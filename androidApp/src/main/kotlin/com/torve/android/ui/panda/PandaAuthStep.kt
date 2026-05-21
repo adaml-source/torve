@@ -212,16 +212,19 @@ private fun FocusRingOutlinedButton(
 ) {
     val interactionSource = remember { MutableInteractionSource() }
     val isFocused by interactionSource.collectIsFocusedAsState()
+    val shape = RoundedCornerShape(12.dp)
     OutlinedButton(
         onClick = onClick,
         modifier = modifier
             .then(entryFocusRequester?.let { Modifier.focusRequester(it) } ?: Modifier)
+            .clip(shape)
             .border(
                 width = if (isFocused) 2.dp else 1.dp,
                 color = if (isFocused) Amber else Steel.copy(alpha = 0.45f),
-                shape = RoundedCornerShape(12.dp),
+                shape = shape,
             ),
-        shape = RoundedCornerShape(12.dp),
+        shape = shape,
+        border = null,
         interactionSource = interactionSource,
     ) {
         Text(text, color = if (isFocused) Amber else Snow, fontWeight = FontWeight.SemiBold)
@@ -237,18 +240,21 @@ private fun FocusRingFilterChip(
 ) {
     val interactionSource = remember { MutableInteractionSource() }
     val isFocused by interactionSource.collectIsFocusedAsState()
+    val shape = RoundedCornerShape(8.dp)
     FilterChip(
         selected = selected,
         onClick = onClick,
         label = { Text(label) },
         modifier = Modifier
             .then(entryFocusRequester?.let { Modifier.focusRequester(it) } ?: Modifier)
+            .clip(shape)
             .border(
                 width = if (isFocused) 2.dp else 1.dp,
                 color = if (isFocused) Amber else Steel.copy(alpha = 0.45f),
-                shape = RoundedCornerShape(8.dp),
+                shape = shape,
             ),
         interactionSource = interactionSource,
+        border = null,
         colors = FilterChipDefaults.filterChipColors(
             selectedContainerColor = Amber.copy(alpha = 0.2f),
             selectedLabelColor = Amber,

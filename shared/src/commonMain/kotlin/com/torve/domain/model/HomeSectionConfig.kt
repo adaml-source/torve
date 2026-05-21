@@ -15,6 +15,7 @@ enum class HomeSection(
     HERO("Featured", true, 0),
     ON_NOW("On now", true, 1),
     CONTINUE_WATCHING("Continue Watching", true, 1),
+    UPCOMING_SCHEDULE("Upcoming Schedule", true, 2),
     WATCHLIST("My Watchlist", true, 2),
     WATCHLIST_MOVIES("Watchlist — Movies", false, 3),
     WATCHLIST_TV("Watchlist — TV Shows", false, 4),

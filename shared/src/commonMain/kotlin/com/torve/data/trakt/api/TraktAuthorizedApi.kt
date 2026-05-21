@@ -17,6 +17,9 @@ class TraktAuthorizedApi(
     private val traktClient: TraktClient,
     private val tokenStore: TraktTokenStore,
 ) {
+    suspend fun hasConnection(): Boolean =
+        tokenStore.read()?.accessToken?.isNotBlank() == true
+
     suspend fun getWatchlist(): List<TraktWatchlistItemResponse> =
         executeWithRefresh { token -> traktClient.getWatchlist(token) }
 
@@ -85,9 +88,15 @@ class TraktAuthorizedApi(
 
     private fun isUnauthorized(error: Throwable): Boolean {
         val message = error.message ?: return false
-        return "401" in message || "Unauthorized" in message
+        return "401" in message ||
+            "Unauthorized" in message ||
+            "authentication required" in message ||
+            "invalid_grant" in message ||
+            "revoked" in message
     }
 }
+
+class TraktAuthorizationRequiredException : IllegalStateException("Trakt not connected")
 
 suspend fun <T> executeWithTokenRefresh(
     initial: TraktTokens?,
@@ -95,12 +104,21 @@ suspend fun <T> executeWithTokenRefresh(
     refresh: suspend (refreshToken: String) -> TraktTokens,
     isUnauthorized: (Throwable) -> Boolean,
 ): T {
-    val initialTokens = initial ?: error("Trakt not connected")
+    val initialTokens = initial ?: throw TraktAuthorizationRequiredException()
     return try {
         execute(initialTokens.accessToken)
     } catch (first: Exception) {
         if (!isUnauthorized(first)) throw first
-        val refreshed = refresh(initialTokens.refreshToken)
-        execute(refreshed.accessToken)
+        val refreshed = try {
+            refresh(initialTokens.refreshToken)
+        } catch (_: Exception) {
+            throw TraktAuthorizationRequiredException()
+        }
+        try {
+            execute(refreshed.accessToken)
+        } catch (second: Exception) {
+            if (isUnauthorized(second)) throw TraktAuthorizationRequiredException()
+            throw second
+        }
     }
 }

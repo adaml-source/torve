@@ -40,16 +40,16 @@ fun TvScaffold(
             .fillMaxSize()
             .background(Obsidian),
     ) {
-        // Content area always starts after the collapsed rail width.
+        // Full-bleed hero backdrop sits behind content and the collapsed rail.
+        background()
+
+        // Content area starts after the collapsed rail width.
         Box(
             modifier = Modifier
                 .fillMaxSize()
                 .then(if (isFullscreen) Modifier else Modifier.padding(start = RAIL_COLLAPSED_WIDTH)),
         ) {
-            // Layer 1: full-bleed hero backdrop
-            background()
-
-            // Layer 2: info panel + scrollable content side by side
+            // Info panel + scrollable content side by side.
             Row(modifier = Modifier.fillMaxSize()) {
                 // Left info panel — slides in/out
                 if (infoPanel != null) {

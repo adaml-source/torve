@@ -34,7 +34,7 @@ class MPVView @JvmOverloads constructor(
         pendingBindingReason = reason
         val surface = holder.surface
         if (!surface.isValid) {
-            Log.d(TAG, "Deferring mpv SurfaceView bind until surface is valid reason=$reason token=$bindingToken")
+            Log.d(TAG, "Deferring mpv SurfaceView bind until surface is valid reason=$reason bindId=$bindingToken")
             return
         }
         val needsRebind = !surfaceAttached || lastBindingToken != bindingToken
@@ -46,7 +46,7 @@ class MPVView @JvmOverloads constructor(
         if (surfaceAttached) {
             runCatching { MPVLib.detachSurface() }
         }
-        Log.d(TAG, "Binding mpv SurfaceView surface reason=$reason token=$bindingToken size=${width}x${height}")
+        Log.d(TAG, "Binding mpv SurfaceView surface reason=$reason bindId=$bindingToken size=${width}x${height}")
         MPVLib.attachSurface(surface)
         surfaceAttached = true
         lastBindingToken = bindingToken
@@ -55,7 +55,7 @@ class MPVView @JvmOverloads constructor(
 
     fun releaseSurface(reason: String) {
         if (surfaceAttached) {
-            Log.d(TAG, "Releasing mpv SurfaceView surface reason=$reason token=${lastBindingToken ?: -1}")
+            Log.d(TAG, "Releasing mpv SurfaceView surface reason=$reason bindId=${lastBindingToken ?: -1}")
             runCatching { MPVLib.detachSurface() }
         }
         surfaceAttached = false

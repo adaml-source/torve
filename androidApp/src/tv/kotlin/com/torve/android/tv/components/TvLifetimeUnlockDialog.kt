@@ -48,6 +48,7 @@ import androidx.compose.ui.res.stringResource
 import com.torve.android.BuildConfig
 import com.torve.android.R
 import com.torve.android.billing.BillingManager
+import com.torve.android.billing.isStripeFireTvBillingBuild
 import com.torve.android.tv.premium.TvEntitledFeature
 import com.torve.android.tv.premium.TvPremiumAccess
 import com.torve.android.ui.theme.Amber
@@ -66,8 +67,12 @@ fun TvLifetimeUnlockDialog(
     onUnlock: () -> Unit,
     onDismiss: () -> Unit,
 ) {
-    if (!BuildConfig.SUPPORTS_TV_BILLING) {
-        TvBuyViaPhoneDialog(feature = feature, onDismiss = onDismiss)
+    if (!BuildConfig.SUPPORTS_TV_BILLING || isStripeFireTvBillingBuild()) {
+        TvExternalPremiumOptionsDialog(
+            feature = feature,
+            onGoToPremium = onUnlock,
+            onDismiss = onDismiss,
+        )
         return
     }
 
@@ -292,15 +297,17 @@ fun TvLifetimeUnlockDialog(
 
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
-private fun TvBuyViaPhoneDialog(
+private fun TvExternalPremiumOptionsDialog(
     feature: TvEntitledFeature,
+    onGoToPremium: () -> Unit,
     onDismiss: () -> Unit,
 ) {
     val dismissRequester = remember(feature) { FocusRequester() }
+    val premiumRequester = remember(feature) { FocusRequester() }
     BackHandler(onBack = onDismiss)
     LaunchedEffect(feature) {
         kotlinx.coroutines.delay(24)
-        runCatching { dismissRequester.requestFocus() }
+        runCatching { premiumRequester.requestFocus() }
     }
     Popup(
         alignment = Alignment.Center,
@@ -370,25 +377,49 @@ private fun TvBuyViaPhoneDialog(
                     verticalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
                     Text(
-                        text = stringResource(R.string.tv_unlock_purchase_phone_title),
+                        text = stringResource(R.string.tv_unlock_purchase_options_title),
                         style = MaterialTheme.typography.titleSmall,
                         color = Snow,
                         fontWeight = FontWeight.SemiBold,
                     )
                     Text(
-                        text = stringResource(R.string.tv_unlock_purchase_phone_body),
+                        text = stringResource(R.string.tv_unlock_purchase_options_body),
                         style = MaterialTheme.typography.bodyMedium,
                         color = Silver,
                     )
                 }
-                TvUnlockDialogButton(
-                    title = stringResource(R.string.tv_action_got_it),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .focusRequester(dismissRequester),
-                    secondary = true,
-                    onClick = onDismiss,
-                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    TvUnlockDialogButton(
+                        title = stringResource(R.string.common_close),
+                        modifier = Modifier
+                            .weight(1f)
+                            .focusRequester(dismissRequester)
+                            .focusProperties {
+                                left = premiumRequester
+                                right = premiumRequester
+                                up = FocusRequester.Cancel
+                                down = FocusRequester.Cancel
+                            },
+                        secondary = true,
+                        onClick = onDismiss,
+                    )
+                    TvUnlockDialogButton(
+                        title = stringResource(R.string.tv_unlock_go_to_premium),
+                        modifier = Modifier
+                            .weight(1f)
+                            .focusRequester(premiumRequester)
+                            .focusProperties {
+                                left = dismissRequester
+                                right = dismissRequester
+                                up = FocusRequester.Cancel
+                                down = FocusRequester.Cancel
+                            },
+                        onClick = onGoToPremium,
+                    )
+                }
             }
         }
     }

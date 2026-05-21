@@ -18,6 +18,7 @@ import com.torve.data.catalog.CatalogTopCacheWorker
 import com.torve.data.panda.NzbIndexerRow
 import com.torve.data.panda.PandaApiClient
 import com.torve.data.usenet.NewznabClient
+import com.torve.domain.diagnostics.DiagnosticsRedactor
 import com.torve.domain.integrations.IntegrationSecretKey
 import com.torve.domain.integrations.IntegrationSecretStore
 import com.torve.domain.model.Channel
@@ -51,6 +52,12 @@ class CatalogWarmupWorker(
     params: WorkerParameters,
 ) : CoroutineWorker(context, params) {
 
+    private inline fun warmupLog(message: () -> String) {
+        if (com.torve.android.BuildConfig.DEBUG) {
+            println(DiagnosticsRedactor.redact(message()))
+        }
+    }
+
     override suspend fun doWork(): Result {
         return try {
             val authClient: AuthClient = getKoin().get()
@@ -62,19 +69,19 @@ class CatalogWarmupWorker(
             val visibleProgress = inputData.getBoolean(KEY_VISIBLE_PROGRESS, true)
             val localSettingsRepo: DeviceLocalSettingsRepository = getKoin().get()
             if (lightweight && missingOnly && user == null && hasPublicCatalogWarmupCache(localSettingsRepo)) {
-                println("CATALOG_WARMUP: public catalog cache present, skipping startup warmup")
+                warmupLog { "CATALOG_WARMUP: public catalog cache present, skipping startup warmup" }
                 return Result.success()
             }
             if (lightweight && missingOnly && user != null && hasLightweightWarmupCache(localSettingsRepo, userId)) {
-                println("CATALOG_WARMUP: lightweight cache present, skipping startup warmup")
+                warmupLog { "CATALOG_WARMUP: lightweight cache present, skipping startup warmup" }
                 return Result.success()
             }
             if (lightweight && user == null && isPublicCatalogWarmupFresh(localSettingsRepo)) {
-                println("CATALOG_WARMUP: public catalog cache fresh, skipping foreground warmup")
+                warmupLog { "CATALOG_WARMUP: public catalog cache fresh, skipping foreground warmup" }
                 return Result.success()
             }
             if (lightweight && user != null && isLightweightWarmupFresh(localSettingsRepo, userId)) {
-                println("CATALOG_WARMUP: lightweight cache fresh, skipping foreground warmup")
+                warmupLog { "CATALOG_WARMUP: lightweight cache fresh, skipping foreground warmup" }
                 return Result.success()
             }
 
@@ -208,7 +215,7 @@ class CatalogWarmupWorker(
         val playlists = channelRepo.getPlaylists()
         if (playlists.isEmpty()) return@withContext
         val startedAt = System.currentTimeMillis()
-        println("CATALOG_WARMUP: refreshing playlists count=${playlists.size} catalogOnly=$catalogOnly")
+        warmupLog { "CATALOG_WARMUP: refreshing playlists count=${playlists.size} catalogOnly=$catalogOnly" }
         playlists.forEach { playlist ->
             val playlistStartedAt = System.currentTimeMillis()
             runCatching {
@@ -216,23 +223,23 @@ class CatalogWarmupWorker(
                 else channelRepo.refreshPlaylist(playlist.id)
             }
                 .onSuccess {
-                    println(
+                    warmupLog {
                         "CATALOG_WARMUP: playlist refresh done id=${playlist.id} type=${playlist.type} " +
-                            "catalogOnly=$catalogOnly durationMs=${System.currentTimeMillis() - playlistStartedAt}",
-                    )
+                            "catalogOnly=$catalogOnly durationMs=${System.currentTimeMillis() - playlistStartedAt}"
+                    }
                 }
                 .onFailure { err ->
-                    println(
+                    warmupLog {
                         "CATALOG_WARMUP: playlist refresh failed id=${playlist.id} type=${playlist.type} " +
-                            "error=${err.message}",
-                    )
+                            "error=${err::class.simpleName} ${DiagnosticsRedactor.redact(err.message)}"
+                    }
                 }
             delay(WORK_YIELD_DELAY_MS)
         }
-        println(
+        warmupLog {
             "CATALOG_WARMUP: playlist refresh batch done count=${playlists.size} " +
-                "catalogOnly=$catalogOnly durationMs=${System.currentTimeMillis() - startedAt}",
-        )
+                "catalogOnly=$catalogOnly durationMs=${System.currentTimeMillis() - startedAt}"
+        }
     }
 
     private suspend fun warmCatalogRailsBootstrap(userId: String) = withContext(Dispatchers.IO) {
@@ -241,14 +248,14 @@ class CatalogWarmupWorker(
         warmCatalogRailsForMedia(
             userId = userId,
             mediaType = "movie",
-            genreIds = listOf(28, 35, 878, 27, 18, 16),
+            genreIds = listOf(28, 35, 18, 878, 27),
             metadataRepo = metadataRepo,
             localSettingsRepo = localSettingsRepo,
         )
         warmCatalogRailsForMedia(
             userId = userId,
             mediaType = "tv",
-            genreIds = listOf(10759, 35, 18, 10765, 80, 16),
+            genreIds = listOf(18, 35, 10765, 16, 99, 10759, 80),
             metadataRepo = metadataRepo,
             localSettingsRepo = localSettingsRepo,
         )
@@ -274,6 +281,16 @@ class CatalogWarmupWorker(
                 .getOrDefault(emptyList())
                 .takeIf { it.isNotEmpty() }
                 ?.let { add(CatalogRailsBootstrapRail("top_rated_$mediaType", it.dedupeByStableKey())) }
+            if (mediaType == "movie") {
+                runCatching { metadataRepo.getNowPlaying(1).take(CATALOG_RAIL_LIMIT) }
+                    .getOrDefault(emptyList())
+                    .takeIf { it.isNotEmpty() }
+                    ?.let { add(CatalogRailsBootstrapRail("now-playing", it.dedupeByStableKey())) }
+                runCatching { metadataRepo.getUpcoming(1).take(CATALOG_RAIL_LIMIT) }
+                    .getOrDefault(emptyList())
+                    .takeIf { it.isNotEmpty() }
+                    ?.let { add(CatalogRailsBootstrapRail("upcoming", it.dedupeByStableKey())) }
+            }
             genreIds.forEach { genreId ->
                 runCatching {
                     metadataRepo.discover(
@@ -298,7 +315,7 @@ class CatalogWarmupWorker(
                 ),
             ),
         )
-        println("CATALOG_WARMUP: catalog rails saved mediaType=$mediaType rails=${rails.size}")
+        warmupLog { "CATALOG_WARMUP: catalog rails saved mediaType=$mediaType rails=${rails.size}" }
     }
 
     private suspend fun publishProgress(label: String, progress: Float, blockNavigation: Boolean = true) {
@@ -403,7 +420,7 @@ class CatalogWarmupWorker(
                 includeEpg = includeEpg,
             )
         }
-        println("CATALOG_WARMUP: live bootstrap saved playlist=${playlist.id} categories=${cleanedCategories.size}")
+        warmupLog { "CATALOG_WARMUP: live bootstrap saved playlist=${playlist.id} categories=${cleanedCategories.size}" }
     }
 
     private suspend fun warmLiveShelves(
@@ -519,7 +536,7 @@ class CatalogWarmupWorker(
                 localSettingsRepo = localSettingsRepo,
             )
         }
-        println("CATALOG_WARMUP: VOD bootstrap saved playlist=${playlist.id} categories=${categories.size}")
+        warmupLog { "CATALOG_WARMUP: VOD bootstrap saved playlist=${playlist.id} categories=${categories.size}" }
     }
 
     private suspend fun warmVodShelves(
@@ -606,7 +623,7 @@ class CatalogWarmupWorker(
             sportsBootstrapKey(userId, indexerUrl, indexerKey),
             SportsBootstrapJson.encodeToString(payload),
         )
-        println("CATALOG_WARMUP: sports bootstrap saved items=${items.size}")
+        warmupLog { "CATALOG_WARMUP: sports bootstrap saved items=${items.size}" }
     }
 
     private suspend fun hydratePandaSecretsForWarmup(authClient: AuthClient) = withContext(Dispatchers.IO) {
@@ -619,13 +636,13 @@ class CatalogWarmupWorker(
         val torveToken = authClient.getValidAccessToken()?.takeIf { it.isNotBlank() }
 
         val manifestRecord = runCatching { pandaClient.getConfig(pandaToken) }
-            .onFailure { println("CATALOG_WARMUP: Panda manifest hydrate failed: ${it.message}") }
+            .onFailure { warmupLog { "CATALOG_WARMUP: Panda manifest hydrate failed: ${it::class.simpleName} ${DiagnosticsRedactor.redact(it.message)}" } }
             .getOrNull() ?: return@withContext
         val configId = manifestRecord.configId?.takeIf { it.isNotBlank() } ?: return@withContext
 
         val record = if (torveToken != null) {
             runCatching { pandaClient.getConfigAsManager(configId, torveToken) }
-                .onFailure { println("CATALOG_WARMUP: Panda owner hydrate failed: ${it.message}") }
+                .onFailure { warmupLog { "CATALOG_WARMUP: Panda owner hydrate failed: ${it::class.simpleName} ${DiagnosticsRedactor.redact(it.message)}" } }
                 .getOrNull() ?: manifestRecord
         } else {
             manifestRecord
@@ -633,7 +650,7 @@ class CatalogWarmupWorker(
         val config = record.config ?: return@withContext
         val secrets = if (torveToken != null) {
             runCatching { pandaClient.getConfigSecrets(configId, torveToken) }
-                .onFailure { println("CATALOG_WARMUP: Panda secrets hydrate failed: ${it.message}") }
+                .onFailure { warmupLog { "CATALOG_WARMUP: Panda credential hydrate failed: ${it::class.simpleName} ${DiagnosticsRedactor.redact(it.message)}" } }
                 .getOrNull()
         } else {
             null
@@ -685,7 +702,7 @@ class CatalogWarmupWorker(
         }
         prefs.setString("panda_download_client", config.downloadClient)
         prefs.setString("panda_usenet_provider", if (config.enableUsenet) config.usenetProvider else "none")
-        println("CATALOG_WARMUP: Panda hydrated indexerRows=${rows.size} cachedIndexerKeys=$cachedIndexerKeys")
+        warmupLog { "CATALOG_WARMUP: Panda hydrated indexerRows=${rows.size} cachedIndexerCredentialCount=$cachedIndexerKeys" }
     }
 
     private suspend fun resolveFirstIndexer(

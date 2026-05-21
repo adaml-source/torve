@@ -46,6 +46,21 @@ class StreamHandoffPolicyTest {
         )
 
         assertFalse(stream.canUseGenericStreamHandoff())
+        assertTrue(stream.canUseLegacyDirectFallback())
+    }
+
+    @Test
+    fun memoryBackedStreamIsNotLegacyFallbackEligibleEvenWhenItHasDirectUrl() {
+        val stream = ParsedStream(
+            addonName = "Panda",
+            quality = "1080p",
+            title = "Movie",
+            directUrl = "https://provider.example/raw-tokenized-url",
+            accelerationMemoryId = "mem-1",
+        )
+
+        assertTrue(stream.canUseGenericStreamHandoff())
+        assertFalse(stream.canUseLegacyDirectFallback())
     }
 
     @Test

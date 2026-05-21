@@ -172,18 +172,20 @@ fun PandaReviewStep(
             Spacer(Modifier.height(16.dp))
             val doneInteractionSource = remember { MutableInteractionSource() }
             val doneFocused by doneInteractionSource.collectIsFocusedAsState()
+            val doneShape = RoundedCornerShape(12.dp)
             Button(
                 onClick = onComplete,
                 modifier = Modifier
                     .fillMaxWidth()
                     .then(entryFocusRequester?.let { Modifier.focusRequester(it) } ?: Modifier)
+                    .clip(doneShape)
                     .border(
                         width = if (doneFocused) 2.dp else 1.dp,
                         color = if (doneFocused) Snow else Amber.copy(alpha = 0.35f),
-                        shape = RoundedCornerShape(12.dp),
+                        shape = doneShape,
                     ),
                 colors = ButtonDefaults.buttonColors(containerColor = Amber),
-                shape = RoundedCornerShape(12.dp),
+                shape = doneShape,
                 interactionSource = doneInteractionSource,
             ) {
                 Text(
@@ -215,19 +217,21 @@ fun PandaReviewStep(
             // Save button
             val saveInteractionSource = remember { MutableInteractionSource() }
             val saveFocused by saveInteractionSource.collectIsFocusedAsState()
+            val saveShape = RoundedCornerShape(12.dp)
             Button(
                 onClick = { viewModel.saveConfigAndInstall() },
                 enabled = !state.isSaving,
                 modifier = Modifier
                     .fillMaxWidth()
                     .then(entryFocusRequester?.let { Modifier.focusRequester(it) } ?: Modifier)
+                    .clip(saveShape)
                     .border(
                         width = if (saveFocused) 2.dp else 1.dp,
                         color = if (saveFocused) Snow else Amber.copy(alpha = 0.35f),
-                        shape = RoundedCornerShape(12.dp),
+                        shape = saveShape,
                     ),
                 colors = ButtonDefaults.buttonColors(containerColor = Amber),
-                shape = RoundedCornerShape(12.dp),
+                shape = saveShape,
                 interactionSource = saveInteractionSource,
             ) {
                 if (state.isSaving) {

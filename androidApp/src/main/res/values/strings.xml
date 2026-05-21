@@ -1106,6 +1106,8 @@
     <string name="tv_settings_poster_titles">Poster Titles</string>
     <string name="tv_settings_poster_titles_on">Shown</string>
     <string name="tv_settings_poster_titles_off">Hidden</string>
+    <string name="tv_settings_see_all_poster_columns">See All posters per row</string>
+    <string name="tv_settings_see_all_poster_columns_value">%1$d posters per row</string>
 
     <!-- TV Navigation -->
     <string name="tv_nav_iptv">Channels</string>
@@ -1942,6 +1944,7 @@
     <string name="error_search_failed">Search failed. Please try again.</string>
     <string name="error_streams_load_failed">Could not load streams. Please try again.</string>
     <string name="error_stream_resolve_failed">Could not resolve stream. Try another source.</string>
+    <string name="error_stream_reference_unavailable">This source is no longer available. Refresh sources or try another one.</string>
     <string name="error_stream_resolve_timeout">Stream resolution timed out. Try another source.</string>
     <string name="error_stream_real_debrid_source_blocked">Real-Debrid blocked this source. Try another source.</string>
     <string name="stream_preparing_title">Preparing your stream</string>

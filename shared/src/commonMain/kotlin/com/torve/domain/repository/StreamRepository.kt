@@ -54,6 +54,9 @@ interface StreamRepository {
      * Resolve a stream to a playable URL.
      *
      * - Hash-based streams (infoHash) always require a [provider] + [apiKey].
+     * - Non-Usenet streams with a backend memory reference resolve through
+     *   `/resolver/stream/handoff`; legacy direct/provider fallback is only
+     *   allowed when the backend did not provide that reference.
      * - Direct URLs served by the owning addon (e.g. Panda's /u/<token>/… paths)
      *   are returned verbatim and played directly — no unrestrict. The resolver
      *   detects these via [com.torve.data.addon.isAddonHostedUrl].

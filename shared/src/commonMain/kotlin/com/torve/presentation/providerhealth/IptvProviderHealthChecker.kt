@@ -27,11 +27,23 @@ class IptvProviderHealthChecker(
 
     override suspend fun check(): ProviderHealthEntry {
         val state = stateSource()
-        if (state.playlists.isEmpty()) {
+        val categoriesPresent = state.categories.isNotEmpty() ||
+            state.groupedChannels.isNotEmpty() ||
+            state.categoryChannels.isNotEmpty()
+        val hasCachedCatalog = state.selectedPlaylistId != null &&
+            (state.channels.isNotEmpty() || categoriesPresent)
+        if (state.playlists.isEmpty() && !hasCachedCatalog) {
             return playlistEntry(
                 status = ProviderHealthStatus.UNCONFIGURED,
                 message = "No IPTV playlist added.",
                 nextAction = "Add a playlist",
+            )
+        }
+        if (state.playlists.isEmpty() && hasCachedCatalog) {
+            return playlistEntry(
+                status = ProviderHealthStatus.GREEN,
+                message = "IPTV channel catalog is loaded.",
+                nextAction = null,
             )
         }
         val activeId = state.selectedPlaylistId
@@ -49,8 +61,6 @@ class IptvProviderHealthChecker(
         // a working state. Mobile settings can also have only the
         // persisted playlist row hydrated; its channelCount is still
         // authoritative proof that the playlist parsed previously.
-        val categoriesPresent = state.categories.isNotEmpty() ||
-            state.groupedChannels.isNotEmpty()
         val hasLoadedContent = channelCount > 0 || categoriesPresent
         val parseError = state.error
         return when {

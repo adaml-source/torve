@@ -193,6 +193,7 @@
     <string name="tv_settings_playlist_confirm_remove">Tap again to confirm removal</string>
     <string name="tv_settings_no_playlists">No playlists configured</string>
     <string name="tv_settings_channels_count">%d channels</string>
+    <string name="tv_settings_channels_count_pending">Channels not counted yet. If guide data is missing, use Refresh EPG below.</string>
 
     <!-- Integrations section (TV-only) -->
     <string name="tv_settings_section_integrations">Integrations</string>
@@ -424,7 +425,7 @@
     <string name="tv_settings_panda_configured_enabled">Configured and enabled. Reconfigure streaming providers and automation.</string>
     <string name="tv_settings_panda_configured_disabled">Configured but disabled. Open Panda to enable or reconfigure it.</string>
     <string name="tv_settings_panda_setup_desc">Set up Torve for streaming with debrid, Usenet, and download clients.</string>
-    <string name="tv_settings_import_refresh_subtitle">Refresh account setup, playlists, provider credentials, favorites, and Panda health.</string>
+    <string name="tv_settings_import_refresh_subtitle">Refresh account setup, playlists, provider credentials, favorites, and Panda health. If channels or guide data are still missing, open Channels and run Refresh EPG.</string>
     <string name="tv_settings_open_panda_setup">Open Panda setup</string>
     <string name="tv_settings_realdebrid_connect">Connect Real-Debrid</string>
     <string name="tv_settings_realdebrid_connect_panda">Connect Real-Debrid in Panda</string>
@@ -458,8 +459,11 @@
     <string name="tv_notification_sync_summary_progress">%1$d progress entries</string>
     <string name="tv_notification_sync_error">Sync error: %1$s</string>
     <string name="tv_notification_downloads_completed">%1$d downloads completed</string>
-    <string name="tv_unlock_purchase_phone_title">Purchase on your phone or tablet</string>
-    <string name="tv_unlock_purchase_phone_body">Open Torve on your mobile device and go to Settings &gt; Subscription to unlock Premium. Your subscription works on all your devices.\n\nAfter purchasing, restart this app or log out and back in for your subscription to take effect.</string>
+    <string name="tv_unlock_purchase_phone_title">Purchase options</string>
+    <string name="tv_unlock_purchase_phone_body">You can upgrade on the website from a phone or desktop: https://torve.app\n\nYou can also buy through Google Play in Torve on a phone or tablet, or use Stripe checkout from this TV. Stripe opens in the browser; the purchase is not completed inside the TV app.\n\nAfter purchasing, refresh access or sign in again so Premium is confirmed by your account.</string>
+    <string name="tv_unlock_purchase_options_title">Purchase options</string>
+    <string name="tv_unlock_purchase_options_body">Website on phone or desktop: https://torve.app\n\nGoogle Play on phone or tablet: open Torve and go to Settings &gt; Subscription.\n\nStripe on this TV: go to the Premium card in Settings. Stripe opens secure checkout in the browser; the purchase is not completed inside the TV app.</string>
+    <string name="tv_unlock_go_to_premium">Go to Premium</string>
     <string name="tv_action_got_it">Got it</string>
     <string name="tv_home_on_now">On Now</string>
     <string name="tv_home_available_now">Available Now</string>
@@ -484,6 +488,7 @@
     <string name="tv_settings_account_sync_synced">Settings synced via account sign-in.</string>
     <string name="tv_settings_account_sync_tap_sync">Tap to sync shared settings from your account.</string>
     <string name="tv_settings_account_refreshed">Account settings refreshed.</string>
+    <string name="tv_settings_account_refreshed_epg_hint">Account setup refreshed. If channels or guide data are still missing, open Settings &gt; Channels and choose Refresh EPG.</string>
     <string name="tv_auth_failed_to_send">Failed to send</string>
     <string name="tv_auth_account_created_verify">Account created. Check your email to verify your address.</string>
     <string name="tv_auth_logged_in">Logged in.</string>

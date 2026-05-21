@@ -44,6 +44,7 @@ import com.torve.domain.repository.WatchlistRepository
 import com.torve.domain.sync.SyncRepository
 import com.torve.platform.NetworkMonitor
 import com.torve.platform.recommendedMaxQuality
+import com.torve.platform.torveVerboseLog
 import com.torve.presentation.integrations.syncTorBoxCredentialPair
 import com.torve.presentation.settings.SettingsRefreshNotifier
 import kotlinx.serialization.encodeToString
@@ -315,7 +316,7 @@ class SettingsViewModel(
                 val refreshToken = integrationSecretStore.get(IntegrationSecretKey.DEBRID_RD_REFRESH_TOKEN)
                 val clientId = integrationSecretStore.get(IntegrationSecretKey.DEBRID_RD_CLIENT_ID)
                 val clientSecret = integrationSecretStore.get(IntegrationSecretKey.DEBRID_RD_CLIENT_SECRET)
-                println("TORVE_RD: startup refresh check — hasRefreshToken=${refreshToken != null} hasClientId=${clientId != null} hasClientSecret=${clientSecret != null}")
+                torveVerboseLog { "TORVE_RD: startup refresh check hasRefreshCredential=${refreshToken != null} hasClientId=${clientId != null} hasClientSecret=${clientSecret != null}" }
                 if (refreshToken != null && clientId != null && clientSecret != null) {
                     try {
                         val tokens = debridClient.rdRefreshAccessToken(refreshToken, clientId, clientSecret)
@@ -323,15 +324,15 @@ class SettingsViewModel(
                         integrationSecretStore.put(IntegrationSecretKey.DEBRID_RD_REFRESH_TOKEN, tokens.refreshToken)
                         prefsRepo.setString(KEY_DEBRID_RD_EXPIRES_AT, tokens.expiresAt.toString())
                         allDebridKeys[provider] = tokens.accessToken
-                        println("TORVE_RD: startup refresh OK, new token length=${tokens.accessToken.length}")
+                        torveVerboseLog { "TORVE_RD: startup refresh OK" }
                     } catch (e: Exception) {
-                        println("TORVE_RD: startup refresh failed — ${e.message}")
+                        torveVerboseLog { "TORVE_RD: startup refresh failed ${e::class.simpleName} ${DiagnosticsRedactor.redact(e.message)}" }
                     }
                 }
             }
 
             val apiKey = allDebridKeys[provider] ?: ""
-            println("[SettingsLoad] Debrid provider=$provider apiKey=${if (apiKey.isNotBlank()) "${apiKey.length} chars" else "EMPTY"} providers=${allDebridKeys.keys}")
+            torveVerboseLog { "[SettingsLoad] Debrid provider=$provider hasCredential=${apiKey.isNotBlank()} providers=${allDebridKeys.keys}" }
             // Trakt: secure store is authoritative. Migrate legacy pref keys once.
             val traktTokens = traktTokenStore.read()
             migrateSecretPref(KEY_TRAKT_ACCESS_TOKEN, IntegrationSecretKey.TRAKT_ACCESS_TOKEN)
@@ -593,7 +594,7 @@ class SettingsViewModel(
             // Legacy migration block removed — migrateSecretPref() handles all
             // one-time imports from plaintext prefs → secure store above.
 
-            println("[SettingsLoad] debridConnected=${apiKey.isNotBlank()} traktConnected=${traktAccessToken.isNotBlank()} simklConnected=${simklAccessToken.isNotBlank()} ratingPrefs.enabled=${ratingPrefs.enabledProviders} maxRatingsOnCard=${ratingPrefs.maxRatingsOnCard} pillPosition=${ratingPrefs.pillPosition}")
+            torveVerboseLog { "[SettingsLoad] debridConnected=${apiKey.isNotBlank()} traktConnected=${traktAccessToken.isNotBlank()} simklConnected=${simklAccessToken.isNotBlank()} ratingPrefs.enabled=${ratingPrefs.enabledProviders} maxRatingsOnCard=${ratingPrefs.maxRatingsOnCard} pillPosition=${ratingPrefs.pillPosition}" }
             if (apiKey.isNotBlank()) {
                 verifyDebridConnection()
             }
@@ -749,11 +750,11 @@ class SettingsViewModel(
     private suspend fun verifyDebridConnection() {
         val now = Clock.System.now().toEpochMilliseconds()
         if (debridValidationRunning) {
-            println("[DebridInit] Validation skipped (already running)")
+            torveVerboseLog { "[DebridInit] Validation skipped (already running)" }
             return
         }
         if (now - debridLastValidatedAt < 30_000L && _state.value.debridConnected) {
-            println("[DebridInit] Validation skipped (cooldown, already connected)")
+            torveVerboseLog { "[DebridInit] Validation skipped (cooldown, already connected)" }
             return
         }
         debridValidationRunning = true
@@ -879,7 +880,7 @@ class SettingsViewModel(
                         // so we don't hammer a flaky network. A SINGLE
                         // transient error must never terminate the flow
                         // (the bug this replaces).
-                        println("[TraktPoll] Transient error, retrying: ${result.message}")
+                        torveVerboseLog { "[TraktPoll] Transient error, retrying: ${DiagnosticsRedactor.redact(result.message)}" }
                         interval = (interval + 1).coerceAtMost(15L)
                     }
                     is com.torve.data.trakt.TraktPollResult.Error -> {
@@ -888,7 +889,7 @@ class SettingsViewModel(
                         // are diagnosable without a debug build. Formerly this
                         // was a generic "Could not connect to the service"
                         // message that hid every real failure.
-                        println("[TraktPoll] Error result: ${result.message}")
+                        torveVerboseLog { "[TraktPoll] Error result: ${DiagnosticsRedactor.redact(result.message)}" }
                         _state.update {
                             it.copy(
                                 isPollingTrakt = false,
@@ -919,15 +920,15 @@ class SettingsViewModel(
     private suspend fun ensureTraktSessionReady(syncOnSuccess: Boolean): Boolean {
         val now = Clock.System.now().toEpochMilliseconds()
         if (traktValidationRunning) {
-            println("[TraktInit] Validation skipped (already running)")
+            torveVerboseLog { "[TraktInit] Validation skipped (already running)" }
             return _state.value.traktConnected
         }
         if (now - traktLastValidatedAt < TRAKT_VALIDATION_COOLDOWN_MS && _state.value.traktUser != null) {
-            println("[TraktInit] Validation skipped (cooldown active, already validated)")
+            torveVerboseLog { "[TraktInit] Validation skipped (cooldown active, already validated)" }
             return true
         }
         traktValidationRunning = true
-        println("[TraktInit] Validation started")
+        torveVerboseLog { "[TraktInit] Validation started" }
         try {
             val activeAccessToken = resolveUsableTraktAccessToken()
             if (activeAccessToken.isBlank()) {
@@ -952,7 +953,7 @@ class SettingsViewModel(
                 )
             }
             traktLastValidatedAt = now
-            println("[TraktInit] Validation success")
+            torveVerboseLog { "[TraktInit] Validation success" }
             loadTraktStats()
             if (syncOnSuccess) {
                 initialTraktImport()
@@ -970,7 +971,7 @@ class SettingsViewModel(
                         traktApiStatus = com.torve.presentation.error.UserFacingError.INTEGRATION_RATE_LIMITED.defaultMessage(),
                     )
                 }
-                println("[TraktInit] Rate limited, cooldown until ${now + TRAKT_VALIDATION_COOLDOWN_MS}")
+                torveVerboseLog { "[TraktInit] Rate limited, cooldown until ${now + TRAKT_VALIDATION_COOLDOWN_MS}" }
                 if (syncOnSuccess) {
                     initialTraktImport()
                 }
@@ -990,7 +991,7 @@ class SettingsViewModel(
                                     traktApiStatus = com.torve.presentation.error.UserFacingError.INTEGRATION_RATE_LIMITED.defaultMessage(),
                                 )
                             }
-                            println("[TraktInit] Token refresh rate limited, keeping existing connection state")
+                            torveVerboseLog { "[TraktInit] Refresh rate limited, keeping existing connection state" }
                             if (syncOnSuccess) {
                                 initialTraktImport()
                             }
@@ -1008,7 +1009,7 @@ class SettingsViewModel(
                                 traktApiStatus = "Online",
                             )
                         }
-                        println("[TraktInit] Validation recovered by token refresh")
+                        torveVerboseLog { "[TraktInit] Validation recovered by refresh" }
                         loadTraktStats()
                         if (syncOnSuccess) {
                             initialTraktImport()
@@ -1023,7 +1024,7 @@ class SettingsViewModel(
                         traktApiStatus = "Error",
                     )
                 }
-                println("[TraktInit] Validation failed: ${e.message}")
+                torveVerboseLog { "[TraktInit] Validation failed: ${e::class.simpleName} ${DiagnosticsRedactor.redact(e.message)}" }
                 return !authFailure
             }
         } finally {
@@ -1055,7 +1056,7 @@ class SettingsViewModel(
             }
             traktClient.getUser(refreshed.accessToken)
         }.getOrElse { error ->
-            println("[TraktInit] Token refresh failed: ${DiagnosticsRedactor.redact(error.message)}")
+            torveVerboseLog { "[TraktInit] Refresh failed: ${DiagnosticsRedactor.redact(error.message)}" }
             if (isRateLimitedTraktError(error)) {
                 throw error
             }
@@ -1176,13 +1177,13 @@ class SettingsViewModel(
             _state.update { it.copy(traktSyncing = true, traktSyncSuccess = false) }
             try {
                 val tokenSnapshot = traktTokenStore.read()
-                println(
+                torveVerboseLog {
                     "[TraktInit] Manual sync requested " +
                         "hasAccess=${tokenSnapshot?.accessToken?.isNotBlank() == true || _state.value.traktAccessToken.isNotBlank()} " +
-                        "hasRefresh=${tokenSnapshot?.refreshToken?.isNotBlank() == true || _state.value.traktRefreshToken.isNotBlank()}",
-                )
+                        "hasRefresh=${tokenSnapshot?.refreshToken?.isNotBlank() == true || _state.value.traktRefreshToken.isNotBlank()}"
+                }
                 if (!ensureTraktSessionReady(syncOnSuccess = false)) {
-                    println("[TraktInit] Manual sync aborted: session not ready")
+                    torveVerboseLog { "[TraktInit] Manual sync aborted: session not ready" }
                     _state.update {
                         it.copy(
                             traktSyncing = false,
@@ -1193,7 +1194,7 @@ class SettingsViewModel(
                     }
                     return@launch
                 }
-                println("[TraktInit] Manual sync session ready")
+                torveVerboseLog { "[TraktInit] Manual sync session ready" }
                 initialTraktImport()
                 _state.update { it.copy(traktSyncing = false, traktSyncSuccess = true) }
                 delay(3000)
@@ -1240,7 +1241,7 @@ class SettingsViewModel(
             } catch (error: Throwable) {
                 lastError = error
                 val finalAttempt = attempt == attempts - 1
-                println("[TraktInit] Startup sync failed label=$label attempt=${attempt + 1}/$attempts error=${error.message}")
+                torveVerboseLog { "[TraktInit] Startup sync failed label=$label attempt=${attempt + 1}/$attempts error=${DiagnosticsRedactor.redact(error.message)}" }
                 if (!finalAttempt) {
                     delay((attempt + 1) * 1_500L)
                 }

@@ -6,6 +6,7 @@ import android.net.Uri
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -22,6 +23,7 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -39,6 +41,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -128,7 +131,9 @@ import com.torve.presentation.tvhome.TvDetailsSourcePickerStateBuilder
 import com.torve.presentation.tvhome.TvSourcePicker
 import com.torve.presentation.tvhome.TvSourcePickerOption
 import com.torve.presentation.tvhome.TvSourcePickerState
+import com.torve.presentation.watchlist.WatchlistMutationState
 import com.torve.presentation.watchlist.WatchlistViewModel
+import com.torve.presentation.watchlist.isMutatingMedia
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import org.koin.compose.koinInject
@@ -146,6 +151,7 @@ private sealed class DownloadAction {
     data class Episode(val s: Int, val e: Int) : DownloadAction()
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun TvDetailsScreen(
     type: String,
@@ -347,7 +353,12 @@ fun TvDetailsScreen(
 
     LaunchedEffect(watchlistState.snackbarMessage) {
         watchlistState.snackbarMessage?.let { message ->
-            TvNotificationQueue.post(message, NotificationType.SUCCESS)
+            val type = if (watchlistState.mutationState is WatchlistMutationState.Error) {
+                NotificationType.ERROR
+            } else {
+                NotificationType.SUCCESS
+            }
+            TvNotificationQueue.post(message, type)
             watchlistViewModel.clearSnackbar()
         }
     }
@@ -546,7 +557,14 @@ fun TvDetailsScreen(
     // Download toast now handled by TvNotificationQueue (auto-dismiss in TvRoot)
 
     val mediaItem = state.mediaItem
+    val showSeriesCompactHeader by remember(mediaItem?.id, mediaItem?.type, listState) {
+        derivedStateOf {
+            mediaItem?.type == MediaType.SERIES &&
+                (listState.firstVisibleItemIndex > 0 || listState.firstVisibleItemScrollOffset > 260)
+        }
+    }
     val isInWatchlist = mediaItem?.let { watchlistViewModel.isInWatchlist(it.id) } == true
+    val isWatchlistUpdating = mediaItem?.let { watchlistState.isMutatingMedia(it.id) } == true
     val isFavorite = mediaItem?.favoriteMediaKey()?.let { it in mediaFavoritesState.favoriteKeys } == true
     val isBusy = state.isLoadingStreams || state.isResolving
 
@@ -557,7 +575,13 @@ fun TvDetailsScreen(
         return
     }
 
-    Box(modifier = Modifier.fillMaxSize().focusGroup()) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Obsidian)
+            .focusGroup(),
+    ) {
+    TvDetailsCinematicBackground(mediaItem)
     LazyColumn(
         state = listState,
         modifier = Modifier.fillMaxSize(),
@@ -600,12 +624,7 @@ fun TvDetailsScreen(
                             .padding(horizontal = 24.dp, vertical = 20.dp),
                         verticalArrangement = Arrangement.spacedBy(10.dp),
                     ) {
-                        Text(
-                            text = item.title,
-                            style = MaterialTheme.typography.displaySmall,
-                            color = Snow,
-                            fontWeight = FontWeight.SemiBold,
-                        )
+                        DetailLogoTitle(item = item)
                         // LAN-library presence pill (Prompt 9C). The
                         // shared `LanAvailabilityBadge` is in the main
                         // source set; TV reuses it.
@@ -768,7 +787,9 @@ fun TvDetailsScreen(
 
                             val watchlistLocked = isLockedFeature(TvEntitledFeature.WATCHLIST_EDIT)
                             TvActionButton(
-                                text = if (isInWatchlist) {
+                                text = if (isWatchlistUpdating) {
+                                    stringResource(R.string.common_loading)
+                                } else if (isInWatchlist) {
                                     if (watchlistLocked) {
                                         "${stringResource(R.string.tv_action_remove_watchlist)} (Locked)"
                                     } else {
@@ -782,27 +803,14 @@ fun TvDetailsScreen(
                                     }
                                 },
                                 modifier = Modifier.focusRequester(registeredWatchlistFocusRequester),
+                                enabled = !isWatchlistUpdating,
                                 onFocused = {
                                     watchlistModalRestoreController.markFocused(watchlistTarget)
                                     onContentFocused(registeredWatchlistFocusRequester)
                                 },
                                 onClick = {
                                     runPremiumAction(TvEntitledFeature.WATCHLIST_EDIT) {
-                                        if (isInWatchlist) {
-                                            watchlistViewModel.toggleWatchlist(item)
-                                        } else {
-                                            val traktOn = settingsState.traktConnected
-                                            val simklOn = settingsState.simklConnected
-                                            if (!traktOn && !simklOn) {
-                                                watchlistViewModel.toggleWatchlist(item)
-                                            } else {
-                                                watchlistModalRestoreController.captureOrigin(
-                                                    target = watchlistTarget,
-                                                    outerListState = listState,
-                                                )
-                                                showWatchlistPicker = true
-                                            }
-                                        }
+                                        watchlistViewModel.toggleWatchlist(item)
                                     }
                                 },
                             )
@@ -954,13 +962,6 @@ fun TvDetailsScreen(
                         }
                     }
                 }
-                item(key = "ratings_attribution") {
-                    DetailRatingsAttribution(
-                        ratings = detailRatings,
-                        prefs = ratingPrefs,
-                        modifier = Modifier.padding(bottom = 14.dp),
-                    )
-                }
             }
 
             // â"€â"€ Overview â"€â"€
@@ -1025,7 +1026,7 @@ fun TvDetailsScreen(
             }
 
             // â"€â"€ Cast â"€â"€
-            if (item.cast.isNotEmpty()) {
+            if (item.cast.isNotEmpty() && item.type != MediaType.SERIES) {
                 item(key = "cast") {
                     Text(
                         text = stringResource(R.string.tv_detail_cast),
@@ -1059,8 +1060,12 @@ fun TvDetailsScreen(
                         selectedSeason = state.selectedSeason,
                         seasonDetail = state.seasonDetail,
                         isLoadingSeasonDetail = state.isLoadingSeasonDetail,
+                        seasonDetailError = state.seasonDetailError,
                         watchedEpisodes = state.watchedEpisodes,
                         watchProgress = state.watchProgress,
+                        ratingPrefs = settingsState.ratingPrefs,
+                        seriesBackdropUrl = item.backdropUrl,
+                        seriesPosterUrl = item.posterUrl,
                         railFocusRequester = railFocusRequester,
                         onSeasonSelected = { seasonNumber ->
                             val tvId = item.tmdbId ?: return@TvEpisodePicker
@@ -1090,7 +1095,10 @@ fun TvDetailsScreen(
                                 }
                             }
                         },
-                        onSeasonDownload = { },
+                        onRetrySeason = {
+                            val tvId = item.tmdbId ?: return@TvEpisodePicker
+                            detailViewModel.loadSeasonDetail(tvId, state.selectedSeason)
+                        },
                         onToggleEpisodeWatched = { season, episode ->
                             detailViewModel.toggleEpisodeWatched(season, episode)
                         },
@@ -1108,21 +1116,52 @@ fun TvDetailsScreen(
                 }
             }
 
-            // â"€â"€ Similar titles â"€â"€
-            if (state.similar.isNotEmpty()) {
-                item(key = "similar") {
+            if (item.type == MediaType.SERIES && item.cast.isNotEmpty()) {
+                item(key = "cast_secondary") {
                     Text(
-                        text = stringResource(R.string.tv_detail_more_like_this),
+                        text = stringResource(R.string.tv_detail_cast),
                         style = MaterialTheme.typography.labelLarge,
                         color = Ash,
-                        modifier = Modifier.padding(bottom = 8.dp),
+                        modifier = Modifier.padding(top = 16.dp, bottom = 8.dp),
                     )
                     LazyRow(
                         horizontalArrangement = Arrangement.spacedBy(12.dp),
                         contentPadding = PaddingValues(start = 8.dp, end = 16.dp),
                         modifier = Modifier.padding(bottom = 16.dp),
                     ) {
-                        itemsIndexed(state.similar.take(10), key = { index, item -> mediaItemLazyKey(item, index) }) { _, similar ->
+                        items(item.cast.take(10), key = { it.id }) { member ->
+                            TvCastCard(
+                                name = member.name,
+                                character = member.character,
+                                profileUrl = member.profileUrl,
+                                onClick = { onCastClick(member.id, member.name) },
+                            )
+                        }
+                    }
+                }
+            }
+
+            // â"€â"€ Similar titles â"€â"€
+            val similarItems = state.similar
+                .filterNot { similar ->
+                    similar.id == item.id ||
+                        (similar.tmdbId != null && item.tmdbId != null && similar.tmdbId == item.tmdbId)
+                }
+                .take(10)
+            when {
+                similarItems.isNotEmpty() -> item(key = "similar") {
+                    Text(
+                        text = stringResource(R.string.tv_detail_more_like_this),
+                        style = MaterialTheme.typography.labelLarge,
+                        color = Ash,
+                        modifier = Modifier.padding(top = 20.dp, bottom = 8.dp),
+                    )
+                    LazyRow(
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        contentPadding = PaddingValues(start = 8.dp, end = 16.dp),
+                        modifier = Modifier.padding(bottom = 16.dp),
+                    ) {
+                        itemsIndexed(similarItems, key = { index, item -> mediaItemLazyKey(item, index) }) { _, similar ->
                             TvSimilarCard(
                                 item = similar,
                                 onClick = { onMediaClick(similar) },
@@ -1130,10 +1169,54 @@ fun TvDetailsScreen(
                         }
                     }
                 }
+                state.isLoadingSimilar -> item(key = "similar_loading") {
+                    Column(modifier = Modifier.padding(top = 20.dp, bottom = 16.dp)) {
+                        Text(
+                            text = stringResource(R.string.tv_detail_more_like_this),
+                            style = MaterialTheme.typography.labelLarge,
+                            color = Ash,
+                            modifier = Modifier.padding(bottom = 8.dp),
+                        )
+                        TvDetailsCompactInlineState(
+                            title = "Loading similar shows...",
+                            subtitle = "Looking for related series from the catalog.",
+                        )
+                    }
+                }
+                state.similarError != null -> item(key = "similar_error") {
+                    Column(modifier = Modifier.padding(top = 20.dp, bottom = 16.dp)) {
+                        Text(
+                            text = stringResource(R.string.tv_detail_more_like_this),
+                            style = MaterialTheme.typography.labelLarge,
+                            color = Ash,
+                            modifier = Modifier.padding(bottom = 8.dp),
+                        )
+                        TvDetailsCompactInlineState(
+                            title = "Couldn't load similar shows.",
+                            subtitle = "Check the catalog source or try again.",
+                            actionLabel = "Retry",
+                            onAction = { detailViewModel.loadDetail(type, id) },
+                        )
+                    }
+                }
+                item.type == MediaType.SERIES -> item(key = "similar_empty") {
+                    Column(modifier = Modifier.padding(top = 20.dp, bottom = 16.dp)) {
+                        Text(
+                            text = stringResource(R.string.tv_detail_more_like_this),
+                            style = MaterialTheme.typography.labelLarge,
+                            color = Ash,
+                            modifier = Modifier.padding(bottom = 8.dp),
+                        )
+                        TvDetailsCompactInlineState(
+                            title = "No similar shows found.",
+                            subtitle = "The catalog did not return related series for this title.",
+                        )
+                    }
+                }
             }
 
             // â"€â"€ Watchlist service picker â"€â"€
-            if (showWatchlistPicker && mediaItem != null) {
+            if (showWatchlistPicker) {
                 item(key = "watchlist_picker_header") {
                     Text(
                         text = stringResource(R.string.tv_watchlist_add_to),
@@ -1547,10 +1630,12 @@ fun TvDetailsScreen(
             }
         } else {
             item(key = "empty") {
-                Text(
-                    text = com.torve.android.error.resolveErrorKey(androidx.compose.ui.platform.LocalContext.current, state.error) ?: stringResource(R.string.tv_no_data),
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = Snow,
+                TvDetailsInlineState(
+                    title = "Couldn't load this title.",
+                    subtitle = com.torve.android.error.resolveErrorKey(
+                        androidx.compose.ui.platform.LocalContext.current,
+                        state.error,
+                    ) ?: "Check the catalog source or try again.",
                 )
             }
         }
@@ -1559,6 +1644,36 @@ fun TvDetailsScreen(
     // Download toast now rendered by TvNotificationQueue in TvRoot
 
     } // end LazyColumn
+
+    if (showSeriesCompactHeader && mediaItem != null) {
+        Box(
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .fillMaxWidth()
+                .height(164.dp)
+                .zIndex(17f)
+                .background(
+                    Brush.verticalGradient(
+                        colors = listOf(
+                            Obsidian.copy(alpha = 0.99f),
+                            Obsidian.copy(alpha = 0.98f),
+                            Obsidian.copy(alpha = 0.90f),
+                            Obsidian.copy(alpha = 0.62f),
+                            Color.Transparent,
+                        ),
+                    ),
+                ),
+        )
+        TvSeriesCompactHeader(
+            item = mediaItem,
+            selectedSeason = state.selectedSeason,
+            selectedEpisodeLabel = state.nextEpisode?.label,
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .zIndex(18f)
+                .padding(start = 16.dp, top = 10.dp, end = 16.dp),
+        )
+    }
 
     // Preparing overlay â€" rendered inside the Box but outside the
     // LazyColumn so it always layers above the detail surface, blocking
@@ -1573,6 +1688,7 @@ fun TvDetailsScreen(
                 restoreFocusAfterPreparingCancel = true
                 detailViewModel.cancelPreparing()
             },
+            modifier = Modifier.zIndex(80f),
         )
     }
 
@@ -1586,6 +1702,7 @@ fun TvDetailsScreen(
         val mediaItem = state.mediaItem
         TvSourcePickerSheet(
             state = picker,
+            modifier = Modifier.zIndex(90f),
             onSelect = { option ->
                 sourcePickerState = null
                 if (mediaItem == null) return@TvSourcePickerSheet
@@ -1705,10 +1822,12 @@ private fun TvSimilarCard(
     var focused by remember { mutableStateOf(false) }
     val scale by animateFloatAsState(targetValue = if (focused) 1.06f else 1f, label = "similarScale")
     val borderColor by animateColorAsState(targetValue = if (focused) AmberLight else Color.Transparent, label = "similarBorder")
+    val imageUrl = item.posterUrl?.takeIf { it.isNotBlank() }
+        ?: item.backdropUrl?.takeIf { it.isNotBlank() }
 
     Column(
         modifier = Modifier
-            .width(130.dp)
+            .width(120.dp)
             .zIndex(if (focused) 1f else 0f)
             .scale(scale)
             .border(2.dp, borderColor, RoundedCornerShape(10.dp))
@@ -1721,28 +1840,420 @@ private fun TvSimilarCard(
                 onClick = onClick,
             ),
     ) {
-        AsyncImage(
-            model = item.posterUrl,
-            contentDescription = item.title,
+        Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .aspectRatio(2f / 3f)
-                .clip(RoundedCornerShape(topStart = 10.dp, topEnd = 10.dp)),
-            contentScale = ContentScale.Crop,
+                .clip(RoundedCornerShape(topStart = 10.dp, topEnd = 10.dp))
+                .background(
+                    Brush.linearGradient(
+                        colors = listOf(
+                            Gunmetal.copy(alpha = 0.96f),
+                            Charcoal.copy(alpha = 0.98f),
+                        ),
+                    ),
+                ),
+            contentAlignment = Alignment.BottomStart,
+        ) {
+            if (imageUrl != null) {
+                AsyncImage(
+                    model = imageUrl,
+                    contentDescription = item.title,
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Crop,
+                )
+            }
+            Box(
+                modifier = Modifier
+                    .matchParentSize()
+                    .background(
+                        Brush.verticalGradient(
+                            colors = listOf(
+                                Color.Transparent,
+                                Obsidian.copy(alpha = 0.82f),
+                            ),
+                        ),
+                    ),
+            )
+            Text(
+                text = item.title,
+                style = MaterialTheme.typography.labelMedium,
+                color = Snow,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.padding(8.dp),
+            )
+        }
+    }
+}
+
+@Composable
+private fun TvDetailsCinematicBackground(item: MediaItem?) {
+    Box(modifier = Modifier.fillMaxSize()) {
+        val backdrop = item?.backdropUrl ?: item?.posterUrl
+        if (!backdrop.isNullOrBlank()) {
+            AsyncImage(
+                model = backdrop,
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize(),
+            )
+        }
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(
+                    Brush.horizontalGradient(
+                        colors = listOf(
+                            Obsidian.copy(alpha = 0.98f),
+                            Obsidian.copy(alpha = 0.88f),
+                            Obsidian.copy(alpha = 0.72f),
+                            Obsidian.copy(alpha = 0.90f),
+                        ),
+                    ),
+                ),
         )
-        Text(
-            text = item.title,
-            style = MaterialTheme.typography.labelSmall,
-            color = Snow,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.padding(horizontal = 6.dp, vertical = 6.dp),
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(
+                    Brush.verticalGradient(
+                        colors = listOf(
+                            Obsidian.copy(alpha = 0.18f),
+                            Obsidian.copy(alpha = 0.50f),
+                            Obsidian.copy(alpha = 0.92f),
+                        ),
+                    ),
+                ),
         )
     }
 }
 
+@Composable
+private fun TvSeriesCompactHeader(
+    item: MediaItem,
+    selectedSeason: Int,
+    selectedEpisodeLabel: String?,
+    modifier: Modifier = Modifier,
+) {
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .height(112.dp)
+            .clip(RoundedCornerShape(22.dp))
+            .background(Obsidian.copy(alpha = 0.96f))
+            .border(1.dp, Snow.copy(alpha = 0.14f), RoundedCornerShape(22.dp))
+            .focusProperties { canFocus = false },
+    ) {
+        val backdrop = item.backdropUrl ?: item.posterUrl
+        if (!backdrop.isNullOrBlank()) {
+            AsyncImage(
+                model = backdrop,
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.matchParentSize(),
+            )
+        }
+        Box(
+            modifier = Modifier
+                .matchParentSize()
+                .background(
+                    Brush.horizontalGradient(
+                        colors = listOf(
+                            Obsidian.copy(alpha = 0.98f),
+                            Obsidian.copy(alpha = 0.92f),
+                            Obsidian.copy(alpha = 0.82f),
+                        ),
+                    ),
+                ),
+        )
+        Box(
+            modifier = Modifier
+                .matchParentSize()
+                .background(
+                    Brush.verticalGradient(
+                        colors = listOf(
+                            Obsidian.copy(alpha = 0.36f),
+                            Color.Transparent,
+                            Obsidian.copy(alpha = 0.42f),
+                        ),
+                    ),
+                ),
+        )
+        Row(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 22.dp, vertical = 14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(18.dp),
+        ) {
+            TvCompactLogoTitle(
+                item = item,
+                modifier = Modifier.widthIn(min = 180.dp, max = 300.dp),
+            )
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(5.dp),
+            ) {
+                val meta = buildList {
+                    item.year?.let { add(it.toString()) }
+                    add("Season $selectedSeason")
+                    selectedEpisodeLabel?.takeIf { it.isNotBlank() }?.let { add(it) }
+                }.joinToString("  ")
+                if (meta.isNotBlank()) {
+                    Text(
+                        text = meta,
+                        style = MaterialTheme.typography.labelLarge,
+                        color = Silver,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                item.overview?.takeIf { it.isNotBlank() }?.let { overview ->
+                    Text(
+                        text = overview,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = Snow.copy(alpha = 0.86f),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+            if (!selectedEpisodeLabel.isNullOrBlank()) {
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(999.dp))
+                        .background(Amber.copy(alpha = 0.20f))
+                        .border(1.dp, Amber.copy(alpha = 0.52f), RoundedCornerShape(999.dp))
+                        .padding(horizontal = 14.dp, vertical = 8.dp),
+                ) {
+                    Text(
+                        text = selectedEpisodeLabel,
+                        style = MaterialTheme.typography.labelLarge,
+                        color = Snow,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun TvCompactLogoTitle(
+    item: MediaItem,
+    modifier: Modifier = Modifier,
+) {
+    val logoUrl = item.logoUrl?.takeIf { it.isNotBlank() }
+    var logoFailed by remember(logoUrl) { mutableStateOf(false) }
+    if (!logoUrl.isNullOrBlank() && !logoFailed) {
+        AsyncImage(
+            model = logoUrl,
+            contentDescription = item.title,
+            contentScale = ContentScale.Fit,
+            alignment = Alignment.CenterStart,
+            onState = { state ->
+                if (state is coil3.compose.AsyncImagePainter.State.Error) {
+                    logoFailed = true
+                }
+            },
+            modifier = modifier.heightIn(min = 42.dp, max = 70.dp),
+        )
+        return
+    }
+    Text(
+        text = item.title,
+        style = MaterialTheme.typography.titleLarge.copy(
+            fontSize = 24.sp,
+            lineHeight = 28.sp,
+            letterSpacing = 0.4.sp,
+        ),
+        color = Snow,
+        fontWeight = FontWeight.SemiBold,
+        maxLines = 2,
+        overflow = TextOverflow.Ellipsis,
+        modifier = modifier,
+    )
+}
+
+@Composable
+private fun TvDetailsInlineState(
+    title: String,
+    subtitle: String,
+    modifier: Modifier = Modifier,
+    actionLabel: String? = null,
+    onAction: (() -> Unit)? = null,
+) {
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(20.dp))
+            .background(Charcoal.copy(alpha = 0.64f))
+            .border(1.dp, Snow.copy(alpha = 0.10f), RoundedCornerShape(20.dp))
+            .padding(horizontal = 20.dp, vertical = 16.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Text(
+            text = title,
+            style = MaterialTheme.typography.titleMedium,
+            color = Snow,
+            fontWeight = FontWeight.SemiBold,
+        )
+        if (subtitle.isNotBlank()) {
+            Text(
+                text = subtitle,
+                style = MaterialTheme.typography.bodyMedium,
+                color = Silver,
+            )
+        }
+        if (!actionLabel.isNullOrBlank() && onAction != null) {
+            var focused by remember { mutableStateOf(false) }
+            val borderColor by animateColorAsState(
+                targetValue = if (focused) AmberLight else Snow.copy(alpha = 0.14f),
+                label = "detailsInlineActionBorder",
+            )
+            Box(
+                modifier = Modifier
+                    .padding(top = 4.dp)
+                    .clip(RoundedCornerShape(999.dp))
+                    .background(if (focused) Amber.copy(alpha = 0.18f) else Gunmetal.copy(alpha = 0.74f))
+                    .border(2.dp, borderColor, RoundedCornerShape(999.dp))
+                    .onFocusChanged { focused = it.isFocused }
+                    .focusable()
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null,
+                        onClick = onAction,
+                    )
+                    .padding(horizontal = 16.dp, vertical = 9.dp),
+            ) {
+                Text(
+                    text = actionLabel,
+                    style = MaterialTheme.typography.labelLarge,
+                    color = Snow,
+                    fontWeight = FontWeight.SemiBold,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun TvDetailsCompactInlineState(
+    title: String,
+    subtitle: String,
+    modifier: Modifier = Modifier,
+    actionLabel: String? = null,
+    onAction: (() -> Unit)? = null,
+) {
+    Row(
+        modifier = modifier
+            .widthIn(max = 620.dp)
+            .clip(RoundedCornerShape(999.dp))
+            .background(Charcoal.copy(alpha = 0.48f))
+            .border(1.dp, Snow.copy(alpha = 0.08f), RoundedCornerShape(999.dp))
+            .padding(horizontal = 16.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.labelLarge,
+                color = Snow.copy(alpha = 0.88f),
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            if (subtitle.isNotBlank()) {
+                Text(
+                    text = subtitle,
+                    style = MaterialTheme.typography.labelMedium,
+                    color = Silver.copy(alpha = 0.78f),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+        if (!actionLabel.isNullOrBlank() && onAction != null) {
+            var focused by remember { mutableStateOf(false) }
+            val borderColor by animateColorAsState(
+                targetValue = if (focused) AmberLight else Snow.copy(alpha = 0.12f),
+                label = "detailsCompactActionBorder",
+            )
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(999.dp))
+                    .background(if (focused) Amber.copy(alpha = 0.18f) else Gunmetal.copy(alpha = 0.70f))
+                    .border(2.dp, borderColor, RoundedCornerShape(999.dp))
+                    .onFocusChanged { focused = it.isFocused }
+                    .focusable()
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null,
+                        onClick = onAction,
+                    )
+                    .padding(horizontal = 14.dp, vertical = 8.dp),
+            ) {
+                Text(
+                    text = actionLabel,
+                    style = MaterialTheme.typography.labelLarge,
+                    color = Snow,
+                    fontWeight = FontWeight.SemiBold,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun DetailLogoTitle(item: MediaItem) {
+    val logoUrl = item.logoUrl?.takeIf { it.isNotBlank() }
+    var logoFailed by remember(logoUrl) { mutableStateOf(false) }
+
+    if (!logoUrl.isNullOrBlank() && !logoFailed) {
+        AsyncImage(
+            model = logoUrl,
+            contentDescription = item.title,
+            contentScale = ContentScale.Fit,
+            alignment = Alignment.CenterStart,
+            onState = { state ->
+                if (state is coil3.compose.AsyncImagePainter.State.Error) {
+                    logoFailed = true
+                }
+            },
+            modifier = Modifier
+                .fillMaxWidth(0.55f)
+                .heightIn(min = 62.dp, max = 104.dp),
+        )
+        return
+    }
+
+    Text(
+        text = item.title,
+        style = MaterialTheme.typography.headlineMedium.copy(
+            fontSize = 38.sp,
+            lineHeight = 42.sp,
+            letterSpacing = 0.6.sp,
+        ),
+        color = Snow,
+        fontWeight = FontWeight.SemiBold,
+        maxLines = 2,
+        overflow = TextOverflow.Ellipsis,
+        modifier = Modifier.fillMaxWidth(0.55f),
+    )
+}
+
 private fun resolveTvDetailMessage(context: android.content.Context, message: String?): String {
     if (message.isNullOrBlank()) return ""
+    if (message == "No streams found") {
+        return "No playable source found. Episode metadata is available, but no stream is currently available."
+    }
+    if (message.startsWith("No compatible streams found")) {
+        return "No playable source found. Episode metadata is available, but no compatible stream is currently available."
+    }
     val shouldResolveAsKey = message.startsWith("error_") || message.startsWith("usenet_")
     return if (shouldResolveAsKey) {
         com.torve.android.error.resolveErrorKey(context, message) ?: message
@@ -1819,10 +2330,9 @@ private fun TvCastCard(
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
         modifier = Modifier
-            .width(80.dp)
+            .width(74.dp)
             .zIndex(if (focused) 1f else 0f)
             .scale(scale)
-            .clip(RoundedCornerShape(10.dp))
             .onFocusChanged { focused = it.isFocused }
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },
@@ -1833,15 +2343,20 @@ private fun TvCastCard(
     ) {
         Box(
             modifier = Modifier
-                .size(60.dp)
-                .border(2.dp, borderColor, RoundedCornerShape(30.dp))
-                .clip(RoundedCornerShape(30.dp)),
+                .size(56.dp)
+                .background(
+                    if (focused) Amber.copy(alpha = 0.16f) else Color.Transparent,
+                    CircleShape,
+                )
+                .border(2.dp, borderColor, CircleShape)
+                .padding(3.dp)
+                .clip(CircleShape),
         ) {
             if (profileUrl != null) {
                 AsyncImage(
                     model = profileUrl,
                     contentDescription = name,
-                    modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(30.dp)),
+                    modifier = Modifier.fillMaxSize().clip(CircleShape),
                     contentScale = ContentScale.Crop,
                 )
             } else {

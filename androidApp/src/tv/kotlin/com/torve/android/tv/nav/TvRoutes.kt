@@ -7,6 +7,7 @@ import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.LiveTv
 import androidx.compose.material.icons.filled.Movie
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.SportsSoccer
 import androidx.compose.material.icons.filled.Tv
@@ -108,6 +109,7 @@ val tvTopDestinations = listOf(
     TvTopDestination(TvRoutes.HOME, R.string.nav_home, Icons.Filled.Home),
     TvTopDestination(TvRoutes.MOVIES, R.string.nav_movies, Icons.Filled.Movie),
     TvTopDestination(TvRoutes.SHOWS, R.string.nav_tv_shows, Icons.Filled.Tv),
+    TvTopDestination(TvRoutes.SEARCH, R.string.tv_nav_search, Icons.Filled.Search),
     TvTopDestination(TvRoutes.IPTV, R.string.tv_nav_iptv, Icons.Filled.LiveTv),
     TvTopDestination(TvRoutes.SPORTS, R.string.tv_nav_sports, Icons.Filled.SportsSoccer),
     TvTopDestination(TvRoutes.LIBRARY, R.string.tv_nav_library, Icons.Filled.Bookmark),

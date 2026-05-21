@@ -2,6 +2,7 @@ package com.torve.data.metadata
 
 import com.torve.domain.model.CastMember
 import com.torve.domain.model.Genre
+import com.torve.domain.model.MediaCompany
 import com.torve.domain.model.MediaItem
 import com.torve.domain.model.MediaRatings
 import com.torve.domain.model.MediaType
@@ -22,16 +23,19 @@ object TmdbMappers {
     fun logoUrl(path: String?, size: String = "w500"): String? =
         path?.let { "${TmdbApiClient.IMAGE_BASE}/$size$it" }
 
-    /** Pick the best English/null-language logo from a TMDB images response. */
+    /** Pick the best title logo from a TMDB images response. */
     fun bestLogoPath(images: TmdbImages?): String? {
         if (images == null) return null
         val logos = images.logos
         if (logos.isEmpty()) return null
-        // Prefer English, then language-neutral, sorted by vote count desc
-        val best = logos
-            .sortedByDescending { it.voteAverage * it.voteCount }
-            .firstOrNull { it.iso6391 == "en" }
-            ?: logos.sortedByDescending { it.voteAverage * it.voteCount }.firstOrNull()
+        val ranked = logos.sortedWith(
+            compareByDescending<TmdbImageItem> { it.voteAverage * it.voteCount }
+                .thenByDescending { it.voteCount }
+                .thenByDescending { it.width },
+        )
+        val best = ranked.firstOrNull { it.iso6391 == "en" }
+            ?: ranked.firstOrNull { it.iso6391 == null }
+            ?: ranked.firstOrNull()
         return best?.filePath
     }
 
@@ -66,6 +70,7 @@ object TmdbMappers {
             director = director?.name,
             directorId = director?.id,
             directorProfileUrl = profileUrl(director?.profilePath),
+            studios = m.productionCompanies.toMediaCompanies(),
             releaseDate = m.releaseDate,
             status = m.status,
             trailerKey = trailer?.key,
@@ -105,6 +110,7 @@ object TmdbMappers {
             director = director?.name,
             directorId = director?.id,
             directorProfileUrl = profileUrl(director?.profilePath),
+            studios = t.networks.toMediaCompanies(),
             releaseDate = t.firstAirDate,
             status = t.status,
             trailerKey = trailer?.key,
@@ -123,6 +129,11 @@ object TmdbMappers {
             ratings = t.voteAverage?.let { MediaRatings(tmdbScore = it.toFloat()) },
         )
     }
+
+    private fun List<TmdbCompany>.toMediaCompanies(): List<MediaCompany> =
+        filter { it.id > 0 && it.name.isNotBlank() }
+            .distinctBy { it.id }
+            .map { MediaCompany(it.id, it.name, logoUrl(it.logoPath, size = "w154")) }
 
     fun personCreditToMediaItem(c: TmdbPersonCastCredit): MediaItem {
         val date = c.releaseDate ?: c.firstAirDate

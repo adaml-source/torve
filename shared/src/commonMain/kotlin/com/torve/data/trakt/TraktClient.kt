@@ -1,6 +1,5 @@
 package com.torve.data.trakt
 
-import com.torve.domain.diagnostics.DiagnosticsRedactor
 import io.ktor.client.HttpClient
 import io.ktor.client.call.body
 import io.ktor.client.request.get
@@ -154,11 +153,7 @@ class TraktClient(
                     try {
                         val resp: TraktTokenResponse = decodeTraktBody(response)
                         if (resp.accessToken.isBlank() || resp.refreshToken.isBlank()) {
-                            val preview = runCatching {
-                                DiagnosticsRedactor.redact(response.bodyAsText()).take(200)
-                            }
-                                .getOrDefault("")
-                            TraktPollResult.Error("Trakt returned empty tokens. body=$preview")
+                            TraktPollResult.Error("Trakt returned an invalid token response.")
                         } else {
                             TraktPollResult.Success(
                                 TraktTokens(
@@ -170,13 +165,7 @@ class TraktClient(
                             )
                         }
                     } catch (parseErr: Exception) {
-                        val preview = runCatching {
-                            DiagnosticsRedactor.redact(response.bodyAsText()).take(200)
-                        }
-                            .getOrDefault("")
-                        TraktPollResult.Error(
-                            "Parse error: ${parseErr.message ?: parseErr::class.simpleName}. body=$preview",
-                        )
+                        TraktPollResult.Error("Trakt token response could not be decoded.")
                     }
                 }
                 400 -> TraktPollResult.Pending
@@ -188,11 +177,7 @@ class TraktClient(
                 // 5xx is retryable — Trakt sometimes blips mid-flight.
                 in 500..599 -> TraktPollResult.TransientError("Server error ${response.status.value}")
                 else -> {
-                    val preview = runCatching {
-                        DiagnosticsRedactor.redact(response.bodyAsText()).take(200)
-                    }
-                        .getOrDefault("")
-                    TraktPollResult.Error("HTTP ${response.status.value}: $preview")
+                    TraktPollResult.Error("Trakt authentication failed with HTTP ${response.status.value}.")
                 }
             }
         } catch (e: Exception) {
@@ -200,7 +185,7 @@ class TraktClient(
             // by nature during a 10-minute device-auth window — the network
             // often shifts when the user bounces to the browser. Retrying
             // on the next tick almost always recovers.
-            TraktPollResult.TransientError("${e::class.simpleName}: ${e.message ?: "Unknown error"}")
+            TraktPollResult.TransientError("Network error while connecting to Trakt.")
         }
     }
 
@@ -323,18 +308,24 @@ class TraktClient(
     }
 
     suspend fun addToWatchlist(accessToken: String, body: TraktWatchlistBody) {
-        httpClient.post("$TRAKT_BASE/sync/watchlist") {
+        val response = httpClient.post("$TRAKT_BASE/sync/watchlist") {
             contentType(ContentType.Application.Json)
             traktHeaders(accessToken).forEach { (k, v) -> header(k, v) }
             setBody(body)
         }
+        if (!response.status.isSuccess()) {
+            throw Exception(traktErrorMessage(response))
+        }
     }
 
     suspend fun removeFromWatchlist(accessToken: String, body: TraktWatchlistBody) {
-        httpClient.post("$TRAKT_BASE/sync/watchlist/remove") {
+        val response = httpClient.post("$TRAKT_BASE/sync/watchlist/remove") {
             contentType(ContentType.Application.Json)
             traktHeaders(accessToken).forEach { (k, v) -> header(k, v) }
             setBody(body)
+        }
+        if (!response.status.isSuccess()) {
+            throw Exception(traktErrorMessage(response))
         }
     }
 
@@ -480,13 +471,10 @@ class TraktClient(
                     "Trakt is rate-limiting your account (HTTP 429). $waitText"
                 }
             }
-            status == 401 -> "Trakt rejected our credentials (HTTP 401). Reconnect Trakt in Settings."
+            status == 401 -> "Trakt authentication required (HTTP 401). Reconnect Trakt in Settings."
             status == 403 -> "Trakt refused this request (HTTP 403). Your client ID may be invalid."
             status in 500..599 -> "Trakt is having a server problem (HTTP $status). Try again shortly."
-            else -> {
-                val body = runCatching { response.bodyAsText().take(200) }.getOrDefault("")
-                "Trakt API error $status${if (body.isNotBlank()) ": $body" else ""}"
-            }
+            else -> "Trakt request failed (HTTP $status)."
         }
     }
 

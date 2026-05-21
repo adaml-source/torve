@@ -58,6 +58,7 @@ class RecordingScheduler(
         startMs: Long,
         endMs: Long,
         force: Boolean = false,
+        metadata: RecordingMetadataSnapshot? = null,
     ): ScheduleResult {
         if (endMs <= startMs) return ScheduleResult.Invalid("End must be after start.")
         if (endMs <= nowMs()) return ScheduleResult.InThePast
@@ -68,8 +69,16 @@ class RecordingScheduler(
             channelId = channelId,
             channelName = channelName,
             streamUrl = streamUrl,
-            programmeTitle = programmeTitle,
-            programmeDescription = programmeDescription,
+            programmeTitle = metadata?.programmeTitle ?: programmeTitle,
+            programmeDescription = metadata?.programmeDescription ?: programmeDescription,
+            epgProgrammeTitle = metadata?.epgProgrammeTitle,
+            epgProgrammeSubtitle = metadata?.epgProgrammeSubtitle,
+            epgProgrammeCategory = metadata?.epgProgrammeCategory,
+            epgProgrammeIconUrl = metadata?.epgProgrammeIconUrl,
+            epgChannelId = metadata?.epgChannelId,
+            sourceLabel = metadata?.sourceLabel,
+            recordingKind = metadata?.recordingKind ?: RecordingKind.SCHEDULED_EPG,
+            epgMatchStatus = metadata?.epgMatchStatus ?: RecordingEpgMatchStatus.UNKNOWN,
             startMs = startMs,
             endMs = endMs,
             status = RecordingStatus.SCHEDULED,

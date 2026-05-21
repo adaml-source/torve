@@ -57,6 +57,7 @@ internal fun TvNavHost(
     onPandaSetupBack: () -> Unit = { navController.popBackStack() },
     onSeeAllBack: () -> Unit = { navController.popBackStack() },
     onDetailsBack: () -> Unit = { navController.popBackStack() },
+    onPairingSignInSuccess: () -> Unit = {},
     onBeforeDetailsNavigateFromSeeAll: () -> Unit = {},
     onRequestLifetimeUnlock: (TvEntitledFeature) -> Unit = {},
     onWatchedStatusChanged: (MediaItem, Boolean) -> Unit = { _, _ -> },
@@ -159,6 +160,7 @@ internal fun TvNavHost(
                     // Pop the sign-in flow; the rest of the TV nav will
                     // pick up the signed-in user via authUserFlow.
                     navController.popBackStack()
+                    onPairingSignInSuccess()
                 },
             )
         }

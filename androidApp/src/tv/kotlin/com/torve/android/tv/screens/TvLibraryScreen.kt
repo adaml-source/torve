@@ -41,25 +41,32 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.torve.android.R
-import com.torve.android.tv.TvScreenCache
 import com.torve.android.tv.components.TvContentRail
 import com.torve.android.tv.components.TvMediaContextMenuAction
 import com.torve.android.tv.components.TvMediaRails
+import com.torve.android.tv.components.TvRailsPresentationMode
 import com.torve.android.tv.components.rememberTvFocusMemory
 import com.torve.android.tv.focus.TvScreenFocusHandle
 import com.torve.android.tv.toMediaItem
 import com.torve.android.ui.theme.*
+import com.torve.data.mdblist.MdbListApi
+import com.torve.data.mdblist.RatingsEnricher
+import com.torve.domain.integrations.IntegrationSecretKey
+import com.torve.domain.integrations.IntegrationSecretStore
 import com.torve.domain.model.Channel
 import com.torve.domain.model.DownloadMediaType
 import com.torve.domain.model.DownloadStatus
 import com.torve.domain.model.MediaItem
 import com.torve.domain.model.MediaType
-import com.torve.domain.repository.WatchlistRepository
+import com.torve.domain.repository.PreferencesRepository
 import com.torve.presentation.download.DownloadCatalogueViewModel
 import com.torve.presentation.jellyfin.JellyfinBrowserViewModel
+import com.torve.presentation.settings.SettingsViewModel
 import com.torve.presentation.watchlist.WatchlistViewModel
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import org.koin.compose.koinInject
 
 private data class TvLibraryUiState(
@@ -69,6 +76,70 @@ private data class TvLibraryUiState(
 )
 
 private enum class LibraryTab { WATCHLIST, FAVORITES, VOD, DOWNLOADS, JELLYFIN }
+
+@Composable
+private fun rememberLibraryEnrichedItems(
+    baseItems: List<MediaItem>,
+    cacheKey: String,
+): List<MediaItem> {
+    val ratingsEnricher: RatingsEnricher = koinInject()
+    val prefsRepo: PreferencesRepository = koinInject()
+    val secretStore: IntegrationSecretStore = koinInject()
+    var enrichedItems by remember(cacheKey) { mutableStateOf(baseItems) }
+    val signature = remember(baseItems) { libraryItemsSignature(baseItems) }
+
+    LaunchedEffect(cacheKey, signature) {
+        enrichedItems = baseItems
+        if (baseItems.isEmpty()) return@LaunchedEffect
+
+        val hydrated = withContext(Dispatchers.IO) {
+            ratingsEnricher.hydrateListFromCache(baseItems)
+        }
+        enrichedItems = hydrated
+
+        val apiKey = withContext(Dispatchers.IO) {
+            runCatching {
+                secretStore.get(IntegrationSecretKey.MDBLIST_API_KEY)
+                    ?: prefsRepo.getString(SettingsViewModel.KEY_MDBLIST_API_KEY)
+                    ?: MdbListApi.DEFAULT_API_KEY
+            }.getOrDefault(MdbListApi.DEFAULT_API_KEY)
+        }
+
+        var current = hydrated
+        for (attempt in 0 until 3) {
+            val enriched = withContext(Dispatchers.IO) {
+                ratingsEnricher.enrichList(current, apiKey)
+            }
+            if (libraryItemRatingsChanged(current, enriched)) {
+                current = enriched
+                enrichedItems = enriched
+            }
+            val remainingMs = ratingsEnricher.rateLimitRemainingMs()
+            if (remainingMs <= 0L || attempt == 2) break
+            delay(remainingMs + 2_000L)
+        }
+    }
+
+    return enrichedItems
+}
+
+private fun libraryItemsSignature(items: List<MediaItem>): String =
+    items.joinToString("|") { item ->
+        "${item.type}:${item.tmdbId ?: item.id}:${item.imdbId.orEmpty()}:${item.rating ?: 0.0}"
+    }
+
+private fun libraryItemRatingsChanged(
+    before: List<MediaItem>,
+    after: List<MediaItem>,
+): Boolean {
+    if (before.size != after.size) return true
+    return before.zip(after).any { (left, right) ->
+        left.id != right.id ||
+            left.tmdbId != right.tmdbId ||
+            left.imdbId != right.imdbId ||
+            left.ratings != right.ratings
+    }
+}
 
 @Composable
 internal fun TvLibraryScreen(
@@ -110,18 +181,29 @@ internal fun TvLibraryScreen(
         runCatching { tabRequesters.firstOrNull()?.requestFocus() }
     }
 
-    Column(modifier = Modifier.fillMaxSize()) {
-        // Tab row
-        val tabLabels = availableTabs.map { tab ->
-            when (tab) {
-                LibraryTab.WATCHLIST -> stringResource(R.string.tv_library_tab_watchlist)
-                LibraryTab.FAVORITES -> stringResource(R.string.tv_iptv_favorites)
-                LibraryTab.VOD -> stringResource(R.string.tv_library_tab_vod)
-                LibraryTab.DOWNLOADS -> stringResource(R.string.tv_library_tab_downloads)
-                LibraryTab.JELLYFIN -> stringResource(R.string.watchlist_jellyfin)
-            }
+    LaunchedEffect(selectedTabIndex) {
+        delay(20)
+        val requester = tabRequesters.getOrNull(selectedTabIndex) ?: return@LaunchedEffect
+        runCatching { requester.requestFocus() }
+        onContentFocused(requester)
+    }
+
+    val selectedTabRequester = tabRequesters.getOrNull(selectedTabIndex) ?: headerFocusRequester
+    val useHeroBackedTabRow = currentTab == LibraryTab.WATCHLIST || currentTab == LibraryTab.FAVORITES
+    val tabLabels = availableTabs.map { tab ->
+        when (tab) {
+            LibraryTab.WATCHLIST -> stringResource(R.string.tv_library_tab_watchlist)
+            LibraryTab.FAVORITES -> stringResource(R.string.tv_iptv_favorites)
+            LibraryTab.VOD -> stringResource(R.string.tv_library_tab_vod)
+            LibraryTab.DOWNLOADS -> stringResource(R.string.tv_library_tab_downloads)
+            LibraryTab.JELLYFIN -> stringResource(R.string.watchlist_jellyfin)
         }
+    }
+
+    @Composable
+    fun LibraryTabsRow(modifier: Modifier = Modifier) {
         LazyRow(
+            modifier = modifier,
             horizontalArrangement = Arrangement.spacedBy(12.dp),
             contentPadding = PaddingValues(start = 40.dp, end = 12.dp, top = 14.dp, bottom = 8.dp),
         ) {
@@ -144,16 +226,22 @@ internal fun TvLibraryScreen(
                             else Modifier
                         ),
                     onFocused = { onContentFocused(requester) },
-                    onClick = { selectedTabIndex = index },
+                    onClick = {
+                        selectedTabIndex = index
+                        runCatching { requester.requestFocus() }
+                        onContentFocused(requester)
+                    },
                 )
             }
         }
+    }
 
-        // Content
+    @Composable
+    fun LibraryTabContent() {
         when (currentTab) {
             LibraryTab.WATCHLIST -> WatchlistContent(
                 railFocusRequester = railFocusRequester,
-                headerFocusRequester = headerFocusRequester,
+                headerFocusRequester = selectedTabRequester,
                 onMediaClick = onMediaClick,
                 onFirstContentRequester = {},
                 onContentFocused = onContentFocused,
@@ -169,38 +257,57 @@ internal fun TvLibraryScreen(
             LibraryTab.FAVORITES -> FavoritesContent(
                 favoriteMediaItems = favoriteMediaItems,
                 railFocusRequester = railFocusRequester,
-                headerFocusRequester = tabRequesters.getOrNull(selectedTabIndex) ?: headerFocusRequester,
+                headerFocusRequester = selectedTabRequester,
                 onMediaClick = onMediaClick,
                 onFirstContentRequester = {},
                 onContentFocused = onContentFocused,
                 onMediaFocused = onMediaFocused,
-                shouldAutoFocus = shouldAutoFocus,
+                onSeeAll = onSeeAll,
+                heroOverlay = heroOverlay,
+                shouldAutoFocus = false,
                 contextMenuActionsForItem = contextMenuActionsForItem,
                 onContextMenuAction = onContextMenuAction,
                 progressResolver = progressResolver,
+                registerFocusHandle = registerFocusHandle,
             )
             LibraryTab.DOWNLOADS -> { /* Downloads removed from TV — stream-only */ }
             LibraryTab.VOD -> TvVodLibraryContent(
                 railFocusRequester = railFocusRequester,
-                headerFocusRequester = tabRequesters.getOrNull(selectedTabIndex) ?: headerFocusRequester,
+                headerFocusRequester = selectedTabRequester,
                 onVodItemPlay = onVodItemPlay,
                 onVodSeriesOpen = onVodSeriesOpen,
                 onFirstContentRequester = {},
                 onContentFocused = onContentFocused,
                 onMediaFocused = onMediaFocused,
-                shouldAutoFocus = shouldAutoFocus,
+                shouldAutoFocus = false,
                 registerFocusHandle = registerFocusHandle,
             )
             LibraryTab.JELLYFIN -> JellyfinContent(
                 railFocusRequester = railFocusRequester,
-                headerFocusRequester = headerFocusRequester,
+                headerFocusRequester = selectedTabRequester,
                 onFirstContentRequester = {},
                 onContentFocused = onContentFocused,
                 onMediaFocused = onMediaFocused,
-                shouldAutoFocus = shouldAutoFocus,
+                shouldAutoFocus = false,
                 onJellyfinItemPlay = onJellyfinItemPlay,
                 registerFocusHandle = registerFocusHandle,
             )
+        }
+    }
+
+    if (useHeroBackedTabRow) {
+        Box(modifier = Modifier.fillMaxSize()) {
+            LibraryTabContent()
+            LibraryTabsRow(
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .zIndex(20f),
+            )
+        }
+    } else {
+        Column(modifier = Modifier.fillMaxSize()) {
+            LibraryTabsRow()
+            LibraryTabContent()
         }
     }
 }
@@ -232,9 +339,17 @@ private fun WatchlistContent(
         watchlistViewModel.loadWatchlist()
     }
 
-    val rails = remember(watchlistState.items, watchlistMoviesLabel, watchlistShowsLabel) {
-        val movieItems = watchlistState.items.filter { it.mediaType == MediaType.MOVIE }.map { it.toMediaItem() }
-        val showItems = watchlistState.items.filter { it.mediaType == MediaType.SERIES }.map { it.toMediaItem() }
+    val baseItems = remember(watchlistState.items) {
+        watchlistState.items.map { it.toMediaItem() }
+    }
+    val enrichedItems = rememberLibraryEnrichedItems(
+        baseItems = baseItems,
+        cacheKey = "library_watchlist",
+    )
+
+    val rails = remember(enrichedItems, watchlistMoviesLabel, watchlistShowsLabel) {
+        val movieItems = enrichedItems.filter { it.type == MediaType.MOVIE }
+        val showItems = enrichedItems.filter { it.type == MediaType.SERIES }
         buildList {
             if (movieItems.isNotEmpty()) {
                 add(
@@ -272,11 +387,14 @@ private fun WatchlistContent(
         onMediaFocused = onMediaFocused,
         onSeeAll = onSeeAll,
         heroOverlay = heroOverlay,
-        shouldAutoFocus = shouldAutoFocus,
+        shouldAutoFocus = false,
         progressResolver = progressResolver,
         contextMenuActionsForItem = contextMenuActionsForItem,
         onContextMenuAction = onContextMenuAction,
         registerFocusHandle = registerFocusHandle,
+        sourceAwareRatings = true,
+        presentationMode = TvRailsPresentationMode.LibraryHero,
+        focusExclusive = true,
     )
 }
 
@@ -289,20 +407,33 @@ private fun FavoritesContent(
     onFirstContentRequester: (FocusRequester) -> Unit,
     onContentFocused: (FocusRequester) -> Unit,
     onMediaFocused: ((MediaItem) -> Unit)?,
+    onSeeAll: ((railKey: String, title: String) -> Unit)?,
+    heroOverlay: (@Composable () -> Unit)?,
     shouldAutoFocus: Boolean,
     contextMenuActionsForItem: ((MediaItem, Float?) -> List<TvMediaContextMenuAction>)?,
     onContextMenuAction: ((MediaItem, TvMediaContextMenuAction, Float?) -> Unit)?,
     progressResolver: ((MediaItem, Float?) -> Float?)?,
+    registerFocusHandle: ((TvScreenFocusHandle?) -> Unit)?,
 ) {
     val focusMemory = rememberTvFocusMemory()
-    val favoritesLabel = stringResource(R.string.tv_iptv_favorites)
-    val uiState = remember(favoriteMediaItems, favoritesLabel) {
+    val favoriteMoviesLabel = "Favorite Movies"
+    val favoriteShowsLabel = "Favorite TV Shows"
+    val enrichedItems = rememberLibraryEnrichedItems(
+        baseItems = favoriteMediaItems,
+        cacheKey = "library_favorites",
+    )
+    val uiState = remember(enrichedItems, favoriteMoviesLabel, favoriteShowsLabel) {
+        val movieItems = enrichedItems.filter { it.type == MediaType.MOVIE }
+        val showItems = enrichedItems.filter { it.type == MediaType.SERIES }
         TvLibraryUiState(
             loading = false,
-            rails = if (favoriteMediaItems.isNotEmpty()) {
-                listOf(TvContentRail(key = "media_favorites", title = favoritesLabel, items = favoriteMediaItems))
-            } else {
-                emptyList()
+            rails = buildList {
+                if (movieItems.isNotEmpty()) {
+                    add(TvContentRail(key = "favorite_movies", title = favoriteMoviesLabel, items = movieItems))
+                }
+                if (showItems.isNotEmpty()) {
+                    add(TvContentRail(key = "favorite_shows", title = favoriteShowsLabel, items = showItems))
+                }
             },
         )
     }
@@ -317,13 +448,19 @@ private fun FavoritesContent(
         screenId = "library_favorites",
         focusMemory = focusMemory,
         loading = uiState.loading,
-        emptyMessage = uiState.error ?: "No favorites yet",
+        emptyMessage = uiState.error ?: "No favorites yet\nMark titles as favorites to collect them here.",
         onMediaFocused = onMediaFocused,
-        onSeeAll = null,
+        onSeeAll = onSeeAll,
+        heroOverlay = heroOverlay,
         shouldAutoFocus = shouldAutoFocus,
         progressResolver = progressResolver,
         contextMenuActionsForItem = contextMenuActionsForItem,
         onContextMenuAction = onContextMenuAction,
+        registerFocusHandle = registerFocusHandle,
+        sourceAwareRatings = true,
+        presentationMode = TvRailsPresentationMode.LibraryHero,
+        showSeeAllCards = false,
+        focusExclusive = true,
     )
 }
 

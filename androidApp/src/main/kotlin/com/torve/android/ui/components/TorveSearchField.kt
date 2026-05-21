@@ -77,6 +77,7 @@ fun TorveSearchField(
     onMoveDownFromEdit: (() -> Unit)? = null,
     onMoveRightFromEdit: (() -> Unit)? = null,
     forceExitEditSignal: Int = 0,
+    startEditingSignal: Int = 0,
     onEditingChanged: ((Boolean) -> Unit)? = null,
 ) {
     var isFocused by remember { mutableStateOf(false) }
@@ -88,6 +89,7 @@ fun TorveSearchField(
     LaunchedEffect(editOnClick, isEditing) {
         if (editOnClick && isEditing) {
             runCatching { inputRequester.requestFocus() }
+            keyboardController?.show()
         }
     }
 
@@ -99,6 +101,12 @@ fun TorveSearchField(
         if (editOnClick && forceExitEditSignal > 0) {
             isEditing = false
             keyboardController?.hide()
+        }
+    }
+
+    LaunchedEffect(startEditingSignal) {
+        if (editOnClick && startEditingSignal > 0) {
+            isEditing = true
         }
     }
 

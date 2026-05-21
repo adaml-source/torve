@@ -1,6 +1,7 @@
 package com.torve.presentation.recording
 
 import com.torve.domain.recording.Recording
+import com.torve.domain.recording.RecordingMetadataSnapshot
 import com.torve.domain.recording.RecordingRepository
 import com.torve.domain.recording.RecordingScheduler
 import com.torve.domain.recording.RecordingStatus
@@ -39,6 +40,7 @@ import kotlinx.coroutines.launch
  */
 interface RecordingStarter {
     suspend fun runNow(rec: Recording) {}
+    suspend fun stopRunning(id: String): Boolean = false
     suspend fun deleteRow(id: String) {}
 }
 
@@ -116,6 +118,7 @@ class RecordingsViewModel(
         programmeDescription: String?,
         startMs: Long,
         endMs: Long,
+        metadata: RecordingMetadataSnapshot? = null,
     ) {
         scope.launch {
             val outcome = scheduler.schedule(
@@ -127,6 +130,7 @@ class RecordingsViewModel(
                 programmeDescription = programmeDescription,
                 startMs = startMs,
                 endMs = endMs,
+                metadata = metadata,
             )
             when (outcome) {
                 is RecordingScheduler.ScheduleResult.Conflict -> {
@@ -174,6 +178,7 @@ class RecordingsViewModel(
                 startMs = pending.candidate.startMs,
                 endMs = pending.candidate.endMs,
                 force = true,
+                metadata = pending.candidate.toMetadataSnapshot(),
             )
         }
     }
@@ -184,7 +189,12 @@ class RecordingsViewModel(
     }
 
     fun cancel(id: String) {
-        scope.launch { scheduler.cancel(id) }
+        scope.launch {
+            val stopped = runCatching { starter.stopRunning(id) }.getOrDefault(false)
+            if (!stopped) {
+                scheduler.cancel(id)
+            }
+        }
     }
 
     /**
@@ -209,6 +219,19 @@ class RecordingsViewModel(
         }
     }
 }
+
+private fun Recording.toMetadataSnapshot(): RecordingMetadataSnapshot = RecordingMetadataSnapshot(
+    programmeTitle = programmeTitle,
+    programmeDescription = programmeDescription,
+    epgProgrammeTitle = epgProgrammeTitle,
+    epgProgrammeSubtitle = epgProgrammeSubtitle,
+    epgProgrammeCategory = epgProgrammeCategory,
+    epgProgrammeIconUrl = epgProgrammeIconUrl,
+    epgChannelId = epgChannelId,
+    sourceLabel = sourceLabel,
+    recordingKind = recordingKind,
+    epgMatchStatus = epgMatchStatus,
+)
 
 /**
  * Bucketed UI state. Each bucket is sorted for the page that consumes it.

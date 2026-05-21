@@ -14,6 +14,7 @@ data class HomeUiState(
     val continueWatching: List<WatchProgress> = emptyList(),
     val continueWatchingRatings: Map<String, MediaRatings> = emptyMap(),
     val recommendedItems: List<ScoredMediaItem> = emptyList(),
+    val upcomingSchedule: List<MediaItem> = emptyList(),
     val watchlistShelf: CatalogShelf? = null,
     val watchlistItems: List<MediaItem> = emptyList(),
     val becauseYouWatched: List<CatalogShelf> = emptyList(),

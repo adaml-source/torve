@@ -7,11 +7,11 @@ import com.torve.domain.model.ChannelCategory
 import com.torve.domain.model.Channel
 import com.torve.domain.model.ChannelContentType
 import com.torve.domain.model.ChannelPlaylist
+import com.torve.domain.model.LiveTvEpgResolver
 import com.torve.domain.model.PlaylistType
 import com.torve.domain.model.channelIdentityCandidates
 import com.torve.domain.model.channelMatchesIdentity
 import com.torve.domain.model.canonicalEpgChannelKey
-import com.torve.domain.model.epgChannelLookupKeys
 import com.torve.domain.model.programmesForEpgChannel
 import com.torve.domain.model.stableChannelId
 import com.torve.domain.player.LiveAudioOutputMode
@@ -197,7 +197,7 @@ class ChannelsViewModel(
                     loadPlaylistCatalog(
                         playlistId = targetPlaylistId,
                         restoreSavedState = true,
-                        triggerBackgroundRefresh = true,
+                        triggerBackgroundRefresh = false,
                         showLoadingUntilRefresh = false,
                     )
                     println("STARTUP[${Clock.System.now().toEpochMilliseconds() - initStartMs}ms] db_category_load: triggered")
@@ -241,15 +241,7 @@ class ChannelsViewModel(
             val playlist = _state.value.playlists.firstOrNull { it.id == playlistId }
             val lastUpdated = playlist?.lastUpdated ?: 0L
             val ageMs = Clock.System.now().toEpochMilliseconds() - lastUpdated
-            val shouldRefresh = ageMs > STALE_THRESHOLD_MS
-            println("REFRESH_GATE: playlistId=$playlistId lastUpdated=$lastUpdated ageMs=$ageMs ageSec=${ageMs / 1000} decision=${if (shouldRefresh) "REFRESH" else "SKIP"}")
-            if (shouldRefresh) {
-                refreshPlaylistInBackground(
-                    playlistId = playlistId,
-                    preserveVisibleCatalog = true,
-                    restoreSavedState = true,
-                )
-            }
+            println("REFRESH_GATE: playlistId=$playlistId lastUpdated=$lastUpdated ageMs=$ageMs ageSec=${ageMs / 1000} decision=SKIP_AUTO_STARTUP")
         }
     }
 
@@ -578,6 +570,12 @@ class ChannelsViewModel(
             .filterNot { (name, _) -> isVodCategoryName(name) }
     }
 
+    private fun ChannelsUiState.hasGuideData(): Boolean {
+        return guideProgrammes.isNotEmpty() ||
+            guideChannels.isNotEmpty() ||
+            epgState is EpgState.Loaded
+    }
+
     private fun matchesQuality(name: String, vararg tags: String): Boolean {
         val lower = name.lowercase()
         return tags.any { tag ->
@@ -592,7 +590,7 @@ class ChannelsViewModel(
 
     fun selectSubTab(tab: ChannelsSubTab) {
         _state.update { it.copy(selectedSubTab = tab) }
-        if (tab == ChannelsSubTab.GUIDE && _state.value.guideProgrammes.isEmpty()) {
+        if (tab == ChannelsSubTab.GUIDE || _state.value.hasGuideData()) {
             buildGuideChannels()
         }
         if (tab == ChannelsSubTab.MOVIES && _state.value.vodCategories.isEmpty()) {
@@ -750,20 +748,11 @@ class ChannelsViewModel(
         // Invariant: guideProgrammes is keyed ONLY by canonical epg_channel_key.
         // No alias keys, no fuzzy matching, no entry scans.
         //
-        // Initial guide source is ALL live channels -- we let
-        // buildEpgGuideResult compute the full programmes map for them,
-        // then filter the guide list down to only channels that
-        // actually got programme matches. This includes channels with
-        // future-only programmes (the original bug), but excludes
-        // channels with no EPG data at all (so the grid doesn't show
-        // empty rows). The filter happens AFTER the EPG load instead
-        // of before, so we don't need a pre-loaded current/next.
-        val guideSource = st.channels.ifEmpty { st.categoryChannels }.filter {
-            (it.channel.contentType == ChannelContentType.LIVE ||
-                it.channel.contentType == ChannelContentType.UNKNOWN) &&
-                !it.channel.groupTitle.orEmpty().startsWith("VOD:", ignoreCase = true) &&
-                !isVodUrl(it.channel.url)
-        }
+        // Resolve rows from the active live browsing scope instead of the
+        // previous guide viewport. Empty EPG rows are kept so a category with
+        // many channels does not collapse to the few channels that currently
+        // have matched programme entries.
+        val guideSource = LiveTvGuideSourceResolver.resolve(st)
         val guide = prioritizeGuideChannels(
             channels = guideSource,
             selectedGroup = st.selectedGroup,
@@ -817,18 +806,15 @@ class ChannelsViewModel(
                 // If we have local EPG data, render it immediately — even if stale.
                 if (epgData.programmesByChannelKey.isNotEmpty()) {
                     val buildResult = buildEpgGuideResult(guide, playlistId, epgData)
-                    val guideWithEpg = filterChannelsWithProgrammes(
-                        guide, playlistId, buildResult.programmesByKey,
-                    )
                     println(
                         "ChannelsEPG: local-first render playlistId=$playlistId generation=${epgData.generationId ?: -1} " +
-                            "guideChannels=${guideWithEpg.size}/${guide.size} matched=${buildResult.matchedChannels} " +
+                            "guideChannels=${guide.size} matched=${buildResult.matchedChannels} " +
                             "unmatched=${buildResult.unmatchedChannels} " +
                             "buildMs=${Clock.System.now().toEpochMilliseconds() - buildStartedAt}",
                     )
                     _state.update {
                         it.copy(
-                            guideChannels = guideWithEpg,
+                            guideChannels = guide,
                             guideProgrammes = buildResult.programmesByKey,
                             isLoadingGuide = false,
                             guideError = null,
@@ -875,16 +861,13 @@ class ChannelsViewModel(
                 }
 
                 val buildResult = buildEpgGuideResult(guide, playlistId, freshEpgData)
-                val guideWithEpg = filterChannelsWithProgrammes(
-                    guide, playlistId, buildResult.programmesByKey,
-                )
                 debugLog(
-                    "ChannelsEPG: guide build complete playlistId=$playlistId generation=${freshEpgData.generationId ?: -1} buildMs=${Clock.System.now().toEpochMilliseconds() - buildStartedAt} channels=${guideWithEpg.size}/${guide.size} programmeRows=${freshEpgData.programmes.size} guideMapSize=${buildResult.programmesByKey.size}",
+                    "ChannelsEPG: guide build complete playlistId=$playlistId generation=${freshEpgData.generationId ?: -1} buildMs=${Clock.System.now().toEpochMilliseconds() - buildStartedAt} channels=${guide.size} programmeRows=${freshEpgData.programmes.size} guideMapSize=${buildResult.programmesByKey.size}",
                 )
 
                 _state.update {
                     it.copy(
-                        guideChannels = guideWithEpg,
+                        guideChannels = guide,
                         guideProgrammes = buildResult.programmesByKey,
                         isLoadingGuide = false,
                         guideError = null,
@@ -1059,16 +1042,10 @@ class ChannelsViewModel(
 
     /**
      * Trigger a guide build without forcing a network refresh of the EPG XML.
-     * Surface that lets the desktop shell populate [ChannelsUiState.guideChannels]
-     * the first time the user opens the Guide tab — without this, the Guide
-     * stays empty until the user manually presses Retry, because
-     * [buildGuideChannels] is private and only auto-fires on playlist load.
+     * Surface that lets the desktop shell resync [ChannelsUiState.guideChannels]
+     * when the user opens the Guide tab or changes the active browse scope.
      */
     fun requestGuideBuild() {
-        if (_state.value.guideChannels.isNotEmpty() && _state.value.isLoadingGuide.not()) {
-            // Already populated — refresh would re-trigger network for nothing.
-            return
-        }
         buildGuideChannels(forceRefreshEpg = false)
     }
 
@@ -1172,12 +1149,18 @@ class ChannelsViewModel(
         // Merged: set filter + rebuild in one emission.
         _state.update { it.copy(activeFilter = filter) }
         buildLiveCategories()
+        if (_state.value.hasGuideData()) {
+            buildGuideChannels()
+        }
     }
 
     fun setSort(sort: ChannelsSortType) {
         // Merged: set sort + rebuild in one emission.
         _state.update { it.copy(activeSort = sort) }
         buildLiveCategories()
+        if (_state.value.hasGuideData()) {
+            buildGuideChannels()
+        }
     }
 
     fun toggleFilterSheet() {
@@ -1246,7 +1229,6 @@ class ChannelsViewModel(
                     epgCheckSuccess = false,
                 )
             }
-            return
         }
         scope.launch {
             _state.update {
@@ -1278,18 +1260,6 @@ class ChannelsViewModel(
         scope.launch {
             try {
                 val normalizedUrl = epgUrl.trim().takeIf { it.isNotEmpty() }
-                val playlistsBefore = withContext(backgroundDispatcher) { channelRepo.getPlaylists() }
-                val playlistBefore = playlistsBefore.firstOrNull { it.id == playlistId }
-                if (playlistBefore?.type != PlaylistType.M3U) {
-                    val message = "Guide URL editing is only available for M3U sources."
-                    _state.update {
-                        it.copy(
-                            guideError = message,
-                            epgState = EpgState.Error(message),
-                        )
-                    }
-                    return@launch
-                }
                 val playlists = withContext(backgroundDispatcher) {
                     channelRepo.updatePlaylistEpgUrl(playlistId, normalizedUrl)
                     channelRepo.getPlaylists()
@@ -1302,7 +1272,7 @@ class ChannelsViewModel(
                             playlistId = updatedPlaylist.id,
                             name = updatedPlaylist.name,
                             url = if (updatedPlaylist.type == PlaylistType.M3U) updatedPlaylist.url else null,
-                            epgUrl = if (updatedPlaylist.type == PlaylistType.M3U) normalizedUrl else null,
+                            epgUrl = normalizedUrl,
                             playlistType = updatedPlaylist.type.name.lowercase(),
                             server = updatedPlaylist.server,
                             username = updatedPlaylist.username,
@@ -1617,6 +1587,9 @@ class ChannelsViewModel(
     fun updateSearchQuery(query: String) {
         _state.update { it.copy(searchQuery = query) }
         searchQueryFlow.value = query
+        if (query.trim().length < 2 && _state.value.hasGuideData()) {
+            buildGuideChannels()
+        }
     }
 
     @OptIn(FlowPreview::class)
@@ -1630,6 +1603,9 @@ class ChannelsViewModel(
                     try {
                         val results = channelRepo.searchChannels(query)
                         _state.update { it.copy(searchResults = results) }
+                        if (_state.value.hasGuideData()) {
+                            buildGuideChannels()
+                        }
                     } catch (_: Exception) { }
                 }
         }
@@ -1638,6 +1614,9 @@ class ChannelsViewModel(
     fun clearSearch() {
         _state.update { it.copy(searchQuery = "", searchResults = emptyList()) }
         searchQueryFlow.value = ""
+        if (_state.value.hasGuideData()) {
+            buildGuideChannels()
+        }
     }
 
     private fun observeAccountSession() {
@@ -1705,7 +1684,7 @@ class ChannelsViewModel(
         scope.launch {
             try {
                 val programmes = withContext(backgroundDispatcher) {
-                    epgChannelLookupKeys(selectedPlaylistId, channel)
+                    LiveTvEpgResolver.lookupKeys(selectedPlaylistId, channel)
                         .firstNotNullOfOrNull { key ->
                             channelRepo.getProgrammes(key).takeIf { it.isNotEmpty() }
                         }
@@ -2102,7 +2081,7 @@ class ChannelsViewModel(
                 channel = enriched.channel,
             ) ?: continue
             try {
-                val programmes = epgChannelLookupKeys(playlistId, enriched.channel)
+                val programmes = LiveTvEpgResolver.lookupKeys(playlistId, enriched.channel)
                     .firstNotNullOfOrNull { key ->
                         channelRepo.getProgrammes(key).takeIf { it.isNotEmpty() }
                     }
@@ -2203,7 +2182,6 @@ class ChannelsViewModel(
         if (epgSourceUrl.isBlank()) {
             _state.update { it.copy(epgState = EpgState.NotConfigured) }
             println("ChannelsEPG: cached-only skipped playlistId=$playlistId reason=no_epg_source")
-            return
         }
         if (epgRefreshJob?.isActive == true) {
             println("ChannelsEPG: cached-only skipped playlistId=$playlistId reason=epg_job_active")
@@ -2596,26 +2574,6 @@ class ChannelsViewModel(
     private fun debugLog(message: String) {
         if (EPG_DEBUG_LOG_ENABLED) {
             println(message)
-        }
-    }
-
-    /**
-     * Filter the candidate guide list down to only channels that have
-     * any programmes in the resolved guideProgrammes map. Run AFTER
-     * buildEpgGuideResult so we can include channels with future-only
-     * programmes (which the old current/next pre-filter dropped) AND
-     * exclude channels with no EPG data (which would render as empty
-     * rows in the grid).
-     */
-    private fun filterChannelsWithProgrammes(
-        candidates: List<EnrichedChannel>,
-        playlistId: String,
-        programmesByKey: Map<String, List<EpgProgramme>>,
-    ): List<EnrichedChannel> {
-        if (programmesByKey.isEmpty()) return candidates // EPG empty: show all
-        return candidates.filter { enriched ->
-            epgChannelLookupKeys(playlistId, enriched.channel)
-                .any { key -> !programmesByKey[key].isNullOrEmpty() }
         }
     }
 

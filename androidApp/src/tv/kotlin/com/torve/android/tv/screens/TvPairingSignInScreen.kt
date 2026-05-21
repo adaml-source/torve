@@ -1,12 +1,15 @@
 package com.torve.android.tv.screens
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -30,6 +33,8 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.platform.LocalContext
@@ -71,9 +76,16 @@ fun TvPairingSignInScreen(
     val state by viewModel.state.collectAsState()
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
+    val cancelRequester = remember { FocusRequester() }
+    fun exitSignIn() {
+        viewModel.cancel()
+        onBack()
+    }
 
     LaunchedEffect(viewModel) { viewModel.start() }
+    LaunchedEffect(Unit) { runCatching { cancelRequester.requestFocus() } }
     DisposableEffect(viewModel) { onDispose { viewModel.cancel() } }
+    BackHandler(onBack = ::exitSignIn)
 
     LaunchedEffect(state) {
         if (state is TvPairingSignInViewModel.State.SignedIn) {
@@ -96,15 +108,24 @@ fun TvPairingSignInScreen(
             .background(Obsidian)
             .padding(48.dp),
     ) {
-        IconButton(onClick = {
-            viewModel.cancel()
-            onBack()
-        }) {
-            Icon(
-                Icons.AutoMirrored.Filled.ArrowBack,
-                contentDescription = stringResource(R.string.common_back),
-                tint = Snow,
-            )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            IconButton(onClick = ::exitSignIn) {
+                Icon(
+                    Icons.AutoMirrored.Filled.ArrowBack,
+                    contentDescription = stringResource(R.string.common_back),
+                    tint = Snow,
+                )
+            }
+            OutlinedButton(
+                onClick = ::exitSignIn,
+                modifier = Modifier.focusRequester(cancelRequester),
+            ) {
+                Text(stringResource(R.string.common_cancel), color = Snow)
+            }
         }
 
         Spacer(Modifier.height(16.dp))

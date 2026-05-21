@@ -258,14 +258,29 @@ private fun TvNavRailItem(
         targetValue = if (reduceMotion) 1f else if (focused) 1.04f else 1f,
         label = "railItemScale",
     )
-    val background = when {
-        focused -> AmberSubtle
-        selected && expanded -> AmberGlow
-        else -> Color.Transparent
+    val backgroundBrush = when {
+        focused -> Brush.horizontalGradient(
+            colors = listOf(
+                Amber.copy(alpha = 0.30f),
+                AmberGlow.copy(alpha = 0.13f),
+                Snow.copy(alpha = 0.07f),
+                Amber.copy(alpha = 0.08f),
+            ),
+        )
+        selected -> Brush.horizontalGradient(
+            colors = listOf(
+                Amber.copy(alpha = 0.20f),
+                AmberSubtle.copy(alpha = 0.12f),
+                Snow.copy(alpha = 0.035f),
+                Color.Transparent,
+            ),
+        )
+        else -> Brush.horizontalGradient(listOf(Color.Transparent, Color.Transparent))
     }
     val borderColor by animateColorAsState(
         targetValue = when {
             focused -> Amber
+            selected -> Amber.copy(alpha = 0.50f)
             else -> Color.Transparent
         },
         label = "railBorder",
@@ -274,7 +289,7 @@ private fun TvNavRailItem(
         targetValue = when {
             focused -> Snow
             selected -> Amber
-            else -> Silver
+            else -> Snow.copy(alpha = 0.76f)
         },
         label = "railTint",
     )
@@ -286,12 +301,12 @@ private fun TvNavRailItem(
             .fillMaxWidth()
             .zIndex(if (focused) 1f else 0f)
             .scale(scale)
-            .clip(RoundedCornerShape(14.dp))
-            .background(background)
+            .clip(RoundedCornerShape(16.dp))
+            .background(backgroundBrush)
             .border(
-                width = if (focused) 2.dp else 0.dp,
+                width = if (focused) 2.dp else if (selected) 1.dp else 0.dp,
                 color = borderColor,
-                shape = RoundedCornerShape(14.dp),
+                shape = RoundedCornerShape(16.dp),
             )
             .onFocusChanged {
                 val wasFocused = focused
@@ -342,7 +357,7 @@ private fun TvNavRailItem(
                 .background(
                     when {
                         focused -> Amber
-                        selected -> Amber.copy(alpha = 0.5f)
+                        selected -> Amber.copy(alpha = 0.72f)
                         else -> Color.Transparent
                     },
                     RoundedCornerShape(2.dp),

@@ -14,8 +14,9 @@ import kotlinx.serialization.Serializable
  *   - [FAILED]     — pull aborted before reaching `endMs`. The
  *                    [Recording.failureReason] carries an actionable
  *                    line for the UI.
- *   - [CANCELLED]  — user cancelled before or during the recording. No
- *                    failure copy needed.
+ *   - [CANCELLED]  — user cancelled before usable output existed, or
+ *                    explicitly discarded it. User Stop on an active
+ *                    recording with bytes on disk finalizes as COMPLETED.
  */
 @Serializable
 enum class RecordingStatus { SCHEDULED, RECORDING, COMPLETED, FAILED, CANCELLED }
@@ -44,6 +45,20 @@ enum class RecordingFailureReason {
  * provided; UI surfaces the disabled state with a "coming soon" copy.
  */
 @Serializable
+enum class RecordingKind {
+    LIVE,
+    SCHEDULED_EPG,
+    SERIES_EPG
+}
+
+@Serializable
+enum class RecordingEpgMatchStatus {
+    MATCHED,
+    NO_MATCH_AT_START,
+    UNKNOWN
+}
+
+@Serializable
 enum class RecordingScheduleKind { ONE_OFF, SERIES }
 
 /**
@@ -68,6 +83,14 @@ data class Recording(
     val streamUrl: String,
     val programmeTitle: String,
     val programmeDescription: String? = null,
+    val epgProgrammeTitle: String? = null,
+    val epgProgrammeSubtitle: String? = null,
+    val epgProgrammeCategory: String? = null,
+    val epgProgrammeIconUrl: String? = null,
+    val epgChannelId: String? = null,
+    val sourceLabel: String? = null,
+    val recordingKind: RecordingKind = RecordingKind.SCHEDULED_EPG,
+    val epgMatchStatus: RecordingEpgMatchStatus = RecordingEpgMatchStatus.UNKNOWN,
     val startMs: Long,
     val endMs: Long,
     val status: RecordingStatus = RecordingStatus.SCHEDULED,
@@ -82,6 +105,11 @@ data class Recording(
     val completedAtMs: Long? = null,
 ) {
     val durationMs: Long get() = (endMs - startMs).coerceAtLeast(0L)
+
+    val displayTitle: String
+        get() = epgProgrammeTitle?.takeIf { it.isNotBlank() }
+            ?: programmeTitle.takeIf { it.isNotBlank() }
+            ?: channelName
 }
 
 /**

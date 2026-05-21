@@ -31,7 +31,10 @@ import com.torve.domain.model.ContentSourceType
 import com.torve.domain.model.DebridServiceType
 import com.torve.domain.model.DeviceCodecCaps
 import com.torve.domain.model.ContentWarmupTrigger
+import com.torve.domain.model.Episode
+import com.torve.domain.model.MediaItem
 import com.torve.domain.model.MediaType
+import com.torve.domain.model.Season
 import com.torve.domain.model.SensitiveClassification
 import com.torve.domain.model.SourceAccelerationRequest
 import com.torve.domain.model.StreamFetchPolicy
@@ -293,30 +296,102 @@ class DetailViewModel(
                     ContentFilterAction.ALLOW_FULL -> rawItem
                     else -> contentPolicyFilter.run { rawItem.asStubDetail() }
                 }
-                _state.update { it.copy(mediaItem = item, similar = emptyList(), isLoading = false) }
+                _state.update {
+                    it.copy(
+                        mediaItem = item,
+                        similar = emptyList(),
+                        similarError = null,
+                        isLoadingSimilar = false,
+                        seasonDetail = null,
+                        seasonDetailError = null,
+                        isLoadingSeasonDetail = false,
+                        isLoading = false,
+                    )
+                }
 
                 if (item.isStubDetail) {
                     return@launch
                 }
 
-                // Load similar items
-                val similar = ratingsEnricher.hydrateListFromCache(metadataRepo.getSimilar(type, id))
+                // TV pages should expose seasons/episodes immediately. Similar
+                // titles and other enrichment can be slower; they must not block
+                // the core episode picker workflow.
+                if (type == "tv" && item.seasons.isNotEmpty()) {
+                    val firstReal = item.seasons.firstOrNull { it.seasonNumber > 0 }
+                    if (firstReal != null) {
+                        loadSeasonDetail(id, firstReal.seasonNumber)
+                    }
+                    loadWatchedEpisodes()
+                }
+
                 val allowSensitiveFromParent = contentPolicyFilter.classify(rawItem, ContentSourceType.TMDB) == SensitiveClassification.SENSITIVE &&
                     policy.adultEnabled
-                val filteredSimilar = contentPolicyFilter.filterItems(
-                    policy = policy,
-                    context = ContentAccessContext.SIMILAR_OR_MORE_LIKE_THIS,
-                    items = similar,
-                    sourceType = ContentSourceType.TMDB,
-                    allowSensitiveBecauseUserReachedSensitiveParent = allowSensitiveFromParent,
-                ).items
-                _state.update { it.copy(similar = filteredSimilar) }
-                // Enrich similar (Related rail) the same way CatalogViewModel
-                // enriches its first three rails. Previously this only
-                // hydrated from the local cache, so newly-fetched related
-                // items showed TMDB-only pills until the user had
-                // navigated to each individually.
-                enrichSimilarRatings(filteredSimilar)
+                _state.update { it.copy(isLoadingSimilar = true, similarError = null) }
+                try {
+                    val similarCandidates = mutableListOf<MediaItem>()
+                    similarCandidates += runCatching { metadataRepo.getSimilar(type, id) }.getOrDefault(emptyList())
+                    if (similarCandidates.size < 12) {
+                        similarCandidates += runCatching { metadataRepo.getRecommendations(type, id) }.getOrDefault(emptyList())
+                    }
+                    if (similarCandidates.size < 12) {
+                        val genreFallback = item.genreIds.firstOrNull()?.toString()
+                        similarCandidates += runCatching {
+                            metadataRepo.discover(
+                                type = type,
+                                sortBy = "popularity.desc",
+                                withGenres = genreFallback,
+                            ).items
+                        }.getOrDefault(emptyList())
+                    }
+                    if (similarCandidates.size < 12) {
+                        similarCandidates += runCatching { metadataRepo.getPopular(type) }.getOrDefault(emptyList())
+                    }
+                    if (similarCandidates.size < 12) {
+                        similarCandidates += runCatching { metadataRepo.getPopular(type, page = 2) }.getOrDefault(emptyList())
+                    }
+                    if (similarCandidates.size < 12) {
+                        similarCandidates += runCatching { metadataRepo.getTrending(type) }.getOrDefault(emptyList())
+                    }
+                    val similar = ratingsEnricher.hydrateListFromCache(
+                        similarCandidates
+                            .asSequence()
+                            .filterNot { candidate ->
+                                candidate.id == item.id ||
+                                    (candidate.tmdbId != null && item.tmdbId != null && candidate.tmdbId == item.tmdbId)
+                            }
+                            .distinctBy { candidate -> "${candidate.type}:${candidate.tmdbId ?: candidate.id}" }
+                            .take(24)
+                            .toList(),
+                    )
+                    val filteredSimilar = contentPolicyFilter.filterItems(
+                        policy = policy,
+                        context = ContentAccessContext.SIMILAR_OR_MORE_LIKE_THIS,
+                        items = similar,
+                        sourceType = ContentSourceType.TMDB,
+                        allowSensitiveBecauseUserReachedSensitiveParent = allowSensitiveFromParent,
+                    ).items
+                    _state.update {
+                        it.copy(
+                            similar = filteredSimilar,
+                            isLoadingSimilar = false,
+                            similarError = null,
+                        )
+                    }
+                    // Enrich similar (Related rail) the same way CatalogViewModel
+                    // enriches its first three rails. Previously this only
+                    // hydrated from the local cache, so newly-fetched related
+                    // items showed TMDB-only pills until the user had
+                    // navigated to each individually.
+                    enrichSimilarRatings(filteredSimilar)
+                } catch (_: Exception) {
+                    _state.update {
+                        it.copy(
+                            similar = emptyList(),
+                            isLoadingSimilar = false,
+                            similarError = "recommendations_failed",
+                        )
+                    }
+                }
 
                 // Load watch progress — merge local SQLDelight row with the
                 // backend's latest report (cross-device resume). Whichever has
@@ -349,14 +424,6 @@ class DetailViewModel(
                     )
                 }
 
-                // Auto-load first season for TV shows
-                if (type == "tv" && item.seasons.isNotEmpty()) {
-                    val firstReal = item.seasons.firstOrNull { it.seasonNumber > 0 }
-                    if (firstReal != null) {
-                        loadSeasonDetail(id, firstReal.seasonNumber)
-                    }
-                    loadWatchedEpisodes()
-                }
                 warmupLikelyPlaybackTarget(ContentWarmupTrigger.DETAIL_OPEN)
                 loadAvailability(item)
                 loadLibraryStatus(item)
@@ -364,7 +431,16 @@ class DetailViewModel(
                 enrichRatings(item)
             } catch (e: Exception) {
                 detailDiagLog("loadDetail FAILED id=$id error=${e.message}")
-                _state.update { it.copy(isLoading = false, error = com.torve.presentation.error.UserFacingError.CONTENT_LOAD_FAILED.messageKey) }
+                _state.update { current ->
+                    if (current.mediaItem != null) {
+                        current.copy(isLoading = false, error = null)
+                    } else {
+                        current.copy(
+                            isLoading = false,
+                            error = com.torve.presentation.error.UserFacingError.CONTENT_LOAD_FAILED.messageKey,
+                        )
+                    }
+                }
             }
         }
     }
@@ -511,14 +587,51 @@ class DetailViewModel(
 
     fun loadSeasonDetail(tvId: Int, seasonNumber: Int) {
         scope.launch {
-            _state.update { it.copy(selectedSeason = seasonNumber, isLoadingSeasonDetail = true) }
+            _state.update {
+                it.copy(
+                    selectedSeason = seasonNumber,
+                    seasonDetail = null,
+                    seasonDetailError = null,
+                    isLoadingSeasonDetail = true,
+                )
+            }
             try {
                 val season = metadataRepo.getSeasonDetail(tvId, seasonNumber)
-                _state.update { it.copy(seasonDetail = season, isLoadingSeasonDetail = false) }
-            } catch (_: Exception) {
-                _state.update { it.copy(isLoadingSeasonDetail = false) }
+                _state.update {
+                    it.copy(
+                        seasonDetail = season,
+                        seasonDetailError = null,
+                        isLoadingSeasonDetail = false,
+                    )
+                }
+            } catch (e: Exception) {
+                detailDiagLog("loadSeasonDetail FAILED tvId=$tvId season=$seasonNumber error=${e::class.simpleName}")
+                val fallbackSeason = fallbackSeasonFromShowMetadata(seasonNumber)
+                _state.update {
+                    it.copy(
+                        seasonDetail = fallbackSeason,
+                        seasonDetailError = if (fallbackSeason == null) "season_metadata_failed" else null,
+                        isLoadingSeasonDetail = false,
+                    )
+                }
             }
         }
+    }
+
+    private fun fallbackSeasonFromShowMetadata(seasonNumber: Int): Season? {
+        val season = _state.value.mediaItem
+            ?.seasons
+            ?.firstOrNull { it.seasonNumber == seasonNumber }
+            ?: return null
+        if (season.episodeCount <= 0) return null
+        return season.copy(
+            episodes = (1..season.episodeCount).map { episode ->
+                Episode(
+                    episodeNumber = episode,
+                    name = "Episode $episode",
+                )
+            },
+        )
     }
 
     /**
@@ -1810,6 +1923,7 @@ class DetailViewModel(
                     com.torve.presentation.error.UserFacingError.PLAYBACK_LINK_EXPIRED.messageKey
                 "stream_reference_required",
                 "stream_reference_not_found",
+                -> com.torve.presentation.error.UserFacingError.STREAM_REFERENCE_UNAVAILABLE.messageKey
                 "stream_handoff_unavailable",
                 -> com.torve.presentation.error.UserFacingError.STREAM_RESOLVE_FAILED.messageKey
                 else -> com.torve.presentation.error.UserFacingError.STREAM_RESOLVE_FAILED.messageKey
@@ -1869,6 +1983,8 @@ class DetailViewModel(
                 "Too many requests. Please wait and try again."
             com.torve.presentation.error.UserFacingError.PLAYBACK_LINK_EXPIRED.messageKey ->
                 "Playback link expired. Try playing this source again."
+            com.torve.presentation.error.UserFacingError.STREAM_REFERENCE_UNAVAILABLE.messageKey ->
+                "This source is no longer available. Refresh sources or try another one."
             else -> "Could not resolve this stream."
         }
     }

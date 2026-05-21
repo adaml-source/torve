@@ -5,13 +5,17 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -26,6 +30,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -34,6 +39,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.draw.shadow
 import androidx.activity.compose.BackHandler
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
@@ -41,9 +47,12 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import com.torve.android.catalog.SportsBootstrapJson
@@ -61,6 +70,8 @@ import com.torve.data.usenet.NewznabClient
 import com.torve.data.usenet.NewznabItem
 import com.torve.data.usenet.TorBoxUsenetClient
 import com.torve.domain.sports.SportBucket
+import com.torve.domain.sports.SportsReleaseDisplay
+import com.torve.domain.sports.SportsReleaseDisplayParser
 import com.torve.domain.usenet.UsenetIndexerCategoryMap
 import com.torve.domain.usenet.UsenetIndexerUrlResolver
 import com.torve.domain.repository.PreferencesRepository
@@ -76,6 +87,22 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import org.koin.compose.koinInject
 import com.torve.data.auth.AuthClient
+
+private const val SPORTS_FILTER_ALL = "all"
+private const val SPORTS_FILTER_TODAY = "today"
+private const val SPORTS_FILTER_RECENT = "recent"
+
+private val SPORTS_PRIMARY_BUCKETS = listOf(
+    SportBucket.F1,
+    SportBucket.MMA,
+    SportBucket.BOXING,
+    SportBucket.WRESTLING,
+    SportBucket.AMERICAN_FOOTBALL,
+    SportBucket.BASKETBALL,
+    SportBucket.BASEBALL,
+    SportBucket.SOCCER,
+    SportBucket.HOCKEY,
+)
 
 /**
  * TV Sports catalog. Cross-platform Newznab + TorBox plumbing now lives
@@ -171,6 +198,9 @@ fun TvSportsScreen(
                 SportBucket.entries.firstOrNull { it.name == name }
             },
         )
+    }
+    var selectedSportsMode by remember {
+        mutableStateOf(savedOnce.selectedSportBucket ?: SPORTS_FILTER_ALL)
     }
     var resolveStatus by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
     val listState = rememberLazyListState(
@@ -292,16 +322,53 @@ fun TvSportsScreen(
         }
     }
 
-    // Classify each item once per load. Recomputed on filter change.
-    data class ClassifiedItem(val item: NewznabItem, val bucket: SportBucket)
+    // Classify and parse each item once per load. Recomputed on filter change.
+    data class ClassifiedItem(
+        val item: NewznabItem,
+        val bucket: SportBucket,
+        val display: SportsReleaseDisplay,
+    )
     val classified: List<ClassifiedItem> = remember(pageState.items) {
-        pageState.items.map { ClassifiedItem(it, SportBucket.classify(it.title)) }
+        pageState.items.map { item ->
+            val bucket = SportBucket.classify(item.title)
+            ClassifiedItem(
+                item = item,
+                bucket = bucket,
+                display = SportsReleaseDisplayParser.parse(item.title, bucket),
+            )
+        }
     }
     val countsByBucket: Map<SportBucket, Int> = remember(classified) {
         classified.groupingBy { it.bucket }.eachCount()
     }
-    val visible: List<ClassifiedItem> = remember(classified, selectedBucket) {
-        if (selectedBucket == null) classified else classified.filter { it.bucket == selectedBucket }
+    val chipListState = rememberLazyListState()
+    val selectedChipIndex = remember(selectedSportsMode) {
+        when (selectedSportsMode) {
+            SPORTS_FILTER_ALL -> 0
+            SPORTS_FILTER_TODAY -> 1
+            SPORTS_FILTER_RECENT -> 2
+            else -> {
+                val bucketIndex = SPORTS_PRIMARY_BUCKETS.indexOfFirst { it.name == selectedSportsMode }
+                if (bucketIndex >= 0) 3 + bucketIndex else 0
+            }
+        }
+    }
+    LaunchedEffect(selectedChipIndex) {
+        chipListState.animateScrollToItem(selectedChipIndex)
+    }
+    val todayTitlePattern = remember {
+        java.time.LocalDate.now().format(java.time.format.DateTimeFormatter.ofPattern("yyyy.MM.dd"))
+    }
+    val todayTitlePatternSpaced = remember(todayTitlePattern) { todayTitlePattern.replace('.', ' ') }
+    val visible: List<ClassifiedItem> = remember(classified, selectedBucket, selectedSportsMode, todayTitlePattern, todayTitlePatternSpaced) {
+        when (selectedSportsMode) {
+            SPORTS_FILTER_TODAY -> classified.filter {
+                it.item.title.contains(todayTitlePattern) || it.item.title.contains(todayTitlePatternSpaced)
+            }
+            SPORTS_FILTER_RECENT -> classified.take(80)
+            SPORTS_FILTER_ALL -> classified
+            else -> selectedBucket?.let { bucket -> classified.filter { it.bucket == bucket } } ?: classified
+        }
     }
 
     val firstChipRequester = remember { FocusRequester() }
@@ -310,19 +377,24 @@ fun TvSportsScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(Obsidian)
-            .padding(horizontal = 40.dp, vertical = 20.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp),
+            .background(
+                Brush.radialGradient(
+                    colors = listOf(Color(0xFF101A26), Color(0xFF070B12), Color(0xFF020408)),
+                    radius = 1550f,
+                ),
+            )
+            .padding(horizontal = 40.dp, vertical = 22.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
         Text(
             text = "Sports",
-            style = MaterialTheme.typography.headlineLarge,
-            fontWeight = FontWeight.Bold,
+            style = MaterialTheme.typography.headlineMedium,
+            fontWeight = FontWeight.SemiBold,
             color = Snow,
         )
         Text(
-            text = pageState.progress ?: "Newznab sport releases · classified by release name",
-            style = MaterialTheme.typography.bodyMedium,
+            text = pageState.progress ?: "Sports releases detected from release names",
+            style = MaterialTheme.typography.bodySmall,
             color = if (pageState.progress != null) Amber else Torve.colors.textSecondary,
         )
 
@@ -334,12 +406,21 @@ fun TvSportsScreen(
         val focusManager = LocalFocusManager.current
         val keyboardController = LocalSoftwareKeyboardController.current
         var searchFieldFocused by remember { mutableStateOf(false) }
-        // On TV, pressing Back while the search field is focused clears focus back to the rail.
-        BackHandler(enabled = searchFieldFocused) {
+        var searchExpanded by remember { mutableStateOf(query.isNotBlank()) }
+        var searchStartEditingSignal by remember { mutableIntStateOf(0) }
+        fun collapseSearchToFilters() {
             keyboardController?.hide()
             focusManager.clearFocus()
+            searchExpanded = query.isNotBlank()
+            runCatching { firstChipRequester.requestFocus() }
+            onContentFocused(firstChipRequester)
         }
-        com.torve.android.ui.components.TorveSearchField(
+        // On TV, pressing Back while the search field is focused clears focus back to the rail.
+        BackHandler(enabled = searchFieldFocused || searchExpanded) {
+            collapseSearchToFilters()
+        }
+        if (searchExpanded) {
+            com.torve.android.ui.components.TorveSearchField(
             value = query,
             onValueChange = { newValue ->
                 val clearing = query.isNotBlank() && newValue.isBlank()
@@ -350,37 +431,80 @@ fun TvSportsScreen(
             onSubmit = { startFetch() },
             showFocusRing = true,
             editOnClick = true,
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(42.dp)
-                .focusProperties { left = railFocusRequester }
-                .onFocusChanged { searchFieldFocused = it.isFocused },
-        )
+                startEditingSignal = searchStartEditingSignal,
+                onMoveDownFromEdit = { collapseSearchToFilters() },
+                modifier = Modifier
+                    .width(300.dp)
+                    .height(38.dp)
+                    .focusProperties { left = firstChipRequester }
+                    .onFocusChanged { searchFieldFocused = it.hasFocus },
+            )
+        } else {
+            TvSportsSearchChip(
+                label = if (query.isBlank()) "Search" else "Search: $query",
+                onClick = {
+                    searchExpanded = true
+                    searchStartEditingSignal += 1
+                },
+            )
+        }
 
         // Bucket filter pills — first focusable row; LEFT off the
         // first pill returns to the nav rail.
-        LazyRow(
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
+        Box(modifier = Modifier.fillMaxWidth()) {
+            LazyRow(
+                state = chipListState,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                contentPadding = PaddingValues(end = 48.dp),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
             item(key = "bucket_all") {
                 TvBucketChip(
                     label = "All · ${classified.size}",
-                    selected = selectedBucket == null,
-                    onClick = { selectedBucket = null },
+                    selected = selectedSportsMode == SPORTS_FILTER_ALL,
+                    onClick = {
+                        selectedSportsMode = SPORTS_FILTER_ALL
+                        selectedBucket = null
+                    },
                     focusRequester = firstChipRequester,
                     leftFocusRequester = railFocusRequester,
                     onFocused = { onContentFocused(firstChipRequester) },
                 )
             }
-            items(SportBucket.entries.filter { b ->
-                b != SportBucket.OTHER || (countsByBucket[b] ?: 0) > 0
-            }, key = { it.name }) { bucket ->
+            item(key = "bucket_today") {
+                val todayCount = classified.count {
+                    it.item.title.contains(todayTitlePattern) || it.item.title.contains(todayTitlePatternSpaced)
+                }
+                TvBucketChip(
+                    label = "Today $todayCount",
+                    selected = selectedSportsMode == SPORTS_FILTER_TODAY,
+                    onClick = {
+                        selectedSportsMode = SPORTS_FILTER_TODAY
+                        selectedBucket = null
+                    },
+                )
+            }
+            item(key = "bucket_recent") {
+                TvBucketChip(
+                    label = "Recent ${classified.take(80).size}",
+                    selected = selectedSportsMode == SPORTS_FILTER_RECENT,
+                    onClick = {
+                        selectedSportsMode = SPORTS_FILTER_RECENT
+                        selectedBucket = null
+                    },
+                )
+            }
+            items(SPORTS_PRIMARY_BUCKETS, key = { it.name }) { bucket ->
                 val count = countsByBucket[bucket] ?: 0
                 TvBucketChip(
                     label = "${bucket.label} · $count",
-                    selected = selectedBucket == bucket,
-                    onClick = { selectedBucket = bucket },
+                    selected = selectedSportsMode == bucket.name,
+                    onClick = {
+                        selectedSportsMode = bucket.name
+                        selectedBucket = bucket
+                    },
                 )
+            }
             }
         }
 
@@ -412,11 +536,13 @@ fun TvSportsScreen(
                     )
                 }
             }
-            visible.isEmpty() -> Text(
-                text = if (selectedBucket != null)
-                    "No releases classified into ${selectedBucket!!.label} this batch."
-                else "No results.",
-                color = Torve.colors.textSecondary,
+            visible.isEmpty() -> SportsEmptyState(
+                title = when {
+                    selectedBucket != null -> "No ${selectedBucket!!.label} releases found"
+                    selectedSportsMode == SPORTS_FILTER_TODAY -> "No sports releases found today"
+                    else -> "No sports releases found"
+                },
+                subtitle = "Try All, Recent, or Search.",
             )
             else -> LazyColumn(
                 state = listState,
@@ -427,9 +553,10 @@ fun TvSportsScreen(
                     val rowKey = ci.item.guid ?: ci.item.nzbUrl
                     val status = resolveStatus[rowKey]
                     val torboxConfigured = torboxKey.isNotBlank()
-                    TvSportsRow(
+                    TvSportsEventHubCard(
                         item = ci.item,
                         bucket = ci.bucket,
+                        display = ci.display,
                         statusText = status,
                         torboxConfigured = torboxConfigured,
                         onPlay = {
@@ -451,11 +578,46 @@ fun TvSportsScreen(
                                 }
                             }
                         },
-                        leftFocusRequester = if (index == 0) railFocusRequester else null,
+                        leftFocusRequester = railFocusRequester,
                     )
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun TvSportsSearchChip(
+    label: String,
+    onClick: () -> Unit,
+) {
+    var focused by remember { mutableStateOf(false) }
+    Surface(
+        color = if (focused) Color(0xFF20283A) else Color(0xB0141824),
+        shape = RoundedCornerShape(50),
+        modifier = Modifier
+            .widthIn(min = 104.dp, max = 230.dp)
+            .border(
+                width = 1.dp,
+                color = if (focused) Amber.copy(alpha = 0.9f) else Color.White.copy(alpha = 0.12f),
+                shape = RoundedCornerShape(50),
+            )
+            .onFocusChanged { focused = it.isFocused }
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                onClick = onClick,
+            ),
+    ) {
+        Text(
+            text = label,
+            color = if (focused) Snow else Torve.colors.textSecondary,
+            fontSize = 13.sp,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+        )
     }
 }
 
@@ -470,19 +632,18 @@ private fun TvBucketChip(
 ) {
     var focused by remember { mutableStateOf(false) }
     val container = when {
-        selected && focused -> Amber
-        selected -> Amber.copy(alpha = 0.85f)
-        focused -> Graphite
-        else -> Charcoal
+        selected -> Amber.copy(alpha = if (focused) 0.30f else 0.18f)
+        focused -> Color(0xFF20283A)
+        else -> Color(0xB0141824)
     }
-    val labelColor = if (selected) Obsidian else Snow
-    val borderColor = if (focused) Amber else Color.Transparent
+    val labelColor = if (selected || focused) Snow else Torve.colors.textSecondary
+    val borderColor = if (focused || selected) Amber.copy(alpha = if (focused) 0.9f else 0.45f) else Color.White.copy(alpha = 0.10f)
     Surface(
         color = container,
         shape = RoundedCornerShape(50),
         modifier = Modifier
-            .scale(if (focused) 1.05f else 1f)
-            .border(2.dp, borderColor, RoundedCornerShape(50))
+            .scale(if (focused) 1.02f else 1f)
+            .border(1.dp, borderColor, RoundedCornerShape(50))
             .then(focusRequester?.let { Modifier.focusRequester(it) } ?: Modifier)
             .then(
                 if (leftFocusRequester != null) Modifier.focusProperties { left = leftFocusRequester }
@@ -500,18 +661,182 @@ private fun TvBucketChip(
     ) {
         Text(
             text = label,
-            style = MaterialTheme.typography.labelLarge,
+            style = MaterialTheme.typography.labelMedium,
             fontWeight = FontWeight.SemiBold,
             color = labelColor,
-            modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
         )
     }
 }
 
 @Composable
-private fun TvSportsRow(
+private fun TvSportsEventHubCard(
     item: NewznabItem,
     bucket: SportBucket,
+    display: SportsReleaseDisplay,
+    statusText: String?,
+    torboxConfigured: Boolean,
+    onPlay: () -> Unit,
+    leftFocusRequester: FocusRequester? = null,
+) {
+    var focused by remember { mutableStateOf(false) }
+    val isWorking = statusText != null &&
+        !statusText.startsWith("Failed") &&
+        !statusText.startsWith("TorBox error")
+    val metaLine = listOfNotNull(
+        display.leagueLabel,
+        display.dateLabel,
+        display.qualitySourceLabel,
+    ).joinToString(" / ").ifBlank { bucket.label }
+    val technicalLine = listOfNotNull(
+        item.sizeBytes?.let { humanBytes(it) },
+        item.fileCount?.let { "$it files" },
+        display.releaseGroup,
+    ).joinToString(" / ").ifBlank { item.title.replace('.', ' ') }
+    val sportBadge = display.leagueLabel?.takeIf { it.length <= 12 } ?: display.sportLabel
+    val statusLabel = when {
+        !torboxConfigured -> "Setup"
+        isWorking -> "Working"
+        else -> "Ready"
+    }
+    val secondaryPills = listOfNotNull(display.qualityLabel, statusLabel)
+    Surface(
+        color = if (focused) Color(0xFF273346) else Color(0xA80E1420),
+        shape = RoundedCornerShape(12.dp),
+        modifier = Modifier
+            .fillMaxWidth(0.93f)
+            .scale(if (focused) 1.014f else 1f)
+            .shadow(if (focused) 14.dp else 0.dp, RoundedCornerShape(12.dp), clip = false)
+            .border(
+                width = if (focused) 2.dp else 1.dp,
+                color = if (focused) Amber.copy(alpha = 0.90f) else Color.White.copy(alpha = 0.045f),
+                shape = RoundedCornerShape(12.dp),
+            )
+            .then(
+                if (leftFocusRequester != null) Modifier.focusProperties { left = leftFocusRequester }
+                else Modifier,
+            )
+            .onFocusChanged { focused = it.isFocused }
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                enabled = torboxConfigured && !isWorking,
+                onClick = onPlay,
+            ),
+    ) {
+        Box(
+            modifier = Modifier.background(
+                Brush.verticalGradient(
+                    colors = if (focused) {
+                        listOf(Color.White.copy(alpha = 0.055f), Color.Transparent)
+                    } else {
+                        listOf(Color.White.copy(alpha = 0.018f), Color.Transparent)
+                    },
+                ),
+            ),
+        ) {
+            Row(
+                modifier = Modifier.padding(horizontal = 14.dp, vertical = 9.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Surface(
+                    color = Amber.copy(alpha = if (focused) 0.13f else 0.075f),
+                    shape = RoundedCornerShape(6.dp),
+                ) {
+                    Text(
+                        text = sportBadge,
+                        fontSize = 9.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = if (focused) Amber else Torve.colors.textTertiary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier
+                            .widthIn(min = 42.dp, max = 78.dp)
+                            .padding(horizontal = 6.dp, vertical = 3.dp),
+                    )
+                }
+                Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                    Text(
+                        text = display.title,
+                        fontSize = if (focused) 17.sp else 16.sp,
+                        fontWeight = if (focused) FontWeight.Bold else FontWeight.SemiBold,
+                        color = Snow,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Text(
+                        text = metaLine,
+                        fontSize = 11.sp,
+                        color = Torve.colors.textSecondary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Text(
+                        text = technicalLine,
+                        fontSize = 10.sp,
+                        color = Torve.colors.textTertiary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    if (statusText != null) {
+                        Text(
+                            text = statusText,
+                            fontSize = 10.sp,
+                            color = Amber,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                }
+                Column(
+                    horizontalAlignment = Alignment.End,
+                    verticalArrangement = Arrangement.spacedBy(5.dp),
+                    modifier = Modifier.widthIn(min = 74.dp, max = 116.dp),
+                ) {
+                    if (focused) {
+                        SportsTinyPill(label = "OK Play", focused = true)
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            secondaryPills.forEach { label ->
+                                SportsTinyPill(label = label, focused = false)
+                            }
+                        }
+                    } else {
+                        display.qualityLabel?.let { quality ->
+                            SportsTinyPill(label = quality, focused = false)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SportsTinyPill(label: String, focused: Boolean) {
+    Surface(
+        color = if (focused) Amber.copy(alpha = 0.16f) else Color.White.copy(alpha = 0.045f),
+        shape = RoundedCornerShape(50),
+    ) {
+        Text(
+            text = label,
+            color = if (focused) Snow else Torve.colors.textSecondary,
+            fontSize = 8.sp,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 1,
+            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+        )
+    }
+}
+
+@Composable
+private fun TvSportsEventCard(
+    item: NewznabItem,
+    bucket: SportBucket,
+    display: SportsReleaseDisplay,
     statusText: String?,
     torboxConfigured: Boolean,
     onPlay: () -> Unit,
@@ -588,10 +913,39 @@ private fun TvSportsRow(
             Text(
                 text = if (!torboxConfigured) "TorBox key missing"
                     else if (isWorking) "Working…"
-                    else "Play (OK)",
+                    else "Ready",
                 style = MaterialTheme.typography.labelMedium,
                 fontWeight = FontWeight.SemiBold,
                 color = if (torboxConfigured && !isWorking) Amber else Torve.colors.textTertiary,
+            )
+        }
+    }
+}
+
+@Composable
+private fun SportsEmptyState(title: String, subtitle: String) {
+    Surface(
+        color = Color(0xB0141824),
+        shape = RoundedCornerShape(14.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = 120.dp)
+            .border(1.dp, Color.White.copy(alpha = 0.08f), RoundedCornerShape(14.dp)),
+    ) {
+        Column(
+            modifier = Modifier.padding(20.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Text(
+                text = title,
+                color = Snow,
+                fontSize = 18.sp,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Text(
+                text = subtitle,
+                color = Torve.colors.textSecondary,
+                fontSize = 13.sp,
             )
         }
     }

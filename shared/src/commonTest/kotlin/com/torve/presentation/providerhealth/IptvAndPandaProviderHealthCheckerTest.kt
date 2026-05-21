@@ -23,6 +23,31 @@ class IptvAndPandaProviderHealthCheckerTest {
     }
 
     @Test
+    fun `iptv reports green when cached catalog exists before playlist rows hydrate`() = runTest {
+        val state = ChannelsUiState(
+            playlists = emptyList(),
+            selectedPlaylistId = "p1",
+            categories = listOf(com.torve.domain.model.ChannelCategory("News", 42)),
+            groupedChannels = mapOf(
+                "News" to listOf(
+                    com.torve.domain.model.EnrichedChannel(
+                        channel = com.torve.domain.model.Channel(
+                            name = "ZDF",
+                            url = "u",
+                            playlistId = "p1",
+                        ),
+                    ),
+                ),
+            ),
+        )
+
+        val out = IptvProviderHealthChecker { state }.check()
+
+        assertEquals(ProviderHealthStatus.GREEN, out.status)
+        assertTrue(out.message?.contains("catalog is loaded") == true, "message was ${out.message}")
+    }
+
+    @Test
     fun `iptv reports green when channels loaded`() = runTest {
         val state = ChannelsUiState(
             playlists = listOf(com.torve.domain.model.ChannelPlaylist(

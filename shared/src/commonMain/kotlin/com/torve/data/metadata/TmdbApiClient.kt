@@ -103,6 +103,22 @@ class TmdbApiClient(
         }
     }
 
+    private fun imageLanguageParam(): String {
+        val lang = contentLanguage ?: languageProvider()
+        return listOf(lang, "en", "null")
+            .mapNotNull { it?.takeIf(String::isNotBlank) }
+            .distinct()
+            .joinToString(",")
+    }
+
+    private fun videoLanguageParam(): String {
+        val lang = contentLanguage ?: languageProvider()
+        return listOf(lang, "en")
+            .mapNotNull { it?.takeIf(String::isNotBlank) }
+            .distinct()
+            .joinToString(",")
+    }
+
     suspend fun getTrending(
         type: String = "all",
         page: Int = 1,
@@ -240,31 +256,29 @@ class TmdbApiClient(
     }
 
     suspend fun getMovieDetail(id: Int): TmdbMovie {
-        val lang = languageProvider() ?: "en"
         return get(
             endpoint = "/movie/$id",
             requestCategory = "tmdb.detail.movie",
             parameters = baseParams() + listOf(
                 "append_to_response" to "credits,videos,similar,external_ids,images",
-                "include_image_language" to "$lang,null",
+                "include_image_language" to imageLanguageParam(),
                 // Fetch trailers in the user's language and English as a
                 // fallback so the trailer mapper has options. TMDB returns
                 // every video for the title regardless when no filter is
                 // set; we constrain to two locales to keep payloads small.
-                "include_video_language" to "$lang,en",
+                "include_video_language" to videoLanguageParam(),
             ),
         )
     }
 
     suspend fun getTvDetail(id: Int): TmdbTv {
-        val lang = languageProvider() ?: "en"
         return get(
             endpoint = "/tv/$id",
             requestCategory = "tmdb.detail.tv",
             parameters = baseParams() + listOf(
                 "append_to_response" to "credits,videos,similar,external_ids,images",
-                "include_image_language" to "$lang,null",
-                "include_video_language" to "$lang,en",
+                "include_image_language" to imageLanguageParam(),
+                "include_video_language" to videoLanguageParam(),
             ),
         )
     }
@@ -274,7 +288,7 @@ class TmdbApiClient(
             endpoint = "/$type/$id/images",
             requestCategory = "tmdb.images.$type",
             parameters = baseParams() + listOf(
-                "include_image_language" to "${languageProvider() ?: "en"},null",
+                "include_image_language" to imageLanguageParam(),
             ),
         )
     }

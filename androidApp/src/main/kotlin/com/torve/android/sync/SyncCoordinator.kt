@@ -725,7 +725,7 @@ class SyncCoordinator(
         scope.launch {
             val token = authClient.getValidAccessToken()
             if (token.isNullOrBlank()) {
-                Log.w(TAG, "startTvPairingFlow: no access token — user not signed in")
+                Log.w(TAG, "startTvPairingFlow: auth unavailable; user not signed in")
                 _state.value = _state.value.copy(error = "Sign in before generating a pairing code.")
                 return@launch
             }
@@ -733,7 +733,7 @@ class SyncCoordinator(
             // If missing, force a token refresh to populate it from the auth response.
             var serverDeviceId = authClient.getServerDeviceId()
             if (serverDeviceId == null) {
-                Log.d(TAG, "startTvPairingFlow: server device ID not cached, forcing token refresh")
+                Log.d(TAG, "startTvPairingFlow: server device ID not cached, forcing auth refresh")
                 val refreshResult = authClient.refreshTokens()
                 Log.d(TAG, "startTvPairingFlow: refresh result success=${refreshResult.success} error=${refreshResult.error}")
                 serverDeviceId = authClient.getServerDeviceId()

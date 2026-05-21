@@ -9,6 +9,9 @@ import com.torve.data.usenet.model.UsenetCandidateStates
 import com.torve.data.usenet.model.UsenetCandidateUiModel
 import com.torve.data.usenet.model.UsenetResolvedStream
 import com.torve.domain.telemetry.NoOpTelemetryEmitter
+import com.torve.domain.telemetry.StreamPathDiagnostics
+import com.torve.domain.telemetry.StreamPathTelemetryContext
+import com.torve.domain.telemetry.StreamPlaybackPath
 import com.torve.domain.telemetry.TelemetryEmitter
 import com.torve.domain.telemetry.UsenetTelemetryEvents
 import com.torve.domain.telemetry.UsenetTelemetryKeys
@@ -104,6 +107,14 @@ class UsenetResolveCoordinator(
             UsenetAvailability.READY -> {
                 val stream = updated.resolvedStream
                 if (stream != null) {
+                    StreamPathDiagnostics.record(
+                        path = StreamPlaybackPath.USENET_HANDOFF,
+                        telemetry = telemetry,
+                        context = StreamPathTelemetryContext(
+                            contentType = contentTypeFromContentId(contentId),
+                            providerCategory = "usenet",
+                        ),
+                    )
                     emitResolveEvent(
                         event = UsenetTelemetryEvents.RESOLVE_READY,
                         contentId = contentId,
@@ -174,6 +185,15 @@ class UsenetResolveCoordinator(
                     UsenetTelemetryKeys.TIME_TO_READY_BUCKET to timeBucket(nowMs() - resolveStartedAt),
                 ),
             )
+        }
+    }
+
+    private fun contentTypeFromContentId(contentId: String): String {
+        val lower = contentId.lowercase()
+        return when {
+            "movie" in lower -> "movie"
+            "series" in lower || "show" in lower || "tv" in lower -> "series"
+            else -> "unknown"
         }
     }
 }

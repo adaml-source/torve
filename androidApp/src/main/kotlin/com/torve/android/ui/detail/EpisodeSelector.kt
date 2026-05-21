@@ -48,12 +48,13 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
 import com.torve.android.R
-import com.torve.android.ui.components.MultiRatingPills
+import com.torve.android.ui.components.PreferredRatingPills
 import com.torve.android.ui.theme.Amber
 import com.torve.android.ui.theme.Torve
 import com.torve.domain.model.Episode
 import com.torve.domain.model.MediaRatings
 import com.torve.domain.model.Season
+import com.torve.domain.model.withFallbackTmdbScore
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -63,6 +64,7 @@ fun EpisodeSelector(
     seasonDetail: Season?,
     isLoadingSeasonDetail: Boolean,
     watchedEpisodes: Set<String> = emptySet(),
+    seriesRatings: MediaRatings? = null,
     onSeasonSelected: (Int) -> Unit,
     onEpisodePlay: (season: Int, episode: Int) -> Unit,
     onEpisodeDownload: (season: Int, episode: Int) -> Unit,
@@ -228,6 +230,7 @@ fun EpisodeSelector(
                             episode = episode,
                             season = selectedSeason,
                             isWatched = watchedEpisodes.contains(key),
+                            seriesRatings = seriesRatings,
                             onPlay = { onEpisodePlay(selectedSeason, episode.episodeNumber) },
                             onDownload = { onEpisodeDownload(selectedSeason, episode.episodeNumber) },
                             onToggleWatched = { onToggleEpisodeWatched(selectedSeason, episode.episodeNumber) },
@@ -245,6 +248,7 @@ private fun EpisodeCard(
     episode: Episode,
     season: Int,
     isWatched: Boolean = false,
+    seriesRatings: MediaRatings? = null,
     onPlay: () -> Unit,
     onDownload: () -> Unit,
     onToggleWatched: () -> Unit = {},
@@ -322,8 +326,7 @@ private fun EpisodeCard(
                     overflow = TextOverflow.Ellipsis,
                 )
             }
-            val episodeRatings = episode.rating.takeIf { it > 0.0 }
-                ?.let { MediaRatings(tmdbScore = it.toFloat()) }
+            val episodeRatings = seriesRatings.withFallbackTmdbScore(episode.rating)
             if ((episode.runtime ?: 0) > 0 || episodeRatings != null) {
                 Spacer(Modifier.height(2.dp))
                 Row(
@@ -338,7 +341,7 @@ private fun EpisodeCard(
                         )
                     }
                     episodeRatings?.let { ratings ->
-                        MultiRatingPills(ratings = ratings)
+                        PreferredRatingPills(ratings = ratings)
                     }
                 }
             }

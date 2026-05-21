@@ -11,4 +11,29 @@ interface WatchlistRepository {
     suspend fun remove(mediaId: String)
     suspend fun clear()
     suspend fun syncFromTrakt()
+    suspend fun addToTraktWatchlist(item: WatchlistItem): WatchlistMutationResult
+    suspend fun removeFromTraktWatchlist(mediaId: String): WatchlistMutationResult
+    suspend fun toggleTraktWatchlist(item: WatchlistItem): WatchlistMutationResult
+}
+
+sealed interface WatchlistMutationResult {
+    val mediaId: String
+
+    data class Success(
+        override val mediaId: String,
+        val isInWatchlist: Boolean,
+        val item: WatchlistItem? = null,
+    ) : WatchlistMutationResult
+
+    data class MissingTraktConnection(
+        override val mediaId: String,
+    ) : WatchlistMutationResult
+
+    data class InsufficientMetadata(
+        override val mediaId: String,
+    ) : WatchlistMutationResult
+
+    data class Failed(
+        override val mediaId: String,
+    ) : WatchlistMutationResult
 }

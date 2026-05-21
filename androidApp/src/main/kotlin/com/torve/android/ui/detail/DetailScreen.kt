@@ -86,6 +86,7 @@ import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
 import com.torve.android.ui.components.CastAvatar
 import com.torve.android.ui.components.CardSize
+import com.torve.android.ui.components.FloatingBackButton
 import com.torve.android.ui.components.LocalCardStyle
 import com.torve.android.ui.components.LocalRatingPrefs
 import com.torve.android.ui.components.MultiRatingPills
@@ -104,6 +105,7 @@ import org.koin.compose.koinInject
 import com.torve.android.download.DownloadWorker
 import com.torve.data.download.BulkDownloadManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import android.content.Intent
 import android.net.Uri
 import com.torve.domain.model.Download
@@ -134,6 +136,8 @@ import com.torve.presentation.settings.SettingsViewModel
 import com.torve.presentation.tvhome.DetailSourcePickerLookup
 import com.torve.presentation.tvhome.TvDetailsSourcePickerStateBuilder
 import com.torve.presentation.tvhome.TvSourcePickerState
+import com.torve.presentation.watchlist.containsMedia
+import com.torve.presentation.watchlist.isMutatingMedia
 import com.torve.presentation.watchlist.WatchlistViewModel
 import com.torve.util.FormatUtil
 import org.koin.compose.koinInject
@@ -316,7 +320,10 @@ fun DetailScreen(
             val dlTarget = pendingEpisodeDownload
             if (dlTarget != null) {
                 val item = state.mediaItem
-                android.util.Log.w("DetailScreen", "pendingEpisodeDownload resolved: target=$dlTarget item=${item?.title} url=$url")
+                android.util.Log.w(
+                    "DetailScreen",
+                    "pendingEpisodeDownload resolved: hasItem=${item != null} urlConfigured=${url.isNotBlank()}",
+                )
                 if (item != null) {
                     val (s, e) = dlTarget
                     val dlTitle = "${item.title} S${s.toString().padStart(2, '0')}E${e.toString().padStart(2, '0')}"
@@ -352,6 +359,9 @@ fun DetailScreen(
         presetId = null,
         globalDefaultPresetId = settingsState.globalDefaultPresetId,
     )
+    val detailScrollState = rememberScrollState()
+    val compactBackThresholdPx = with(LocalDensity.current) { 80.dp.toPx() }
+    val useCompactBackButton = detailScrollState.value >= compactBackThresholdPx
 
     CompositionLocalProvider(
         LocalCardStyle provides defaultCardStyle,
@@ -398,7 +408,7 @@ fun DetailScreen(
                 Column(
                     modifier = Modifier
                         .fillMaxSize()
-                        .verticalScroll(rememberScrollState()),
+                        .verticalScroll(detailScrollState),
                 ) {
                     // ── Immersive Backdrop ──
                     // Taller than before, deeper gradient, content overlaid
@@ -632,7 +642,10 @@ fun DetailScreen(
                             // Secondary actions row (adaptive columns to avoid cramped labels on narrow phones)
                             Spacer(Modifier.height(10.dp))
                             val isInWatchlist = state.mediaItem?.let {
-                                watchlistState.watchlistIds.contains(it.id)
+                                watchlistState.containsMedia(it.id)
+                            } ?: false
+                            val isWatchlistUpdating = state.mediaItem?.let {
+                                watchlistState.isMutatingMedia(it.id)
                             } ?: false
                             val isFavorite = state.mediaItem?.let {
                                 favoritesState.favoriteKeys.contains(it.favoriteMediaKey())
@@ -642,6 +655,7 @@ fun DetailScreen(
                                     DetailSecondaryActionSpec(
                                         label = when {
                                             watchlistEditLocked -> stringResource(R.string.premium_unlock_with_lifetime)
+                                            isWatchlistUpdating -> stringResource(R.string.common_loading)
                                             isInWatchlist -> stringResource(R.string.detail_remove_watchlist)
                                             else -> stringResource(R.string.detail_add_watchlist)
                                         },
@@ -660,6 +674,7 @@ fun DetailScreen(
                                             isInWatchlist -> Amber
                                             else -> Snow
                                         },
+                                        enabled = !isWatchlistUpdating,
                                         onClick = {
                                             if (watchlistEditLocked) {
                                                 onLockedFeatureClick(PremiumFeature.WATCHLIST_EDIT)
@@ -871,6 +886,7 @@ fun DetailScreen(
                                 seasonDetail = state.seasonDetail,
                                 isLoadingSeasonDetail = state.isLoadingSeasonDetail,
                                 watchedEpisodes = state.watchedEpisodes,
+                                seriesRatings = item.ratings.withFallbackTmdbScore(item.rating),
                                 onSeasonSelected = { seasonNum ->
                                     item.tmdbId?.let { tvId ->
                                         viewModel.loadSeasonDetail(tvId, seasonNum)
@@ -1180,13 +1196,15 @@ fun DetailScreen(
         }
 
             // Floating back button — always visible regardless of scroll position
-            com.torve.android.ui.components.BackButton(
-                onClick = onBack,
+            FloatingBackButton(
+                onBack = onBack,
+                label = stringResource(R.string.common_back_cd),
+                compact = useCompactBackButton,
                 modifier = Modifier
-                    .zIndex(2f)
+                    .zIndex(20f)
                     .align(Alignment.TopStart)
                     .statusBarsPadding()
-                    .padding(start = 12.dp, top = 8.dp),
+                    .padding(start = 12.dp, top = 10.dp),
             )
 
             // Preparing-stream overlay: blocks the detail surface while a
@@ -1197,7 +1215,7 @@ fun DetailScreen(
                 StreamPreparingOverlay(
                     state = preparing,
                     onCancel = { viewModel.cancelPreparing() },
-                    modifier = Modifier.zIndex(3f),
+                    modifier = Modifier.zIndex(80f),
                 )
             }
         }
@@ -1280,6 +1298,7 @@ private data class DetailSecondaryActionSpec(
     val icon: ImageVector,
     val containerColor: Color,
     val contentColor: Color,
+    val enabled: Boolean = true,
     val onClick: () -> Unit,
 )
 
@@ -1336,6 +1355,7 @@ private fun DetailSecondaryActionButton(
     FilledTonalButton(
         onClick = action.onClick,
         modifier = modifier.heightIn(min = 46.dp),
+        enabled = action.enabled,
         shape = RoundedCornerShape(10.dp),
         contentPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp),
         colors = ButtonDefaults.filledTonalButtonColors(
@@ -1477,8 +1497,12 @@ private fun GenrePill(name: String) {
 
 @Composable
 private fun ErrorMessage(message: String, modifier: Modifier = Modifier) {
+    val resolved = com.torve.android.error.resolveErrorKey(
+        androidx.compose.ui.platform.LocalContext.current,
+        message,
+    ) ?: message
     Text(
-        text = message,
+        text = resolved,
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.error,
         modifier = modifier,

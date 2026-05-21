@@ -44,6 +44,8 @@ import com.torve.data.mdblist.MdbListRepository
 import com.torve.data.mdblist.RatingsEnricher
 import com.torve.data.network.homeContentLoadErrorMessage
 import com.torve.data.network.sanitizeNetworkDiagnosticText
+import com.torve.data.trakt.TraktCalendarEpisode
+import com.torve.data.trakt.api.TraktAuthorizedApi
 import com.torve.domain.model.ContentAccessContext
 import com.torve.domain.model.ContentPolicyState
 import com.torve.domain.model.ContentSourceType
@@ -76,6 +78,8 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.builtins.SetSerializer
 import kotlinx.serialization.builtins.serializer
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.toLocalDateTime
 
 @OptIn(FlowPreview::class)
 class HomeViewModel(
@@ -97,6 +101,7 @@ class HomeViewModel(
     private val contentPolicyRepository: ContentPolicyRepository? = null,
     private val contentPolicyFilter: ContentPolicyFilter = ContentPolicyFilter(),
     private val addonPolicyRepository: AddonPolicyRepository? = null,
+    private val traktApi: TraktAuthorizedApi? = null,
     invalidationCoordinator: ContentPolicyCacheInvalidationCoordinator? = null,
     private val layoutSourceSelector: HomeLayoutSourceSelector = HomeLayoutSourceSelector(prefsRepo),
 ) {
@@ -115,6 +120,7 @@ class HomeViewModel(
         val recentHistory: List<com.torve.domain.model.WatchHistoryEntry>,
         val hiddenGems: List<MediaItem>,
         val recentlyWatched: List<MediaItem>,
+        val upcomingSchedule: List<MediaItem>,
         val popularPeople: List<PersonSummary>,
         val addonShelves: List<CatalogShelf>,
         val mdbListShelves: List<CatalogShelf>,
@@ -131,6 +137,7 @@ class HomeViewModel(
         val becauseYouWatched: List<CatalogShelf> = emptyList(),
         val hiddenGemsShelf: CatalogShelf? = null,
         val recentlyWatched: List<MediaItem> = emptyList(),
+        val upcomingSchedule: List<MediaItem> = emptyList(),
         val customShelves: Map<String, List<MediaItem>> = emptyMap(),
         val addonShelves: List<CatalogShelf> = emptyList(),
         val addonShelfVisibility: Map<String, Boolean> = emptyMap(),
@@ -171,6 +178,9 @@ class HomeViewModel(
     private val searchQueryFlow = MutableStateFlow("")
     private var homeLoadJob: Job? = null
     private var homeAutoRetryCount = 0
+    private var upcomingScheduleRefreshJob: Job? = null
+    private var lastTraktScheduleRefreshAtMs = 0L
+    private var lastTraktConnectedForSchedule: Boolean? = null
 
     init {
         scope.launch {
@@ -179,9 +189,9 @@ class HomeViewModel(
             _customSections.value = loadCustomSections()
             _addonShelfVisibility.value = loadAddonShelfVisibility()
             _homeLayoutOrder.value = ensureAllSectionsInLayoutOrder(loadHomeLayoutOrder())
-            if (!restoreFreshHomeSnapshot()) {
-                loadHomeScreen()
-            }
+            restoreFreshHomeSnapshot()
+            loadHomeScreen()
+            scheduleUpcomingScheduleRefresh("startup")
         }
         scope.launch {
             // Debounce: on app start the settings-refresh notifier fires
@@ -194,9 +204,8 @@ class HomeViewModel(
                 .collect {
                     _sectionConfigs.value = loadSectionConfigs()
                     _homeLayoutOrder.value = ensureAllSectionsInLayoutOrder(loadHomeLayoutOrder())
-                    if (!restoreFreshHomeSnapshot()) {
-                        loadHomeScreen()
-                    }
+                    loadHomeScreen()
+                    scheduleUpcomingScheduleRefresh("settings_refresh")
                 }
         }
         if (invalidationCoordinator != null) {
@@ -227,6 +236,7 @@ class HomeViewModel(
                             continueWatching = emptyList(),
                             continueWatchingRatings = emptyMap(),
                             recommendedItems = emptyList(),
+                            upcomingSchedule = emptyList(),
                             watchlistShelf = null,
                             watchlistItems = emptyList(),
                             customShelves = emptyMap(),
@@ -545,11 +555,13 @@ class HomeViewModel(
             return false
         }
         if (currentTimeMillis() - snapshot.savedAtMs > HOME_SNAPSHOT_MAX_AGE_MS) return false
+        val restoredAddonShelves = snapshot.addonShelves.withoutProviderOwnedHomeCatalogs()
         if (
             snapshot.shelves.isEmpty() &&
             snapshot.continueWatching.isEmpty() &&
+            snapshot.upcomingSchedule.isEmpty() &&
             snapshot.watchlistItems.isEmpty() &&
-            snapshot.addonShelves.isEmpty() &&
+            restoredAddonShelves.isEmpty() &&
             snapshot.mdbListShelves.isEmpty()
         ) {
             return false
@@ -559,15 +571,17 @@ class HomeViewModel(
             shelves = snapshot.shelves,
             heroItem = snapshot.heroItem ?: snapshot.shelves.firstOrNull()?.items?.firstOrNull(),
             continueWatching = snapshot.continueWatching,
+            upcomingSchedule = snapshot.upcomingSchedule,
             continueWatchingRatings = buildRatingsLookup(
                 hydratedContinueWatching +
                     snapshot.shelves.flatMap { it.items } +
+                    snapshot.upcomingSchedule +
                     snapshot.watchlistItems +
                     snapshot.becauseYouWatched.flatMap { it.items } +
                     (snapshot.hiddenGemsShelf?.items ?: emptyList()) +
                     snapshot.recentlyWatched +
                     snapshot.customShelves.values.flatten() +
-                    snapshot.addonShelves.flatMap { it.items } +
+                    restoredAddonShelves.flatMap { it.items } +
                     snapshot.mdbListShelves.flatMap { it.items },
             ),
             watchlistShelf = snapshot.watchlistShelf,
@@ -576,7 +590,7 @@ class HomeViewModel(
             hiddenGemsShelf = snapshot.hiddenGemsShelf,
             recentlyWatched = snapshot.recentlyWatched,
             customShelves = snapshot.customShelves,
-            addonShelves = snapshot.addonShelves,
+            addonShelves = restoredAddonShelves,
             addonShelfVisibility = snapshot.addonShelfVisibility,
             mdbListShelves = snapshot.mdbListShelves,
             isLoading = false,
@@ -593,13 +607,14 @@ class HomeViewModel(
             shelves = state.shelves,
             heroItem = state.heroItem,
             continueWatching = state.continueWatching,
+            upcomingSchedule = state.upcomingSchedule,
             watchlistShelf = state.watchlistShelf,
             watchlistItems = state.watchlistItems,
             becauseYouWatched = state.becauseYouWatched,
             hiddenGemsShelf = state.hiddenGemsShelf,
             recentlyWatched = state.recentlyWatched,
             customShelves = state.customShelves,
-            addonShelves = state.addonShelves,
+            addonShelves = state.addonShelves.withoutProviderOwnedHomeCatalogs(),
             addonShelfVisibility = state.addonShelfVisibility,
             mdbListShelves = state.mdbListShelves,
         )
@@ -607,6 +622,21 @@ class HomeViewModel(
     }
 
     private fun currentTimeMillis(): Long = kotlinx.datetime.Clock.System.now().toEpochMilliseconds()
+
+    private fun List<CatalogShelf>.withoutProviderOwnedHomeCatalogs(): List<CatalogShelf> =
+        filterNot { it.isProviderOwnedHomeCatalog() }
+
+    private fun CatalogShelf.isProviderOwnedHomeCatalog(): Boolean {
+        val titleKey = title.normalizedHomeCatalogLabel()
+        val idKey = id.normalizedHomeCatalogLabel()
+        return titleKey in HIDDEN_PROVIDER_HOME_CATALOG_LABELS ||
+            idKey in HIDDEN_PROVIDER_HOME_CATALOG_LABELS ||
+            titleKey.startsWith("yourmedia") ||
+            idKey.contains("yourmedia")
+    }
+
+    private fun String.normalizedHomeCatalogLabel(): String =
+        lowercase().filter { it.isLetterOrDigit() }
 
     fun loadHomeScreen() {
         val keepContentVisible = _state.value.hasRenderableContent()
@@ -718,6 +748,9 @@ class HomeViewModel(
                             emptyList()
                         }
                     }
+                    val upcomingScheduleDeferred = async {
+                        loadUpcomingScheduleItems()
+                    }
                     val popularPeopleDeferred = async {
                         try {
                             metadataRepo.getPopularPeople()
@@ -773,6 +806,7 @@ class HomeViewModel(
                         recentHistory = historyDeferred.await(),
                         hiddenGems = hiddenGemsDeferred.await(),
                         recentlyWatched = recentlyWatchedDeferred.await(),
+                        upcomingSchedule = upcomingScheduleDeferred.await(),
                         popularPeople = popularPeopleDeferred.await(),
                         addonShelves = addonShelvesDeferred.await(),
                         mdbListShelves = mdbListShelvesDeferred.await(),
@@ -799,6 +833,7 @@ class HomeViewModel(
                 val recentHistory = loadInputs.recentHistory
                 val hiddenGems = loadInputs.hiddenGems
                 val recentlyWatched = loadInputs.recentlyWatched
+                val upcomingSchedule = loadInputs.upcomingSchedule
                 val popularPeople = loadInputs.popularPeople
                 val popularActors = popularPeople.filter { it.knownForDepartment == "Acting" }.take(20)
                 val directorDepartments = setOf("Directing", "Production", "Writing")
@@ -810,7 +845,7 @@ class HomeViewModel(
                     .ifEmpty { popularPeople }
                     .take(20)
                 val installedAddons = loadInputs.installedAddons
-                val addonShelves = loadInputs.addonShelves
+                val addonShelves = loadInputs.addonShelves.withoutProviderOwnedHomeCatalogs()
                 val mdbListShelves = loadInputs.mdbListShelves
                 val policy = currentPolicy()
                 val addonFlagsByShelfId = addonShelfPolicyFlags(installedAddons)
@@ -945,7 +980,7 @@ class HomeViewModel(
                         }
                         val type = if (isSeries) "tv" else "movie"
                         val similar = try {
-                            metadataRepo.getSimilar(type, tmdbId).take(15)
+                            metadataRepo.getSimilar(type, tmdbId).take(20)
                         } catch (_: Exception) {
                             continue
                         }
@@ -1016,6 +1051,12 @@ class HomeViewModel(
                 val policyFilteredWatchlistShelf = watchlistShelf
                     ?.copy(items = policyFilteredWatchlist)
                     ?.takeIf { it.items.isNotEmpty() }
+                val policyFilteredUpcomingSchedule = contentPolicyFilter.filterItems(
+                    policy = policy,
+                    context = ContentAccessContext.HISTORY_DERIVED,
+                    items = upcomingSchedule,
+                    sourceType = ContentSourceType.LOCAL_LIBRARY,
+                ).items
                 val policyFilteredByw = filterShelves(
                     policy = policy,
                     context = ContentAccessContext.HISTORY_DERIVED,
@@ -1068,6 +1109,7 @@ class HomeViewModel(
 
                 // Within-shelf dedup first
                 val withinDedupedWatchlist = if (dedupe) policyFilteredWatchlist.dedupeByStableKey() else policyFilteredWatchlist
+                val withinDedupedUpcomingSchedule = if (dedupe) policyFilteredUpcomingSchedule.dedupeByStableKey() else policyFilteredUpcomingSchedule
                 val withinDedupedRecents = if (dedupe) policyFilteredRecents.dedupeByStableKey() else policyFilteredRecents
                 val withinDedupedHiddenGems = policyFilteredHiddenGems?.let { shelf ->
                     shelf.copy(items = if (dedupe) shelf.items.dedupeByStableKey() else shelf.items)
@@ -1100,10 +1142,15 @@ class HomeViewModel(
                         }
                     }
                     withinDedupedWatchlist.collectStableKeys(globalSeen)
+                    withinDedupedUpcomingSchedule.collectStableKeys(globalSeen)
                     withinDedupedRecents.collectStableKeys(globalSeen)
 
                     // 2. Cross-dedup main TMDB shelves (Popular, Now Playing, Trending, etc.)
-                    val finalShelves = policyFilteredShelves.dedupeAcrossShelves(globalSeen)
+                    val finalShelves = backfillDiscoveryShelves(
+                        shelves = policyFilteredShelves.dedupeAcrossShelves(globalSeen),
+                        globalSeen = globalSeen,
+                        policy = policy,
+                    )
 
                     // 3. Cross-dedup recommendations against seen items
                     val finalRecommendations = run {
@@ -1144,6 +1191,8 @@ class HomeViewModel(
                     val hydratedShelves = hydrateShelvesFromCache(finalShelves)
                     val hydratedRecommendations = hydrateRecommendationsFromCache(finalRecommendations)
                     val hydratedWatchlistItems = hydrateItemsFromCache(withinDedupedWatchlist)
+                    val hydratedUpcomingSchedule = hydrateItemsFromCache(withinDedupedUpcomingSchedule)
+                        .mergeScheduleVisualsFrom(_state.value.upcomingSchedule)
                     val hydratedWatchlistShelf = policyFilteredWatchlistShelf?.copy(items = hydratedWatchlistItems)
                     val hydratedByw = hydrateShelvesFromCache(finalByw)
                     val hydratedHiddenGems = hydrateShelfFromCache(finalHiddenGems)
@@ -1157,6 +1206,7 @@ class HomeViewModel(
                         hydratedShelves.flatMap { shelf -> shelf.items } +
                             hydratedRecommendations.map { scored -> scored.item } +
                             hydratedWatchlistItems +
+                            hydratedUpcomingSchedule +
                             hydratedByw.flatMap { shelf -> shelf.items } +
                             (hydratedHiddenGems?.items ?: emptyList()) +
                             hydratedRecents +
@@ -1172,6 +1222,7 @@ class HomeViewModel(
                             continueWatching = policyFilteredWatchProgress,
                             continueWatchingRatings = continueWatchingRatings,
                             recommendedItems = hydratedRecommendations,
+                            upcomingSchedule = hydratedUpcomingSchedule,
                             watchlistShelf = hydratedWatchlistShelf,
                             watchlistItems = hydratedWatchlistItems,
                             becauseYouWatched = hydratedByw,
@@ -1194,6 +1245,8 @@ class HomeViewModel(
                     val hydratedShelves = hydrateShelvesFromCache(policyFilteredShelves)
                     val hydratedRecommendations = hydrateRecommendationsFromCache(policyFilteredRecommendations)
                     val hydratedWatchlistItems = hydrateItemsFromCache(policyFilteredWatchlist)
+                    val hydratedUpcomingSchedule = hydrateItemsFromCache(policyFilteredUpcomingSchedule)
+                        .mergeScheduleVisualsFrom(_state.value.upcomingSchedule)
                     val hydratedWatchlistShelf = policyFilteredWatchlistShelf?.copy(items = hydratedWatchlistItems)
                     val hydratedByw = hydrateShelvesFromCache(policyFilteredByw)
                     val hydratedHiddenGems = hydrateShelfFromCache(policyFilteredHiddenGems)
@@ -1207,6 +1260,7 @@ class HomeViewModel(
                         hydratedShelves.flatMap { shelf -> shelf.items } +
                             hydratedRecommendations.map { scored -> scored.item } +
                             hydratedWatchlistItems +
+                            hydratedUpcomingSchedule +
                             hydratedByw.flatMap { shelf -> shelf.items } +
                             (hydratedHiddenGems?.items ?: emptyList()) +
                             hydratedRecents +
@@ -1221,6 +1275,7 @@ class HomeViewModel(
                             continueWatching = policyFilteredWatchProgress,
                             continueWatchingRatings = continueWatchingRatings,
                             recommendedItems = hydratedRecommendations,
+                            upcomingSchedule = hydratedUpcomingSchedule,
                             watchlistShelf = hydratedWatchlistShelf,
                             watchlistItems = hydratedWatchlistItems,
                             becauseYouWatched = hydratedByw,
@@ -1244,18 +1299,11 @@ class HomeViewModel(
                 homeAutoRetryCount = 0
                 loadProviderLogos()
 
-                // Background enrichment: add MDBList multi-source ratings
-                println(
-                    "[HomeVM] loadHomeScreen success — launching ratings enrichment. shelves=${_state.value.shelves.size} " +
-                        "watchlist=${_state.value.watchlistItems.size} recommended=${_state.value.recommendedItems.size} " +
-                        "addonShelves=${_state.value.addonShelves.size}",
-                )
                 launchRatingsEnrichment()
                 launchArtworkBackfill()
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                println("[HomeVM] loadHomeScreen failed: ${e::class.simpleName}: ${e.message}")
                 torveVerboseLog {
                     "HOME_TAB state_transition state=error ${e::class.simpleName}: ${sanitizeNetworkDiagnosticText(e.message)}"
                 }
@@ -1328,11 +1376,115 @@ class HomeViewModel(
 
     fun refresh() {
         loadHomeScreen()
+        scheduleUpcomingScheduleRefresh("manual_refresh", force = true)
     }
 
     private suspend fun shouldDedupe(): Boolean {
         return prefsRepo.getString(SettingsViewModel.KEY_DEDUPE_RESULTS)?.toBooleanStrictOrNull() ?: true
     }
+
+    private fun scheduleUpcomingScheduleRefresh(reason: String, force: Boolean = false) {
+        if (upcomingScheduleRefreshJob?.isActive == true) return
+        upcomingScheduleRefreshJob = scope.launch {
+            delay(600L)
+            if (!force && homeLoadJob?.isActive == true) return@launch
+            val connected = runCatching { traktApi?.hasConnection() == true }.getOrDefault(false)
+            val becameConnected = connected && lastTraktConnectedForSchedule != true
+            lastTraktConnectedForSchedule = connected
+            if (!connected) return@launch
+            val existingSchedule = _state.value.upcomingSchedule
+            if (
+                !force &&
+                !becameConnected &&
+                existingSchedule.isNotEmpty() &&
+                !existingSchedule.needsUpcomingScheduleRefresh()
+            ) {
+                return@launch
+            }
+
+            val now = currentTimeMillis()
+            if (!force && !becameConnected && now - lastTraktScheduleRefreshAtMs < TRAKT_SCHEDULE_REFRESH_THROTTLE_MS) {
+                return@launch
+            }
+            lastTraktScheduleRefreshAtMs = now
+            torveVerboseLog { "HOME_TAB upcoming_schedule_refresh reason=$reason connected=true" }
+
+            val schedule = loadUpcomingScheduleItems()
+            val filteredSchedule = contentPolicyFilter.filterItems(
+                policy = currentPolicy(),
+                context = ContentAccessContext.HISTORY_DERIVED,
+                items = schedule,
+                sourceType = ContentSourceType.LOCAL_LIBRARY,
+            ).items
+            val hydratedSchedule = hydrateItemsFromCache(filteredSchedule)
+                .mergeScheduleVisualsFrom(existingSchedule)
+
+            _state.update { state ->
+                state.copy(
+                    upcomingSchedule = hydratedSchedule,
+                    continueWatchingRatings = state.continueWatchingRatings.mergeRatingsFor(hydratedSchedule),
+                )
+            }
+            persistHomeSnapshot(_state.value)
+        }
+    }
+
+    private suspend fun loadUpcomingScheduleItems(): List<MediaItem> {
+        val episodes = try {
+            traktApi?.getCalendar(days = 33).orEmpty()
+        } catch (_: Exception) {
+            emptyList()
+        }
+        if (episodes.isEmpty()) return emptyList()
+
+        val distinctEpisodes = episodes
+            .sortedBy { it.firstAired }
+            .distinctBy { episode ->
+                "${episode.showTmdbId ?: episode.showTitle}:${episode.season}:${episode.episode}:${episode.firstAired}"
+            }
+            .take(24)
+
+        return distinctEpisodes.map { episode -> episode.toUpcomingScheduleItem() }
+    }
+
+    private fun TraktCalendarEpisode.toUpcomingScheduleItem(): MediaItem {
+        val airDateTime = firstAired.takeIf { it.isNotBlank() }
+        val episodeCode = "S${season}E${episode}"
+        val title = buildString {
+            append(showTitle)
+            append(" - ")
+            append(episodeCode)
+            if (episodeTitle.isNotBlank()) {
+                append(" - ")
+                append(episodeTitle)
+            }
+        }
+        val fallbackId = buildString {
+            append("trakt-calendar:")
+            append(showTmdbId ?: showTitle)
+            append(':')
+            append(season)
+            append(':')
+            append(episode)
+            append(':')
+            append(firstAired)
+        }
+        return MediaItem(
+            id = fallbackId,
+            tmdbId = showTmdbId,
+            type = MediaType.SERIES,
+            title = title,
+            year = null,
+            releaseDate = airDateTime,
+        )
+    }
+
+    private fun List<MediaItem>.needsUpcomingScheduleRefresh(): Boolean =
+        any { item ->
+            item.id.startsWith("trakt-calendar:") &&
+                item.releaseDate.isNullOrBlank() &&
+                item.id.split(":", limit = 5).getOrNull(4).isNullOrBlank()
+        }
 
     private fun launchArtworkBackfill() {
         scope.launch {
@@ -1361,11 +1513,12 @@ class HomeViewModel(
             _state.update { current ->
                 current.applyArtworkBackfill(backfilledArtwork)
             }
+            persistHomeSnapshot(_state.value)
         }
     }
 
     private fun launchRatingsEnrichment() {
-        scope.launch {
+        scope.launch(Dispatchers.Default) {
             // Purge expired cache entries (older than 30 days)
             try { ratingsEnricher.clearExpiredCache() } catch (_: Exception) { }
 
@@ -1410,7 +1563,7 @@ class HomeViewModel(
     }
 
     fun refreshRatings(apiKey: String) {
-        scope.launch { doRefreshRatings(apiKey) }
+        scope.launch(Dispatchers.Default) { doRefreshRatings(apiKey) }
     }
 
     private suspend fun doRefreshRatings(apiKey: String) {
@@ -1566,6 +1719,7 @@ class HomeViewModel(
         return buildList {
             addAll(state.shelves.flatMap { it.items })
             addAll(state.watchlistItems)
+            addAll(state.upcomingSchedule.take(24))
             addAll(state.becauseYouWatched.flatMap { it.items })
             state.hiddenGemsShelf?.let { addAll(it.items) }
             addAll(state.recentlyWatched)
@@ -1591,6 +1745,7 @@ class HomeViewModel(
             shelf.copy(items = shelf.items.map { it.applyArtworkBackfill(backfilledArtwork) })
         }
         val updatedWatchlistItems = watchlistItems.map { it.applyArtworkBackfill(backfilledArtwork) }
+        val updatedUpcomingSchedule = upcomingSchedule.map { it.applyArtworkBackfill(backfilledArtwork) }
         return copy(
             shelves = updatedShelves,
             heroItem = heroItem?.applyArtworkBackfill(backfilledArtwork)
@@ -1599,6 +1754,7 @@ class HomeViewModel(
                 scored.copy(item = scored.item.applyArtworkBackfill(backfilledArtwork))
             },
             watchlistItems = updatedWatchlistItems,
+            upcomingSchedule = updatedUpcomingSchedule,
             watchlistShelf = watchlistShelf?.copy(items = updatedWatchlistItems),
             becauseYouWatched = becauseYouWatched.map { shelf ->
                 shelf.copy(items = shelf.items.map { it.applyArtworkBackfill(backfilledArtwork) })
@@ -1628,15 +1784,43 @@ class HomeViewModel(
             posterUrl = posterUrl.takeUnless { it.isNullOrBlank() } ?: detail.posterUrl,
             backdropUrl = backdropUrl.takeUnless { it.isNullOrBlank() } ?: detail.backdropUrl,
             logoUrl = logoUrl.takeUnless { it.isNullOrBlank() } ?: detail.logoUrl,
+            overview = overview.takeUnless { it.isNullOrBlank() } ?: detail.overview,
+            rating = rating ?: detail.rating,
+            ratings = ratings ?: detail.ratings,
+            genres = genres.ifEmpty { detail.genres },
+            runtime = runtime ?: detail.runtime,
         )
+    }
+
+    private fun List<MediaItem>.mergeScheduleVisualsFrom(previous: List<MediaItem>): List<MediaItem> {
+        if (isEmpty() || previous.isEmpty()) return this
+        val previousById = previous.associateBy { it.id }
+        val previousByTmdb = previous.mapNotNull { item ->
+            item.tmdbId?.let { tmdbId -> tmdbId to item }
+        }.toMap()
+        return map { item ->
+            if (!item.id.startsWith("trakt-calendar:")) return@map item
+            val cached = previousById[item.id]
+                ?: item.tmdbId?.let { previousByTmdb[it] }
+                ?: return@map item
+            item.copy(
+                posterUrl = item.posterUrl.takeUnless { it.isNullOrBlank() } ?: cached.posterUrl,
+                backdropUrl = item.backdropUrl.takeUnless { it.isNullOrBlank() } ?: cached.backdropUrl,
+                logoUrl = item.logoUrl.takeUnless { it.isNullOrBlank() } ?: cached.logoUrl,
+                overview = item.overview.takeUnless { it.isNullOrBlank() } ?: cached.overview,
+                rating = item.rating ?: cached.rating,
+                ratings = item.ratings ?: cached.ratings,
+                genres = item.genres.ifEmpty { cached.genres },
+                runtime = item.runtime ?: cached.runtime,
+            )
+        }
     }
 
     private fun MediaItem.needsArtworkBackfill(): Boolean {
         return !isContentPlaceholder &&
             !isStubDetail &&
             tmdbId != null &&
-            posterUrl.isNullOrBlank() &&
-            backdropUrl.isNullOrBlank()
+            (posterUrl.isNullOrBlank() || backdropUrl.isNullOrBlank() || overview.isNullOrBlank())
     }
 
     private fun hydrateItemsFromCache(items: List<MediaItem>): List<MediaItem> {
@@ -1743,6 +1927,88 @@ class HomeViewModel(
         }
     }
 
+    private suspend fun backfillDiscoveryShelves(
+        shelves: List<CatalogShelf>,
+        globalSeen: MutableSet<String>,
+        policy: ContentPolicyState,
+        minItemsPerShelf: Int = 20,
+        maxPage: Int = 20,
+    ): List<CatalogShelf> {
+        return shelves.mapNotNull { shelf ->
+            if (!shelf.isBackfillableDiscoveryShelf()) {
+                shelf.takeIf { it.items.isNotEmpty() }
+            } else if (shelf.items.size >= minItemsPerShelf) {
+                shelf
+            } else {
+                val localSeen = shelf.items.mapTo(mutableSetOf()) { it.stableKey() }
+                val filled = shelf.items.toMutableList()
+                var page = 3
+
+                while (filled.size < minItemsPerShelf && page <= maxPage) {
+                    val candidates = runCatching {
+                        fetchDiscoveryShelfPage(shelf.id, page)
+                    }.getOrDefault(emptyList())
+
+                    val policyFiltered = contentPolicyFilter.filterItems(
+                        policy = policy,
+                        context = ContentAccessContext.DEFAULT_DISCOVERY,
+                        items = candidates,
+                        sourceType = ContentSourceType.TMDB,
+                    ).items.dedupeByStableKey()
+
+                    for (item in policyFiltered) {
+                        val key = item.stableKey()
+                        if (key in globalSeen || key in localSeen) continue
+                        filled += item
+                        localSeen += key
+                        globalSeen += key
+                        if (filled.size >= minItemsPerShelf) break
+                    }
+                    page++
+                }
+
+                shelf.copy(items = filled).takeIf { it.items.size >= minItemsPerShelf }
+            }
+        }
+    }
+
+    private fun CatalogShelf.isBackfillableDiscoveryShelf(): Boolean =
+        id in setOf(
+            "trending-movies",
+            "trending-tv",
+            "popular-movies",
+            "popular-tv",
+            "now-playing",
+            "upcoming",
+            "top-rated",
+            "airing-today",
+        )
+
+    private suspend fun fetchDiscoveryShelfPage(shelfId: String, page: Int): List<MediaItem> {
+        return when (shelfId) {
+            "trending-movies" -> metadataRepo.getTrending("movie", page)
+            "trending-tv" -> metadataRepo.getTrending("tv", page)
+            "popular-movies" -> metadataRepo.getPopular("movie", page)
+            "popular-tv" -> metadataRepo.getPopular("tv", page)
+            "now-playing" -> metadataRepo.getNowPlaying(page)
+            "upcoming" -> metadataRepo.getUpcoming(page).filterFutureHomeReleases()
+            "top-rated" -> metadataRepo.getTopRated("movie", page)
+            "airing-today" -> metadataRepo.getAiringToday(page)
+            else -> emptyList()
+        }
+    }
+
+    private fun List<MediaItem>.filterFutureHomeReleases(): List<MediaItem> {
+        val today = kotlinx.datetime.Clock.System.now()
+            .toLocalDateTime(TimeZone.currentSystemDefault())
+            .date
+            .toString()
+        return filter { item ->
+            val releaseDate = item.releaseDate?.take(10)?.takeIf { it.length == 10 }
+            releaseDate != null && releaseDate >= today
+        }
+    }
+
     private fun filterRecommendations(
         policy: ContentPolicyState,
         context: ContentAccessContext,
@@ -1774,6 +2040,7 @@ class HomeViewModel(
             shelves.isNotEmpty() ||
             continueWatching.isNotEmpty() ||
             recommendedItems.isNotEmpty() ||
+            upcomingSchedule.isNotEmpty() ||
             watchlistItems.isNotEmpty() ||
             becauseYouWatched.isNotEmpty() ||
             hiddenGemsShelf != null ||
@@ -1813,10 +2080,15 @@ class HomeViewModel(
     }
 
     companion object {
-        private const val HOME_SNAPSHOT_KEY = "home_snapshot_v1"
+        private const val HOME_SNAPSHOT_KEY = "home_snapshot_v2"
         private const val HOME_SNAPSHOT_MAX_AGE_MS = 6L * 60L * 60L * 1000L
         private val HOME_LOAD_AUTO_RETRY_DELAYS_MS = longArrayOf(5_000L, 15_000L, 30_000L)
         private const val KEY_RATINGS_CACHE_VERSION = "ratings_cache_version"
+        private const val TRAKT_SCHEDULE_REFRESH_THROTTLE_MS = 15_000L
+        private val HIDDEN_PROVIDER_HOME_CATALOG_LABELS = setOf(
+            "yourmedia",
+            "lastvideos",
+        )
 
         // Bump when enrichment semantics change in a way that should
         // invalidate the persistent ratings cache on existing installs.

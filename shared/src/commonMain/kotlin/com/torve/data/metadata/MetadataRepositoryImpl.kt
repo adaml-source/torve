@@ -9,10 +9,26 @@ import com.torve.domain.model.PagedResult
 import com.torve.domain.model.PersonSummary
 import com.torve.domain.model.Season
 import com.torve.domain.model.ShelfType
+import com.torve.domain.model.dedupeByStableKey
 import com.torve.domain.repository.MetadataRepository
 import com.torve.platform.torveVerboseLog
 import kotlinx.coroutines.async
 import kotlinx.coroutines.supervisorScope
+import kotlinx.datetime.Clock
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.toLocalDateTime
+
+private fun todayIsoDate(): String =
+    Clock.System.now().toLocalDateTime(TimeZone.currentSystemDefault()).date.toString()
+
+private fun List<MediaItem>.filterUpcomingMovieReleases(today: String = todayIsoDate()): List<MediaItem> =
+    filter { item ->
+        val releaseDate = item.releaseDate?.take(10)?.takeIf { it.length == 10 }
+        releaseDate != null && releaseDate >= today
+    }
+
+private const val HOME_RAIL_PREFETCH_PAGES = 2
+private const val HOME_UPCOMING_PREFETCH_PAGES = 5
 
 class HomeShelvesUnavailableException(
     val failedSegments: List<String>,
@@ -75,9 +91,19 @@ class MetadataRepositoryImpl(
         torveVerboseLog { "CONTENT_REPO fetch_start source=top_rated type=$type page=$page" }
         return try {
             val items = if (type == "tv") {
-                api.getTopRatedTv(page, requestCategory = "catalog.top_rated.$type.page_$page").results.map { TmdbMappers.tvToMediaItem(it) }
+                api.discoverTv(
+                    page = page,
+                    sortBy = "vote_average.desc",
+                    minRating = 7.0f,
+                    requestCategory = "catalog.top_rated.$type.page_$page",
+                ).results.map { TmdbMappers.tvToMediaItem(it) }
             } else {
-                api.getTopRated(type, page, requestCategory = "catalog.top_rated.$type.page_$page").results.map { TmdbMappers.movieToMediaItem(it) }
+                api.discoverMovies(
+                    page = page,
+                    sortBy = "vote_average.desc",
+                    minRating = 7.0f,
+                    requestCategory = "catalog.top_rated.$type.page_$page",
+                ).results.map { TmdbMappers.movieToMediaItem(it) }
             }
             torveVerboseLog {
                 "CONTENT_REPO fetch_success source=top_rated type=$type page=$page items=${items.size}"
@@ -92,7 +118,10 @@ class MetadataRepositoryImpl(
     }
 
     override suspend fun getUpcoming(page: Int): List<MediaItem> {
-        return api.getUpcoming(page, requestCategory = "catalog.upcoming.movie.page_$page").results.map { TmdbMappers.movieToMediaItem(it) }
+        return api.getUpcoming(page, requestCategory = "catalog.upcoming.movie.page_$page")
+            .results
+            .map { TmdbMappers.movieToMediaItem(it) }
+            .filterUpcomingMovieReleases()
     }
 
     override suspend fun getNowPlaying(page: Int): List<MediaItem> {
@@ -175,6 +204,23 @@ class MetadataRepositoryImpl(
             )
             .mapNotNull { image -> TmdbMappers.profileUrl(image.filePath, size = "w342") }
             .distinct()
+    }
+
+    override suspend fun getMediaImageUrls(type: String, id: Int): List<String> {
+        val images = api.getImages(type, id)
+        val backdrops = images.backdrops
+            .sortedWith(
+                compareByDescending<TmdbImageItem> { it.voteAverage * (it.voteCount.coerceAtLeast(1)) }
+                    .thenByDescending { it.width * it.height },
+            )
+            .mapNotNull { image -> TmdbMappers.backdropUrl(image.filePath, size = "w1280") }
+        val posters = images.posters
+            .sortedWith(
+                compareByDescending<TmdbImageItem> { it.voteAverage * (it.voteCount.coerceAtLeast(1)) }
+                    .thenByDescending { it.width * it.height },
+            )
+            .mapNotNull { image -> TmdbMappers.posterUrl(image.filePath, size = "w500") }
+        return (backdrops + posters).distinct()
     }
 
     override suspend fun getSeasonDetail(tvId: Int, seasonNumber: Int): Season {
@@ -267,7 +313,12 @@ class MetadataRepositoryImpl(
         torveVerboseLog { "CONTENT_REPO fetch_start source=top_rated_paged type=$type page=$page" }
         return try {
             val result = if (type == "tv") {
-                val resp = api.getTopRatedTv(page, requestCategory = "catalog.top_rated_paged.$type.page_$page")
+                val resp = api.discoverTv(
+                    page = page,
+                    sortBy = "vote_average.desc",
+                    minRating = 7.0f,
+                    requestCategory = "catalog.top_rated_paged.$type.page_$page",
+                )
                 PagedResult(
                     items = resp.results.map { TmdbMappers.tvToMediaItem(it) },
                     page = resp.page,
@@ -275,7 +326,12 @@ class MetadataRepositoryImpl(
                     totalResults = resp.totalResults,
                 )
             } else {
-                val resp = api.getTopRated(type, page, requestCategory = "catalog.top_rated_paged.$type.page_$page")
+                val resp = api.discoverMovies(
+                    page = page,
+                    sortBy = "vote_average.desc",
+                    minRating = 7.0f,
+                    requestCategory = "catalog.top_rated_paged.$type.page_$page",
+                )
                 PagedResult(
                     items = resp.results.map { TmdbMappers.movieToMediaItem(it) },
                     page = resp.page,
@@ -417,7 +473,7 @@ class MetadataRepositoryImpl(
         val response = api.getWatchProviders(type, region)
         return response.results.mapNotNull { provider ->
             provider.logoPath?.let { path ->
-                provider.providerId to "${TmdbApiClient.IMAGE_BASE}/w154$path"
+                provider.providerId to "${TmdbApiClient.IMAGE_BASE}/original$path"
             }
         }.toMap()
     }
@@ -445,44 +501,70 @@ class MetadataRepositoryImpl(
             }
         }
 
+        suspend fun <T> homePages(pageCount: Int, block: suspend (Int) -> List<T>): List<T> =
+            (1..pageCount).flatMap { page -> block(page) }
+
         val trendingMovies = async {
             homeRequest("trending_movies") {
-                api.getTrending("movie", requestCategory = "home.trending_movies")
+                homePages(HOME_RAIL_PREFETCH_PAGES) { page ->
+                    api.getTrending("movie", page = page, requestCategory = "home.trending_movies.page_$page").results
+                }.map { TmdbMappers.movieToMediaItem(it) }.dedupeByStableKey()
             }
         }
         val trendingTv = async {
             homeRequest("trending_tv") {
-                api.getTrendingTv(requestCategory = "home.trending_tv")
+                homePages(HOME_RAIL_PREFETCH_PAGES) { page ->
+                    api.getTrendingTv(page = page, requestCategory = "home.trending_tv.page_$page").results
+                }.map { TmdbMappers.tvToMediaItem(it) }.dedupeByStableKey()
             }
         }
         val nowPlaying = async {
             homeRequest("now_playing") {
-                api.getNowPlaying(requestCategory = "home.now_playing")
+                homePages(HOME_RAIL_PREFETCH_PAGES) { page ->
+                    api.getNowPlaying(page = page, requestCategory = "home.now_playing.page_$page").results
+                }.map { TmdbMappers.movieToMediaItem(it) }.dedupeByStableKey()
             }
         }
         val popularMovies = async {
             homeRequest("popular_movies") {
-                api.getPopular("movie", requestCategory = "home.popular_movies")
+                homePages(HOME_RAIL_PREFETCH_PAGES) { page ->
+                    api.getPopular("movie", page = page, requestCategory = "home.popular_movies.page_$page").results
+                }.map { TmdbMappers.movieToMediaItem(it) }.dedupeByStableKey()
             }
         }
         val upcoming = async {
             homeRequest("upcoming") {
-                api.getUpcoming(requestCategory = "home.upcoming")
+                homePages(HOME_UPCOMING_PREFETCH_PAGES) { page ->
+                    api.getUpcoming(page = page, requestCategory = "home.upcoming.page_$page").results
+                }.map { TmdbMappers.movieToMediaItem(it) }
+                    .filterUpcomingMovieReleases()
+                    .dedupeByStableKey()
             }
         }
         val popularTv = async {
             homeRequest("popular_tv") {
-                api.getPopularTv(requestCategory = "home.popular_tv")
+                homePages(HOME_RAIL_PREFETCH_PAGES) { page ->
+                    api.getPopularTv(page = page, requestCategory = "home.popular_tv.page_$page").results
+                }.map { TmdbMappers.tvToMediaItem(it) }.dedupeByStableKey()
             }
         }
         val topRated = async {
             homeRequest("top_rated") {
-                api.getTopRated("movie", requestCategory = "home.top_rated")
+                homePages(HOME_RAIL_PREFETCH_PAGES) { page ->
+                    api.discoverMovies(
+                        page = page,
+                        sortBy = "vote_average.desc",
+                        minRating = 7.0f,
+                        requestCategory = "home.top_rated.page_$page",
+                    ).results
+                }.map { TmdbMappers.movieToMediaItem(it) }.dedupeByStableKey()
             }
         }
         val airingToday = async {
             homeRequest("airing_today") {
-                api.getAiringToday(requestCategory = "home.airing_today")
+                homePages(HOME_RAIL_PREFETCH_PAGES) { page ->
+                    api.getAiringToday(page = page, requestCategory = "home.airing_today.page_$page").results
+                }.map { TmdbMappers.tvToMediaItem(it) }.dedupeByStableKey()
             }
         }
         val failedSegments = mutableListOf<String>()
@@ -493,82 +575,82 @@ class MetadataRepositoryImpl(
         }
 
         val shelves = buildList {
-            consume(trendingMovies.await())?.results?.takeIf { it.isNotEmpty() }?.let { results ->
+            consume(trendingMovies.await())?.takeIf { it.isNotEmpty() }?.let { items ->
                 add(
                     CatalogShelf(
                         id = "trending-movies",
                         title = "Trending Movies",
-                        items = results.map { TmdbMappers.movieToMediaItem(it) },
+                        items = items,
                         type = ShelfType.POSTER,
                     ),
                 )
             }
-            consume(trendingTv.await())?.results?.takeIf { it.isNotEmpty() }?.let { results ->
+            consume(trendingTv.await())?.takeIf { it.isNotEmpty() }?.let { items ->
                 add(
                     CatalogShelf(
                         id = "trending-tv",
                         title = "Trending TV Shows",
-                        items = results.map { TmdbMappers.tvToMediaItem(it) },
+                        items = items,
                         type = ShelfType.POSTER,
                     ),
                 )
             }
-            consume(nowPlaying.await())?.results?.takeIf { it.isNotEmpty() }?.let { results ->
+            consume(nowPlaying.await())?.takeIf { it.isNotEmpty() }?.let { items ->
                 add(
                     CatalogShelf(
                         id = "now-playing",
                         title = "Now Playing",
-                        items = results.map { TmdbMappers.movieToMediaItem(it) },
+                        items = items,
                         type = ShelfType.LANDSCAPE,
                     ),
                 )
             }
-            consume(popularMovies.await())?.results?.takeIf { it.isNotEmpty() }?.let { results ->
+            consume(popularMovies.await())?.takeIf { it.isNotEmpty() }?.let { items ->
                 add(
                     CatalogShelf(
                         id = "popular-movies",
                         title = "Popular Movies",
-                        items = results.map { TmdbMappers.movieToMediaItem(it) },
+                        items = items,
                         type = ShelfType.POSTER,
                     ),
                 )
             }
-            consume(upcoming.await())?.results?.takeIf { it.isNotEmpty() }?.let { results ->
+            consume(upcoming.await())?.takeIf { it.isNotEmpty() }?.let { items ->
                 add(
                     CatalogShelf(
                         id = "upcoming",
                         title = "Upcoming",
-                        items = results.map { TmdbMappers.movieToMediaItem(it) },
+                        items = items,
                         type = ShelfType.POSTER,
                     ),
                 )
             }
-            consume(popularTv.await())?.results?.takeIf { it.isNotEmpty() }?.let { results ->
+            consume(popularTv.await())?.takeIf { it.isNotEmpty() }?.let { items ->
                 add(
                     CatalogShelf(
                         id = "popular-tv",
                         title = "Popular TV Shows",
-                        items = results.map { TmdbMappers.tvToMediaItem(it) },
+                        items = items,
                         type = ShelfType.POSTER,
                     ),
                 )
             }
-            consume(topRated.await())?.results?.takeIf { it.isNotEmpty() }?.let { results ->
+            consume(topRated.await())?.takeIf { it.isNotEmpty() }?.let { items ->
                 add(
                     CatalogShelf(
                         id = "top-rated",
                         title = "Top Rated",
-                        items = results.map { TmdbMappers.movieToMediaItem(it) },
+                        items = items,
                         type = ShelfType.POSTER,
                     ),
                 )
             }
-            consume(airingToday.await())?.results?.takeIf { it.isNotEmpty() }?.let { results ->
+            consume(airingToday.await())?.takeIf { it.isNotEmpty() }?.let { items ->
                 add(
                     CatalogShelf(
                         id = "airing-today",
                         title = "Airing Today",
-                        items = results.map { TmdbMappers.tvToMediaItem(it) },
+                        items = items,
                         type = ShelfType.POSTER,
                     ),
                 )

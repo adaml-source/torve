@@ -1,7 +1,9 @@
 ﻿package com.torve.android.tv.screens
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -23,6 +25,7 @@ import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -44,12 +47,15 @@ import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.zIndex
 import androidx.tv.material3.ClickableSurfaceDefaults
 import androidx.tv.material3.Surface
 import coil3.compose.AsyncImage
@@ -66,8 +72,8 @@ import com.torve.domain.model.Channel
 import com.torve.domain.model.ChannelCategory
 import com.torve.domain.model.EnrichedChannel
 
-private const val GROUP_PANEL_WIDTH_DP = 260
-private const val PREVIEW_PANEL_WIDTH_DP = 340
+private const val GROUP_PANEL_WIDTH_DP = 236
+private const val DETAIL_PANEL_WIDTH_DP = 340
 private const val LONG_PRESS_THRESHOLD_MS = 650L
 
 @Composable
@@ -84,7 +90,6 @@ fun LiveChannelListOverlay(
 ) {
     BackHandler { onDismiss() }
 
-    var searchQuery by rememberSaveable { mutableStateOf("") }
     val groupFocus = remember { FocusRequester() }
     val channelFocus = remember { FocusRequester() }
     val favoritesByUrl = remember(favoriteChannels) { favoriteChannels.associateBy { it.url } }
@@ -120,44 +125,17 @@ fun LiveChannelListOverlay(
         }
     }
 
-    val filteredCategories = remember(categoriesWithLoadedChannels, searchQuery) {
-        val query = searchQuery.trim()
-        if (query.isBlank()) {
-            categoriesWithLoadedChannels
-        } else {
-            val normalized = query.lowercase()
-            categoriesWithLoadedChannels.mapNotNull { category ->
-                if (category.name.contains(normalized, ignoreCase = true)) {
-                    return@mapNotNull category
-                }
-                val channels = category.channels.filter { enriched ->
-                    enriched.channel.name.contains(normalized, ignoreCase = true) ||
-                        enriched.currentProgramme?.title?.contains(normalized, ignoreCase = true) == true ||
-                        enriched.nextProgramme?.title?.contains(normalized, ignoreCase = true) == true
-                }
-                if (channels.isEmpty()) {
-                    null
-                } else {
-                    category.copy(
-                        channels = channels,
-                        channelCount = channels.size,
-                    )
-                }
-            }
-        }
-    }
-
     // Scroll group panel to active group whenever the overlay opens for a new channel
     LaunchedEffect(currentChannelUrl, initialGroupIndex) {
-        if (initialGroupIndex > 0 && filteredCategories.isNotEmpty()) {
-            groupListState.scrollToItem(initialGroupIndex.coerceIn(0, filteredCategories.lastIndex))
+        if (initialGroupIndex > 0 && categoriesWithLoadedChannels.isNotEmpty()) {
+            groupListState.scrollToItem(initialGroupIndex.coerceIn(0, categoriesWithLoadedChannels.lastIndex))
         }
     }
 
-    val maxIndex = (filteredCategories.size - 1).coerceAtLeast(0)
+    val maxIndex = (categoriesWithLoadedChannels.size - 1).coerceAtLeast(0)
     if (selectedGroupIndex > maxIndex) selectedGroupIndex = maxIndex
-    val selectedCategory = remember(filteredCategories, selectedGroupIndex) {
-        filteredCategories.getOrNull(selectedGroupIndex)
+    val selectedCategory = remember(categoriesWithLoadedChannels, selectedGroupIndex) {
+        categoriesWithLoadedChannels.getOrNull(selectedGroupIndex)
     }
     val channelsInGroup = remember(selectedCategory) {
         selectedCategory?.channels ?: emptyList()
@@ -249,97 +227,40 @@ fun LiveChannelListOverlay(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(Obsidian.copy(alpha = 0.55f))
-            .onPreviewKeyEvent { event ->
-                if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
-                when (event.key) {
-                    Key.Backspace -> {
-                        if (searchQuery.isNotEmpty()) {
-                            searchQuery = searchQuery.dropLast(1)
-                            true
-                        } else {
-                            false
-                        }
-                    }
-
-                    Key.Spacebar -> {
-                        searchQuery += " "
-                        true
-                    }
-
-                    else -> {
-                        val keyCode = event.key.keyCode.toInt()
-                        val unicode = android.view.KeyCharacterMap
-                            .load(android.view.KeyCharacterMap.VIRTUAL_KEYBOARD)
-                            .get(keyCode, 0)
-                        if (unicode > 0) {
-                            val c = unicode.toChar()
-                            if (!c.isISOControl()) {
-                                searchQuery += c
-                                true
-                            } else {
-                                false
-                            }
-                        } else {
-                            false
-                        }
-                    }
-                }
-            },
+            .background(
+                Brush.horizontalGradient(
+                    0f to Color.Black.copy(alpha = 0.78f),
+                    0.48f to Color.Black.copy(alpha = 0.52f),
+                    1f to Color.Black.copy(alpha = 0.28f),
+                ),
+            ),
     ) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(top = 24.dp),
+                .padding(horizontal = 42.dp, vertical = 34.dp),
         ) {
-            Text(
-                text = stringResource(R.string.tv_live_channels_list),
-                color = Snow,
-                fontSize = 22.sp,
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier.padding(start = 24.dp, bottom = 12.dp),
-            )
+            ZappingOverlayHeader(previewEnriched = previewEnriched, currentChannelUrl = currentChannelUrl)
+            Spacer(Modifier.height(14.dp))
 
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 24.dp, vertical = 6.dp)
-                    .background(Graphite.copy(alpha = 0.6f), RoundedCornerShape(8.dp))
-                    .padding(horizontal = 12.dp, vertical = 8.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
+                    .weight(1f),
+                horizontalArrangement = Arrangement.spacedBy(14.dp),
             ) {
-                Text(
-                    text = if (searchQuery.isBlank()) {
-                        stringResource(R.string.tv_live_search_hint)
-                    } else {
-                        stringResource(R.string.tv_live_search_query, searchQuery)
-                    },
-                    color = if (searchQuery.isBlank()) Silver else Snow,
-                    fontSize = 12.sp,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f),
-                )
-                Text(
-                    text = stringResource(R.string.tv_live_search_clear_hint),
-                    color = Silver,
-                    fontSize = 11.sp,
-                )
-            }
-
-            Row(modifier = Modifier.fillMaxSize()) {
                 // Left panel: category/group list
                 LazyColumn(
                     state = groupListState,
                     modifier = Modifier
                         .width(GROUP_PANEL_WIDTH_DP.dp)
                         .fillMaxHeight()
-                        .background(Charcoal.copy(alpha = 0.7f))
-                        .padding(vertical = 4.dp),
+                        .background(Charcoal.copy(alpha = 0.72f), RoundedCornerShape(18.dp))
+                        .border(1.dp, Color.White.copy(alpha = 0.08f), RoundedCornerShape(18.dp))
+                        .padding(vertical = 8.dp),
                 ) {
                     itemsIndexed(
-                        filteredCategories,
+                        categoriesWithLoadedChannels,
                         key = { _, cat -> cat.name },
                     ) { index, category ->
                         val isSelected = index == selectedGroupIndex
@@ -347,7 +268,7 @@ fun LiveChannelListOverlay(
                             onClick = { selectedGroupIndex = index },
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .height(52.dp)
+                                .height(44.dp)
                                 .then(if (index == selectedGroupIndex) Modifier.focusRequester(groupFocus) else Modifier)
                                 .onFocusChanged { if (it.isFocused) selectedGroupIndex = index }
                                 .onPreviewKeyEvent { event ->
@@ -360,24 +281,30 @@ fun LiveChannelListOverlay(
                                     } else {
                                         false
                                     }
-                                },
-                            shape = ClickableSurfaceDefaults.shape(RoundedCornerShape(0.dp)),
+                            },
+                            shape = ClickableSurfaceDefaults.shape(RoundedCornerShape(12.dp)),
                             colors = ClickableSurfaceDefaults.colors(
-                                containerColor = if (isSelected) AmberSubtle else Charcoal.copy(alpha = 0.01f),
+                                containerColor = if (isSelected) AmberSubtle.copy(alpha = 0.45f) else Charcoal.copy(alpha = 0.01f),
                                 focusedContainerColor = Amber.copy(alpha = 0.2f),
+                            ),
+                            border = ClickableSurfaceDefaults.border(
+                                focusedBorder = androidx.tv.material3.Border(
+                                    border = BorderStroke(1.5.dp, Amber),
+                                    shape = RoundedCornerShape(12.dp),
+                                ),
                             ),
                         ) {
                             Row(
                                 modifier = Modifier
                                     .fillMaxSize()
-                                    .padding(horizontal = 16.dp),
+                                    .padding(horizontal = 12.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.SpaceBetween,
                             ) {
                                 Text(
                                     text = category.name,
                                     color = if (isSelected) Amber else Snow,
-                                    fontSize = 14.sp,
+                                    fontSize = 13.sp,
                                     fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis,
@@ -386,7 +313,7 @@ fun LiveChannelListOverlay(
                                 Text(
                                     text = "${category.channelCount}",
                                     color = Silver,
-                                    fontSize = 12.sp,
+                                    fontSize = 11.sp,
                                 )
                             }
                         }
@@ -418,7 +345,9 @@ fun LiveChannelListOverlay(
                         modifier = Modifier
                             .weight(1f)
                             .fillMaxHeight()
-                            .padding(start = 6.dp, end = 16.dp, top = 4.dp, bottom = 4.dp),
+                            .background(Charcoal.copy(alpha = 0.64f), RoundedCornerShape(20.dp))
+                            .border(1.dp, Color.White.copy(alpha = 0.08f), RoundedCornerShape(20.dp))
+                            .padding(horizontal = 10.dp, vertical = 10.dp),
                     ) {
                         itemsIndexed(
                             channelsInGroup,
@@ -448,57 +377,134 @@ fun LiveChannelListOverlay(
                     }
                 }
 
-                // Right panel: mini preview metadata while searching/browsing
-                Box(
+                // Right panel: informational only. Actions stay on the focused channel row/menu.
+                SelectedChannelDetailsPanel(
+                    enrichedChannel = previewEnriched,
                     modifier = Modifier
-                        .width(PREVIEW_PANEL_WIDTH_DP.dp)
+                        .width(DETAIL_PANEL_WIDTH_DP.dp)
                         .fillMaxHeight()
-                        .padding(end = 24.dp, top = 4.dp, bottom = 4.dp)
-                        .background(Charcoal.copy(alpha = 0.72f), RoundedCornerShape(10.dp))
-                        .padding(14.dp),
-                ) {
-                    Column(
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun ZappingOverlayHeader(
+    previewEnriched: EnrichedChannel?,
+    currentChannelUrl: String,
+) {
+    val channel = previewEnriched?.channel
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text(
+            text = if (channel?.url == currentChannelUrl) "Now playing" else "Switch channel",
+            color = Silver,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Medium,
+        )
+        Text(
+            text = channel?.name ?: stringResource(R.string.tv_live_no_channel_playing),
+            color = Snow,
+            fontSize = 18.sp,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        previewEnriched?.currentProgramme?.let { programme ->
+            Text(
+                text = programme.title,
+                color = Silver,
+                fontSize = 12.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
+}
+
+@Composable
+private fun SelectedChannelDetailsPanel(
+    enrichedChannel: EnrichedChannel?,
+    modifier: Modifier = Modifier,
+) {
+    val channel = enrichedChannel?.channel
+    Box(
+        modifier = modifier
+            .background(Charcoal.copy(alpha = 0.68f), RoundedCornerShape(20.dp))
+            .border(1.dp, Color.White.copy(alpha = 0.08f), RoundedCornerShape(20.dp))
+            .padding(18.dp),
+    ) {
+        Column(
+            modifier = Modifier.fillMaxSize(),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Box(
+                modifier = Modifier
+                    .width(96.dp)
+                    .height(54.dp)
+                    .background(Graphite.copy(alpha = 0.46f), RoundedCornerShape(14.dp))
+                    .padding(8.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                if (channel?.tvgLogo != null) {
+                    AsyncImage(
+                        model = channel.tvgLogo,
+                        contentDescription = null,
                         modifier = Modifier.fillMaxSize(),
-                        verticalArrangement = Arrangement.spacedBy(10.dp),
-                    ) {
-                        Text(
-                            text = stringResource(R.string.tv_live_mini_preview_title),
-                            color = Amber,
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.Bold,
-                        )
-                        Text(
-                            text = stringResource(R.string.tv_live_mini_preview_subtitle),
-                            color = Silver,
-                            fontSize = 11.sp,
-                        )
-                        Spacer(modifier = Modifier.height(2.dp))
-                        Text(
-                            text = previewEnriched?.channel?.name ?: stringResource(R.string.tv_live_no_channel_playing),
-                            color = Snow,
-                            fontSize = 15.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            maxLines = 2,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                        previewEnriched?.currentProgramme?.let { current ->
-                            Text(
-                                text = current.title,
-                                color = Silver,
-                                fontSize = 12.sp,
-                                maxLines = 2,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                        }
-                        Spacer(modifier = Modifier.weight(1f))
-                        Text(
-                            text = stringResource(R.string.tv_live_favorite_hint),
-                            color = Silver,
-                            fontSize = 11.sp,
-                        )
-                    }
+                        contentScale = ContentScale.Fit,
+                    )
+                } else {
+                    Text(
+                        text = channel?.name?.take(6).orEmpty(),
+                        color = Snow,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                    )
                 }
             }
+            Text(
+                text = channel?.name ?: stringResource(R.string.tv_live_no_channel_playing),
+                color = Snow,
+                fontSize = 18.sp,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+            enrichedChannel?.currentProgramme?.let { current ->
+                Text(
+                    text = current.title,
+                    color = Snow,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Medium,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                LinearProgressIndicator(
+                    progress = { programmeProgress(current) },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(3.dp)
+                        .clip(RoundedCornerShape(3.dp)),
+                    color = Amber,
+                    trackColor = Graphite.copy(alpha = 0.8f),
+                )
+            } ?: Text(
+                text = "No programme data",
+                color = Silver,
+                fontSize = 12.sp,
+                maxLines = 1,
+            )
+            enrichedChannel?.nextProgramme?.let { next ->
+                Text(
+                    text = "Next: ${next.title}",
+                    color = Silver,
+                    fontSize = 12.sp,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            Spacer(Modifier.weight(1f))
         }
     }
 }
@@ -515,13 +521,19 @@ private fun ChannelListItem(
 ) {
     val ch = enrichedChannel.channel
     var centerKeyDownTime by remember { mutableLongStateOf(0L) }
+    var isFocused by remember { mutableStateOf(false) }
 
     Surface(
         onClick = onTune,
         modifier = modifier
             .fillMaxWidth()
-            .height(62.dp)
-            .onFocusChanged { if (it.isFocused) onFocused() }
+            .height(46.dp)
+            .padding(vertical = 1.dp)
+            .zIndex(if (isFocused) 4f else 0f)
+            .onFocusChanged {
+                isFocused = it.isFocused
+                if (it.isFocused) onFocused()
+            }
             .onPreviewKeyEvent { event ->
                 when {
                     event.key == Key.Menu && event.type == KeyEventType.KeyDown -> {
@@ -556,22 +568,22 @@ private fun ChannelListItem(
                     else -> false
                 }
             },
-        shape = ClickableSurfaceDefaults.shape(RoundedCornerShape(6.dp)),
+        shape = ClickableSurfaceDefaults.shape(RoundedCornerShape(10.dp)),
         colors = ClickableSurfaceDefaults.colors(
-            containerColor = if (isPlaying) AmberSubtle else Graphite.copy(alpha = 0.4f),
-            focusedContainerColor = Amber.copy(alpha = 0.2f),
+            containerColor = if (isPlaying) AmberSubtle.copy(alpha = 0.45f) else Graphite.copy(alpha = 0.46f),
+            focusedContainerColor = Amber.copy(alpha = 0.22f),
         ),
         border = ClickableSurfaceDefaults.border(
             focusedBorder = androidx.tv.material3.Border(
-                border = androidx.compose.foundation.BorderStroke(1.5.dp, Amber),
-                shape = RoundedCornerShape(6.dp),
+                border = BorderStroke(1.5.dp, Amber),
+                shape = RoundedCornerShape(10.dp),
             ),
         ),
     ) {
         Row(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(horizontal = 12.dp),
+                .padding(horizontal = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             if (isPlaying) {
@@ -579,28 +591,33 @@ private fun ChannelListItem(
                     Icons.Filled.PlayArrow,
                     contentDescription = null,
                     tint = Coral,
-                    modifier = Modifier.size(18.dp),
+                    modifier = Modifier.size(16.dp),
                 )
-                Spacer(Modifier.width(6.dp))
+                Spacer(Modifier.width(5.dp))
             }
 
             ch.tvgLogo?.let { logo ->
-                AsyncImage(
-                    model = logo,
-                    contentDescription = null,
+                Box(
                     modifier = Modifier
-                        .size(36.dp)
-                        .clip(RoundedCornerShape(4.dp)),
-                    contentScale = ContentScale.Fit,
-                )
-                Spacer(Modifier.width(10.dp))
+                        .width(34.dp)
+                        .height(22.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    AsyncImage(
+                        model = logo,
+                        contentDescription = null,
+                        modifier = Modifier.fillMaxSize(),
+                        contentScale = ContentScale.Fit,
+                    )
+                }
+                Spacer(Modifier.width(8.dp))
             }
 
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = ch.name,
                     color = if (isPlaying) Amber else Snow,
-                    fontSize = 14.sp,
+                    fontSize = 13.sp,
                     fontWeight = FontWeight.Medium,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
@@ -609,7 +626,7 @@ private fun ChannelListItem(
                     Text(
                         text = prog.title,
                         color = Silver,
-                        fontSize = 11.sp,
+                        fontSize = 10.sp,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
@@ -620,7 +637,7 @@ private fun ChannelListItem(
                 imageVector = if (isFavorite) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder,
                 contentDescription = null,
                 tint = if (isFavorite) Amber else Silver.copy(alpha = 0.6f),
-                modifier = Modifier.size(18.dp),
+                modifier = Modifier.size(16.dp),
             )
         }
     }

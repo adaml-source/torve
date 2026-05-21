@@ -1,30 +1,19 @@
 package com.torve.android.tv.components
 
 import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
-import androidx.compose.foundation.background
-import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -35,32 +24,29 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.scale
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.focus.FocusRequester
-import androidx.compose.ui.focus.focusProperties
-import androidx.compose.ui.focus.focusRequester
-import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.zIndex
-import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.graphics.Shadow
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import com.torve.android.R
-import com.torve.android.ui.theme.Amber
-import com.torve.android.ui.theme.Obsidian
+import androidx.compose.ui.unit.sp
+import coil3.compose.AsyncImage
+import com.torve.android.ui.components.PreferredRatingPills
 import com.torve.android.ui.theme.Snow
 import com.torve.domain.model.MediaItem
-import com.torve.domain.model.allowsTmdbRatingProvider
+import com.torve.domain.model.withFallbackTmdbScore
 import com.torve.presentation.settings.SettingsViewModel
 import org.koin.compose.koinInject
 
 /**
- * Hero overlay with title, metadata, overview, and action buttons.
- * Sits INSIDE the scrollable LazyColumn as the first item, so it
- * scrolls up naturally — exactly like mobile's HeroSlide but with
- * D-pad focus support.
+ * Cinematic TV hero overlay.
+ *
+ * The poster grid remains the action surface. This overlay intentionally has no
+ * Play/Trailer/Watchlist buttons because those controls were hard to reach from
+ * the rail and created dead focus targets.
  */
 @Composable
 fun TvHeroOverlay(
@@ -73,15 +59,17 @@ fun TvHeroOverlay(
     onTrailerFeatured: () -> Unit,
     isInWatchlist: Boolean = false,
     onWatchlistToggle: () -> Unit = {},
+    logoLookupInFlight: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
     val settingsViewModel: SettingsViewModel = koinInject()
     val settingsState by settingsViewModel.state.collectAsState()
-    val showTmdbRating = settingsState.ratingPrefs.allowsTmdbRatingProvider()
+    val ratingPrefs = remember(settingsState.ratingPrefs) {
+        settingsState.ratingPrefs.tvExternalCardRatingPrefs()
+    }
 
     Column(modifier = modifier.fillMaxWidth()) {
-        // Keep more of the hero artwork visible while still reserving space for metadata/actions.
-        Spacer(modifier = Modifier.height(64.dp))
+        Spacer(modifier = Modifier.height(56.dp))
 
         AnimatedContent(
             targetState = featuredItem,
@@ -93,210 +81,97 @@ fun TvHeroOverlay(
         ) { item ->
             Column(
                 modifier = Modifier
-                    .defaultMinSize(minHeight = 176.dp)
-                    .padding(start = 40.dp, end = 40.dp, bottom = 10.dp),
-                verticalArrangement = Arrangement.spacedBy(4.dp),
+                    .padding(start = 56.dp, end = 40.dp, bottom = 16.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                // Genre tags (matching mobile HeroSlide pattern)
-                if (item != null && item.genres.isNotEmpty()) {
-                    Text(
-                        text = item.genres.take(3).joinToString(" \u2022 ") { it.name },
-                        style = MaterialTheme.typography.labelMedium,
-                        color = Amber,
-                    )
-                    Spacer(Modifier.height(4.dp))
-                } else {
-                    // Section label when no specific item focused
-                    Text(
-                        text = sectionTitle.uppercase(),
-                        style = MaterialTheme.typography.labelMedium,
-                        color = Amber,
-                        letterSpacing = MaterialTheme.typography.labelMedium.letterSpacing,
-                    )
-                    Spacer(Modifier.height(4.dp))
-                }
-
-                val titleText = item?.title ?: subtitle
-                if (titleText.isNotBlank()) {
-                    Text(
-                        text = titleText,
-                        style = MaterialTheme.typography.displayMedium,
-                        color = Snow,
-                        fontWeight = FontWeight.Bold,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
-
-                // Metadata: year • rating • runtime (matching mobile HeroSlide)
-                if (item != null) {
-                    Spacer(Modifier.height(4.dp))
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        item.year?.let {
-                            Text(
-                                text = it.toString(),
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = Snow.copy(alpha = 0.7f),
-                            )
-                        }
-                        item.rating?.let { rating ->
-                            if (showTmdbRating && rating > 0) {
-                                Text(
-                                    text = "  \u2022  \u2605 ${"%.1f".format(rating)}",
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = Amber.copy(alpha = 0.9f),
-                                )
+                val logoUrl = item?.logoUrl?.takeIf { it.isNotBlank() }
+                var logoFailed by remember(logoUrl) { mutableStateOf(false) }
+                if (!logoUrl.isNullOrBlank() && !logoFailed) {
+                    AsyncImage(
+                        model = logoUrl,
+                        contentDescription = item.title,
+                        contentScale = ContentScale.Fit,
+                        alignment = Alignment.CenterStart,
+                        onState = { state ->
+                            if (state is coil3.compose.AsyncImagePainter.State.Error) {
+                                logoFailed = true
                             }
-                        }
-                        item.runtime?.let { runtime ->
-                            Text(
-                                text = "  \u2022  ${runtime}m",
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = Snow.copy(alpha = 0.7f),
-                            )
-                        }
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth(0.42f)
+                            .heightIn(min = 32.dp, max = 54.dp),
+                    )
+                } else {
+                    val titleText = item?.title ?: subtitle
+                    if (titleText.isNotBlank() && (!logoLookupInFlight || logoFailed)) {
+                        Text(
+                            text = titleText,
+                            style = MaterialTheme.typography.headlineMedium.copy(
+                                fontSize = 38.sp,
+                                lineHeight = 42.sp,
+                                letterSpacing = 0.6.sp,
+                                shadow = Shadow(
+                                    color = Color.Black.copy(alpha = 0.82f),
+                                    offset = Offset(0f, 3f),
+                                    blurRadius = 18f,
+                                ),
+                            ),
+                            color = Snow,
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.fillMaxWidth(0.38f),
+                        )
+                    } else {
+                        Spacer(modifier = Modifier.height(44.dp))
                     }
                 }
 
-                // Overview
-                if (!item?.overview.isNullOrBlank()) {
-                    Spacer(Modifier.height(4.dp))
-                    Text(
-                        text = item?.overview.orEmpty(),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = Snow.copy(alpha = 0.6f),
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.width(680.dp),
-                    )
-                }
-
-                // Action buttons
                 if (item != null) {
-                    Spacer(Modifier.height(14.dp))
-                    val detailsFocusRequester = remember { FocusRequester() }
-
-                    val watchlistFocusRequester = remember { FocusRequester() }
-
                     Row(
                         horizontalArrangement = Arrangement.spacedBy(12.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        // Details button — Amber CTA
-                        Button(
-                            onClick = onDetailsFeatured,
-                            modifier = Modifier
-                                .focusRequester(primaryActionFocusRequester)
-                                .focusProperties {
-                                    left = railFocusRequester
-                                    right = detailsFocusRequester
-                                },
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = Amber,
-                                contentColor = Obsidian,
-                            ),
-                            shape = RoundedCornerShape(8.dp),
-                        ) {
+                        item.year?.let {
                             Text(
-                                text = stringResource(R.string.tv_action_details),
-                                style = MaterialTheme.typography.labelLarge,
-                                fontWeight = FontWeight.SemiBold,
+                                text = it.toString(),
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = Snow.copy(alpha = 0.72f),
                             )
                         }
-
-                        // Trailer button
-                        var trailerFocused by remember { mutableStateOf(false) }
-                        val trailerScale by animateFloatAsState(
-                            targetValue = if (trailerFocused) 1.05f else 1f,
-                            label = "trailerScale",
-                        )
-                        val trailerBorderColor by animateColorAsState(
-                            targetValue = if (trailerFocused) Amber else Color.Transparent,
-                            label = "trailerBorderColor",
-                        )
-
-                        Box(
-                            modifier = Modifier
-                                .zIndex(if (trailerFocused) 1f else 0f)
-                                .scale(trailerScale)
-                                .border(2.dp, trailerBorderColor, RoundedCornerShape(8.dp))
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(
-                                    if (trailerFocused) Amber.copy(alpha = 0.25f)
-                                    else Snow.copy(alpha = 0.15f),
-                                )
-                                .focusRequester(detailsFocusRequester)
-                                .onFocusChanged {
-                                    trailerFocused = it.isFocused
-                                }
-                                .focusProperties {
-                                    left = primaryActionFocusRequester
-                                    right = watchlistFocusRequester
-                                }
-                                .clickable(
-                                    interactionSource = remember { MutableInteractionSource() },
-                                    indication = null,
-                                    onClick = onTrailerFeatured,
-                                )
-                                .padding(horizontal = 20.dp, vertical = 11.dp),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            Text(
-                                text = stringResource(R.string.tv_action_trailer),
-                                style = MaterialTheme.typography.labelLarge,
-                                color = if (trailerFocused) Amber else Snow,
-                                fontWeight = FontWeight.SemiBold,
+                        item.ratings.withFallbackTmdbScore(item.rating)?.let { ratings ->
+                            PreferredRatingPills(
+                                ratings = ratings,
+                                prefs = ratingPrefs,
                             )
                         }
-
-                        // Watchlist button
-                        var watchlistFocused by remember { mutableStateOf(false) }
-                        val watchlistScale by animateFloatAsState(
-                            targetValue = if (watchlistFocused) 1.05f else 1f,
-                            label = "watchlistScale",
-                        )
-                        val watchlistBorderColor by animateColorAsState(
-                            targetValue = if (watchlistFocused) Amber else Color.Transparent,
-                            label = "watchlistBorderColor",
-                        )
-
-                        Box(
-                            modifier = Modifier
-                                .zIndex(if (watchlistFocused) 1f else 0f)
-                                .scale(watchlistScale)
-                                .border(2.dp, watchlistBorderColor, RoundedCornerShape(8.dp))
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(
-                                    if (watchlistFocused) Amber.copy(alpha = 0.25f)
-                                    else Snow.copy(alpha = 0.15f),
-                                )
-                                .focusRequester(watchlistFocusRequester)
-                                .onFocusChanged {
-                                    watchlistFocused = it.isFocused
-                                }
-                                .focusProperties {
-                                    left = detailsFocusRequester
-                                }
-                                .clickable(
-                                    interactionSource = remember { MutableInteractionSource() },
-                                    indication = null,
-                                    onClick = onWatchlistToggle,
-                                )
-                                .padding(horizontal = 20.dp, vertical = 11.dp),
-                            contentAlignment = Alignment.Center,
-                        ) {
+                        item.runtime?.takeIf { it > 0 }?.let { runtime ->
                             Text(
-                                text = if (isInWatchlist) {
-                                    stringResource(R.string.tv_action_remove_watchlist)
-                                } else {
-                                    stringResource(R.string.tv_action_add_watchlist)
-                                },
-                                style = MaterialTheme.typography.labelLarge,
-                                color = if (watchlistFocused) Amber else Snow,
-                                fontWeight = FontWeight.SemiBold,
+                                text = "${runtime}m",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = Snow.copy(alpha = 0.72f),
+                            )
+                        }
+                        item.voteCount?.takeIf { it > 0 }?.let { votes ->
+                            Text(
+                                text = if (votes >= 1000) "${votes / 1000}K votes" else "$votes votes",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = Snow.copy(alpha = 0.62f),
                             )
                         }
                     }
+                }
+
+                val overview = item?.overview.orEmpty()
+                if (overview.isNotBlank()) {
+                    Text(
+                        text = overview,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = Snow.copy(alpha = 0.84f),
+                        maxLines = 3,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.width(680.dp),
+                    )
                 }
             }
         }

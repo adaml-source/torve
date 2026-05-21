@@ -7,6 +7,11 @@ import com.torve.data.usenet.model.UsenetAvailability
 import com.torve.data.usenet.model.UsenetCandidatePayload
 import com.torve.data.usenet.model.UsenetCandidateUiModel
 import com.torve.data.usenet.model.UsenetResolvedStream
+import com.torve.domain.telemetry.NoOpTelemetryEmitter
+import com.torve.domain.telemetry.StreamPathDiagnostics
+import com.torve.domain.telemetry.StreamPathTelemetryContext
+import com.torve.domain.telemetry.StreamPlaybackPath
+import com.torve.domain.telemetry.TelemetryEmitter
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -48,6 +53,7 @@ class UsenetJobPoller(
     private val intervalMs: Long = DEFAULT_INTERVAL_MS,
     private val maxDurationMs: Long = DEFAULT_MAX_DURATION_MS,
     private val nowMs: () -> Long = { Clock.System.now().toEpochMilliseconds() },
+    private val telemetry: TelemetryEmitter = NoOpTelemetryEmitter(),
 ) {
     private val mutex = Mutex()
     private var active: ActivePoll? = null
@@ -127,6 +133,14 @@ class UsenetJobPoller(
                             // returns state=ready + stream immediately.
                             val hotStream = fetchHotCacheStream(contentId, candidate)
                             if (hotStream != null) {
+                                StreamPathDiagnostics.record(
+                                    path = StreamPlaybackPath.USENET_HANDOFF,
+                                    telemetry = telemetry,
+                                    context = StreamPathTelemetryContext(
+                                        contentType = contentTypeFromContentId(contentId),
+                                        providerCategory = "usenet",
+                                    ),
+                                )
                                 val withStream = updated.copy(resolvedStream = hotStream)
                                 onOutcome(PollOutcome.Ready(row = withStream, stream = hotStream))
                             } else {
@@ -224,6 +238,15 @@ class UsenetJobPoller(
             supportsRange = dto.supportsRange,
             streamId = dto.streamId,
         )
+    }
+
+    private fun contentTypeFromContentId(contentId: String): String {
+        val lower = contentId.lowercase()
+        return when {
+            "movie" in lower -> "movie"
+            "series" in lower || "show" in lower || "tv" in lower -> "series"
+            else -> "unknown"
+        }
     }
 
     private suspend fun bestEffortCancel(contentId: String, candidateId: String) {

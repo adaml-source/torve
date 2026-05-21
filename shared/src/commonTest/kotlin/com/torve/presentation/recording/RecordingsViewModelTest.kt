@@ -114,6 +114,46 @@ class RecordingsViewModelTest {
     }
 
     @Test
+    fun `cancel on active recording delegates to starter stop instead of marking cancelled`() = runTest {
+        val repo = InMemoryRecordingRepository()
+        val sch = RecordingScheduler(repo, nowMs = { now }, newId = { "rec-active" })
+        var stopCalls = 0
+        val starter = object : RecordingStarter {
+            override suspend fun stopRunning(id: String): Boolean {
+                stopCalls++
+                return true
+            }
+        }
+        val vm = RecordingsViewModel(
+            scheduler = sch,
+            repository = repo,
+            starter = starter,
+            scope = CoroutineScope(SupervisorJob() + UnconfinedTestDispatcher()),
+        )
+        repo.upsert(
+            Recording(
+                id = "rec-active",
+                playlistId = "p1",
+                channelId = "ch",
+                channelName = "BBC",
+                streamUrl = "http://x",
+                programmeTitle = "Live",
+                startMs = now,
+                endMs = now + ms(3600),
+                status = RecordingStatus.RECORDING,
+                filePath = "/recordings/live.ts",
+                createdAtMs = now,
+                startedAtMs = now,
+            ),
+        )
+
+        vm.cancel("rec-active")
+
+        assertEquals(1, stopCalls)
+        assertEquals(RecordingStatus.RECORDING, repo.get("rec-active")?.status)
+    }
+
+    @Test
     fun `completed bucket sorts most-recent first`() = runTest {
         val (repo, sch, vm) = fixture()
         // Two rows that already completed, with distinct completedAtMs.

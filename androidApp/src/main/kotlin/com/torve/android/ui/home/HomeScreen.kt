@@ -176,6 +176,12 @@ fun HomeScreen(
             }
         }
     }
+    val filteredUpcomingSchedule = remember(state.upcomingSchedule, mediaType) {
+        when (mediaType) {
+            "all", "tv" -> state.upcomingSchedule
+            else -> emptyList()
+        }
+    }
     val filteredWatchlist = remember(state.watchlistItems, mediaType) {
         if (mediaType == "all") state.watchlistItems
         else state.watchlistItems.filter { item ->
@@ -382,6 +388,38 @@ fun HomeScreen(
                                             text = stringResource(R.string.home_continue_watching_empty),
                                             icon = Icons.Rounded.BookmarkBorder,
                                         )
+                                    }
+                                }
+                            }
+
+                            HomeSection.UPCOMING_SCHEDULE -> if (isSignedIn && filteredUpcomingSchedule.isNotEmpty()) {
+                                item(key = "upcoming_schedule") {
+                                    androidx.compose.runtime.CompositionLocalProvider(
+                                        LocalCardStyle provides sectionStyle,
+                                    ) {
+                                        SectionHeader(
+                                            title = config.customTitle ?: "Upcoming Schedule",
+                                            action = stringResource(R.string.home_see_all),
+                                            onActionClick = {
+                                                SeeAllViewModel.pendingItems["upcoming_schedule"] =
+                                                    (config.customTitle ?: "Upcoming Schedule") to filteredUpcomingSchedule
+                                                onSeeAllClick("upcoming_schedule")
+                                            },
+                                        )
+                                        LazyRow(
+                                            contentPadding = PaddingValues(horizontal = 16.dp),
+                                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                        ) {
+                                            items(
+                                                filteredUpcomingSchedule.size,
+                                                key = { index -> "upcoming_${filteredUpcomingSchedule[index].id}_$index" },
+                                            ) { index ->
+                                                PosterCard(
+                                                    item = filteredUpcomingSchedule[index],
+                                                    onClick = { onMediaClick(filteredUpcomingSchedule[index]) },
+                                                )
+                                            }
+                                        }
                                     }
                                 }
                             }

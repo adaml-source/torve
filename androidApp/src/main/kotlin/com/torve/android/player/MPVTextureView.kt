@@ -34,7 +34,7 @@ class MPVTextureView @JvmOverloads constructor(
         pendingBindingToken = bindingToken
         pendingBindingReason = reason
         val texture = surfaceTexture ?: run {
-            Log.d(TAG, "Deferring mpv TextureView bind until surface is available reason=$reason token=$bindingToken")
+            Log.d(TAG, "Deferring mpv TextureView bind until surface is available reason=$reason bindId=$bindingToken")
             return
         }
         val surface = boundSurface?.takeIf { it.isValid } ?: Surface(texture).also { boundSurface = it }
@@ -47,7 +47,7 @@ class MPVTextureView @JvmOverloads constructor(
         if (surfaceAttached) {
             runCatching { MPVLib.detachSurface() }
         }
-        Log.d(TAG, "Binding mpv TextureView surface reason=$reason token=$bindingToken size=${width}x${height}")
+        Log.d(TAG, "Binding mpv TextureView surface reason=$reason bindId=$bindingToken size=${width}x${height}")
         MPVLib.attachSurface(surface)
         surfaceAttached = true
         lastBindingToken = bindingToken
@@ -56,7 +56,7 @@ class MPVTextureView @JvmOverloads constructor(
 
     fun releaseSurface(reason: String) {
         if (surfaceAttached) {
-            Log.d(TAG, "Releasing mpv TextureView surface reason=$reason token=${lastBindingToken ?: -1}")
+            Log.d(TAG, "Releasing mpv TextureView surface reason=$reason bindId=${lastBindingToken ?: -1}")
             runCatching { MPVLib.detachSurface() }
         }
         surfaceAttached = false

@@ -8,6 +8,7 @@ import com.torve.domain.model.MediaRatings
 import com.torve.domain.model.MediaType
 import com.torve.domain.model.extractImdbIdOrNull
 import com.torve.domain.model.extractTmdbIdOrNull
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
@@ -15,6 +16,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.sync.withPermit
+import kotlinx.coroutines.withContext
 import kotlinx.datetime.Clock
 
 class RatingsEnricher(
@@ -237,32 +239,18 @@ class RatingsEnricher(
         )
     }
 
-    suspend fun enrichList(items: List<MediaItem>, apiKey: String): List<MediaItem> = coroutineScope {
-        if (items.isEmpty()) return@coroutineScope items
-        val hadMdbKey = apiKey.isNotBlank()
-        // Snapshot cache state up front so the counters reflect *original*
-        // cache hits, not items that get cached mid-run by sibling fetches.
-        val cachedFlags = items.map { item ->
-            val key = item.tmdbId?.let { "${item.type.name}:$it" }
-            key != null && cacheRepo.getCached(key) != null
-        }
-        val enriched = items.mapIndexed { idx, item ->
+    suspend fun enrichList(items: List<MediaItem>, apiKey: String): List<MediaItem> = withContext(Dispatchers.Default) {
+        if (items.isEmpty()) return@withContext items
+        coroutineScope {
+        val enriched = items.map { item ->
             async {
                 globalSemaphore.withPermit {
                     runCatching { enrichSingle(item, apiKey) }.getOrDefault(item)
                 }
             }
         }.awaitAll()
-        var fetchedOk = 0
-        var fetchedFail = 0
-        enriched.forEachIndexed { idx, out ->
-            if (!cachedFlags[idx]) {
-                if (out.ratings?.imdbScore != null || out.ratings?.tmdbScore != null) fetchedOk++ else fetchedFail++
-            }
-        }
-        val cachedBefore = cachedFlags.count { it }
-        println("[RatingsEnricher] enrichList size=${items.size} cached=$cachedBefore fetchedOk=$fetchedOk fetchedMiss=$fetchedFail rateLimited=$rateLimited hadMdbKey=$hadMdbKey")
         enriched
+        }
     }
 
     /**

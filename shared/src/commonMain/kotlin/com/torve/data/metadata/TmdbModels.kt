@@ -41,6 +41,7 @@ data class TmdbMovie(
     val tagline: String? = null,
     val status: String? = null,
     @SerialName("imdb_id") val imdbId: String? = null,
+    @SerialName("production_companies") val productionCompanies: List<TmdbCompany> = emptyList(),
     val credits: TmdbCredits? = null,
     val videos: TmdbVideos? = null,
     val similar: TmdbResponse<TmdbMovie>? = null,
@@ -65,6 +66,8 @@ data class TmdbTv(
     val genres: List<TmdbGenre>? = null,
     val tagline: String? = null,
     val status: String? = null,
+    val networks: List<TmdbCompany> = emptyList(),
+    @SerialName("production_companies") val productionCompanies: List<TmdbCompany> = emptyList(),
     val credits: TmdbCredits? = null,
     val videos: TmdbVideos? = null,
     val seasons: List<TmdbSeason>? = null,
@@ -95,6 +98,14 @@ data class TmdbMultiResult(
 data class TmdbGenre(
     val id: Int,
     val name: String,
+)
+
+@Serializable
+data class TmdbCompany(
+    val id: Int,
+    val name: String = "",
+    @SerialName("logo_path") val logoPath: String? = null,
+    @SerialName("origin_country") val originCountry: String? = null,
 )
 
 @Serializable
@@ -257,6 +268,8 @@ data class TmdbImageItem(
 data class TmdbImages(
     val logos: List<TmdbImageItem> = emptyList(),
     val profiles: List<TmdbImageItem> = emptyList(),
+    val backdrops: List<TmdbImageItem> = emptyList(),
+    val posters: List<TmdbImageItem> = emptyList(),
 )
 
 @Serializable

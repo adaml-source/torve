@@ -14,6 +14,7 @@ import com.torve.data.trakt.TraktHistoryMovie
 import com.torve.data.trakt.TraktHistoryShow
 import com.torve.data.trakt.TraktIds
 import com.torve.data.trakt.TraktWatchlistBody
+import com.torve.data.trakt.api.TraktAuthorizationRequiredException
 import com.torve.db.TorveDatabase
 import com.torve.domain.integrations.IntegrationSecretKey
 import com.torve.domain.integrations.IntegrationSecretStore
@@ -21,6 +22,7 @@ import com.torve.domain.model.MediaType
 import com.torve.domain.model.WatchlistItem
 import com.torve.domain.repository.PreferencesRepository
 import com.torve.domain.repository.WatchlistRepository
+import com.torve.domain.repository.WatchlistMutationResult
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -86,54 +88,20 @@ class WatchlistRepositoryImpl(
         val userId = signedInUserIdOrNull() ?: return false
         return database.torveQueries.isInWatchlist(
             userId = userId,
-            mediaId = mediaId,
+            mediaId = mediaId.normalizeWatchlistMediaId(),
         ).executeAsOne() > 0
     }
 
     override suspend fun add(item: WatchlistItem) {
         val userId = signedInUserIdOrNull() ?: return
-        database.torveQueries.insertWatchlistItem(
-            user_id = userId,
-            media_id = item.mediaId,
-            media_type = when (item.mediaType) {
-                MediaType.MOVIE -> "movie"
-                MediaType.SERIES -> "series"
-            },
-            tmdb_id = item.tmdbId.toLong(),
-            imdb_id = item.imdbId,
-            title = item.title,
-            poster_url = item.posterUrl,
-            backdrop_url = item.backdropUrl,
-            rating = item.rating,
-            year = item.year?.toLong(),
-            genres = item.genres,
-            added_at = item.addedAt,
-            sort_order = item.sortOrder.toLong(),
-        )
+        insertLocal(userId, item)
         syncTraktAdd(item)
         syncSimklAdd(item)
     }
 
     override suspend fun add(item: WatchlistItem, syncTrakt: Boolean, syncSimkl: Boolean) {
         val userId = signedInUserIdOrNull() ?: return
-        database.torveQueries.insertWatchlistItem(
-            user_id = userId,
-            media_id = item.mediaId,
-            media_type = when (item.mediaType) {
-                MediaType.MOVIE -> "movie"
-                MediaType.SERIES -> "series"
-            },
-            tmdb_id = item.tmdbId.toLong(),
-            imdb_id = item.imdbId,
-            title = item.title,
-            poster_url = item.posterUrl,
-            backdrop_url = item.backdropUrl,
-            rating = item.rating,
-            year = item.year?.toLong(),
-            genres = item.genres,
-            added_at = item.addedAt,
-            sort_order = item.sortOrder.toLong(),
-        )
+        insertLocal(userId, item)
         if (syncTrakt) syncTraktAdd(item)
         if (syncSimkl) syncSimklAdd(item)
     }
@@ -155,6 +123,65 @@ class WatchlistRepositoryImpl(
                 imdbId = it.imdb_id,
                 isMovie = it.media_type == "movie",
             )
+        }
+    }
+
+    override suspend fun addToTraktWatchlist(item: WatchlistItem): WatchlistMutationResult {
+        val userId = signedInUserIdOrNull()
+            ?: return WatchlistMutationResult.Failed(item.mediaId.normalizeWatchlistMediaId())
+        val normalizedItem = item.copy(mediaId = item.mediaId.normalizeWatchlistMediaId())
+        if (!normalizedItem.hasTraktMutationIds() || normalizedItem.title.isBlank()) {
+            return WatchlistMutationResult.InsufficientMetadata(normalizedItem.mediaId)
+        }
+        return try {
+            traktApi.addToWatchlist(normalizedItem.toTraktWatchlistBody())
+            insertLocal(userId, normalizedItem)
+            WatchlistMutationResult.Success(
+                mediaId = normalizedItem.mediaId,
+                isInWatchlist = true,
+                item = normalizedItem,
+            )
+        } catch (error: Exception) {
+            if (error.isMissingTraktConnection()) {
+                WatchlistMutationResult.MissingTraktConnection(normalizedItem.mediaId)
+            } else {
+                WatchlistMutationResult.Failed(normalizedItem.mediaId)
+            }
+        }
+    }
+
+    override suspend fun removeFromTraktWatchlist(mediaId: String): WatchlistMutationResult {
+        val userId = signedInUserIdOrNull()
+            ?: return WatchlistMutationResult.Failed(mediaId.normalizeWatchlistMediaId())
+        val normalizedMediaId = mediaId.normalizeWatchlistMediaId()
+        val item = getLocalItem(userId, normalizedMediaId)
+            ?: return WatchlistMutationResult.InsufficientMetadata(normalizedMediaId)
+        if (!item.hasTraktMutationIds()) {
+            return WatchlistMutationResult.InsufficientMetadata(normalizedMediaId)
+        }
+        return try {
+            traktApi.removeFromWatchlist(item.toTraktWatchlistBody())
+            database.torveQueries.removeFromWatchlist(userId = userId, mediaId = normalizedMediaId)
+            WatchlistMutationResult.Success(
+                mediaId = normalizedMediaId,
+                isInWatchlist = false,
+                item = item,
+            )
+        } catch (error: Exception) {
+            if (error.isMissingTraktConnection()) {
+                WatchlistMutationResult.MissingTraktConnection(normalizedMediaId)
+            } else {
+                WatchlistMutationResult.Failed(normalizedMediaId)
+            }
+        }
+    }
+
+    override suspend fun toggleTraktWatchlist(item: WatchlistItem): WatchlistMutationResult {
+        val mediaId = item.mediaId.normalizeWatchlistMediaId()
+        return if (isInWatchlist(mediaId)) {
+            removeFromTraktWatchlist(mediaId)
+        } else {
+            addToTraktWatchlist(item.copy(mediaId = mediaId))
         }
     }
 
@@ -264,6 +291,69 @@ class WatchlistRepositoryImpl(
         }
     }
 
+    private fun insertLocal(userId: String, item: WatchlistItem) {
+        database.torveQueries.insertWatchlistItem(
+            user_id = userId,
+            media_id = item.mediaId.normalizeWatchlistMediaId(),
+            media_type = when (item.mediaType) {
+                MediaType.MOVIE -> "movie"
+                MediaType.SERIES -> "series"
+            },
+            tmdb_id = item.tmdbId.toLong(),
+            imdb_id = item.imdbId,
+            title = item.title,
+            poster_url = item.posterUrl,
+            backdrop_url = item.backdropUrl,
+            rating = item.rating,
+            year = item.year?.toLong(),
+            genres = item.genres,
+            added_at = item.addedAt,
+            sort_order = item.sortOrder.toLong(),
+        )
+    }
+
+    private fun getLocalItem(userId: String, mediaId: String): WatchlistItem? {
+        return database.torveQueries.getAllWatchlist(userId = userId).executeAsList()
+            .firstOrNull { it.media_id.normalizeWatchlistMediaId() == mediaId.normalizeWatchlistMediaId() }
+            ?.let { row ->
+                WatchlistItem(
+                    mediaId = row.media_id.normalizeWatchlistMediaId(),
+                    mediaType = MediaType.fromString(row.media_type),
+                    tmdbId = row.tmdb_id.toInt(),
+                    imdbId = row.imdb_id,
+                    title = row.title,
+                    posterUrl = row.poster_url,
+                    backdropUrl = row.backdrop_url,
+                    rating = row.rating,
+                    year = row.year?.toInt(),
+                    genres = row.genres,
+                    addedAt = row.added_at,
+                    sortOrder = row.sort_order.toInt(),
+                )
+            }
+    }
+
+    private fun WatchlistItem.hasTraktMutationIds(): Boolean =
+        tmdbId > 0 || !imdbId.isNullOrBlank()
+
+    private fun WatchlistItem.toTraktWatchlistBody(): TraktWatchlistBody {
+        val ids = TraktIds(
+            tmdb = tmdbId.takeIf { it > 0 },
+            imdb = imdbId?.takeIf { it.isNotBlank() },
+        )
+        return if (mediaType == MediaType.MOVIE) {
+            TraktWatchlistBody(movies = listOf(TraktHistoryMovie(ids)))
+        } else {
+            TraktWatchlistBody(shows = listOf(TraktHistoryShow(ids)))
+        }
+    }
+
+    private fun Throwable.isMissingTraktConnection(): Boolean =
+        this is TraktAuthorizationRequiredException ||
+            message?.contains("Trakt not connected", ignoreCase = true) == true ||
+            message?.contains("authentication required", ignoreCase = true) == true ||
+            message?.contains("Reconnect Trakt", ignoreCase = true) == true
+
     private fun syncTraktAdd(item: WatchlistItem) {
         syncScope.launch {
             try {
@@ -343,4 +433,12 @@ class WatchlistRepositoryImpl(
             }
         }
     }
+}
+
+private fun String.normalizeWatchlistMediaId(): String {
+    val parts = split(":")
+    if (parts.firstOrNull()?.lowercase() != "tmdb") return this
+    return parts.lastOrNull()?.takeIf { part ->
+        part.isNotBlank() && part.all { it in '0'..'9' }
+    } ?: this
 }

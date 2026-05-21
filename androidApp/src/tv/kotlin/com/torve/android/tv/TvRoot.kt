@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.util.Log
+import com.torve.domain.diagnostics.DiagnosticsRedactor
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -76,7 +77,7 @@ import com.torve.android.premium.rememberEffectivePremiumAccessTier
 import com.torve.android.session.PostSignInRefresh
 import com.torve.android.sync.SyncCoordinator
 import com.torve.android.sync.model.SyncInboundEvent
-import com.torve.android.tv.components.TvFocusDetailsPanel
+import com.torve.android.tv.components.TvBrowseLayout
 import com.torve.android.tv.components.TvHeroBackground
 import com.torve.android.tv.components.TvHeroOverlay
 import com.torve.android.tv.components.TvLifetimeUnlockDialog
@@ -107,6 +108,7 @@ import com.torve.android.tv.screens.TvPairedDevicesScreen
 import com.torve.android.tv.screens.TvSettingsCategory
 import com.torve.android.tv.screens.TvSettingsScreen
 import com.torve.android.tv.screens.TvShowsScreen
+import com.torve.android.tv.screens.TvSearchScreen
 import com.torve.android.tv.screens.TvVodSeriesDetailsArgs
 import com.torve.android.ui.theme.AmberSubtle
 import com.torve.android.ui.theme.Charcoal
@@ -132,6 +134,7 @@ import com.torve.presentation.providerhealth.ProviderHealthRecoveryStateProvider
 import com.torve.presentation.settings.SettingsViewModel
 import com.torve.presentation.subscription.SubscriptionViewModel
 import com.torve.presentation.transfer.TransferImportCompletionNotifier
+import com.torve.presentation.watchlist.WatchlistMutationState
 import com.torve.presentation.watchlist.WatchlistViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -269,6 +272,7 @@ fun TvRoot(
 
     val authUser by authClient.authUserFlow.collectAsState()
     val mediaFavoritesState by mediaFavoritesRepository.state.collectAsState()
+    val watchlistState by watchlistViewModel.state.collectAsState()
     val signedInUserId = authUser?.id?.takeIf { it.isNotBlank() }
     val isSignedIn = signedInUserId != null
     val syncState by syncCoordinator.state.collectAsState()
@@ -338,6 +342,18 @@ fun TvRoot(
         currentSubRoute?.startsWith("tv_live_player") == true
     val hideRailForIptv by TvIptvRailState.hideRail
 
+    LaunchedEffect(watchlistState.snackbarMessage, isSubRouteActive) {
+        val message = watchlistState.snackbarMessage?.takeIf { it.isNotBlank() } ?: return@LaunchedEffect
+        if (isSubRouteActive) return@LaunchedEffect
+        val notificationType = if (watchlistState.mutationState is WatchlistMutationState.Error) {
+            NotificationType.ERROR
+        } else {
+            NotificationType.SUCCESS
+        }
+        TvNotificationQueue.post(message, notificationType)
+        watchlistViewModel.clearSnackbar()
+    }
+
     /* ── Tab state ─────────────────────────────────────────────────────────────────────── */
     /** The tab currently highlighted by D-pad focus on the rail. Changes on Up/Down. */
     var highlightedTopRoute by rememberSaveable { mutableStateOf(TvRoutes.HOME) }
@@ -387,6 +403,8 @@ fun TvRoot(
     val firstContentFocusByRoute = remember { mutableStateMapOf<String, FocusRequester>() }
     val lastFocusedContentByRoute = remember { mutableStateMapOf<String, FocusRequester>() }
     val focusHandlesByRoute = remember { mutableStateMapOf<String, TvScreenFocusHandle>() }
+    var contentFocusEpoch by remember { mutableIntStateOf(0) }
+    var focusedContentRoute by remember { mutableStateOf<String?>(null) }
     val focusReturnStack = remember { mutableStateListOf<TvFocusBackStackEntry>() }
     var pendingFocusBackRestore by remember { mutableStateOf<TvFocusBackStackEntry?>(null) }
     val topLevelRoutes = remember { tvTopDestinations.map { it.route }.toSet() }
@@ -443,6 +461,12 @@ fun TvRoot(
         }
     }
     var focusedMediaItem by remember { mutableStateOf<MediaItem?>(null) }
+
+    fun markContentFocused(route: String, requester: FocusRequester) {
+        lastFocusedContentByRoute[route] = requester
+        focusedContentRoute = route
+        contentFocusEpoch += 1
+    }
     val mediaFavoritesPrefKey = remember(signedInUserId) {
         signedInUserId?.let { "$TV_PREF_KEY_MEDIA_FAVORITES:$it" }
     }
@@ -486,10 +510,15 @@ fun TvRoot(
     /* ── Clearlogo cache: lazy-fetch logos for focused browse items ─────────────────── */
     val logoCache = remember { mutableStateMapOf<String, String?>() }
     val logoLoadingByKey = remember { mutableStateMapOf<String, Boolean>() }
+    val heroDetailCache = remember { mutableStateMapOf<String, MediaItem?>() }
+    var lastBrowseFocusKey by remember { mutableStateOf<String?>(null) }
 
     val onBrowseMediaFocused: (MediaItem) -> Unit = remember(logoCache, logoLoadingByKey) {
-        { item ->
+        onFocus@{ item ->
             val tmdbId = item.tmdbId
+            val focusKey = tmdbId?.let { "${item.type}:$it" } ?: "${item.type}:${item.id}"
+            if (focusKey == lastBrowseFocusKey) return@onFocus
+            lastBrowseFocusKey = focusKey
             if (tmdbId == null) {
                 focusedMediaItem = item
             } else {
@@ -504,12 +533,7 @@ fun TvRoot(
                         focusedMediaItem = item.copy(logoUrl = logoCache[cacheKey])
                         logoLoadingByKey.remove(cacheKey)
                     }
-                    cacheKey in logoCache -> {
-                        // Known-missing logo; avoid repeated loading state churn.
-                        focusedMediaItem = item
-                        logoLoadingByKey.remove(cacheKey)
-                    }
-                    cacheKey !in logoCache -> {
+                    else -> {
                         focusedMediaItem = item
                         // Mark immediately so the panel can avoid text-first flash.
                         logoLoadingByKey[cacheKey] = true
@@ -528,10 +552,8 @@ fun TvRoot(
             return@LaunchedEffect
         }
         val cacheKey = "${item.type}:$tmdbId"
-        // Already resolved (could be null = no logo available)
-        if (cacheKey in logoCache) {
-            val cached = logoCache[cacheKey]
-            if (cached != null && focusedMediaItem?.tmdbId == tmdbId) {
+        logoCache[cacheKey]?.let { cached ->
+            if (focusedMediaItem?.tmdbId == tmdbId) {
                 focusedMediaItem = item.copy(logoUrl = cached)
             }
             logoLoadingByKey.remove(cacheKey)
@@ -544,8 +566,23 @@ fun TvRoot(
             // Check if focus already moved on
             if (focusedMediaItem?.tmdbId != tmdbId) return@LaunchedEffect
             val type = if (item.type == MediaType.MOVIE) "movie" else "tv"
-            val url = withContext(Dispatchers.IO) { metadataRepo.getLogoUrl(type, tmdbId) }
-            logoCache[cacheKey] = url
+            val (detail, url) = withContext(Dispatchers.IO) {
+                val directLogo = runCatching { metadataRepo.getLogoUrl(type, tmdbId) }
+                    .getOrNull()
+                    ?.takeIf { it.isNotBlank() }
+                if (directLogo != null) {
+                    null to directLogo
+                } else {
+                    val detail = runCatching { metadataRepo.getDetail(type, tmdbId) }.getOrNull()
+                    detail to detail?.logoUrl?.takeIf { it.isNotBlank() }
+                }
+            }
+            detail?.let { heroDetailCache[cacheKey] = it }
+            if (url != null) {
+                logoCache[cacheKey] = url
+            } else {
+                logoCache.remove(cacheKey)
+            }
             // Only update if still the focused item
             if (focusedMediaItem?.tmdbId == tmdbId && url != null) {
                 focusedMediaItem = focusedMediaItem?.copy(logoUrl = url)
@@ -596,7 +633,6 @@ fun TvRoot(
             restoreProgress.phase == com.torve.presentation.session.RestorePhase.COMPLETED ||
             restoreProgress.phase == com.torve.presentation.session.RestorePhase.COMPLETED_WITH_ERRORS
         ) {
-            PostSignInRefresh.enqueueStartupCacheWarmup(context)
             syncCoordinator.refreshDevices()
             subscriptionViewModel.loadSubscription()
         }
@@ -607,6 +643,7 @@ fun TvRoot(
     var focusRestoreTrigger by remember { mutableStateOf(0) }
     var railInteractionEpoch by remember { mutableStateOf(0) }
     var pendingContentEntryRoute by remember { mutableStateOf<String?>(null) }
+    var contentEntryRequestNonce by remember { mutableIntStateOf(0) }
     var pendingRailEntryRoute by remember { mutableStateOf<String?>(null) }
     var pendingRailEntryRequestNonce by remember { mutableIntStateOf(0) }
     var pendingSettingsSubpageEntryRoute by remember { mutableStateOf<String?>(null) }
@@ -626,6 +663,7 @@ fun TvRoot(
     var previousIsRailFocused by remember { mutableStateOf(isRailFocused) }
     var backgroundWorkWasBlocking by remember { mutableStateOf(false) }
     var backgroundWorkWasVisible by remember { mutableStateOf(false) }
+    var suppressNextSeeAllReturnFocusRestore by remember { mutableStateOf(false) }
 
     LaunchedEffect(backgroundWorkStatus.blockNavigation) {
         if (backgroundWorkWasBlocking && !backgroundWorkStatus.blockNavigation) {
@@ -666,13 +704,12 @@ fun TvRoot(
     }
 
     val contentTopRoute = selectedTopRoute
+    val heroPreviewRoute = if (isRailFocused) highlightedTopRoute else selectedTopRoute
     val heroRoutes = remember { setOf(TvRoutes.HOME, TvRoutes.MOVIES, TvRoutes.SHOWS, TvRoutes.LIBRARY) }
-    val infoPanelRoutes = remember { setOf(TvRoutes.HOME, TvRoutes.MOVIES, TvRoutes.SHOWS) }
     val showRail = !isPlayerRoute && !isSubRouteActive &&
         !(selectedTopRoute == TvRoutes.IPTV && hideRailForIptv)
-    val showHero = !isPlayerRoute && !isSubRouteActive && contentTopRoute in heroRoutes
-    val showInfoPanel = !isPlayerRoute && !isSubRouteActive && !isRailFocused &&
-        contentTopRoute in infoPanelRoutes && focusedMediaItem != null
+    val showHero = !isPlayerRoute && !isSubRouteActive && heroPreviewRoute in heroRoutes
+    val showInfoPanel = false
     val focusedLogoKey = focusedMediaItem?.tmdbId?.let { tmdbId ->
         focusedMediaItem?.let { item -> "${item.type}:$tmdbId" }
     }
@@ -777,9 +814,11 @@ fun TvRoot(
                 Log.d("TvFocusRestore", "root_focus_restore_cancelled railOwnsFocus=true")
                 return@LaunchedEffect
             }
-            // After each delay, check if focus already landed on content (e.g.
-            // the user pressed right again, or a previous attempt took effect).
-            if (!isRailFocused && pendingContentEntryRoute != null) {
+            // After each delay, check if focus actually landed on content.
+            // Do not use "rail lost focus" as the signal: Compose can briefly
+            // drop focus between the rail item and the content node, and that
+            // was cancelling restore while no content requester owned focus.
+            if (pendingContentEntryRoute != null && focusedContentRoute == pendingContentEntryRoute) {
                 pendingContentEntryRoute = null
                 return@LaunchedEffect
             }
@@ -798,20 +837,32 @@ fun TvRoot(
                     firstContentFocusRequester = firstContentFocusByRoute[TvRoutes.SETTINGS],
                 )
             } else {
-                listOfNotNull(
-                    lastFocusedContentByRoute[activeRoute],
-                    firstContentFocusByRoute[activeRoute],
-                )
+                if (
+                    activeRoute == TvRoutes.MOVIES ||
+                    activeRoute == TvRoutes.SHOWS ||
+                    activeRoute == TvRoutes.HOME ||
+                    activeRoute == TvRoutes.SEARCH
+                ) {
+                    listOfNotNull(
+                        lastFocusedContentByRoute[activeRoute],
+                        firstContentFocusByRoute[activeRoute],
+                    )
+                } else {
+                    listOfNotNull(
+                        lastFocusedContentByRoute[activeRoute],
+                        firstContentFocusByRoute[activeRoute],
+                    )
+                }
             }
-            val candidates = settingsCandidates + listOfNotNull(
-                headerPrimaryActionRequester.takeIf { activeRoute in heroRoutes },
-            )
+            val candidates = settingsCandidates
             for (candidate in candidates) {
                 try {
+                    val beforeEpoch = contentFocusEpoch
                     candidate.requestFocus()
-                    // Wait a frame, then verify focus actually left the rail
+                    // Wait a frame, then verify a content node reported focus.
                     kotlinx.coroutines.yield()
-                    if (!isRailFocused) {
+                    withFrameNanos { }
+                    if (contentFocusEpoch != beforeEpoch && focusedContentRoute == activeRoute) {
                         pendingContentEntryRoute = null
                         return@LaunchedEffect
                     }
@@ -857,6 +908,13 @@ fun TvRoot(
             pendingNavJob = null
         }
         if (!isSubRouteActive) {
+            if (suppressNextSeeAllReturnFocusRestore) {
+                suppressNextSeeAllReturnFocusRestore = false
+                pendingFocusBackRestore = null
+                pendingContentEntryRoute = null
+                pendingRailEntryRoute = null
+                return@LaunchedEffect
+            }
             // Returning from a sub-route (See All, Details, etc.) — restore focus to
             // the content page, not the rail. Clear stale focus requesters that were
             // registered while the tab had canFocus=false during the sub-route overlay.
@@ -1224,13 +1282,13 @@ fun TvRoot(
                         null
                     }
                     if (payload != null) {
-                        Log.d("TvRoot", "Settings payload: ${payload.addons.size} addons, ${payload.preferences.size} prefs, ${payload.channelPlaylists.size} playlists, ${payload.channelFavorites.size} favorites, ${payload.watchProgress.size} progress, ${payload.integrationSecrets.size} secrets")
+                        Log.d("TvRoot", "Settings payload: ${payload.addons.size} addons, ${payload.preferences.size} prefs, ${payload.channelPlaylists.size} playlists, ${payload.channelFavorites.size} favorites, ${payload.watchProgress.size} progress, ${payload.integrationSecrets.size} integration rows")
                         val result = try {
                             withContext(Dispatchers.IO) {
                                 syncRepository.importSyncPayload(payload)
                             }
                         } catch (e: Exception) {
-                            Log.e("TvRoot", "Failed to import settings", e)
+                            Log.e("TvRoot", "Failed to import settings: ${e::class.simpleName} ${DiagnosticsRedactor.redact(e.message)}")
                             TvNotificationQueue.post(
                                 context.getString(
                                     R.string.tv_notification_sync_import_failed,
@@ -1350,45 +1408,180 @@ fun TvRoot(
     /* ── Featured hero item ────────────────────────────────────────────────────────────── */
     // Use highlightedTopRoute so the hero updates immediately during rail navigation,
     // not after the 250ms debounce that controls selectedTopRoute.
-    val heroRoute = if (isRailFocused) highlightedTopRoute else selectedTopRoute
+    val heroRoute = heroPreviewRoute
     val featuredCacheKey = "featured:$heroRoute"
     val featuredInitialValue = remember(featuredCacheKey) {
         TvScreenCache.get<MediaItem>(featuredCacheKey)
             ?: if (heroRoute == TvRoutes.HOME) TvScreenCache.get("featured:${TvRoutes.MOVIES}") else null
     }
-    val featuredItem by produceState<MediaItem?>(
-        initialValue = featuredInitialValue,
+    val featuredItems by produceState<List<MediaItem>>(
+        initialValue = listOfNotNull(featuredInitialValue),
         heroRoute,
         signedInUserId,
         metadataRepo,
     ) {
         val loaded = try {
             when (heroRoute) {
-                TvRoutes.MOVIES -> metadataRepo.getTrending("movie").firstOrNull()
-                TvRoutes.SHOWS -> metadataRepo.getTrending("tv").firstOrNull()
-                TvRoutes.HOME -> metadataRepo.getTrending("movie").firstOrNull()
-                    ?: metadataRepo.getPopular("movie").firstOrNull()
-                else -> null
+                TvRoutes.MOVIES -> metadataRepo.getTrending("movie")
+                    .ifEmpty { metadataRepo.discover(type = "movie", sortBy = "popularity.desc").items }
+                TvRoutes.SHOWS -> metadataRepo.getTrending("tv")
+                    .ifEmpty { metadataRepo.discover(type = "tv", sortBy = "popularity.desc").items }
+                TvRoutes.HOME -> metadataRepo.getTrending("movie")
+                    .ifEmpty { metadataRepo.getPopular("movie") }
+                    .ifEmpty { metadataRepo.discover(type = "movie", sortBy = "popularity.desc").items }
+                else -> emptyList()
             }
         } catch (_: Throwable) {
-            null
+            emptyList()
         }
-        if (loaded != null) {
-            TvScreenCache.put(featuredCacheKey, loaded)
+        val usable = loaded
+            .filter { !it.backdropUrl.isNullOrBlank() || !it.posterUrl.isNullOrBlank() }
+            .distinctBy { "${it.type}:${it.tmdbId ?: it.id}" }
+            .take(12)
+        if (usable.isNotEmpty()) {
+            TvScreenCache.put(featuredCacheKey, usable.first())
         }
-        value = loaded ?: TvScreenCache.get(featuredCacheKey)
+        value = usable.ifEmpty { listOfNotNull(TvScreenCache.get(featuredCacheKey)) }
+    }
+    var featuredItemIndex by remember(heroRoute) { mutableIntStateOf(0) }
+    LaunchedEffect(heroRoute, featuredItems, isSubRouteActive) {
+        featuredItemIndex = 0
+        if (featuredItems.size <= 1) return@LaunchedEffect
+        while (true) {
+            delay(6_500L)
+            if (!isSubRouteActive) {
+                featuredItemIndex = (featuredItemIndex + 1) % featuredItems.size
+            }
+        }
+    }
+    val featuredItem = featuredItems.getOrNull(
+        featuredItemIndex.coerceIn(0, (featuredItems.size - 1).coerceAtLeast(0)),
+    ) ?: featuredInitialValue
+
+    fun MediaItem.matchesHeroRoute(route: String): Boolean = when (route) {
+        TvRoutes.MOVIES -> type == MediaType.MOVIE
+        TvRoutes.SHOWS -> type == MediaType.SERIES
+        TvRoutes.HOME,
+        TvRoutes.LIBRARY -> true
+        else -> false
     }
 
     val displayedFeaturedItem = if (isRailFocused) {
-        // On the rail, show the per-tab featured item (responds to highlightedTopRoute)
-        featuredItem
+        // During rail navigation prefer the per-tab hero, but do not leave the
+        // backdrop blank if the root-level fetch is still resolving and the
+        // active catalog page has already published its first trending item.
+        featuredItem ?: focusedMediaItem?.takeIf { it.matchesHeroRoute(heroRoute) }
     } else {
         focusedMediaItem?.takeIf { item ->
-            !item.backdropUrl.isNullOrBlank() || !item.posterUrl.isNullOrBlank()
+            item.matchesHeroRoute(heroRoute) &&
+                (!item.backdropUrl.isNullOrBlank() || !item.posterUrl.isNullOrBlank())
         } ?: featuredItem
     }
 
+    LaunchedEffect(displayedFeaturedItem?.type, displayedFeaturedItem?.tmdbId) {
+        val item = displayedFeaturedItem ?: return@LaunchedEffect
+        val tmdbId = item.tmdbId ?: return@LaunchedEffect
+        val cacheKey = "${item.type}:$tmdbId"
+        if (heroDetailCache[cacheKey] != null) return@LaunchedEffect
+
+        val needsDetail = item.overview.isNullOrBlank() ||
+            item.logoUrl.isNullOrBlank() ||
+            item.ratings == null ||
+            item.runtime == null ||
+            item.genres.isEmpty()
+        if (!needsDetail) {
+            heroDetailCache[cacheKey] = item
+            return@LaunchedEffect
+        }
+
+        delay(120)
+        val type = if (item.type == MediaType.MOVIE) "movie" else "tv"
+        val detail = withContext(Dispatchers.IO) {
+            runCatching { metadataRepo.getDetail(type, tmdbId) }.getOrNull()
+        }
+        heroDetailCache[cacheKey] = detail
+        detail?.logoUrl?.takeIf { it.isNotBlank() }?.let { logoUrl ->
+            logoCache[cacheKey] = logoUrl
+            logoLoadingByKey.remove(cacheKey)
+        }
+    }
+
     /* ── Section titles ────────────────────────────────────────────────────────────────── */
+    LaunchedEffect(
+        displayedFeaturedItem?.type,
+        displayedFeaturedItem?.tmdbId,
+        displayedFeaturedItem?.logoUrl,
+    ) {
+        val item = displayedFeaturedItem ?: return@LaunchedEffect
+        val tmdbId = item.tmdbId ?: return@LaunchedEffect
+        val cacheKey = "${item.type}:$tmdbId"
+        if (!item.logoUrl.isNullOrBlank()) {
+            logoCache[cacheKey] = item.logoUrl
+            logoLoadingByKey.remove(cacheKey)
+            return@LaunchedEffect
+        }
+        if (logoCache[cacheKey] != null) return@LaunchedEffect
+
+        logoLoadingByKey[cacheKey] = true
+        try {
+            delay(80)
+            val type = if (item.type == MediaType.MOVIE) "movie" else "tv"
+            val (detail, url) = withContext(Dispatchers.IO) {
+                val directLogo = runCatching { metadataRepo.getLogoUrl(type, tmdbId) }
+                    .getOrNull()
+                    ?.takeIf { it.isNotBlank() }
+                if (directLogo != null) {
+                    null to directLogo
+                } else {
+                    val detail = runCatching { metadataRepo.getDetail(type, tmdbId) }.getOrNull()
+                    detail to detail?.logoUrl?.takeIf { it.isNotBlank() }
+                }
+            }
+            detail?.let {
+                heroDetailCache[cacheKey] = it
+            }
+            if (url != null) {
+                logoCache[cacheKey] = url
+            } else {
+                logoCache.remove(cacheKey)
+            }
+        } finally {
+            logoLoadingByKey.remove(cacheKey)
+        }
+    }
+
+    val displayedHeroItem = displayedFeaturedItem?.let { item ->
+        val tmdbId = item.tmdbId
+        val detail = tmdbId?.let { heroDetailCache["${item.type}:$it"] }
+        val enriched = if (detail == null) {
+            item
+        } else {
+            item.copy(
+                imdbId = item.imdbId ?: detail.imdbId,
+                year = item.year ?: detail.year,
+                overview = item.overview?.takeIf { it.isNotBlank() } ?: detail.overview,
+                posterUrl = item.posterUrl?.takeIf { it.isNotBlank() } ?: detail.posterUrl,
+                backdropUrl = item.backdropUrl?.takeIf { it.isNotBlank() } ?: detail.backdropUrl,
+                logoUrl = item.logoUrl?.takeIf { it.isNotBlank() } ?: detail.logoUrl,
+                rating = item.rating ?: detail.rating,
+                voteCount = item.voteCount ?: detail.voteCount,
+                runtime = item.runtime ?: detail.runtime,
+                genres = if (item.genres.isNotEmpty()) item.genres else detail.genres,
+                genreIds = if (item.genreIds.isNotEmpty()) item.genreIds else detail.genreIds,
+                releaseDate = item.releaseDate?.takeIf { it.isNotBlank() } ?: detail.releaseDate,
+                status = item.status?.takeIf { it.isNotBlank() } ?: detail.status,
+                trailerKey = item.trailerKey?.takeIf { it.isNotBlank() } ?: detail.trailerKey,
+                tagline = item.tagline?.takeIf { it.isNotBlank() } ?: detail.tagline,
+                ratings = item.ratings ?: detail.ratings,
+            )
+        }
+        if (!enriched.logoUrl.isNullOrBlank() || tmdbId == null) {
+            enriched
+        } else {
+            logoCache["${item.type}:$tmdbId"]?.let { logoUrl -> enriched.copy(logoUrl = logoUrl) } ?: enriched
+        }
+    }
+
     val sectionTitle = when (contentTopRoute) {
         TvRoutes.MOVIES -> stringResource(R.string.nav_movies)
         TvRoutes.SHOWS -> stringResource(R.string.nav_tv_shows)
@@ -1422,6 +1615,8 @@ fun TvRoot(
     }
 
     fun requestContentFocusFromRail(route: String) {
+        pendingContentEntryRoute = route
+        contentEntryRequestNonce += 1
         val candidates = if (route == TvRoutes.SETTINGS) {
             orderedSettingsEntryCandidates(
                 settingsEntryRequester = settingsEntryRequester,
@@ -1429,17 +1624,30 @@ fun TvRoot(
                 firstContentFocusRequester = firstContentFocusByRoute[TvRoutes.SETTINGS],
             )
         } else {
-            listOfNotNull(
-                lastFocusedContentByRoute[route],
-                firstContentFocusByRoute[route],
-            )
+            if (
+                route == TvRoutes.MOVIES ||
+                route == TvRoutes.SHOWS ||
+                route == TvRoutes.HOME ||
+                route == TvRoutes.SEARCH
+            ) {
+                listOfNotNull(
+                    lastFocusedContentByRoute[route],
+                    firstContentFocusByRoute[route],
+                )
+            } else {
+                listOfNotNull(
+                    lastFocusedContentByRoute[route],
+                    firstContentFocusByRoute[route],
+                )
+            }
         }
         rootScope.launch {
             for (candidate in candidates) {
+                val beforeEpoch = contentFocusEpoch
                 val movedFocus = runCatching {
                     candidate.requestFocus()
                     withFrameNanos { }
-                    !isRailFocused
+                    contentFocusEpoch != beforeEpoch && focusedContentRoute == route
                 }.getOrDefault(false)
                 if (movedFocus) {
                     pendingContentEntryRoute = null
@@ -1684,15 +1892,7 @@ fun TvRoot(
                     }
 
                     TV_CONTEXT_ACTION_TOGGLE_WATCHLIST -> {
-                        val currentlyInWatchlist = watchlistViewModel.isInWatchlist(item.id)
                         watchlistViewModel.toggleWatchlist(item)
-                        TvNotificationQueue.post(
-                            if (currentlyInWatchlist) {
-                                context.getString(R.string.tv_notification_watchlist_removed, item.title)
-                            } else {
-                                context.getString(R.string.tv_notification_watchlist_added, item.title)
-                            },
-                        )
                     }
 
                     TV_CONTEXT_ACTION_TOGGLE_FAVORITES -> {
@@ -1787,13 +1987,7 @@ fun TvRoot(
     TvScaffold(
         isFullscreen = isPlayerRoute || !showRail,
         showInfoPanel = showInfoPanel,
-        infoPanel = {
-            TvFocusDetailsPanel(
-                focusedItem = focusedMediaItem,
-                logoLookupInFlight = focusedLogoLookupInFlight,
-                logoLookupResolved = focusedLogoLookupResolved,
-            )
-        },
+        infoPanel = null,
         leftRail = {
             // Always compose the rail so railFocusRequester stays attached.
             // Screens reference it in focusProperties { left = railFocusRequester };
@@ -1818,6 +2012,7 @@ fun TvRoot(
                     onRailFocusChanged = { hasFocus ->
                         isRailFocused = hasFocus
                         if (hasFocus) {
+                            focusedContentRoute = null
                             railInteractionEpoch++
                         }
                         // Only collapse immediately; expansion is debounced below
@@ -1901,8 +2096,8 @@ fun TvRoot(
         },
         background = {
             if (showHero) {
-                key(displayedFeaturedItem?.tmdbId, displayedFeaturedItem?.type) {
-                    TvHeroBackground(featuredItem = displayedFeaturedItem)
+                key(displayedHeroItem?.tmdbId, displayedHeroItem?.type) {
+                    TvHeroBackground(featuredItem = displayedHeroItem)
                 }
             }
         },
@@ -1930,12 +2125,15 @@ fun TvRoot(
                 // presses a direction key — the crash is caught and swallowed by
                 // TvMainActivity, but Compose's focus state ends up stuck.
                 // Pass null downstream when the requester isn't safe to target.
-                val heroPrimaryActionRequester = headerPrimaryActionRequester
-                    .takeIf { displayedFeaturedItem != null }
+                val heroPrimaryActionRequester: FocusRequester? = null
 
                 // Shared hero overlay content — only attached to the visible tab.
                 val heroOverlayContent: (@Composable () -> Unit) = {
-                    val heroItem = displayedFeaturedItem
+                    val heroItem = displayedHeroItem
+                    val heroLogoLookupInFlight = heroItem?.tmdbId?.let { tmdbId ->
+                        heroItem.logoUrl.isNullOrBlank() &&
+                            logoLoadingByKey["${heroItem.type}:$tmdbId"] == true
+                    } == true
                     val heroInWatchlist = heroItem?.let {
                         watchlistViewModel.isInWatchlist(it.id)
                     } == true
@@ -1979,6 +2177,7 @@ fun TvRoot(
                                 watchlistViewModel.toggleWatchlist(it)
                             }
                         },
+                        logoLookupInFlight = heroLogoLookupInFlight,
                     )
                 }
 
@@ -2091,7 +2290,7 @@ fun TvRoot(
                                 navController.navigate(TvRoutes.SETTINGS)
                             },
                             onFirstContentRequester = { firstContentFocusByRoute[TvRoutes.HOME] = it },
-                            onContentFocused = { lastFocusedContentByRoute[TvRoutes.HOME] = it },
+                            onContentFocused = { markContentFocused(TvRoutes.HOME, it) },
                             registerFocusHandle = { handle ->
                                 if (handle == null) {
                                     focusHandlesByRoute.remove(TvRoutes.HOME)
@@ -2105,6 +2304,7 @@ fun TvRoot(
                             onContextMenuAction = onContextMenuAction,
                             onSeeAll = { railKey, title ->
                                 val mt = when {
+                                    railKey.startsWith("upcoming_schedule") -> "tv"
                                     railKey.contains("movie") -> "movie"
                                     railKey.contains("show") || railKey.contains("tv") -> "tv"
                                     else -> "movie"
@@ -2112,6 +2312,7 @@ fun TvRoot(
                                 navigateToSeeAll(railKey, title, mt)
                             },
                             heroOverlay = homeHeroOverlay,
+                            browseLayout = TvBrowseLayout.POSTER_ONLY,
                             shouldAutoFocus = pendingContentEntryRoute == TvRoutes.HOME,
                         )
                     }
@@ -2149,7 +2350,7 @@ fun TvRoot(
                                             navController.navigateToTvDetails(item)
                                         },
                                         onFirstContentRequester = { firstContentFocusByRoute[TvRoutes.MOVIES] = it },
-                                        onContentFocused = { lastFocusedContentByRoute[TvRoutes.MOVIES] = it },
+                                        onContentFocused = { markContentFocused(TvRoutes.MOVIES, it) },
                                         registerFocusHandle = { handle ->
                                             if (handle == null) {
                                                 focusHandlesByRoute.remove(TvRoutes.MOVIES)
@@ -2164,7 +2365,9 @@ fun TvRoot(
                                         onContextMenuAction = onContextMenuAction,
                                         onSeeAll = { railKey, title -> navigateToSeeAll(railKey, title, "movie") },
                                         initialSearchQuery = searchSeedQuery.takeIf { selectedTopRoute == TvRoutes.MOVIES },
+                                        browseLayout = TvBrowseLayout.POSTER_ONLY,
                                         shouldAutoFocus = pendingContentEntryRoute == TvRoutes.MOVIES,
+                                        autoFocusRequestNonce = contentEntryRequestNonce,
                                     )
 
                                     TvRoutes.SHOWS -> TvShowsScreen(
@@ -2176,7 +2379,7 @@ fun TvRoot(
                                             navController.navigateToTvDetails(item)
                                         },
                                         onFirstContentRequester = { firstContentFocusByRoute[TvRoutes.SHOWS] = it },
-                                        onContentFocused = { lastFocusedContentByRoute[TvRoutes.SHOWS] = it },
+                                        onContentFocused = { markContentFocused(TvRoutes.SHOWS, it) },
                                         registerFocusHandle = { handle ->
                                             if (handle == null) {
                                                 focusHandlesByRoute.remove(TvRoutes.SHOWS)
@@ -2191,7 +2394,21 @@ fun TvRoot(
                                         onContextMenuAction = onContextMenuAction,
                                         onSeeAll = { railKey, title -> navigateToSeeAll(railKey, title, "tv") },
                                         initialSearchQuery = searchSeedQuery.takeIf { selectedTopRoute == TvRoutes.SHOWS },
+                                        browseLayout = TvBrowseLayout.POSTER_ONLY,
                                         shouldAutoFocus = pendingContentEntryRoute == TvRoutes.SHOWS,
+                                        autoFocusRequestNonce = contentEntryRequestNonce,
+                                    )
+
+                                    TvRoutes.SEARCH -> TvSearchScreen(
+                                        railFocusRequester = railFocusRequester,
+                                        onMediaClick = { item ->
+                                            pushFocusReturnEntry(TvRoutes.SEARCH)
+                                            navController.navigateToTvDetails(item)
+                                        },
+                                        onFirstContentRequester = { firstContentFocusByRoute[TvRoutes.SEARCH] = it },
+                                        onContentFocused = { markContentFocused(TvRoutes.SEARCH, it) },
+                                        initialQuery = searchSeedQuery.orEmpty(),
+                                        shouldAutoFocus = pendingContentEntryRoute == TvRoutes.SEARCH,
                                     )
 
                                     TvRoutes.IPTV -> {
@@ -2229,7 +2446,7 @@ fun TvRoot(
                                                 focusRestoreTrigger++
                                             },
                                             onFirstContentRequester = { firstContentFocusByRoute[TvRoutes.IPTV] = it },
-                                            onContentFocused = { lastFocusedContentByRoute[TvRoutes.IPTV] = it },
+                                            onContentFocused = { markContentFocused(TvRoutes.IPTV, it) },
                                             shouldAutoFocus = pendingContentEntryRoute == TvRoutes.IPTV,
                                             isActive = true,
                                             isSubRouteActive = isSubRouteActive,
@@ -2265,7 +2482,7 @@ fun TvRoot(
                                             navController.navigate(TvRoutes.PANDA_SETUP)
                                         },
                                         onFirstContentRequester = { firstContentFocusByRoute[TvRoutes.SPORTS] = it },
-                                        onContentFocused = { lastFocusedContentByRoute[TvRoutes.SPORTS] = it },
+                                        onContentFocused = { markContentFocused(TvRoutes.SPORTS, it) },
                                     )
 
                                     TvRoutes.LIBRARY -> TvLibraryScreen(
@@ -2278,7 +2495,7 @@ fun TvRoot(
                                             navController.navigateToTvDetails(item)
                                         },
                                         onFirstContentRequester = { firstContentFocusByRoute[TvRoutes.LIBRARY] = it },
-                                        onContentFocused = { lastFocusedContentByRoute[TvRoutes.LIBRARY] = it },
+                                        onContentFocused = { markContentFocused(TvRoutes.LIBRARY, it) },
                                         registerFocusHandle = { handle ->
                                             if (handle == null) {
                                                 focusHandlesByRoute.remove(TvRoutes.LIBRARY)
@@ -2379,7 +2596,7 @@ fun TvRoot(
                                             TvSettingsScreen(
                                                 railFocusRequester = railFocusRequester,
                                                 onFirstContentRequester = { firstContentFocusByRoute[TvRoutes.SETTINGS] = it },
-                                                onContentFocused = { lastFocusedContentByRoute[TvRoutes.SETTINGS] = it },
+                                                onContentFocused = { markContentFocused(TvRoutes.SETTINGS, it) },
                                                 onMoveFocusToRail = {
                                                     suppressBackToHome = true
                                                     selectedTopRoute = TvRoutes.SETTINGS
@@ -2439,10 +2656,15 @@ fun TvRoot(
                                                     pendingNavJob = null
                                                     suppressBackToHome = true
                                                     settingsDestination = TvSettingsDestination.MAIN
+                                                    settingsFocusStateMachine.selectedCategory = TvSettingsCategory.ACCOUNT
+                                                    settingsFocusStateMachine.requestRestore(
+                                                        itemId = TvSettingsItemIds.ACCOUNT_AUTH_ACCOUNT,
+                                                        reason = "auth_success",
+                                                    )
                                                     selectedTopRoute = TvRoutes.SETTINGS
                                                     highlightedTopRoute = TvRoutes.SETTINGS
                                                     confirmedTopRoute = TvRoutes.SETTINGS
-                                                    pendingRailEntryRoute = TvRoutes.SETTINGS
+                                                    pendingRailEntryRoute = null
                                                     pendingContentEntryRoute = TvRoutes.SETTINGS
                                                     focusRestoreTrigger++
                                                 },
@@ -2489,11 +2711,33 @@ fun TvRoot(
                         railFocusRequester = railFocusRequester,
                         onSeeAllBack = {
                             pendingFocusBackRestore = popFocusReturnEntry()
+                            pendingContentEntryRoute = null
+                            pendingRailEntryRoute = null
                             navController.popBackStack()
                         },
                         onDetailsBack = {
                             pendingFocusBackRestore = popFocusReturnEntry()
                             navController.popBackStack()
+                        },
+                        onPairingSignInSuccess = {
+                            focusReturnStack.clear()
+                            pendingFocusBackRestore = null
+                            pendingNavJob?.cancel()
+                            pendingNavJob = null
+                            suppressBackToHome = true
+                            navController.popBackStack(TvRoutes.SUB_NAV_START, inclusive = false)
+                            settingsDestination = TvSettingsDestination.MAIN
+                            settingsFocusStateMachine.selectedCategory = TvSettingsCategory.ACCOUNT
+                            settingsFocusStateMachine.requestRestore(
+                                itemId = TvSettingsItemIds.ACCOUNT_AUTH_ACCOUNT,
+                                reason = "phone_sign_in_success",
+                            )
+                            selectedTopRoute = TvRoutes.SETTINGS
+                            highlightedTopRoute = TvRoutes.SETTINGS
+                            confirmedTopRoute = TvRoutes.SETTINGS
+                            pendingRailEntryRoute = null
+                            pendingContentEntryRoute = TvRoutes.SETTINGS
+                            focusRestoreTrigger++
                         },
                         onBeforeDetailsNavigateFromSeeAll = {
                             pushFocusReturnEntry(TvRoutes.SEE_ALL)

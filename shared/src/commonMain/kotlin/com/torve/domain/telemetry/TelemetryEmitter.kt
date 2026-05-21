@@ -20,6 +20,16 @@ interface TelemetryEmitter {
     fun emit(event: String, attributes: Map<String, String> = emptyMap())
 }
 
+class CompositeTelemetryEmitter(
+    private val emitters: List<TelemetryEmitter>,
+) : TelemetryEmitter {
+    override fun emit(event: String, attributes: Map<String, String>) {
+        emitters.forEach { emitter ->
+            runCatching { emitter.emit(event, attributes) }
+        }
+    }
+}
+
 /** Default sink. Drops every emission. Wired in [com.torve.di.SharedModule]. */
 class NoOpTelemetryEmitter : TelemetryEmitter {
     override fun emit(event: String, attributes: Map<String, String>) {

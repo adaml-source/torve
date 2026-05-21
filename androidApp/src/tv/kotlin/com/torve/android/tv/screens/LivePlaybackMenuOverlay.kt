@@ -619,7 +619,7 @@ private fun PlaybackMenuDetailPane(
                 DetailKv("Channel", currentChannel?.name ?: "Unknown")
                 DetailKv("Group", currentChannel?.groupTitle ?: "Unknown")
                 DetailKv("Favorite", if (isFavorite) "Yes" else "No")
-                DetailKv("Stream URL", currentChannel?.url ?: "Unknown")
+                DetailKv("Stream", if (currentChannel?.url.isNullOrBlank()) "Unavailable" else "Available")
             }
 
             PlaybackMenuRoute.SLEEP_TIMER -> {

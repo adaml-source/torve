@@ -1,5 +1,6 @@
 package com.torve.presentation.catalog
 
+import com.torve.domain.discovery.DiscoveryRatingSource
 import com.torve.domain.model.MediaItem
 import com.torve.domain.model.WatchProgress
 
@@ -54,6 +55,7 @@ enum class CatalogCategory(val label: String) {
 
 data class CatalogFilter(
     val minRating: Float? = null,
+    val ratingSource: DiscoveryRatingSource = DiscoveryRatingSource.TMDB,
     val year: Int? = null,
     val yearTo: Int? = null,
     val runtimeFilter: RuntimeFilter? = null,

@@ -18,6 +18,7 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.Renderer
 import androidx.media3.exoplayer.analytics.AnalyticsListener
 import androidx.media3.exoplayer.audio.DefaultAudioSink
 import androidx.media3.datasource.DefaultHttpDataSource
@@ -418,7 +419,13 @@ class ExoPlayerEngine(
     private fun createPlayer(preferSoftwareAudioDecoding: Boolean) {
         // TiviMate-aligned: no custom audio processors for live TV — they add
         // variable latency that causes A/V sync drift and microstutter.
-        val renderersFactory = DefaultRenderersFactory(context)
+        val renderersFactory = object : DefaultRenderersFactory(context) {
+            override fun buildImageRenderers(out: java.util.ArrayList<Renderer>) {
+                // Torve playback does not use Media3 image tracks. Leaving the
+                // renderer out avoids a Media3 duplicate ImageOutputBuffer
+                // release crash seen during rapid TV focus/navigation churn.
+            }
+        }
             .setEnableDecoderFallback(true)
             .setExtensionRendererMode(
                 if (preferSoftwareAudioDecoding) {
@@ -475,10 +482,14 @@ class ExoPlayerEngine(
         val resumePositionMs = previousPlayer?.currentPosition?.coerceAtLeast(0L) ?: 0L
         val playWhenReady = previousPlayer?.playWhenReady ?: true
 
-        previousPlayer?.removeListener(exoListener)
-        previousPlayer?.removeAnalyticsListener(analyticsListener)
-        previousPlayer?.stop()
-        previousPlayer?.release()
+        runCatching {
+            previousPlayer?.removeListener(exoListener)
+            previousPlayer?.removeAnalyticsListener(analyticsListener)
+            previousPlayer?.stop()
+            previousPlayer?.release()
+        }.onFailure { error ->
+            Log.w(TAG, "Ignoring late ExoPlayer rebuild release during $reason", error)
+        }
 
         createPlayer(preferSoftwareAudioDecoding = preferSoftwareAudioDecoding)
         applyEffectiveAudioOutputPreferences(
@@ -1669,11 +1680,16 @@ class ExoPlayerEngine(
 
     override fun release() {
         cancelAudioReadinessTimeout()
-        exoPlayer?.removeListener(exoListener)
-        exoPlayer?.removeAnalyticsListener(analyticsListener)
-        exoPlayer?.stop()
-        exoPlayer?.release()
+        val player = exoPlayer ?: return
         exoPlayer = null
+        runCatching {
+            player.removeListener(exoListener)
+            player.removeAnalyticsListener(analyticsListener)
+            player.stop()
+            player.release()
+        }.onFailure { error ->
+            Log.w(TAG, "Ignoring duplicate or late ExoPlayer release", error)
+        }
         trackSelector = null
         onCodecError = null
         onLiveAudioCompatibilityFailure = null

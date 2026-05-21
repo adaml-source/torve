@@ -1,6 +1,7 @@
 package com.torve.domain.model
 
 import kotlinx.serialization.Serializable
+import kotlin.math.round
 
 @Serializable
 enum class RatingSource(
@@ -34,6 +35,44 @@ data class MediaRatings(
     val mdblistScore: Float? = null,
     val malScore: Float? = null,
 )
+
+@Serializable
+enum class RatingConfidence {
+    NORMAL,
+}
+
+@Serializable
+data class DisplayRating(
+    val value: Double,
+    val source: RatingSource,
+    val confidence: RatingConfidence = RatingConfidence.NORMAL,
+)
+
+fun MediaItem.bestDisplayRating(): DisplayRating? =
+    ratings.bestDisplayRating(tmdbFallback = rating)
+
+fun MediaRatings?.bestDisplayRating(tmdbFallback: Double? = null): DisplayRating? {
+    val ratings = this
+    val candidates = listOf(
+        RatingSource.IMDB to ratings?.imdbScore?.toDouble(),
+        RatingSource.MDBLIST to ratings?.mdblistScore?.toDouble(),
+        RatingSource.TRAKT to ratings?.traktScore?.toDouble(),
+        RatingSource.TMDB to (ratings?.tmdbScore?.toDouble() ?: tmdbFallback),
+    )
+    return candidates.firstNotNullOfOrNull { (source, rawValue) ->
+        rawValue.normalizedDisplayRating()?.let { normalized ->
+            DisplayRating(value = normalized, source = source)
+        }
+    }
+}
+
+private fun Double?.normalizedDisplayRating(): Double? {
+    val raw = this ?: return null
+    if (raw.isNaN() || raw.isInfinite() || raw <= 0.0 || raw > 100.0) return null
+    val normalized = if (raw > 10.0) raw / 10.0 else raw
+    if (normalized <= 0.0 || normalized > 10.0) return null
+    return round(normalized * 10.0) / 10.0
+}
 
 fun MediaRatings?.withFallbackTmdbScore(tmdbRating: Double?): MediaRatings? {
     val fallbackScore = tmdbRating?.takeIf { it > 0 }?.toFloat()

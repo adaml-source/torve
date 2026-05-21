@@ -12,6 +12,7 @@ import com.torve.domain.model.WatchlistItem
 import com.torve.domain.model.stableTmdbIdString
 import com.torve.domain.repository.PreferencesRepository
 import com.torve.domain.repository.WatchlistRepository
+import com.torve.domain.repository.WatchlistMutationResult
 import com.torve.presentation.contentpolicy.ContentPolicyFilter
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -31,6 +32,13 @@ class WatchlistViewModel(
     private val contentPolicyFilter: ContentPolicyFilter = ContentPolicyFilter(),
     invalidationCoordinator: ContentPolicyCacheInvalidationCoordinator? = null,
 ) {
+    companion object {
+        const val MESSAGE_ADDED = "Added to watchlist."
+        const val MESSAGE_REMOVED = "Removed from watchlist."
+        const val MESSAGE_CONNECT_TRAKT = "Connect Trakt to use Watchlist."
+        const val MESSAGE_UPDATE_FAILED = "Could not update watchlist. Please try again."
+    }
+
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private val _state = MutableStateFlow(WatchlistUiState())
     val state: StateFlow<WatchlistUiState> = _state.asStateFlow()
@@ -56,7 +64,7 @@ class WatchlistViewModel(
                 _state.update {
                     it.copy(
                         items = items,
-                        watchlistIds = items.map { item -> item.mediaId }.toSet(),
+                        watchlistIds = items.map { item -> item.mediaId.normalizedWatchlistMediaId() }.toSet(),
                         isLoading = false,
                         error = null,
                     )
@@ -68,93 +76,79 @@ class WatchlistViewModel(
     }
 
     fun isInWatchlist(mediaId: String): Boolean {
-        return _state.value.watchlistIds.contains(mediaId.normalizeWatchlistMediaId())
+        return _state.value.containsMedia(mediaId)
     }
 
     fun toggleWatchlist(mediaItem: MediaItem) {
         val mediaId = mediaItem.watchlistMediaId()
+        if (_state.value.isMutatingMedia(mediaId)) return
         val wasInWatchlist = isInWatchlist(mediaId)
-        val optimisticItem = mediaItem.toWatchlistItem()
+        val item = mediaItem.toWatchlistItem()
+        val normalizedMediaId = mediaId.normalizedWatchlistMediaId()
+
+        if (mediaItem.isContentPlaceholder || item.title.isBlank() || (item.tmdbId <= 0 && item.imdbId.isNullOrBlank())) {
+            publishMutationError(normalizedMediaId, MESSAGE_UPDATE_FAILED)
+            return
+        }
+
         _state.update {
-            if (wasInWatchlist) {
-                it.copy(
-                    items = it.items.filter { item -> item.mediaId != mediaId },
-                    watchlistIds = it.watchlistIds - mediaId,
-                    snackbarMessage = "Removed from Watchlist",
-                )
-            } else {
-                it.copy(
-                    items = listOf(optimisticItem) + it.items.filter { item -> item.mediaId != mediaId },
-                    watchlistIds = it.watchlistIds + mediaId,
-                    snackbarMessage = "Added to Watchlist",
-                )
-            }
+            it.copy(
+                mutationState = WatchlistMutationState.Loading(normalizedMediaId),
+                snackbarMessage = null,
+            )
         }
         scope.launch {
-            try {
-                if (wasInWatchlist) {
-                    watchlistRepo.remove(mediaId)
-                } else {
-                    watchlistRepo.add(optimisticItem)
-                }
-            } catch (e: Exception) {
-                _state.update {
-                    if (wasInWatchlist) {
-                        it.copy(
-                            items = listOf(optimisticItem) + it.items.filter { item -> item.mediaId != mediaId },
-                            watchlistIds = it.watchlistIds + mediaId,
-                            snackbarMessage = com.torve.presentation.error.UserFacingError.WATCHLIST_FAILED.defaultMessage(),
-                        )
-                    } else {
-                        it.copy(
-                            items = it.items.filter { item -> item.mediaId != mediaId },
-                            watchlistIds = it.watchlistIds - mediaId,
-                            snackbarMessage = com.torve.presentation.error.UserFacingError.WATCHLIST_FAILED.defaultMessage(),
-                        )
-                    }
-                }
+            val result = if (wasInWatchlist) {
+                watchlistRepo.removeFromTraktWatchlist(normalizedMediaId)
+            } else {
+                watchlistRepo.addToTraktWatchlist(item)
             }
+            applyMutationResult(result)
         }
     }
 
     fun addToWatchlist(mediaItem: MediaItem, syncTrakt: Boolean, syncSimkl: Boolean) {
         val mediaId = mediaItem.watchlistMediaId()
+        val normalizedMediaId = mediaId.normalizedWatchlistMediaId()
+        if (_state.value.isMutatingMedia(normalizedMediaId)) return
+        val item = mediaItem.toWatchlistItem()
+        if (mediaItem.isContentPlaceholder || item.title.isBlank() || (item.tmdbId <= 0 && item.imdbId.isNullOrBlank())) {
+            publishMutationError(normalizedMediaId, MESSAGE_UPDATE_FAILED)
+            return
+        }
         scope.launch {
             try {
-                val item = WatchlistItem(
-                    mediaId = mediaId,
-                    mediaType = mediaItem.type,
-                    tmdbId = mediaItem.tmdbId ?: 0,
-                    imdbId = mediaItem.imdbId,
-                    title = mediaItem.title,
-                    posterUrl = mediaItem.posterUrl,
-                    backdropUrl = mediaItem.backdropUrl,
-                    rating = mediaItem.rating,
-                    year = mediaItem.year,
-                    genres = mediaItem.genres.joinToString(", ") { it.name },
-                    addedAt = Clock.System.now().toEpochMilliseconds(),
-                )
-                watchlistRepo.add(item, syncTrakt, syncSimkl)
-                val targets = buildList {
-                    add("Watchlist")
-                    if (syncTrakt) add("Trakt")
-                    if (syncSimkl) add("Simkl")
-                }
-                _state.update {
-                    it.copy(
-                        items = listOf(item) + it.items,
-                        watchlistIds = it.watchlistIds + mediaId,
-                        snackbarMessage = "Added to ${targets.joinToString(" + ")}",
-                    )
+                if (syncTrakt) {
+                    _state.update {
+                        it.copy(
+                            mutationState = WatchlistMutationState.Loading(normalizedMediaId),
+                            snackbarMessage = null,
+                        )
+                    }
+                    val result = watchlistRepo.addToTraktWatchlist(item)
+                    applyMutationResult(result)
+                    if (syncSimkl && result is WatchlistMutationResult.Success) {
+                        watchlistRepo.add(item, syncTrakt = false, syncSimkl = true)
+                    }
+                } else {
+                    watchlistRepo.add(item, syncTrakt = false, syncSimkl = syncSimkl)
+                    _state.update {
+                        it.copy(
+                            items = listOf(item) + it.items.filter { existing -> existing.mediaId != mediaId },
+                            watchlistIds = it.watchlistIds + normalizedMediaId,
+                            snackbarMessage = MESSAGE_ADDED,
+                            mutationState = WatchlistMutationState.Success(normalizedMediaId, true),
+                        )
+                    }
                 }
             } catch (e: Exception) {
-                _state.update { it.copy(snackbarMessage = com.torve.presentation.error.UserFacingError.WATCHLIST_FAILED.defaultMessage()) }
+                publishMutationError(normalizedMediaId, MESSAGE_UPDATE_FAILED)
             }
         }
     }
 
     fun clearSnackbar() {
-        _state.update { it.copy(snackbarMessage = null) }
+        _state.update { it.copy(snackbarMessage = null, mutationState = WatchlistMutationState.Idle) }
     }
 
     private fun currentPolicy(): ContentPolicyState {
@@ -195,7 +189,7 @@ class WatchlistViewModel(
     private fun MediaItem.toWatchlistItem(): WatchlistItem {
         val stableTmdbId = stableTmdbIdString()?.toIntOrNull()
         return WatchlistItem(
-            mediaId = watchlistMediaId(),
+            mediaId = watchlistMediaId().normalizedWatchlistMediaId(),
             mediaType = type,
             tmdbId = tmdbId ?: stableTmdbId ?: 0,
             imdbId = imdbId,
@@ -208,14 +202,52 @@ class WatchlistViewModel(
             addedAt = Clock.System.now().toEpochMilliseconds(),
         )
     }
+
+    private fun applyMutationResult(result: WatchlistMutationResult) {
+        when (result) {
+            is WatchlistMutationResult.Success -> {
+                if (result.isInWatchlist) {
+                    val item = result.item ?: return publishMutationError(result.mediaId, MESSAGE_UPDATE_FAILED)
+                    _state.update {
+                        it.copy(
+                            items = listOf(item) + it.items.filter { existing ->
+                                existing.mediaId.normalizedWatchlistMediaId() != result.mediaId
+                            },
+                            watchlistIds = it.watchlistIds + result.mediaId,
+                            snackbarMessage = MESSAGE_ADDED,
+                            mutationState = WatchlistMutationState.Success(result.mediaId, true),
+                        )
+                    }
+                } else {
+                    _state.update {
+                        it.copy(
+                            items = it.items.filter { existing ->
+                                existing.mediaId.normalizedWatchlistMediaId() != result.mediaId
+                            },
+                            watchlistIds = it.watchlistIds - result.mediaId,
+                            snackbarMessage = MESSAGE_REMOVED,
+                            mutationState = WatchlistMutationState.Success(result.mediaId, false),
+                        )
+                    }
+                }
+            }
+            is WatchlistMutationResult.MissingTraktConnection ->
+                publishMutationError(result.mediaId, MESSAGE_CONNECT_TRAKT)
+            is WatchlistMutationResult.InsufficientMetadata ->
+                publishMutationError(result.mediaId, MESSAGE_UPDATE_FAILED)
+            is WatchlistMutationResult.Failed ->
+                publishMutationError(result.mediaId, MESSAGE_UPDATE_FAILED)
+        }
+    }
+
+    private fun publishMutationError(mediaId: String, message: String) {
+        _state.update {
+            it.copy(
+                snackbarMessage = message,
+                mutationState = WatchlistMutationState.Error(mediaId, message),
+            )
+        }
+    }
 }
 
 internal fun MediaItem.watchlistMediaId(): String = stableTmdbIdString() ?: id
-
-private fun String.normalizeWatchlistMediaId(): String {
-    val parts = split(":")
-    if (parts.firstOrNull()?.lowercase() != "tmdb") return this
-    return parts.lastOrNull()?.takeIf { part ->
-        part.isNotBlank() && part.all { it in '0'..'9' }
-    } ?: this
-}

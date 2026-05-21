@@ -38,6 +38,7 @@ data class MediaItem(
     val director: String? = null,
     val directorId: Int? = null,
     val directorProfileUrl: String? = null,
+    val studios: List<MediaCompany> = emptyList(),
     val releaseDate: String? = null,
     val status: String? = null,
     val trailerKey: String? = null,
@@ -53,6 +54,13 @@ data class MediaItem(
 data class Genre(
     val id: Int,
     val name: String,
+)
+
+@Serializable
+data class MediaCompany(
+    val id: Int,
+    val name: String,
+    val logoUrl: String? = null,
 )
 
 @Serializable
@@ -130,6 +138,7 @@ private fun mergeMediaItems(primary: MediaItem, other: MediaItem): MediaItem {
         director = preferString(primary.director, other.director),
         directorId = preferInt(primary.directorId, other.directorId),
         directorProfileUrl = preferString(primary.directorProfileUrl, other.directorProfileUrl),
+        studios = if (primary.studios.isNotEmpty()) primary.studios else other.studios,
         releaseDate = preferString(primary.releaseDate, other.releaseDate),
         status = preferString(primary.status, other.status),
         trailerKey = preferString(primary.trailerKey, other.trailerKey),
@@ -167,19 +176,22 @@ fun List<MediaItem>.dedupeByStableKey(): List<MediaItem> {
  */
 fun List<CatalogShelf>.dedupeAcrossShelves(
     globalSeen: MutableSet<String> = mutableSetOf(),
+    minItemsPerShelf: Int = 20,
 ): List<CatalogShelf> {
     return mapNotNull { shelf ->
+        val localSeen = mutableSetOf<String>()
         val filtered = shelf.items.filter { item ->
             val key = item.stableKey()
-            if (key in globalSeen) {
+            if (key in globalSeen || key in localSeen) {
                 false
             } else {
-                globalSeen.add(key)
+                localSeen.add(key)
                 true
             }
         }
-        if (filtered.isEmpty()) null
-        else shelf.copy(items = filtered)
+        val result = filtered
+        result.collectStableKeys(globalSeen)
+        if (result.isEmpty()) null else shelf.copy(items = result)
     }
 }
 

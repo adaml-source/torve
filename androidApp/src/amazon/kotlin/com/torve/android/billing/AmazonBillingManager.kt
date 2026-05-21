@@ -9,6 +9,7 @@ import com.amazon.device.iap.model.ProductDataResponse
 import com.amazon.device.iap.model.PurchaseResponse
 import com.amazon.device.iap.model.PurchaseUpdatesResponse
 import com.amazon.device.iap.model.UserDataResponse
+import com.torve.domain.diagnostics.DiagnosticsRedactor
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -43,13 +44,13 @@ class AmazonBillingManager(private val context: Context) : BillingManager, Purch
 
     private inline fun logDebug(message: () -> String) {
         if (com.torve.android.BuildConfig.DEBUG) {
-            Log.d(TAG, message())
+            Log.d(TAG, DiagnosticsRedactor.redact(message()))
         }
     }
 
     private inline fun logWarn(message: () -> String) {
         if (com.torve.android.BuildConfig.DEBUG) {
-            Log.w(TAG, message())
+            Log.w(TAG, DiagnosticsRedactor.redact(message()))
         }
     }
 
@@ -57,10 +58,9 @@ class AmazonBillingManager(private val context: Context) : BillingManager, Purch
         throwable: Throwable? = null,
         message: String,
     ) {
-        if (throwable != null) {
-            Log.e(TAG, message, throwable)
-        } else {
-            Log.e(TAG, message)
+        if (com.torve.android.BuildConfig.DEBUG) {
+            val suffix = throwable?.let { " (${it::class.java.simpleName})" }.orEmpty()
+            Log.e(TAG, DiagnosticsRedactor.redact(message + suffix))
         }
     }
 
@@ -100,7 +100,7 @@ class AmazonBillingManager(private val context: Context) : BillingManager, Purch
             productId = productId,
         )
         logDebug {
-            "Queued pending Amazon purchase receiptIdPrefix=${receiptId.take(8)}..., productId=$productId while waiting for user data"
+            "Queued pending Amazon purchase receiptPresent=${receiptId.isNotBlank()}, productId=$productId while waiting for user data"
         }
         PurchasingService.getUserData()
         _purchaseResult.value = BillingManager.PurchaseResult.Pending(
@@ -159,7 +159,7 @@ class AmazonBillingManager(private val context: Context) : BillingManager, Purch
             return
         }
         try {
-            Log.i(TAG, "launchPurchase productId=$productId type=$productType")
+            logDebug { "launchPurchase productId=$productId type=$productType" }
             PurchasingService.getUserData()
             PurchasingService.purchase(productId)
         } catch (e: Exception) {
@@ -299,7 +299,7 @@ class AmazonBillingManager(private val context: Context) : BillingManager, Purch
     }
 
     override fun onPurchaseResponse(response: PurchaseResponse) {
-        Log.i(TAG, "onPurchaseResponse status=${response.requestStatus} sku=${response.receipt?.sku}")
+        logDebug { "onPurchaseResponse status=${response.requestStatus} sku=${response.receipt?.sku}" }
         when (response.requestStatus) {
             PurchaseResponse.RequestStatus.SUCCESSFUL -> {
                 val receipt = response.receipt

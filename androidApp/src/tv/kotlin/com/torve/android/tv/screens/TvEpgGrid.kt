@@ -33,6 +33,8 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
@@ -42,6 +44,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.tv.material3.ClickableSurfaceDefaults
@@ -49,10 +52,8 @@ import androidx.tv.material3.Surface
 import coil3.compose.AsyncImage
 import com.torve.android.R
 import com.torve.android.ui.theme.Amber
-import com.torve.android.ui.theme.AmberSubtle
 import com.torve.android.ui.theme.Ash
 import com.torve.android.ui.theme.Charcoal
-import com.torve.android.ui.theme.Coral
 import com.torve.android.ui.theme.Graphite
 import com.torve.android.ui.theme.Obsidian
 import com.torve.android.ui.theme.Silver
@@ -69,9 +70,9 @@ import kotlinx.coroutines.delay
 
 internal const val IPTV_EPG_WINDOW_HOURS = 2
 private const val EPG_SLOT_MINUTES = 30
-private const val EPG_SLOT_WIDTH_DP = 160
-private const val EPG_CHANNEL_COL_WIDTH_DP = 180
-private const val EPG_ROW_HEIGHT_DP = 52
+private const val EPG_SLOT_WIDTH_DP = 300
+private const val EPG_CHANNEL_COL_WIDTH_DP = 178
+private const val EPG_ROW_HEIGHT_DP = 46
 private val epgTimeFormat = SimpleDateFormat("HH:mm", Locale.getDefault())
 private val epgDateFormat = SimpleDateFormat("EEE, MMM d", Locale.getDefault())
 
@@ -92,6 +93,7 @@ private data class EpgWindowCell(
 internal fun TvEpgGrid(
     channels: List<EnrichedChannel>,
     guideProgrammes: Map<String, List<EpgProgramme>>,
+    isGuideLoading: Boolean = false,
     playlistId: String? = null,
     windowStartMs: Long,
     windowEndMs: Long,
@@ -107,6 +109,7 @@ internal fun TvEpgGrid(
     onChannelPlay: (Channel) -> Unit,
     onTimeForward: () -> Unit,
     modifier: Modifier = Modifier,
+    channelColumnWidth: Dp = EPG_CHANNEL_COL_WIDTH_DP.dp,
 ) {
     val slotMillis = EPG_SLOT_MINUTES * 60_000L
     val slotCount = ((windowEndMs - windowStartMs) / slotMillis).toInt().coerceAtLeast(1)
@@ -152,9 +155,16 @@ internal fun TvEpgGrid(
 
     Column(
         modifier = modifier
-            .clip(RoundedCornerShape(12.dp))
-            .background(Graphite.copy(alpha = 0.55f))
-            .border(1.dp, Steel.copy(alpha = 0.35f), RoundedCornerShape(12.dp))
+            .clip(RoundedCornerShape(26.dp))
+            .background(
+                Brush.verticalGradient(
+                    colors = listOf(
+                        Charcoal.copy(alpha = 0.72f),
+                        Obsidian.copy(alpha = 0.92f),
+                    ),
+                ),
+            )
+            .border(1.dp, Steel.copy(alpha = 0.28f), RoundedCornerShape(26.dp))
             .onPreviewKeyEvent { event ->
                 // Serialize vertical navigation at the grid level.
                 // Debounce prevents stacked DPAD events from causing double-jumps.
@@ -176,6 +186,7 @@ internal fun TvEpgGrid(
             windowStartMs = windowStartMs,
             slotCount = slotCount,
             slotMillis = slotMillis,
+            channelColumnWidth = channelColumnWidth,
         )
 
         if (channels.isEmpty()) {
@@ -222,6 +233,7 @@ internal fun TvEpgGrid(
                         rowNumber = rowIndex + 1,
                         channel = enriched,
                         cells = cells,
+                        channelColumnWidth = channelColumnWidth,
                         windowStartMs = windowStartMs,
                         windowEndMs = windowEndMs,
                         timelineWidth = timelineWidth,
@@ -232,6 +244,7 @@ internal fun TvEpgGrid(
                         focusTargetCol = targetCol,
                         focusRequestToken = focusRequestToken,
                         isFocusEnabled = isFocusEnabled,
+                        isGuideLoading = isGuideLoading,
                         nowMs = nowMs,
                         onChannelFocused = { programme -> onChannelFocused(enriched, programme) },
                         onGridCellFocused = { colIndex ->
@@ -247,13 +260,35 @@ internal fun TvEpgGrid(
                 val nowFraction = ((nowMs - windowStartMs).toFloat() / (windowEndMs - windowStartMs).toFloat())
                     .coerceIn(0f, 1f)
                 val nowOffsetDp = timelineWidth * nowFraction
-                Box(
+                Column(
                     modifier = Modifier
-                        .offset(x = EPG_CHANNEL_COL_WIDTH_DP.dp + nowOffsetDp)
-                        .width(2.dp)
-                        .fillMaxHeight()
-                        .background(Coral),
-                )
+                        .offset(x = channelColumnWidth + nowOffsetDp, y = (-24).dp)
+                        .width(42.dp)
+                        .fillMaxHeight(),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(999.dp))
+                            .background(Amber)
+                            .padding(horizontal = 5.dp, vertical = 1.dp),
+                    ) {
+                        Text(
+                            text = epgTimeFormat.format(Date(nowMs)),
+                            color = Obsidian,
+                            fontSize = 9.sp,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1,
+                            softWrap = false,
+                        )
+                    }
+                    Box(
+                        modifier = Modifier
+                            .width(1.dp)
+                            .fillMaxHeight()
+                            .background(Amber.copy(alpha = 0.86f)),
+                    )
+                }
             }
         }
     }
@@ -264,20 +299,21 @@ private fun EpgTimeHeader(
     windowStartMs: Long,
     slotCount: Int,
     slotMillis: Long,
+    channelColumnWidth: Dp,
 ) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .height(42.dp)
-            .background(Charcoal.copy(alpha = 0.9f)),
+            .height(34.dp)
+            .background(Obsidian.copy(alpha = 0.78f)),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Box(
             modifier = Modifier
-                .width(EPG_CHANNEL_COL_WIDTH_DP.dp)
+                .width(channelColumnWidth)
                 .fillMaxHeight()
-                .background(Obsidian.copy(alpha = 0.65f))
-                .padding(horizontal = 10.dp),
+                .background(Obsidian.copy(alpha = 0.70f))
+                .padding(horizontal = 16.dp),
             contentAlignment = Alignment.CenterStart,
         ) {
             Text(
@@ -285,6 +321,8 @@ private fun EpgTimeHeader(
                 color = Snow,
                 fontSize = 12.sp,
                 fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                softWrap = false,
             )
         }
         Row {
@@ -294,13 +332,19 @@ private fun EpgTimeHeader(
                     modifier = Modifier
                         .width(EPG_SLOT_WIDTH_DP.dp)
                         .fillMaxHeight()
-                        .background(if (index % 2 == 0) Charcoal else Graphite),
+                        .background(
+                            if (index % 2 == 0) Charcoal.copy(alpha = 0.34f)
+                            else Graphite.copy(alpha = 0.28f),
+                        ),
                     contentAlignment = Alignment.CenterStart,
                 ) {
                     Text(
                         text = epgTimeFormat.format(Date(slotStart)),
                         color = Silver,
                         fontSize = 12.sp,
+                        fontWeight = FontWeight.Medium,
+                        maxLines = 1,
+                        softWrap = false,
                         modifier = Modifier.padding(start = 8.dp),
                     )
                 }
@@ -314,6 +358,7 @@ private fun EpgChannelRow(
     rowNumber: Int,
     channel: EnrichedChannel,
     cells: List<EpgWindowCell>,
+    channelColumnWidth: Dp,
     windowStartMs: Long,
     windowEndMs: Long,
     timelineWidth: androidx.compose.ui.unit.Dp,
@@ -324,6 +369,7 @@ private fun EpgChannelRow(
     focusTargetCol: Int,
     focusRequestToken: Int,
     isFocusEnabled: Boolean,
+    isGuideLoading: Boolean,
     nowMs: Long,
     onChannelFocused: (EpgProgramme?) -> Unit,
     onGridCellFocused: (colIndex: Int) -> Unit,
@@ -338,10 +384,10 @@ private fun EpgChannelRow(
     ) {
         Row(
             modifier = Modifier
-                .width(EPG_CHANNEL_COL_WIDTH_DP.dp)
+                .width(channelColumnWidth)
                 .fillMaxHeight()
-                .background(Obsidian.copy(alpha = 0.4f))
-                .padding(horizontal = 8.dp),
+                .background(Obsidian.copy(alpha = 0.44f))
+                .padding(horizontal = 12.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             val channelNumber = channel.channel.channelNumber ?: rowNumber
@@ -349,24 +395,35 @@ private fun EpgChannelRow(
                 text = channelNumber.toString(),
                 color = Ash,
                 fontSize = 11.sp,
-                modifier = Modifier.width(24.dp),
+                maxLines = 1,
+                softWrap = false,
+                modifier = Modifier.width(32.dp),
             )
             channel.channel.tvgLogo?.let { logo ->
-                AsyncImage(
-                    model = logo,
-                    contentDescription = null,
+                Box(
                     modifier = Modifier
-                        .width(30.dp)
-                        .height(30.dp)
-                        .clip(RoundedCornerShape(4.dp)),
-                    contentScale = ContentScale.Fit,
-                )
+                        .width(42.dp)
+                        .height(22.dp)
+                        .clip(RoundedCornerShape(7.dp))
+                        .background(Charcoal.copy(alpha = 0.26f)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    AsyncImage(
+                        model = logo,
+                        contentDescription = null,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .fillMaxHeight(),
+                        contentScale = ContentScale.Fit,
+                    )
+                }
             }
             Text(
                 text = channel.channel.name,
                 color = Snow,
                 fontSize = 12.sp,
                 maxLines = 1,
+                softWrap = false,
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier
                     .padding(start = 8.dp)
@@ -390,6 +447,7 @@ private fun EpgChannelRow(
                 val cellWidth = (timelineWidth * cellFraction).coerceAtLeast(48.dp)
                 EpgProgrammeCell(
                     programme = cell.programme,
+                    fallbackTitle = if (isGuideLoading) "Loading schedule" else "Schedule unavailable",
                     width = cellWidth,
                     isNow = cell.programme?.let { it.startTime <= nowMs && it.endTime > nowMs } == true,
                     isLastFocusableCell = index == cells.lastIndex,
@@ -410,6 +468,7 @@ private fun EpgChannelRow(
 @Composable
 private fun EpgProgrammeCell(
     programme: EpgProgramme?,
+    fallbackTitle: String,
     width: androidx.compose.ui.unit.Dp,
     isNow: Boolean,
     isLastFocusableCell: Boolean,
@@ -439,6 +498,7 @@ private fun EpgProgrammeCell(
         modifier = Modifier
             .width(width)
             .fillMaxHeight()
+            .padding(horizontal = 4.dp, vertical = 3.dp)
             .focusRequester(cellFocusRequester)
             .focusProperties { canFocus = isFocusEnabled }
             .onFocusChanged {
@@ -469,21 +529,61 @@ private fun EpgProgrammeCell(
                     else -> false
                 }
             },
-        shape = ClickableSurfaceDefaults.shape(RoundedCornerShape(0.dp)),
+        shape = ClickableSurfaceDefaults.shape(RoundedCornerShape(14.dp)),
         colors = ClickableSurfaceDefaults.colors(
-            containerColor = if (isNow) AmberSubtle else Graphite.copy(alpha = 0.45f),
-            focusedContainerColor = Amber.copy(alpha = 0.45f),
+            containerColor = if (isNow) Graphite.copy(alpha = 0.58f) else Graphite.copy(alpha = 0.46f),
+            focusedContainerColor = Amber.copy(alpha = 0.24f),
         ),
         scale = ClickableSurfaceDefaults.scale(focusedScale = 1f),
     ) {
-        Text(
-            text = programme?.title ?: "No guide data",
-            color = if (isFocused || isNow) Snow else Silver,
-            fontSize = 11.sp,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
-        )
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .border(
+                    width = if (isFocused) 2.dp else 1.dp,
+                    color = when {
+                        isFocused -> Amber
+                        isNow -> Amber.copy(alpha = 0.22f)
+                        else -> Steel.copy(alpha = 0.16f)
+                    },
+                    shape = RoundedCornerShape(14.dp),
+                )
+                .background(
+                    if (isFocused) {
+                        Brush.radialGradient(
+                            colors = listOf(
+                                Amber.copy(alpha = 0.22f),
+                                Color.Transparent,
+                            ),
+                        )
+                    } else {
+                        Brush.verticalGradient(
+                            colors = listOf(Color.Transparent, Obsidian.copy(alpha = 0.22f)),
+                        )
+                    },
+                    RoundedCornerShape(14.dp),
+                )
+                .padding(horizontal = 10.dp, vertical = 4.dp),
+        ) {
+            Text(
+                text = programme?.title?.takeIf { it.isNotBlank() } ?: fallbackTitle,
+                color = when {
+                    programme == null -> Silver.copy(alpha = 0.72f)
+                    isFocused || isNow -> Snow
+                    else -> Silver
+                },
+                fontSize = if (isFocused && programme != null) 13.sp else 12.sp,
+                fontWeight = when {
+                    programme == null -> FontWeight.Normal
+                    isFocused -> FontWeight.SemiBold
+                    else -> FontWeight.Medium
+                },
+                maxLines = 1,
+                softWrap = false,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.align(Alignment.CenterStart),
+            )
+        }
     }
 }
 

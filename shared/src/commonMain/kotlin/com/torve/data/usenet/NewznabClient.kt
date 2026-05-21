@@ -1,5 +1,7 @@
 package com.torve.data.usenet
 
+import com.torve.domain.diagnostics.DiagnosticsRedactor
+import com.torve.platform.torveVerboseLog
 import io.ktor.client.HttpClient
 import io.ktor.client.request.get
 import io.ktor.client.request.header
@@ -163,15 +165,11 @@ class NewznabClient(
             header("Accept", "application/xml, text/xml")
         }
         val body = response.bodyAsText()
-        // Log so we can debug "0 results" cases — print URL, status,
-        // and the first 200 chars of the body. Newznab error responses
-        // come back as `<error code="..." description="..."/>`;
-        // visible in the body so the user / dev can copy-paste it.
-        val safeUrl = REDACT_API_KEY.replace(url, "apikey=***")
-        println("TORVE NEWZNAB ┃ GET $safeUrl → ${response.status.value}; body[0..200]=${body.take(200).replace("\n", " ")}")
+        // Debug-only transport summary. Do not log URL, API key, or XML body.
+        torveVerboseLog { "TORVE NEWZNAB | GET status=${response.status.value} bodyBytes=${body.length}" }
         if (response.status.isSuccess()) body else null
     } catch (t: Throwable) {
-        println("TORVE NEWZNAB ┃ GET failed: ${t.message}")
+        torveVerboseLog { "TORVE NEWZNAB | GET failed: ${t::class.simpleName} ${DiagnosticsRedactor.redact(t.message)}" }
         null
     }
 
@@ -240,7 +238,6 @@ class NewznabClient(
             .replace("&#39;", "'")
 
     companion object {
-        private val REDACT_API_KEY = Regex("apikey=[^&]+")
         private val ERROR_REGEX = Regex(
             "<error[^>]*description=\"([^\"]*)\"[^>]*/>",
             RegexOption.IGNORE_CASE,

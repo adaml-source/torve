@@ -3,7 +3,10 @@ package com.torve.android.tv.screens
 import android.util.Log
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusGroup
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -14,12 +17,15 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material3.Icon
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -38,10 +44,14 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.input.key.Key
@@ -54,6 +64,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.torve.android.R
 import com.torve.android.catalog.LiveBootstrapJson
 import com.torve.android.catalog.LiveBootstrapShelf
@@ -63,11 +74,14 @@ import com.torve.android.tv.TvScreenCache
 import com.torve.android.ui.theme.Amber
 import com.torve.android.ui.theme.Charcoal
 import com.torve.android.ui.theme.Graphite
+import com.torve.android.ui.theme.Obsidian
 import com.torve.android.ui.theme.Silver
 import com.torve.android.ui.theme.Snow
+import com.torve.android.ui.theme.Steel
 import com.torve.data.auth.AuthClient
 import com.torve.domain.model.Channel
 import com.torve.domain.model.ChannelCategory
+import com.torve.domain.model.ChannelContentType
 import com.torve.domain.model.EnrichedChannel
 import com.torve.domain.model.EpgProgramme
 import com.torve.domain.model.canonicalEpgChannelKey
@@ -83,26 +97,40 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import org.koin.compose.koinInject
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+import java.util.TimeZone
 
-private const val SIDEBAR_WEIGHT = 0.30f
-private const val PREVIEW_WEIGHT = 0.35f
-private const val GRID_WEIGHT = 0.65f
+private val IPTV_CATEGORY_PANEL_WIDTH = 280.dp
+private const val PREVIEW_WEIGHT = 0.26f
+private const val GRID_WEIGHT = 0.74f
 private const val MAX_FORWARD_HOURS = 12
 private const val PAGE_DURATION_MS = IPTV_EPG_WINDOW_HOURS * 60L * 60L * 1000L
 private const val MAX_PAGE_OFFSET = MAX_FORWARD_HOURS / IPTV_EPG_WINDOW_HOURS
 private const val IPTV_SCREEN_CACHE_KEY = "tv_iptv_screen_state"
 private const val IPTV_STARTUP_LOG_TAG = "TvStartupRecovery"
 private const val TV_STAGED_SHELF_WARMUP_DELAY_MS = 1_200L
+private const val IPTV_VISIBLE_EPG_CHANNEL_LIMIT = 260
+private val iptvHeaderTimeFormat = SimpleDateFormat("HH:mm", Locale.getDefault())
+private val iptvHeaderDateFormat = SimpleDateFormat("EEE, MMM d", Locale.getDefault())
 
 private enum class FocusZone {
     CHANNEL_LIST,
     EPG_GRID,
 }
 
+private enum class LeftFocusTarget {
+    SEARCH,
+    MANAGE,
+    CATEGORY,
+}
+
 private data class TvIptvScreenCacheState(
     val focusedChannelId: String? = null,
     val selectedChannelId: String? = null,
     val focusedZone: String = FocusZone.CHANNEL_LIST.name,
+    val leftFocusTarget: String = LeftFocusTarget.SEARCH.name,
     val focusedChannelIndex: Int = 0,
     val lastGridRowIndex: Int = 0,
     val lastGridColIndex: Int = 0,
@@ -139,6 +167,12 @@ fun TvIptvScreen(
     var focusedChannel by remember { mutableStateOf<EnrichedChannel?>(null) }
     var focusedProgramme by remember { mutableStateOf<EpgProgramme?>(null) }
     var windowPageOffset by rememberSaveable { mutableIntStateOf(cachedScreenState.windowPageOffset) }
+    var lastLeftFocusTarget by rememberSaveable {
+        mutableStateOf(
+            runCatching { LeftFocusTarget.valueOf(cachedScreenState.leftFocusTarget) }
+                .getOrDefault(LeftFocusTarget.SEARCH),
+        )
+    }
     var focusedZone by rememberSaveable {
         mutableStateOf(
             runCatching { FocusZone.valueOf(cachedScreenState.focusedZone) }
@@ -153,6 +187,8 @@ fun TvIptvScreen(
     var wasActive by remember { mutableStateOf(false) }
 
     val sidebarFocusRequester = remember { FocusRequester() }
+    val searchFocusRequester = remember { FocusRequester() }
+    val manageFocusRequester = remember { FocusRequester() }
     val sidebarListState = rememberLazyListState()
     var iptvSearchFieldFocused by remember { mutableStateOf(false) }
     val iptvFocusManager = LocalFocusManager.current
@@ -162,6 +198,9 @@ fun TvIptvScreen(
     }
     var loadedShelvesByCategory by remember(liveShelfSessionCacheKey) {
         mutableStateOf(TvScreenCache.get<Map<String, LiveShelfLoad>>(liveShelfSessionCacheKey).orEmpty())
+    }
+    var visibleDirectProgrammes by remember(liveShelfSessionCacheKey) {
+        mutableStateOf<Map<String, List<EpgProgramme>>>(emptyMap())
     }
     var pendingGridEntryName by remember { mutableStateOf<String?>(null) }
     var restoringShelfNames by remember(liveShelfSessionCacheKey) { mutableStateOf(emptySet<String>()) }
@@ -176,6 +215,7 @@ fun TvIptvScreen(
         focusedChannelId,
         selectedChannelId,
         focusedZone,
+        lastLeftFocusTarget,
         focusedChannelIndex,
         lastGridRowIndex,
         lastGridColIndex,
@@ -187,6 +227,7 @@ fun TvIptvScreen(
                 focusedChannelId = focusedChannelId,
                 selectedChannelId = selectedChannelId,
                 focusedZone = focusedZone.name,
+                leftFocusTarget = lastLeftFocusTarget.name,
                 focusedChannelIndex = focusedChannelIndex,
                 lastGridRowIndex = lastGridRowIndex,
                 lastGridColIndex = lastGridColIndex,
@@ -210,6 +251,11 @@ fun TvIptvScreen(
             }
             state.showFilterSheet -> viewModel.toggleFilterSheet()
             state.showCategoryManager -> viewModel.toggleCategoryManager()
+            focusedZone == FocusZone.EPG_GRID -> {
+                focusedZone = FocusZone.CHANNEL_LIST
+                lastLeftFocusTarget = LeftFocusTarget.CATEGORY
+                TvIptvRailState.hideRail.value = false
+            }
             else -> {
                 focusedZone = FocusZone.CHANNEL_LIST
                 TvIptvRailState.hideRail.value = false
@@ -430,15 +476,21 @@ fun TvIptvScreen(
         return categoryRequesterAt(targetIndex)
     }
 
+    fun leftEntryRequester(): FocusRequester = when (lastLeftFocusTarget) {
+        LeftFocusTarget.SEARCH -> searchFocusRequester
+        LeftFocusTarget.MANAGE -> manageFocusRequester
+        LeftFocusTarget.CATEGORY -> focusedCategoryRequester()
+    }
+
     LaunchedEffect(state.selectedPlaylistId) {
         if (!state.selectedPlaylistId.isNullOrBlank()) {
             viewModel.hydrateCachedEpgOnly()
         }
     }
 
-    LaunchedEffect(displayCategories, focusedGroupIndex) {
+    LaunchedEffect(displayCategories, focusedGroupIndex, lastLeftFocusTarget) {
         if (displayCategories.isNotEmpty()) {
-            onFirstContentRequester(focusedCategoryRequester())
+            onFirstContentRequester(leftEntryRequester())
         } else {
             onFirstContentRequester(sidebarFocusRequester)
         }
@@ -465,7 +517,7 @@ fun TvIptvScreen(
             loadedShelf.channels
         } else {
             emptyList()
-        }
+        }.filter { enriched -> isPlayableIptvChannel(enriched.channel) }
     }
     // Recompute the anchor every 30 s so the EPG timeline tracks real time.
     var nowMs by remember { mutableLongStateOf(System.currentTimeMillis()) }
@@ -480,16 +532,31 @@ fun TvIptvScreen(
     val windowEndMs = windowStartMs + PAGE_DURATION_MS
     val activePlaylistId = state.selectedPlaylistId.orEmpty()
 
+    LaunchedEffect(activePlaylistId, channelsInGroup, state.epgState) {
+        visibleDirectProgrammes = emptyMap()
+        if (activePlaylistId.isBlank() || channelsInGroup.isEmpty()) return@LaunchedEffect
+        if (state.epgState is EpgState.NotConfigured) return@LaunchedEffect
+        val queryChannels = channelsInGroup.take(IPTV_VISIBLE_EPG_CHANNEL_LIMIT)
+        val programmes = runCatching {
+            viewModel.getProgrammesForChannelsDirect(
+                playlistId = activePlaylistId,
+                channels = queryChannels,
+            )
+        }.getOrDefault(emptyMap())
+        visibleDirectProgrammes = programmes
+        Log.i(
+            "ChannelsEPG",
+            "visible_direct_load category=${focusedCategory?.name.orEmpty()} channels=${channelsInGroup.size} " +
+                "queried=${queryChannels.size} keys=${programmes.size} state=${state.epgState::class.simpleName}",
+        )
+    }
+
     suspend fun requestListFocus(reason: String = "unspecified") {
         if (displayCategories.isEmpty()) return
         val itemIndex = (focusedGroupIndex.takeIf { it >= 0 } ?: focusedChannelIndex).coerceIn(0, maxCategoryIndex)
         val targetCategory = displayCategories.getOrNull(itemIndex)
         val targetRequester = categoryRequesterAt(itemIndex)
-        // Sidebar LazyColumn has two header items before categories: "iptv_search"
-        // and "list_controls". Skip both so the focused category is actually visible
-        // when focus lands on it; previously `itemIndex + 1` accounted for only one
-        // header, leaving the first category off-screen on initial entry.
-        val lazyItemIndex = itemIndex + 2
+        val lazyItemIndex = itemIndex
         val visibleItemIndexes = sidebarListState.layoutInfo.visibleItemsInfo.map { it.index }
         if (lazyItemIndex !in visibleItemIndexes) {
             runCatching { sidebarListState.scrollToItem(lazyItemIndex) }
@@ -510,6 +577,28 @@ fun TvIptvScreen(
         )
         if (!focusedSelected) {
             runCatching { sidebarFocusRequester.requestFocus() }
+        }
+    }
+
+    suspend fun requestLeftPanelFocus(reason: String = "unspecified") {
+        when (lastLeftFocusTarget) {
+            LeftFocusTarget.SEARCH -> {
+                delay(32)
+                runCatching { searchFocusRequester.requestFocus() }
+                    .onFailure { Log.w("TvIptvFocus", "requestSearchFocus failed reason=$reason: ${it.message}") }
+            }
+            LeftFocusTarget.MANAGE -> {
+                delay(32)
+                runCatching { manageFocusRequester.requestFocus() }
+                    .onFailure { Log.w("TvIptvFocus", "requestManageFocus failed reason=$reason: ${it.message}") }
+            }
+            LeftFocusTarget.CATEGORY -> requestListFocus(reason)
+        }
+    }
+
+    LaunchedEffect(focusedZone, lastLeftFocusTarget) {
+        if (focusedZone == FocusZone.CHANNEL_LIST && lastLeftFocusTarget == LeftFocusTarget.CATEGORY) {
+            requestListFocus("group_mode_visible")
         }
     }
 
@@ -583,6 +672,7 @@ fun TvIptvScreen(
 
     fun focusListZone() {
         focusedZone = FocusZone.CHANNEL_LIST
+        lastLeftFocusTarget = LeftFocusTarget.CATEGORY
         onContentFocused(focusedCategoryRequester())
         scope.launch {
             delay(50)
@@ -638,7 +728,7 @@ fun TvIptvScreen(
         ) {
             requestedListFocusCatalogKey = focusKey
             delay(90)
-            requestListFocus("catalog_ready")
+            requestLeftPanelFocus("catalog_ready")
         }
     }
 
@@ -669,68 +759,91 @@ fun TvIptvScreen(
         val lookupPlaylistId = nextFocused.channel.playlistId
             .takeIf { it.isNotBlank() }
             ?: activePlaylistId
+        val shelfProgrammes = focusedCategory
+            ?.let { loadedShelvesByCategory[it.name]?.programmes }
+            .orEmpty()
+        val effectiveProgrammes = mergeEpgProgrammeMaps(
+            primary = mergeEpgProgrammeMaps(
+                primary = state.guideProgrammes,
+                secondary = shelfProgrammes,
+            ),
+            secondary = visibleDirectProgrammes,
+        )
         val programmes = programmesForEpgChannel(
-            programmesByChannelKey = state.guideProgrammes,
+            programmesByChannelKey = effectiveProgrammes,
             playlistId = lookupPlaylistId,
             channel = nextFocused.channel,
-        ).ifEmpty {
-            focusedCategory
-                ?.let { loadedShelvesByCategory[it.name]?.programmes }
-                ?.let { shelfProgrammes ->
-                    programmesForEpgChannel(
-                        programmesByChannelKey = shelfProgrammes,
-                        playlistId = lookupPlaylistId,
-                        channel = nextFocused.channel,
-                    )
-                }
-                .orEmpty()
-        }
+        )
         focusedProgramme = programmes.firstOrNull { it.endTime > windowStartMs && it.startTime < windowEndMs }
             ?: nextFocused.currentProgramme
     }
 
-    LaunchedEffect(windowStartMs, windowEndMs, focusedChannel, state.guideProgrammes, loadedShelvesByCategory, focusedCategory, activePlaylistId) {
+    LaunchedEffect(windowStartMs, windowEndMs, focusedChannel, state.guideProgrammes, visibleDirectProgrammes, loadedShelvesByCategory, focusedCategory, activePlaylistId) {
         val ch = focusedChannel ?: return@LaunchedEffect
         val lookupPlaylistId = ch.channel.playlistId
             .takeIf { it.isNotBlank() }
             ?: activePlaylistId
+        val shelfProgrammes = focusedCategory
+            ?.let { loadedShelvesByCategory[it.name]?.programmes }
+            .orEmpty()
+        val effectiveProgrammes = mergeEpgProgrammeMaps(
+            primary = mergeEpgProgrammeMaps(
+                primary = state.guideProgrammes,
+                secondary = shelfProgrammes,
+            ),
+            secondary = visibleDirectProgrammes,
+        )
         val programmes = programmesForEpgChannel(
-            programmesByChannelKey = state.guideProgrammes,
+            programmesByChannelKey = effectiveProgrammes,
             playlistId = lookupPlaylistId,
             channel = ch.channel,
-        ).ifEmpty {
-            focusedCategory
-                ?.let { loadedShelvesByCategory[it.name]?.programmes }
-                ?.let { shelfProgrammes ->
-                    programmesForEpgChannel(
-                        programmesByChannelKey = shelfProgrammes,
-                        playlistId = lookupPlaylistId,
-                        channel = ch.channel,
-                    )
-                }
-                .orEmpty()
-        }
+        )
         focusedProgramme = programmes.firstOrNull { it.endTime > windowStartMs && it.startTime < windowEndMs }
             ?: ch.currentProgramme
     }
 
-    LaunchedEffect(channelsInGroup, state.guideProgrammes, loadedShelvesByCategory, focusedCategory, activePlaylistId) {
-        if (channelsInGroup.isEmpty() || state.guideProgrammes.isEmpty()) return@LaunchedEffect
+    LaunchedEffect(channelsInGroup, state.guideProgrammes, visibleDirectProgrammes, loadedShelvesByCategory, focusedCategory, activePlaylistId) {
+        if (channelsInGroup.isEmpty()) return@LaunchedEffect
         val shelfProgrammes = focusedCategory
             ?.let { loadedShelvesByCategory[it.name]?.programmes }
             .orEmpty()
+        val effectiveProgrammes = mergeEpgProgrammeMaps(
+            primary = mergeEpgProgrammeMaps(
+                primary = state.guideProgrammes,
+                secondary = shelfProgrammes,
+            ),
+            secondary = visibleDirectProgrammes,
+        )
         val matched = channelsInGroup.count { enriched ->
             val lookupPlaylistId = enriched.channel.playlistId
                 .takeIf { it.isNotBlank() }
                 ?: activePlaylistId
-            programmesForEpgChannel(state.guideProgrammes, lookupPlaylistId, enriched.channel).isNotEmpty() ||
-                programmesForEpgChannel(shelfProgrammes, lookupPlaylistId, enriched.channel).isNotEmpty()
+            programmesForEpgChannel(effectiveProgrammes, lookupPlaylistId, enriched.channel).isNotEmpty()
         }
-        Log.d(
-            "ChannelsEPG",
-            "visible_match category=${focusedCategory?.name.orEmpty()} channels=${channelsInGroup.size} " +
-                "matched=$matched stateKeys=${state.guideProgrammes.size} shelfKeys=${shelfProgrammes.size} playlist=$activePlaylistId",
-        )
+        if (com.torve.android.BuildConfig.DEBUG) {
+            val sample = channelsInGroup.take(5).joinToString(separator = ";") { enriched ->
+                val lookupPlaylistId = enriched.channel.playlistId
+                    .takeIf { it.isNotBlank() }
+                    ?: activePlaylistId
+                val programmeCount = programmesForEpgChannel(
+                    programmesByChannelKey = effectiveProgrammes,
+                    playlistId = lookupPlaylistId,
+                    channel = enriched.channel,
+                ).size
+                val lookupCount = epgChannelLookupKeys(
+                    playlistId = lookupPlaylistId,
+                    channel = enriched.channel,
+                ).size
+                "id=${stableChannelId(enriched.channel).take(12)} keys=$lookupCount programmes=$programmeCount"
+            }
+            Log.d(
+                "ChannelsEPG",
+                    "visible_match category=${focusedCategory?.name.orEmpty()} channels=${channelsInGroup.size} " +
+                    "matched=$matched stateKeys=${state.guideProgrammes.size} shelfKeys=${shelfProgrammes.size} " +
+                    "directKeys=${visibleDirectProgrammes.size} mergedKeys=${effectiveProgrammes.size} playlist=$activePlaylistId " +
+                    "window=${Date(windowStartMs)}..${Date(windowEndMs)} tz=${TimeZone.getDefault().id} sample=[$sample]",
+            )
+        }
     }
 
     LaunchedEffect(isActive) {
@@ -745,7 +858,7 @@ fun TvIptvScreen(
                 gridFocusRequestToken += 1
             } else if (shouldAutoFocus || focusedZone == FocusZone.CHANNEL_LIST) {
                 focusedZone = FocusZone.CHANNEL_LIST
-                requestListFocus("screen_active")
+                requestLeftPanelFocus("screen_active")
             }
         }
         wasActive = true
@@ -763,20 +876,49 @@ fun TvIptvScreen(
             if (focusedZone == FocusZone.EPG_GRID && channelsInGroup.isNotEmpty()) {
                 gridFocusRequestToken += 1
             } else {
-                requestListFocus("sub_route_return")
+                requestLeftPanelFocus("sub_route_return")
             }
         }
         wasSubRouteActive = isSubRouteActive
     }
 
-    Box(modifier = Modifier.fillMaxSize()) {
-        Row(modifier = Modifier.fillMaxSize()) {
-            LazyColumn(
-                state = sidebarListState,
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(
+                Brush.radialGradient(
+                    colors = listOf(
+                        Color(0xFF1D2448).copy(alpha = 0.42f),
+                        Obsidian.copy(alpha = 0.98f),
+                    ),
+                    center = androidx.compose.ui.geometry.Offset(1480f, 80f),
+                    radius = 1500f,
+                ),
+            ),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(start = 22.dp, end = 24.dp, top = 26.dp, bottom = 22.dp),
+            horizontalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            val isGuideMode = focusedZone == FocusZone.EPG_GRID
+            if (!isGuideMode) {
+            Column(
                 modifier = Modifier
-                    .weight(SIDEBAR_WEIGHT)
+                    .width(IPTV_CATEGORY_PANEL_WIDTH)
                     .fillMaxHeight()
-                    .background(Charcoal.copy(alpha = 0.6f))
+                    .padding(top = 48.dp)
+                    .clip(RoundedCornerShape(26.dp))
+                    .background(
+                        Brush.verticalGradient(
+                            colors = listOf(
+                                Charcoal.copy(alpha = 0.76f),
+                                Obsidian.copy(alpha = 0.92f),
+                            ),
+                        ),
+                    )
+                    .border(1.dp, Steel.copy(alpha = 0.26f), RoundedCornerShape(26.dp))
                     .focusRequester(sidebarFocusRequester)
                     .focusProperties {
                         canFocus = focusedZone == FocusZone.CHANNEL_LIST
@@ -785,14 +927,14 @@ fun TvIptvScreen(
                         // field. Without this the focusGroup forwards to the first focusable
                         // child — the search input — and the user has to D-pad right twice +
                         // back to actually land on a channel category on first entry.
-                        enter = { focusedCategoryRequester() }
+                        enter = { leftEntryRequester() }
                     }
                     .focusGroup()
                     .onFocusChanged { state ->
                         if (!isActive || focusedZone != FocusZone.CHANNEL_LIST) return@onFocusChanged
                         if (state.isFocused) {
                             scope.launch {
-                                requestListFocus("sidebar_container_focused")
+                                requestLeftPanelFocus("sidebar_container_focused")
                             }
                         }
                     }
@@ -801,7 +943,9 @@ fun TvIptvScreen(
                         when (event.key) {
                             Key.DirectionRight -> {
                                 if (focusedZone != FocusZone.CHANNEL_LIST) return@onPreviewKeyEvent false
-                                focusGridZone()
+                                if (lastLeftFocusTarget == LeftFocusTarget.CATEGORY) {
+                                    focusGridZone()
+                                }
                                 true
                             }
 
@@ -813,79 +957,138 @@ fun TvIptvScreen(
                             else -> false
                         }
                     }
-                    .padding(vertical = 8.dp),
+                    .padding(horizontal = 12.dp, vertical = 12.dp),
             ) {
-                item(key = "iptv_search") {
-                    com.torve.android.ui.components.TorveSearchField(
-                        value = iptvSearchQuery,
-                        onValueChange = { iptvSearchQuery = it },
-                        placeholder = stringResource(R.string.tv_iptv_search_hint),
-                        showFocusRing = true,
-                        editOnClick = true,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 8.dp, vertical = 6.dp)
-                            .focusProperties { left = railFocusRequester }
-                            .onFocusChanged { iptvSearchFieldFocused = it.isFocused },
-                    )
-                }
-
-                item(key = "list_controls") {
-                    TvIptvControlChip(
-                        label = stringResource(R.string.tv_iptv_manage_channels),
-                        onClick = onOpenEpgSettings,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 8.dp, vertical = 6.dp),
-                    )
-                }
-
-                itemsIndexed(
-                    items = displayCategories,
-                    key = { index, cat -> "cat_${index}_${cat.name}" },
-                ) { index, category ->
-                    val categoryRequester = categoryRequesterAt(index)
-                    IptvCategoryItem(
-                        category = category,
-                        isSelected = index == selectedGroupIndex,
-                        modifier = Modifier
-                            .focusRequester(categoryRequester)
-                            .focusProperties {
-                                left = railFocusRequester
-                                canFocus = focusedZone == FocusZone.CHANNEL_LIST
+                Text(
+                    text = "CATEGORIES",
+                    color = Silver.copy(alpha = 0.72f),
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(start = 4.dp, bottom = 8.dp),
+                )
+                com.torve.android.ui.components.TorveSearchField(
+                    value = iptvSearchQuery,
+                    onValueChange = { iptvSearchQuery = it },
+                    placeholder = stringResource(R.string.tv_iptv_search_hint),
+                    showFocusRing = true,
+                    editOnClick = true,
+                    onMoveDownFromEdit = {
+                        lastLeftFocusTarget = LeftFocusTarget.MANAGE
+                        runCatching { manageFocusRequester.requestFocus() }
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(46.dp)
+                        .focusRequester(searchFocusRequester)
+                        .focusProperties {
+                            left = railFocusRequester
+                            up = searchFocusRequester
+                            down = manageFocusRequester
+                            right = searchFocusRequester
+                            canFocus = focusedZone == FocusZone.CHANNEL_LIST
+                        }
+                        .onFocusChanged {
+                            iptvSearchFieldFocused = it.hasFocus
+                            if (it.hasFocus) {
+                                lastLeftFocusTarget = LeftFocusTarget.SEARCH
+                                onContentFocused(searchFocusRequester)
+                            }
+                        },
+                )
+                Spacer(Modifier.height(8.dp))
+                IptvPanelActionRow(
+                    icon = Icons.Filled.Settings,
+                    label = stringResource(R.string.tv_iptv_manage_channels),
+                    onClick = {
+                        lastLeftFocusTarget = LeftFocusTarget.MANAGE
+                        onOpenEpgSettings()
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(42.dp)
+                        .focusRequester(manageFocusRequester)
+                        .focusProperties {
+                            left = railFocusRequester
+                            up = searchFocusRequester
+                            down = categoryRequesterAt(0)
+                            right = manageFocusRequester
+                            canFocus = focusedZone == FocusZone.CHANNEL_LIST
+                        },
+                    onFocused = {
+                        lastLeftFocusTarget = LeftFocusTarget.MANAGE
+                        onContentFocused(manageFocusRequester)
+                    },
+                )
+                Spacer(Modifier.height(10.dp))
+                LazyColumn(
+                    state = sidebarListState,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f),
+                ) {
+                    itemsIndexed(
+                        items = displayCategories,
+                        key = { index, cat -> "cat_${index}_${cat.name}" },
+                    ) { index, category ->
+                        val categoryRequester = categoryRequesterAt(index)
+                        IptvCategoryItem(
+                            category = category,
+                            isSelected = index == selectedGroupIndex,
+                            guideOwnsFocus = focusedZone == FocusZone.EPG_GRID,
+                            modifier = Modifier
+                                .focusRequester(categoryRequester)
+                                .focusProperties {
+                                    left = railFocusRequester
+                                    up = if (index > 0) categoryRequesterAt(index - 1) else manageFocusRequester
+                                    down = if (index < displayCategories.lastIndex) {
+                                        categoryRequesterAt(index + 1)
+                                    } else {
+                                        categoryRequester
+                                    }
+                                    canFocus = focusedZone == FocusZone.CHANNEL_LIST
+                                },
+                            onFocused = {
+                                lastLeftFocusTarget = LeftFocusTarget.CATEGORY
+                                focusedChannelIndex = index
+                                focusedChannelId = category.name
+                                selectedChannelId = category.name
+                                if (!isCategoryShelfReady(category)) {
+                                    restoreShelfIfNeeded(category)
+                                }
+                                focusedZone = FocusZone.CHANNEL_LIST
+                                onContentFocused(categoryRequester)
+                                Log.d("TvIptvFocus", "category_focused index=$index name=${category.name}")
                             },
-                        onFocused = {
-                            focusedChannelIndex = index
-                            focusedChannelId = category.name
-                            selectedChannelId = category.name
-                            if (!isCategoryShelfReady(category)) {
-                                restoreShelfIfNeeded(category)
-                            }
-                            focusedZone = FocusZone.CHANNEL_LIST
-                            onContentFocused(categoryRequester)
-                            Log.d("TvIptvFocus", "category_focused index=$index name=${category.name}")
-                        },
-                        onClick = {
-                            focusedChannelIndex = index
-                            focusedChannelId = category.name
-                            selectedChannelId = category.name
-                            if (!isCategoryShelfReady(category)) {
-                                restoreShelfIfNeeded(category, enterGridWhenReady = true)
-                            } else {
-                                focusGridZone()
-                            }
-                        },
-                    )
+                            onClick = {
+                                lastLeftFocusTarget = LeftFocusTarget.CATEGORY
+                                focusedChannelIndex = index
+                                focusedChannelId = category.name
+                                selectedChannelId = category.name
+                                if (!isCategoryShelfReady(category)) {
+                                    restoreShelfIfNeeded(category, enterGridWhenReady = true)
+                                } else {
+                                    focusGridZone()
+                                }
+                            },
+                        )
+                    }
                 }
+            }
             }
 
             Column(
                 modifier = Modifier
-                    .weight(1f - SIDEBAR_WEIGHT)
+                    .weight(1f)
                     .fillMaxHeight()
-                    .padding(horizontal = 8.dp, vertical = 8.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
+                    .clip(RoundedCornerShape(30.dp)),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
+                TvIptvHeader(
+                    channelCount = channelsInGroup.size,
+                    groupName = focusedCategory?.name,
+                    showGroupName = isGuideMode,
+                )
+
                 TvEpgPreviewPanel(
                     focusedChannel = focusedChannel,
                     focusedProgramme = focusedProgramme,
@@ -894,28 +1097,6 @@ fun TvIptvScreen(
                         .fillMaxWidth()
                         .weight(PREVIEW_WEIGHT),
                 )
-
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .background(Graphite.copy(alpha = 0.45f), MaterialTheme.shapes.small)
-                        .padding(horizontal = 10.dp, vertical = 6.dp),
-                ) {
-                    val noChannelProgrammeText = "No guide data"
-                    Text(
-                        text = focusedProgramme?.title
-                            ?: if (state.epgState is EpgState.Loaded) {
-                                noChannelProgrammeText
-                            } else {
-                                focusedChannel?.channel?.name ?: stringResource(R.string.tv_live_no_programme_data)
-                            },
-                        color = Snow,
-                        fontSize = MaterialTheme.typography.bodyMedium.fontSize,
-                        fontWeight = FontWeight.Medium,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
 
                 Box(
                     modifier = Modifier
@@ -956,14 +1137,19 @@ fun TvIptvScreen(
                     val shelfProgrammes = focusedCategory
                         ?.let { loadedShelvesByCategory[it.name]?.programmes }
                         .orEmpty()
-                    val effectiveProgrammes = if (shelfProgrammes.isNotEmpty()) {
-                        state.guideProgrammes + shelfProgrammes
-                    } else {
-                        state.guideProgrammes
+                    val effectiveProgrammes = remember(state.guideProgrammes, shelfProgrammes, visibleDirectProgrammes) {
+                        mergeEpgProgrammeMaps(
+                            primary = mergeEpgProgrammeMaps(
+                                primary = state.guideProgrammes,
+                                secondary = shelfProgrammes,
+                            ),
+                            secondary = visibleDirectProgrammes,
+                        )
                     }
                     TvEpgGrid(
                         channels = channelsInGroup,
                         guideProgrammes = effectiveProgrammes,
+                        isGuideLoading = state.epgState is EpgState.Loading,
                         playlistId = activePlaylistId,
                         windowStartMs = windowStartMs,
                         windowEndMs = windowEndMs,
@@ -1005,6 +1191,7 @@ fun TvIptvScreen(
                             }
                         },
                         modifier = Modifier.fillMaxSize(),
+                        channelColumnWidth = if (isGuideMode) 310.dp else 178.dp,
                     )
 
                     if (channelsInGroup.isEmpty()) {
@@ -1100,6 +1287,7 @@ fun TvIptvScreen(
                         is EpgState.Loaded -> Unit
                     }
                 }
+
             }
         }
 
@@ -1172,6 +1360,150 @@ private fun LiveBootstrapShelf.toLiveShelfLoad(playlistId: String): LiveShelfLoa
     return LiveShelfLoad(channels = channels, programmes = programmes)
 }
 
+private fun mergeEpgProgrammeMaps(
+    primary: Map<String, List<EpgProgramme>>,
+    secondary: Map<String, List<EpgProgramme>>,
+): Map<String, List<EpgProgramme>> {
+    if (primary.isEmpty()) return secondary
+    if (secondary.isEmpty()) return primary
+
+    val merged = linkedMapOf<String, List<EpgProgramme>>()
+    (primary.keys + secondary.keys).forEach { key ->
+        val primaryProgrammes = primary[key].orEmpty()
+        val secondaryProgrammes = secondary[key].orEmpty()
+        val programmes = when {
+            primaryProgrammes.isEmpty() -> secondaryProgrammes
+            secondaryProgrammes.isEmpty() -> primaryProgrammes
+            else -> (primaryProgrammes + secondaryProgrammes)
+                .distinctBy { programme ->
+                    "${programme.channelId}|${programme.startTime}|${programme.endTime}|${programme.title}"
+                }
+                .sortedWith(compareBy<EpgProgramme> { it.startTime }.thenBy { it.endTime })
+        }
+        if (programmes.isNotEmpty()) {
+            merged[key] = programmes
+        }
+    }
+    return merged
+}
+
+@Composable
+private fun IptvPanelActionRow(
+    icon: ImageVector,
+    label: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    onFocused: () -> Unit = {},
+) {
+    var focused by remember { mutableStateOf(false) }
+    Row(
+        modifier = modifier
+            .onFocusChanged {
+                focused = it.isFocused
+                if (it.isFocused) onFocused()
+            }
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                onClick = onClick,
+            )
+            .border(
+                width = if (focused) 2.dp else 1.dp,
+                color = if (focused) Amber else Steel.copy(alpha = 0.14f),
+                shape = RoundedCornerShape(16.dp),
+            )
+            .clip(RoundedCornerShape(16.dp))
+            .background(if (focused) Amber.copy(alpha = 0.17f) else Graphite.copy(alpha = 0.18f))
+            .padding(horizontal = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = null,
+            tint = if (focused) Amber else Silver,
+            modifier = Modifier.size(17.dp),
+        )
+        Text(
+            text = label,
+            color = if (focused) Snow else Silver,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Medium,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+@Composable
+private fun TvIptvHeader(
+    channelCount: Int,
+    groupName: String? = null,
+    showGroupName: Boolean = false,
+) {
+    var nowMs by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(30_000L)
+            nowMs = System.currentTimeMillis()
+        }
+    }
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(36.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween,
+    ) {
+        Box(
+            modifier = Modifier
+                .clip(RoundedCornerShape(999.dp))
+                .background(Charcoal.copy(alpha = 0.34f))
+                .border(1.dp, Steel.copy(alpha = 0.16f), RoundedCornerShape(999.dp))
+                .padding(horizontal = 12.dp, vertical = 7.dp),
+        ) {
+            Text(
+                text = if (showGroupName && !groupName.isNullOrBlank()) {
+                    "$groupName · $channelCount channels"
+                } else {
+                    "$channelCount channels"
+                },
+                color = Silver,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Medium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        Row(
+            modifier = Modifier
+                .clip(RoundedCornerShape(999.dp))
+                .background(Charcoal.copy(alpha = 0.34f))
+                .border(1.dp, Steel.copy(alpha = 0.16f), RoundedCornerShape(999.dp))
+                .padding(horizontal = 12.dp, vertical = 5.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Text(
+                text = iptvHeaderDateFormat.format(Date(nowMs)),
+                color = Silver,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Medium,
+                maxLines = 1,
+                softWrap = false,
+            )
+            Text(
+                text = iptvHeaderTimeFormat.format(Date(nowMs)),
+                color = Amber,
+                fontSize = 20.sp,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                softWrap = false,
+            )
+        }
+    }
+}
+
 internal fun LiveShelfLoad.filterAdult(allowAdult: Boolean): LiveShelfLoad {
     if (allowAdult) return this
     val adultKeywords = setOf("xxx", "adult", "18+", "porn", "erotic")
@@ -1191,4 +1523,26 @@ internal fun LiveShelfLoad.filterAdult(allowAdult: Boolean): LiveShelfLoad {
         channels = filteredChannels,
         programmes = programmes.filterKeys(visibleKeys::contains),
     )
+}
+
+private fun isPlayableIptvChannel(channel: Channel): Boolean {
+    val url = channel.url.trim()
+    if (url.isBlank()) return false
+    if (url == "#" || url.equals("about:blank", ignoreCase = true)) return false
+    if (channel.contentType == ChannelContentType.VOD_MOVIE || channel.contentType == ChannelContentType.VOD_SERIES) {
+        return false
+    }
+    return !isDecorativeChannelName(channel.name)
+}
+
+private fun isDecorativeChannelName(name: String): Boolean {
+    val trimmed = name.trim()
+    if (trimmed.isBlank()) return true
+    if (trimmed.all { it == '#' || it == '-' || it == '_' || it == '*' || it == '=' || it.isWhitespace() }) {
+        return true
+    }
+    val hashCount = trimmed.count { it == '#' }
+    if (hashCount >= 6 && trimmed.startsWith("#") && trimmed.endsWith("#")) return true
+    val stripped = trimmed.trim('#', '-', '_', '*', '=', ' ')
+    return stripped.isBlank()
 }

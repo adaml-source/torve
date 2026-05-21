@@ -284,6 +284,7 @@ fun HomeSection.icon(): ImageVector = when (this) {
     HomeSection.HERO -> Icons.AutoMirrored.Rounded.FeaturedPlayList
     HomeSection.ON_NOW -> Icons.Rounded.Tv
     HomeSection.CONTINUE_WATCHING -> Icons.Rounded.PlayCircleOutline
+    HomeSection.UPCOMING_SCHEDULE -> Icons.Rounded.NewReleases
     HomeSection.WATCHLIST -> Icons.Rounded.BookmarkBorder
     HomeSection.WATCHLIST_MOVIES -> Icons.Rounded.Theaters
     HomeSection.WATCHLIST_TV -> Icons.Rounded.Tv

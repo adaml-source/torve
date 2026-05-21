@@ -230,10 +230,10 @@ class UserFacingErrorTest {
 
     @Test
     fun streamHandoffReferenceCodesMapToSanitizedUnavailableMessage() {
-        assertEquals(UserFacingError.STREAM_RESOLVE_FAILED, backendReasonToUserFacingError("stream_reference_required"))
-        assertEquals(UserFacingError.STREAM_RESOLVE_FAILED, backendReasonToUserFacingError("stream_reference_not_found"))
+        assertEquals(UserFacingError.STREAM_REFERENCE_UNAVAILABLE, backendReasonToUserFacingError("stream_reference_required"))
+        assertEquals(UserFacingError.STREAM_REFERENCE_UNAVAILABLE, backendReasonToUserFacingError("stream_reference_not_found"))
         assertEquals(UserFacingError.STREAM_RESOLVE_FAILED, backendReasonToUserFacingError("stream_handoff_unavailable"))
-        val msg = UserFacingError.STREAM_RESOLVE_FAILED.defaultMessage()
+        val msg = UserFacingError.STREAM_REFERENCE_UNAVAILABLE.defaultMessage()
         assert("stream_reference" !in msg) { "Raw code leaked: $msg" }
         assert("stream_handoff" !in msg) { "Raw code leaked: $msg" }
     }

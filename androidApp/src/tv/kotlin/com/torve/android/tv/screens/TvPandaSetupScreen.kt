@@ -37,6 +37,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.res.stringResource
@@ -264,17 +265,19 @@ private fun TvPandaPrimaryNavButton(
 ) {
     val interactionSource = remember { MutableInteractionSource() }
     val focused by interactionSource.collectIsFocusedAsState()
+    val shape = RoundedCornerShape(12.dp)
     Button(
         onClick = onClick,
         colors = ButtonDefaults.buttonColors(containerColor = Amber, contentColor = Obsidian),
-        shape = RoundedCornerShape(12.dp),
+        shape = shape,
         interactionSource = interactionSource,
         modifier = Modifier
             .focusRequester(focusRequester)
+            .clip(shape)
             .border(
                 width = if (focused) 2.dp else 1.dp,
                 color = if (focused) Snow else Amber.copy(alpha = 0.35f),
-                shape = RoundedCornerShape(12.dp),
+                shape = shape,
             ),
     ) {
         Text(text, fontWeight = FontWeight.SemiBold)
@@ -294,20 +297,23 @@ private fun TvPandaOutlinedNavButton(
 ) {
     val interactionSource = remember { MutableInteractionSource() }
     val focused by interactionSource.collectIsFocusedAsState()
+    val shape = RoundedCornerShape(12.dp)
     OutlinedButton(
         onClick = onClick,
-        shape = RoundedCornerShape(12.dp),
+        shape = shape,
+        border = null,
         interactionSource = interactionSource,
         modifier = Modifier
             .focusRequester(focusRequester)
+            .clip(shape)
             .background(
                 color = if (focused) Gunmetal else Obsidian,
-                shape = RoundedCornerShape(12.dp),
+                shape = shape,
             )
             .border(
                 width = if (focused) 2.dp else 1.dp,
                 color = if (focused) Snow else Amber.copy(alpha = 0.45f),
-                shape = RoundedCornerShape(12.dp),
+                shape = shape,
             ),
     ) {
         leadingIcon?.let {

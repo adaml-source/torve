@@ -124,6 +124,15 @@ fun ParsedStream.isTorrentOrDebridStream(): Boolean =
 fun ParsedStream.canUseGenericStreamHandoff(): Boolean =
     !accelerationMemoryId.isNullOrBlank() && !isUsenetStream()
 
+object LegacyStreamFallbackCompatibility {
+    var allowDirectFallbackWithoutMemoryId: Boolean = true
+}
+
+fun ParsedStream.canUseLegacyDirectFallback(): Boolean =
+    accelerationMemoryId.isNullOrBlank() &&
+        !isUsenetStream() &&
+        (directUrl != null || magnetUrl != null || infoHash != null)
+
 fun String?.containsUsenetMarker(): Boolean {
     val value = this ?: return false
     return listOf(

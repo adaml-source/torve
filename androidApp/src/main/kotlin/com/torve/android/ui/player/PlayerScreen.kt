@@ -107,7 +107,6 @@ import androidx.media3.common.MediaMetadata
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.session.MediaSession
 import androidx.media3.ui.AspectRatioFrameLayout
-import androidx.media3.ui.PlayerView
 import com.torve.android.BuildConfig
 import com.torve.android.player.AudioEqualizer
 import com.torve.android.device.DeviceFormFactor
@@ -119,7 +118,10 @@ import com.torve.android.player.LiveAudioPathSnapshot
 import com.torve.android.player.LivePlayerEngineId
 import com.torve.android.player.MPVPlayerEngine
 import com.torve.android.player.MPVView
+import com.torve.android.player.TorvePlayerView
 import com.torve.android.player.buildLiveAudioPathLog
+import com.torve.android.player.clearPlayerSafely
+import com.torve.android.player.setPlayerSafely
 import com.torve.android.sync.SyncCoordinator
 import com.torve.android.tv.settings.rememberTvReduceMotionPreference
 import com.torve.android.voice.PlayerVoiceCommand
@@ -176,6 +178,10 @@ import com.torve.domain.repository.StreamRepository
 import com.torve.domain.repository.PreferencesRepository
 import com.torve.domain.repository.WatchHistoryRepository
 import com.torve.domain.repository.WatchProgressRepository
+import com.torve.domain.telemetry.StreamPathDiagnostics
+import com.torve.domain.telemetry.StreamPathTelemetryContext
+import com.torve.domain.telemetry.StreamPlaybackPath
+import com.torve.domain.telemetry.TelemetryEmitter
 import com.torve.presentation.channels.ChannelsViewModel
 import com.torve.presentation.player.TraktScrobbler
 import com.torve.presentation.settings.SettingsViewModel
@@ -222,6 +228,7 @@ fun PlayerScreen(
     prefsRepo: PreferencesRepository = koinInject(),
     subtitleAggregator: SubtitleAggregator = koinInject(),
     openSubtitlesClient: OpenSubtitlesClient = koinInject(),
+    telemetry: TelemetryEmitter = koinInject(),
 ) {
     val context = LocalContext.current
     val voiceInputUnavailableFallback = context.getString(R.string.voice_input_unavailable)
@@ -321,7 +328,11 @@ fun PlayerScreen(
     var activeReplayProgramme by remember { mutableStateOf<com.torve.domain.model.EpgProgramme?>(null) }
     var liveBufferDurationMs by remember { mutableIntStateOf(ExoPlayerEngine.DEFAULT_LIVE_BUFFER_MS) }
     var audioEqualizer by remember { mutableStateOf<AudioEqualizer?>(null) }
-    var exoPlayerView by remember { mutableStateOf<PlayerView?>(null) }
+    var exoPlayerView by remember { mutableStateOf<TorvePlayerView?>(null) }
+    fun detachExoPlayerView() {
+        exoPlayerView?.clearPlayerSafely("mobile_player_detach")
+        exoPlayerView = null
+    }
     var topMenuFocusTick by remember { mutableIntStateOf(0) }
     var lastTopMenuFocusTarget by remember { mutableStateOf(TopMenuFocusTarget.BACK) }
     var seekRepeatDirection by remember { mutableIntStateOf(0) }
@@ -576,6 +587,16 @@ fun PlayerScreen(
 
     fun requestPlayback(url: String) {
         if (url.isBlank()) return
+        if (isLiveChannelPlayback) {
+            StreamPathDiagnostics.record(
+                path = StreamPlaybackPath.IPTV_DIRECT,
+                telemetry = telemetry,
+                context = StreamPathTelemetryContext(
+                    contentType = "live_tv",
+                    providerCategory = "iptv",
+                ),
+            )
+        }
         currentUrl = url
         // Consume any LAN handoff staged before navigation. The route
         // schema can't carry HTTP headers, so the LAN-from-Home /
@@ -897,14 +918,12 @@ fun PlayerScreen(
         )
     }
 
-    LaunchedEffect(useMpv, pictureFormat, exoPlayerView) {
+    LaunchedEffect(useMpv, pictureFormat) {
         if (useMpv) {
             (engine as? MPVPlayerEngine)?.setPictureFormat(
                 aspectRatio = pictureFormat.aspectRatio,
                 fill = pictureFormat.fill,
             )
-        } else {
-            exoPlayerView?.resizeMode = pictureFormat.exoResizeMode
         }
     }
 
@@ -1620,11 +1639,12 @@ fun PlayerScreen(
 
             override fun onError(message: String) {
                 val safeUrl = com.torve.domain.diagnostics.DiagnosticsRedactor.redact(currentUrl)
-                if (message.isNonFatalRecoveryMessage()) {
-                    android.util.Log.i("Player", "Ignoring non-fatal playback recovery notice for URL: $safeUrl - $message")
+                val safeMessage = com.torve.domain.diagnostics.DiagnosticsRedactor.redact(message)
+                if (safeMessage.isNonFatalRecoveryMessage()) {
+                    android.util.Log.i("Player", "Ignoring non-fatal playback recovery notice for URL: $safeUrl - $safeMessage")
                     return
                 }
-                android.util.Log.e("Player", "Playback error for URL: $safeUrl — $message")
+                android.util.Log.e("Player", "Playback error for URL: $safeUrl - $safeMessage")
                 val seekSuppressed = isSeekSuppressionActive()
                 if (!seekSuppressed) {
                     currentStreamHostKey?.let { StreamRuntimeTelemetry.recordFatalError(it) }
@@ -1810,6 +1830,9 @@ fun PlayerScreen(
             engine.removeListener(listener)
             audioEqualizer?.release()
             mpvView = null
+            if (engine is ExoPlayerEngine) {
+                detachExoPlayerView()
+            }
             engine.release()
         }
     }
@@ -2483,65 +2506,27 @@ fun PlayerScreen(
                 },
             ),
     ) {
-        // Video surface
-        if (useMpv) {
-            // MPV SurfaceView — surface must be attached before mpv can render.
-            // The update block sets the pending binding token; surfaceCreated()
-            // will do the actual attach. onSurfaceAttachedStateChanged signals
-            // mpvSurfaceReady so the DisposableEffect can start playback.
-            val mpvBindingToken = remember { System.identityHashCode(engine) }
-            AndroidView(
-                factory = { ctx ->
-                    MPVView(ctx).apply {
-                        layoutParams = FrameLayout.LayoutParams(
-                            ViewGroup.LayoutParams.MATCH_PARENT,
-                            ViewGroup.LayoutParams.MATCH_PARENT,
-                        )
-                        mpvView = this
-                        onSurfaceAttachedStateChanged = { attached ->
-                            mpvSurfaceReady = attached
-                        }
-                    }
-                },
-                update = { view ->
-                    view.bindSurface(mpvBindingToken, "mobile_compose_update")
-                },
-                onRelease = { view ->
-                    mpvSurfaceReady = false
-                    view.releaseSurface("mobile_compose_release")
-                    if (mpvView === view) {
-                        mpvView = null
-                    }
-                },
-                modifier = Modifier.fillMaxSize(),
-            )
-        } else {
-            // ExoPlayer PlayerView
-            AndroidView(
-                factory = {
-                    PlayerView(context).apply {
-                        useController = false
-                        layoutParams = FrameLayout.LayoutParams(
-                            ViewGroup.LayoutParams.MATCH_PARENT,
-                            ViewGroup.LayoutParams.MATCH_PARENT,
-                        )
-                        resizeMode = pictureFormat.exoResizeMode
-                        exoPlayerView = this
-                    }
-                },
-                update = { view ->
-                    view.player = (engine as? ExoPlayerEngine)?.getExoPlayer()
-                    view.resizeMode = pictureFormat.exoResizeMode
-                    exoPlayerView = view
-                },
-                onRelease = { view ->
-                    view.player = null
-                    if (exoPlayerView == view) exoPlayerView = null
-                },
-                modifier = Modifier.fillMaxSize(),
-            )
-        }
-
+        PlayerVideoSurface(
+            useMpv = useMpv,
+            engine = engine,
+            pictureFormat = pictureFormat,
+            onMpvViewCreated = { view ->
+                mpvView = view
+                view.onSurfaceAttachedStateChanged = { attached ->
+                    mpvSurfaceReady = attached
+                }
+            },
+            onMpvViewReleased = { view ->
+                mpvSurfaceReady = false
+                if (mpvView === view) {
+                    mpvView = null
+                }
+            },
+            onExoPlayerViewCreated = { view -> exoPlayerView = view },
+            onExoPlayerViewReleased = { view ->
+                if (exoPlayerView === view) exoPlayerView = null
+            },
+        )
         // Error overlay
         errorMessage?.let { msg ->
             if (isTv) {
@@ -3962,6 +3947,66 @@ fun PlayerScreen(
                 showDevicePicker = false
                 topMenuFocusTick++
             },
+        )
+    }
+}
+
+@OptIn(UnstableApi::class)
+@Composable
+private fun PlayerVideoSurface(
+    useMpv: Boolean,
+    engine: PlayerEngine,
+    pictureFormat: PlayerPictureFormat,
+    onMpvViewCreated: (MPVView) -> Unit,
+    onMpvViewReleased: (MPVView) -> Unit,
+    onExoPlayerViewCreated: (TorvePlayerView) -> Unit,
+    onExoPlayerViewReleased: (TorvePlayerView) -> Unit,
+) {
+    if (useMpv) {
+        val mpvBindingToken = remember { System.identityHashCode(engine) }
+        AndroidView(
+            factory = { ctx ->
+                MPVView(ctx).apply {
+                    layoutParams = FrameLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                    )
+                    onMpvViewCreated(this)
+                }
+            },
+            update = { view ->
+                view.bindSurface(mpvBindingToken, "mobile_compose_update")
+            },
+            onRelease = { view ->
+                view.releaseSurface("mobile_compose_release")
+                onMpvViewReleased(view)
+            },
+            modifier = Modifier.fillMaxSize(),
+        )
+    } else {
+        AndroidView(
+            factory = { ctx ->
+                TorvePlayerView(ctx).apply {
+                    useController = false
+                    resizeMode = pictureFormat.exoResizeMode
+                    layoutParams = FrameLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                    )
+                    onExoPlayerViewCreated(this)
+                }
+            },
+            update = { view ->
+                view.useController = false
+                view.resizeMode = pictureFormat.exoResizeMode
+                view.setPlayerSafely((engine as? ExoPlayerEngine)?.getExoPlayer(), "mobile_player_update")
+                onExoPlayerViewCreated(view)
+            },
+            onRelease = { view ->
+                view.clearPlayerSafely("mobile_player_release")
+                onExoPlayerViewReleased(view)
+            },
+            modifier = Modifier.fillMaxSize(),
         )
     }
 }

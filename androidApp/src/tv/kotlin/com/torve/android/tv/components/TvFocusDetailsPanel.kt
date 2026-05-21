@@ -1,12 +1,16 @@
 package com.torve.android.tv.components
 
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -16,10 +20,13 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -31,8 +38,12 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
@@ -43,6 +54,7 @@ import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
 import coil3.compose.AsyncImagePainter
 import com.torve.android.R
+import com.torve.android.ui.components.PreferredRatingPills
 import com.torve.android.ui.components.ratingSourceIconRes
 import com.torve.android.ui.theme.Amber
 import com.torve.android.ui.theme.Charcoal
@@ -54,6 +66,8 @@ import com.torve.domain.model.CastMember
 import com.torve.domain.model.MediaItem
 import com.torve.domain.model.MediaRatings
 import com.torve.domain.model.MediaType
+import com.torve.domain.model.RatingDisplayPrefs
+import com.torve.domain.model.RatingPillStyle
 import com.torve.domain.model.RatingSource
 import com.torve.domain.model.allowsTmdbRatingProvider
 import com.torve.domain.model.deriveProvidersToRender
@@ -64,15 +78,28 @@ import com.torve.domain.repository.MetadataRepository
 import com.torve.android.ui.components.getRatingValue
 import com.torve.presentation.settings.SettingsViewModel
 import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.rememberCoroutineScope
-import kotlinx.coroutines.launch
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import org.koin.compose.koinInject
 
 /** App-lifetime enriched item cache — survives all recomposition/navigation.
  *  SnapshotStateMap so Compose observes reads and recomposes when entries are added. */
 private val enrichedItemCache = androidx.compose.runtime.mutableStateMapOf<String, MediaItem>()
+private fun MediaItem.upcomingScheduleDateTime(): String? {
+    if (!id.startsWith("trakt-calendar:")) return null
+    val raw = releaseDate?.trim()?.takeIf { it.isNotEmpty() }
+        ?: id.split(":", limit = 5).getOrNull(4)?.trim()?.takeIf { it.isNotEmpty() }
+        ?: return null
+    return runCatching {
+        java.time.ZonedDateTime.parse(raw)
+            .withZoneSameInstant(java.time.ZoneId.systemDefault())
+            .format(java.time.format.DateTimeFormatter.ofPattern("MMM d, yyyy, h:mm a", java.util.Locale.US))
+    }.getOrElse {
+        raw.take(16).replace('T', ' ').removeSuffix("Z").takeIf { it.isNotBlank() }
+    }
+}
 
 /**
  * Left-side contextual info panel for TV browsing.
@@ -94,10 +121,21 @@ fun TvFocusDetailsPanel(
     val settingsViewModel: SettingsViewModel = koinInject()
     val settingsState by settingsViewModel.state.collectAsState()
     var lastResolvedLogoUrl by remember { mutableStateOf<String?>(null) }
-    val enrichScope = rememberCoroutineScope()
+    val requestedItem = focusedItem
+    val requestedItemKey = requestedItem?.let { "${it.type}:${it.tmdbId ?: it.id}" }
+    var displayedFocusedItem by remember { mutableStateOf(focusedItem) }
 
-    LaunchedEffect(focusedItem?.logoUrl) {
-        val resolved = focusedItem?.logoUrl?.takeIf { it.isNotBlank() } ?: return@LaunchedEffect
+    LaunchedEffect(requestedItemKey) {
+        if (requestedItem == null) {
+            displayedFocusedItem = null
+            return@LaunchedEffect
+        }
+        delay(220L)
+        displayedFocusedItem = requestedItem
+    }
+
+    LaunchedEffect(displayedFocusedItem?.logoUrl) {
+        val resolved = displayedFocusedItem?.logoUrl?.takeIf { it.isNotBlank() } ?: return@LaunchedEffect
         lastResolvedLogoUrl = resolved
     }
 
@@ -106,54 +144,64 @@ fun TvFocusDetailsPanel(
     // does network calls. Results stored in static enrichedItemCache so returning to an
     // item is always instant.
     LaunchedEffect(
-        focusedItem?.let { "${it.type}:${it.tmdbId ?: it.id}" },
+        displayedFocusedItem?.let { "${it.type}:${it.tmdbId ?: it.id}" },
         settingsState.ratingPrefs.enabledProviders,
     ) {
-        val item = focusedItem ?: return@LaunchedEffect
+        val item = displayedFocusedItem ?: return@LaunchedEffect
         val itemKey = "${item.type}:${item.tmdbId ?: item.id}"
         val tmdbId = item.tmdbId ?: item.id.extractTmdbIdOrNull()
-        // Skip if already in static cache
-        if (enrichedItemCache.containsKey(itemKey)) return@LaunchedEffect
+        val cachedItem = enrichedItemCache[itemKey]
+        if (
+            cachedItem != null &&
+            !cachedItem.logoUrl.isNullOrBlank() &&
+            (!cachedItem.posterUrl.isNullOrBlank() || !cachedItem.backdropUrl.isNullOrBlank())
+        ) return@LaunchedEffect
         // Skip only when the item already has values for the user's selected
         // providers. A raw TMDB score should not block IMDb/RT enrichment.
         val displayRatings = item.ratings.withFallbackTmdbScore(item.rating)
-        if (displayRatings?.hasAnyEnabledDisplayValue(settingsState.ratingPrefs) == true) {
+        if (
+            !item.overview.isNullOrBlank() &&
+            displayRatings?.hasAnyEnabledDisplayValue(settingsState.ratingPrefs) == true
+        ) {
             enrichedItemCache[itemKey] = item
             return@LaunchedEffect
         }
 
-        enrichScope.launch {
-            try {
-                val mediaType = if (item.type == MediaType.MOVIE) "movie" else "tv"
-                val detail = if (tmdbId != null) withContext(Dispatchers.IO) {
-                    runCatching { metadataRepo.getDetail(mediaType, tmdbId) }.getOrNull()
-                } else null
-                val itemWithDetail = item.copy(
-                    tmdbId = tmdbId ?: detail?.tmdbId ?: item.tmdbId,
-                    imdbId = detail?.imdbId ?: item.imdbId,
-                    overview = item.overview ?: detail?.overview,
-                    genres = item.genres.ifEmpty { detail?.genres ?: emptyList() },
-                    year = item.year ?: detail?.year,
-                    runtime = item.runtime ?: detail?.runtime,
-                    cast = if (item.cast.isNotEmpty()) item.cast else detail?.cast?.take(8) ?: emptyList(),
-                )
-                // Enrich ratings via SQLite cache or network
-                val apiKey = withContext(Dispatchers.IO) {
-                    runCatching {
-                        secretStore.get(com.torve.domain.integrations.IntegrationSecretKey.MDBLIST_API_KEY)
-                            ?: prefsRepo.getString(SettingsViewModel.KEY_MDBLIST_API_KEY)
-                            ?: com.torve.data.mdblist.MdbListApi.DEFAULT_API_KEY
-                    }.getOrDefault(com.torve.data.mdblist.MdbListApi.DEFAULT_API_KEY)
-                }
-                val enriched = withContext(Dispatchers.IO) {
-                    runCatching { ratingsEnricher.enrichSingle(itemWithDetail, apiKey) }.getOrNull()
-                }
-                val result = enriched ?: itemWithDetail
-                enrichedItemCache[itemKey] = result
-            } catch (_: Exception) {
-                // Cache raw item so we don't retry failed enrichments endlessly
-                enrichedItemCache[itemKey] = item
+        delay(650L)
+        try {
+            val mediaType = if (item.type == MediaType.MOVIE) "movie" else "tv"
+            val detail = if (tmdbId != null) withContext(Dispatchers.IO) {
+                runCatching { metadataRepo.getDetail(mediaType, tmdbId) }.getOrNull()
+            } else null
+            val itemWithDetail = item.copy(
+                tmdbId = tmdbId ?: detail?.tmdbId ?: item.tmdbId,
+                imdbId = detail?.imdbId ?: item.imdbId,
+                overview = item.overview ?: detail?.overview,
+                genres = item.genres.ifEmpty { detail?.genres ?: emptyList() },
+                year = item.year ?: detail?.year,
+                runtime = item.runtime ?: detail?.runtime,
+                logoUrl = item.logoUrl ?: detail?.logoUrl,
+                posterUrl = item.posterUrl ?: detail?.posterUrl,
+                backdropUrl = item.backdropUrl ?: detail?.backdropUrl,
+                cast = if (item.cast.isNotEmpty()) item.cast else detail?.cast?.take(8) ?: emptyList(),
+            )
+            // Enrich ratings via SQLite cache or network
+            val apiKey = withContext(Dispatchers.IO) {
+                runCatching {
+                    secretStore.get(com.torve.domain.integrations.IntegrationSecretKey.MDBLIST_API_KEY)
+                        ?: prefsRepo.getString(SettingsViewModel.KEY_MDBLIST_API_KEY)
+                        ?: com.torve.data.mdblist.MdbListApi.DEFAULT_API_KEY
+                }.getOrDefault(com.torve.data.mdblist.MdbListApi.DEFAULT_API_KEY)
             }
+            val enriched = withContext(Dispatchers.IO) {
+                runCatching { ratingsEnricher.enrichSingle(itemWithDetail, apiKey) }.getOrNull()
+            }
+            val result = enriched ?: itemWithDetail
+            enrichedItemCache[itemKey] = result
+        } catch (error: Exception) {
+            if (error is CancellationException) throw error
+            // Cache raw item so we don't retry failed enrichments endlessly
+            enrichedItemCache[itemKey] = item
         }
     }
 
@@ -171,7 +219,7 @@ fun TvFocusDetailsPanel(
             ),
     ) {
         AnimatedContent(
-            targetState = focusedItem,
+            targetState = displayedFocusedItem,
             transitionSpec = {
                 fadeIn(tween(50)) togetherWith fadeOut(tween(30))
             },
@@ -190,6 +238,9 @@ fun TvFocusDetailsPanel(
                         genres = item.genres.ifEmpty { cached.genres },
                         year = item.year ?: cached.year,
                         runtime = item.runtime ?: cached.runtime,
+                        logoUrl = item.logoUrl ?: cached.logoUrl,
+                        posterUrl = item.posterUrl ?: cached.posterUrl,
+                        backdropUrl = item.backdropUrl ?: cached.backdropUrl,
                         cast = if (item.cast.isNotEmpty()) item.cast else cached.cast,
                     )
                 } else item
@@ -203,6 +254,7 @@ fun TvFocusDetailsPanel(
                     logoLookupInFlight = logoLookupInFlight,
                     logoLookupResolved = logoLookupResolved,
                     retainedLogoUrl = lastResolvedLogoUrl,
+                    artworkUrls = emptyList(),
                     cast = displayItem.cast.take(8),
                 )
             } else {
@@ -213,20 +265,359 @@ fun TvFocusDetailsPanel(
 }
 
 @Composable
+fun TvBrowsePreviewPanel(
+    focusedItem: MediaItem?,
+    modifier: Modifier = Modifier,
+    focusablePanel: Boolean = false,
+    onFocused: () -> Unit = {},
+) {
+    val metadataRepo: MetadataRepository = koinInject()
+    val settingsViewModel: SettingsViewModel = koinInject()
+    val settingsState by settingsViewModel.state.collectAsState()
+    var focused by remember { mutableStateOf(false) }
+    val scale by animateFloatAsState(
+        targetValue = if (focused) 1.015f else 1f,
+        label = "browsePreviewScale",
+    )
+    val borderColor by animateColorAsState(
+        targetValue = if (focused) Amber.copy(alpha = 0.92f) else Steel.copy(alpha = 0.34f),
+        label = "browsePreviewBorder",
+    )
+    val requestedSourceItem = focusedItem
+    val requestedSourceKey = requestedSourceItem?.let { "${it.type}:${it.tmdbId ?: it.id}" }
+    var debouncedSourceItem by remember { mutableStateOf(focusedItem) }
+
+    LaunchedEffect(requestedSourceKey) {
+        if (requestedSourceItem == null) {
+            debouncedSourceItem = null
+            return@LaunchedEffect
+        }
+        delay(240L)
+        debouncedSourceItem = requestedSourceItem
+    }
+
+    val sourceItem = debouncedSourceItem
+    val sourceKey = sourceItem?.let { "${it.type}:${it.tmdbId ?: it.id}" }
+    val cachedItem = sourceKey?.let { enrichedItemCache[it] }
+    val item = if (sourceItem != null && cachedItem != null) {
+        sourceItem.copy(
+            tmdbId = sourceItem.tmdbId ?: cachedItem.tmdbId,
+            imdbId = sourceItem.imdbId ?: cachedItem.imdbId,
+            overview = sourceItem.overview ?: cachedItem.overview,
+            genres = sourceItem.genres.ifEmpty { cachedItem.genres },
+            year = sourceItem.year ?: cachedItem.year,
+            runtime = sourceItem.runtime ?: cachedItem.runtime,
+            ratings = sourceItem.ratings ?: cachedItem.ratings,
+            logoUrl = sourceItem.logoUrl ?: cachedItem.logoUrl,
+            posterUrl = sourceItem.posterUrl ?: cachedItem.posterUrl,
+            backdropUrl = sourceItem.backdropUrl ?: cachedItem.backdropUrl,
+        )
+    } else {
+        sourceItem
+    }
+
+    LaunchedEffect(sourceKey) {
+        val base = sourceItem ?: return@LaunchedEffect
+        val key = sourceKey ?: return@LaunchedEffect
+        if (!base.logoUrl.isNullOrBlank()) return@LaunchedEffect
+        val tmdbId = base.tmdbId ?: base.id.extractTmdbIdOrNull() ?: return@LaunchedEffect
+        val mediaType = if (base.type == MediaType.MOVIE) "movie" else "tv"
+        delay(360L)
+        val logoUrl = withContext(Dispatchers.IO) {
+            runCatching { metadataRepo.getLogoUrl(mediaType, tmdbId) }.getOrNull()
+        } ?: return@LaunchedEffect
+        val current = enrichedItemCache[key] ?: base
+        enrichedItemCache[key] = current.copy(logoUrl = current.logoUrl ?: logoUrl)
+    }
+
+    LaunchedEffect(sourceKey) {
+        val base = sourceItem ?: return@LaunchedEffect
+        val key = sourceKey ?: return@LaunchedEffect
+        val cached = enrichedItemCache[key]
+        if (
+            cached != null &&
+            !cached.logoUrl.isNullOrBlank() &&
+            !cached.overview.isNullOrBlank() &&
+            cached.ratings != null
+        ) return@LaunchedEffect
+        val tmdbId = base.tmdbId ?: base.id.extractTmdbIdOrNull() ?: return@LaunchedEffect
+        val mediaType = if (base.type == MediaType.MOVIE) "movie" else "tv"
+        delay(900L)
+        val detail = withContext(Dispatchers.IO) {
+            runCatching { metadataRepo.getDetail(mediaType, tmdbId) }.getOrNull()
+        } ?: return@LaunchedEffect
+        enrichedItemCache[key] = base.copy(
+            tmdbId = base.tmdbId ?: detail.tmdbId,
+            imdbId = base.imdbId ?: detail.imdbId,
+            overview = base.overview ?: detail.overview,
+            genres = base.genres.ifEmpty { detail.genres },
+            year = base.year ?: detail.year,
+            runtime = base.runtime ?: detail.runtime,
+            ratings = base.ratings ?: detail.ratings,
+            logoUrl = base.logoUrl ?: detail.logoUrl,
+            posterUrl = base.posterUrl ?: detail.posterUrl,
+            backdropUrl = base.backdropUrl ?: detail.backdropUrl,
+        )
+    }
+
+    val imageUrl = item?.backdropUrl?.takeIf { it.isNotBlank() }
+        ?: item?.posterUrl?.takeIf { it.isNotBlank() }
+    val logoUrl = item?.logoUrl?.takeIf { it.isNotBlank() }
+    val overviewScrollState = rememberScrollState()
+    val overview = item?.overview?.takeIf { it.isNotBlank() }
+    LaunchedEffect(sourceKey, overview) {
+        overviewScrollState.scrollTo(0)
+        if (overview.isNullOrBlank()) return@LaunchedEffect
+        while (true) {
+            delay(2_400L)
+            val max = overviewScrollState.maxValue
+            if (max > 0) {
+                overviewScrollState.animateScrollTo(
+                    value = max,
+                    animationSpec = tween(durationMillis = (max * 42).coerceIn(6_000, 18_000)),
+                )
+                delay(1_400L)
+                overviewScrollState.scrollTo(0)
+            }
+        }
+    }
+    val metadata = remember(item) {
+        if (item == null) {
+            ""
+        } else {
+            buildList {
+                item.year?.let { add(it.toString()) }
+                item.runtime?.takeIf { it > 0 }?.let { minutes ->
+                    val hours = minutes / 60
+                    val mins = minutes % 60
+                    add(if (hours > 0) "${hours}h ${mins}m" else "${mins}m")
+                }
+                item.genres.take(2).mapNotNull { genre ->
+                    genre.name.takeIf { name -> name.isNotBlank() }
+                }.takeIf { it.isNotEmpty() }
+                    ?.let { add(it.joinToString(" / ")) }
+                val rating = item.ratings?.imdbScore?.toDouble()
+                    ?: item.ratings?.tmdbScore?.toDouble()
+                    ?: item.rating
+                rating?.takeIf { it > 0.0 }?.let { add("Rating %.1f".format(java.util.Locale.US, it)) }
+            }.joinToString("  /  ")
+        }
+    }
+
+    Box(
+        modifier = modifier
+            .onFocusChanged {
+                focused = focusablePanel && it.isFocused
+                if (focusablePanel && it.isFocused) onFocused()
+            }
+            .scale(scale)
+            .border(1.dp, borderColor, RoundedCornerShape(24.dp))
+            .clip(RoundedCornerShape(24.dp))
+            .background(Charcoal.copy(alpha = if (focused) 0.82f else 0.64f))
+            .focusable(enabled = focusablePanel && item != null),
+    ) {
+        if (imageUrl != null) {
+            AsyncImage(
+                model = imageUrl,
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .alpha(0.62f),
+            )
+        }
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(
+                    Brush.verticalGradient(
+                        colors = listOf(
+                            Obsidian.copy(alpha = 0.18f),
+                            Obsidian.copy(alpha = 0.58f),
+                            Obsidian.copy(alpha = 0.94f),
+                        ),
+                    ),
+                ),
+        )
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(
+                    Brush.horizontalGradient(
+                        colors = listOf(
+                            Obsidian.copy(alpha = 0.22f),
+                            Obsidian.copy(alpha = 0.58f),
+                        ),
+                    ),
+                ),
+        )
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(20.dp),
+            verticalArrangement = Arrangement.Bottom,
+        ) {
+            if (!logoUrl.isNullOrBlank()) {
+                AsyncImage(
+                    model = logoUrl,
+                    contentDescription = item?.title,
+                    contentScale = ContentScale.Fit,
+                    alignment = Alignment.CenterStart,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(68.dp),
+                )
+            } else {
+                Text(
+                    text = item?.title ?: "Focus a title",
+                    style = MaterialTheme.typography.headlineSmall,
+                    color = Snow,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 3,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            if (metadata.isNotBlank()) {
+                Spacer(Modifier.height(10.dp))
+                Text(
+                    text = metadata,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Silver,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            item?.let {
+                PreviewRatingPills(
+                    item = it,
+                    ratingPrefs = settingsState.ratingPrefs,
+                )
+            }
+            overview?.let {
+                Spacer(Modifier.height(12.dp))
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 156.dp)
+                        .verticalScroll(overviewScrollState),
+                ) {
+                    Text(
+                        text = it,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = Snow.copy(alpha = 0.84f),
+                        lineHeight = 20.sp,
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun PreviewRatingPills(
+    item: MediaItem,
+    ratingPrefs: RatingDisplayPrefs,
+) {
+    val ratings = item.ratings.withFallbackTmdbScore(item.rating)
+    if (ratings == null) return
+
+    Spacer(Modifier.height(12.dp))
+    PreferredRatingPills(
+        ratings = ratings,
+        prefs = ratingPrefs.copy(
+            pillStyle = RatingPillStyle.ICON,
+            maxRatingsOnCard = ratingPrefs.maxRatingsOnCard.coerceAtLeast(3),
+        ),
+    )
+}
+
+@Composable
 private fun FocusPanelContent(
     item: MediaItem,
     progress: Float?,
     logoLookupInFlight: Boolean,
     logoLookupResolved: Boolean,
     retainedLogoUrl: String?,
+    artworkUrls: List<String>,
     cast: List<CastMember>,
 ) {
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(start = 24.dp, end = 16.dp, top = 28.dp, bottom = 24.dp),
-        verticalArrangement = Arrangement.Top,
-    ) {
+    val panelArtworkUrls = remember(artworkUrls, item.backdropUrl, item.posterUrl) {
+        if (artworkUrls.isNotEmpty()) {
+            (
+                artworkUrls +
+                    listOfNotNull(item.backdropUrl?.takeIf { it.isNotBlank() }) +
+                    listOfNotNull(item.posterUrl?.takeIf { it.isNotBlank() })
+                ).distinct()
+        } else {
+            listOfNotNull(
+                item.backdropUrl?.takeIf { it.isNotBlank() }
+                    ?: item.posterUrl?.takeIf { it.isNotBlank() },
+            )
+        }
+    }
+    val fallbackArtworkUrls = remember(item.backdropUrl, item.posterUrl) {
+        listOfNotNull(
+            item.backdropUrl?.takeIf { it.isNotBlank() },
+            item.posterUrl?.takeIf { it.isNotBlank() },
+        ).distinct()
+    }
+    val effectiveArtworkUrls = panelArtworkUrls.ifEmpty { fallbackArtworkUrls }
+    var artworkIndex by remember(item.type, item.tmdbId, item.id, effectiveArtworkUrls) { mutableStateOf(0) }
+    val activeArtworkUrl = effectiveArtworkUrls.getOrNull(artworkIndex.coerceIn(0, (effectiveArtworkUrls.size - 1).coerceAtLeast(0)))
+
+    LaunchedEffect(effectiveArtworkUrls) {
+        artworkIndex = 0
+        if (effectiveArtworkUrls.size > 1) {
+            while (true) {
+                delay(3_800L)
+                artworkIndex = (artworkIndex + 1) % effectiveArtworkUrls.size
+            }
+        }
+    }
+
+    Box(modifier = Modifier.fillMaxSize()) {
+        if (!activeArtworkUrl.isNullOrBlank()) {
+            AsyncImage(
+                model = activeArtworkUrl,
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .alpha(0.72f),
+            )
+        }
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(
+                    Brush.horizontalGradient(
+                        colors = listOf(
+                            Obsidian.copy(alpha = 0.82f),
+                            Obsidian.copy(alpha = 0.58f),
+                            Obsidian.copy(alpha = 0.30f),
+                        ),
+                    ),
+                ),
+        )
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(
+                    Brush.verticalGradient(
+                        colors = listOf(
+                            Color.Black.copy(alpha = 0.04f),
+                            Charcoal.copy(alpha = 0.20f),
+                            Obsidian.copy(alpha = 0.70f),
+                        ),
+                    ),
+                ),
+        )
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(start = 24.dp, end = 16.dp, top = 28.dp, bottom = 24.dp),
+            verticalArrangement = Arrangement.Top,
+        ) {
         // 1. Clearlogo / title artwork — or fallback text title
         ClearlogoOrTitle(
             item = item,
@@ -306,6 +697,7 @@ private fun FocusPanelContent(
             CastStrip(cast = cast)
         }
     }
+}
 }
 
 /**
@@ -402,8 +794,12 @@ private fun FallbackTextTitle(title: String, minHeight: androidx.compose.ui.unit
 @Composable
 private fun MetadataBlock(item: MediaItem) {
     val primaryParts = buildList {
+        item.upcomingScheduleDateTime()?.let { add(it) }
+
         // Year
-        item.year?.let { add(it.toString()) }
+        if (!item.id.startsWith("trakt-calendar:")) {
+            item.year?.let { add(it.toString()) }
+        }
 
         // Genres (up to 2, concise)
         if (item.genres.isNotEmpty()) {

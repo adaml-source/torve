@@ -25,6 +25,7 @@ internal fun TvShowsScreen(
     contextMenuActionsForItem: ((MediaItem, Float?) -> List<TvMediaContextMenuAction>)? = null,
     onContextMenuAction: ((MediaItem, TvMediaContextMenuAction, Float?) -> Unit)? = null,
     registerFocusHandle: ((TvScreenFocusHandle?) -> Unit)? = null,
+    autoFocusRequestNonce: Int = 0,
 ) {
     TvCatalogRailsScreen(
         mediaType = "tv",
@@ -44,5 +45,6 @@ internal fun TvShowsScreen(
         contextMenuActionsForItem = contextMenuActionsForItem,
         onContextMenuAction = onContextMenuAction,
         registerFocusHandle = registerFocusHandle,
+        autoFocusRequestNonce = autoFocusRequestNonce,
     )
 }

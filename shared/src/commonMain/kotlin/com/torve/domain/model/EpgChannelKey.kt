@@ -70,12 +70,11 @@ fun programmesForEpgChannel(
     playlistId: String,
     channel: Channel,
 ): List<EpgProgramme> {
-    if (programmesByChannelKey.isEmpty()) return emptyList()
-    return epgChannelLookupKeys(playlistId, channel)
-        .firstNotNullOfOrNull { key ->
-            programmesByChannelKey[key]?.takeIf { it.isNotEmpty() }
-        }
-        .orEmpty()
+    return LiveTvEpgResolver.resolveProgrammes(
+        channel = channel,
+        playlistId = playlistId,
+        programmesByChannelKey = programmesByChannelKey,
+    )
 }
 
 fun programmesForEpgChannel(

@@ -387,6 +387,37 @@ internal fun AddPlaylistDialog(
                     StyledTextField(value = xtreamServer, onValueChange = onXtreamServerChange, label = stringResource(R.string.channels_server_url), placeholder = "http://example.com:8080")
                     StyledTextField(value = xtreamUsername, onValueChange = onXtreamUsernameChange, label = stringResource(R.string.channels_username))
                     StyledTextField(value = xtreamPassword, onValueChange = onXtreamPasswordChange, label = stringResource(R.string.channels_password), isSensitive = true)
+                    StyledTextField(value = epgUrl, onValueChange = onEpgUrlChange, label = stringResource(R.string.channels_epg_optional))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        TextButton(
+                            onClick = onCheckEpg,
+                            enabled = !isCheckingEpg && epgUrl.isNotBlank(),
+                        ) {
+                            Text(
+                                if (isCheckingEpg) stringResource(R.string.channels_check_epg_checking)
+                                else stringResource(R.string.channels_check_epg),
+                                color = Amber,
+                            )
+                        }
+                        if (isCheckingEpg) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(16.dp),
+                                strokeWidth = 2.dp,
+                                color = Amber,
+                            )
+                        }
+                    }
+                    epgCheckMessage?.let { message ->
+                        Text(
+                            text = message,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (epgCheckSuccess == true) Amber else MaterialTheme.colorScheme.error,
+                        )
+                    }
                 } else {
                     StyledTextField(value = url, onValueChange = onUrlChange, label = stringResource(R.string.channels_m3u_url))
                     StyledTextField(value = epgUrl, onValueChange = onEpgUrlChange, label = stringResource(R.string.channels_epg_optional))

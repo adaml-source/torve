@@ -39,8 +39,14 @@ import com.torve.domain.model.StartupConfidenceReasonCode
 import com.torve.domain.model.StreamFetchPolicy
 import com.torve.domain.model.StreamPreferences
 import com.torve.domain.model.apiValue
+import com.torve.domain.diagnostics.DiagnosticsRedactor
 import com.torve.domain.repository.StreamReadiness
 import com.torve.domain.repository.StreamRepository
+import com.torve.domain.telemetry.StreamPathDiagnostics
+import com.torve.domain.telemetry.StreamPathTelemetryContext
+import com.torve.domain.telemetry.StreamPlaybackPath
+import com.torve.domain.telemetry.TelemetryEmitter
+import com.torve.platform.TorveRuntimeDebug
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.datetime.Clock
@@ -58,11 +64,18 @@ class StreamRepositoryImpl(
     private val database: TorveDatabase,
     private val accelerationApi: AccelerationApi,
     private val httpClient: HttpClient,
+    private val telemetry: TelemetryEmitter,
 ) : StreamRepository {
 
     // Dedicated parser so we can decode the 504 body without bringing in the
     // shared Json instance (which may be configured for strict mode).
     private val readinessJson = Json { ignoreUnknownKeys = true; isLenient = true }
+
+    private inline fun repositoryDebugLog(message: () -> String) {
+        if (TorveRuntimeDebug.verboseLoggingEnabled) {
+            println(DiagnosticsRedactor.redact(message()))
+        }
+    }
 
     // Probe-only client with redirect-follow disabled. Panda's 302 points at
     // a signed CDN URL — we explicitly don't want to chase that from the
@@ -244,7 +257,7 @@ class StreamRepositoryImpl(
             // 15s, and the player never sees an unfulfillable URL. If the
             // server is genuinely dead, the 5-min budget still terminates
             // with a friendly timeout message.
-            println("[StreamProbe] probe error → Preparing: ${e::class.simpleName}: ${e.message}")
+            repositoryDebugLog { "[StreamProbe] probe error -> Preparing: ${e::class.simpleName}: ${DiagnosticsRedactor.redact(e.message)}" }
             return StreamReadiness.Preparing
         }
         val code = response.status.value
@@ -281,11 +294,39 @@ class StreamRepositoryImpl(
         stream: ParsedStream,
         provider: DebridServiceType?,
         apiKey: String,
+    ): ResolvedStream = resolveStreamInternal(stream, provider, apiKey, trackPath = true)
+
+    private suspend fun resolveStreamInternal(
+        stream: ParsedStream,
+        provider: DebridServiceType?,
+        apiKey: String,
+        trackPath: Boolean,
     ): ResolvedStream {
         return try {
+            if (trackPath) {
+                playbackPathForStream(stream)?.let { path ->
+                    val request = memoryMutex.withLock { lastRequestByStreamKey[streamMemoryKey(stream)] }
+                    StreamPathDiagnostics.record(
+                        path = path,
+                        telemetry = telemetry,
+                        context = StreamPathTelemetryContext(
+                            contentType = request?.type?.telemetryContentType() ?: "unknown",
+                            providerCategory = providerCategoryForStream(stream),
+                        ),
+                    )
+                }
+            }
             resolveGenericStreamHandoffIfAvailable(stream)?.let { resolved ->
                 reportPlaybackOutcome(stream, provider, success = true)
                 return resolved.requirePlayableUrl()
+            }
+            if (stream.canUseLegacyDirectFallback() &&
+                !LegacyStreamFallbackCompatibility.allowDirectFallbackWithoutMemoryId
+            ) {
+                throw StreamHandoffApiException(
+                    errorCode = "stream_reference_required",
+                    message = "This stream needs a backend handoff reference.",
+                )
             }
             // Priority: addon-hosted URLs ALWAYS bypass debrid, regardless of
             // whether the stream also carries an infoHash. Panda's Usenet/NZB
@@ -359,14 +400,14 @@ override suspend fun resolveStreamWithFallback(
         providers: Map<DebridServiceType, String>,
     ): ResolvedStream {
         if (stream.canUseGenericStreamHandoff()) {
-            return resolveStream(stream, provider = null, apiKey = "")
+            return resolveStreamInternal(stream, provider = null, apiKey = "", trackPath = true)
         }
 
         // Addon-hosted streams (Panda's /u/<token>/nzb/..., /u/<token>/easynews/..., …)
         // bypass debrid entirely. The infoHash field, when present, just identifies
         // the release — the addon's own server handles fetching it. Skip the chain.
         if (stream.directUrl != null && stream.isAddonHostedUrl()) {
-            return resolveStream(stream, provider = null, apiKey = "")
+            return resolveStreamInternal(stream, provider = null, apiKey = "", trackPath = true)
         }
 
         if (providers.isEmpty()) {
@@ -376,10 +417,18 @@ override suspend fun resolveStreamWithFallback(
         }
 
         val attempts = mutableListOf<String>()
+        var trackedProviderAttempt = false
         for ((provider, apiKey) in providers) {
             if (apiKey.isBlank()) continue
             try {
-                val resolved = resolveStream(stream, provider, apiKey)
+                val shouldTrack = !trackedProviderAttempt
+                trackedProviderAttempt = true
+                val resolved = resolveStreamInternal(
+                    stream = stream,
+                    provider = provider,
+                    apiKey = apiKey,
+                    trackPath = shouldTrack,
+                )
                 if (resolved.url.isNotBlank()) return resolved
                 attempts += "${provider.name}: empty URL"
             } catch (e: kotlinx.coroutines.CancellationException) {
@@ -409,6 +458,26 @@ override suspend fun resolveStreamWithFallback(
         return accelerationApi
             .requestStreamHandoff(contentId = contentId, memoryId = memoryId)
             .toResolvedStream()
+    }
+
+    private fun playbackPathForStream(stream: ParsedStream): StreamPlaybackPath? = when {
+        stream.canUseGenericStreamHandoff() -> StreamPlaybackPath.GENERIC_HANDOFF_MEMORY_ID
+        stream.isUsenetStream() -> null
+        stream.canUseLegacyDirectFallback() -> StreamPlaybackPath.LEGACY_DIRECT_NO_MEMORY_ID
+        else -> null
+    }
+
+    private fun providerCategoryForStream(stream: ParsedStream): String = when {
+        stream.isUsenetStream() -> "usenet"
+        stream.isPandaStream() -> "panda"
+        stream.isTorrentOrDebridStream() -> "debrid"
+        stream.addonName.isNotBlank() -> "addon"
+        else -> "unknown"
+    }
+
+    private fun MediaType.telemetryContentType(): String = when (this) {
+        MediaType.MOVIE -> "movie"
+        MediaType.SERIES -> "series"
     }
 
     override suspend fun reportPlaybackOutcome(

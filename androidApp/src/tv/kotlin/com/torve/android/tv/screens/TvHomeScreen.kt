@@ -13,6 +13,7 @@ import com.torve.android.tv.components.TvCardStyle
 import com.torve.android.tv.components.TvContentRail
 import com.torve.android.tv.components.TvMediaContextMenuAction
 import com.torve.android.tv.components.TvMediaRails
+import com.torve.android.tv.components.TvRailsPresentationMode
 import com.torve.android.tv.components.TvOnNowRail
 import com.torve.android.tv.components.TvProviderHealthBanner
 import com.torve.android.tv.components.dedupeAcrossRails
@@ -250,6 +251,8 @@ internal fun TvHomeScreen(
         onMediaFocused = onMediaFocused,
         onSeeAll = onSeeAll,
         heroOverlay = composedHeroOverlay,
+        presentationMode = TvRailsPresentationMode.CatalogHero,
+        focusExclusive = true,
         heroOverlayFocusRequester = onNowFocusRequester.takeIf {
             outcomeState.onNow.isNotEmpty() &&
                 onLiveChannelClick != null &&
@@ -388,6 +391,7 @@ private fun buildBuiltInRails(
         HomeSection.STREAMING_SERVICES,
         HomeSection.ACTORS,
         HomeSection.DIRECTORS,
+        HomeSection.UPCOMING_SCHEDULE,
         HomeSection.ADDON_SHELVES -> {
             emptyList()
         }

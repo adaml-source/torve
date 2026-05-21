@@ -18,6 +18,7 @@ import com.torve.domain.model.DebridServiceType
 import com.torve.domain.repository.AddonRepository
 import com.torve.presentation.addon.AddonViewModel
 import com.torve.domain.diagnostics.DiagnosticsRedactor
+import com.torve.platform.torveVerboseLog
 import com.torve.presentation.integrations.findTorBoxCredential
 import com.torve.presentation.integrations.syncTorBoxCredentialPair
 import com.torve.presentation.settings.SettingsRefreshNotifier
@@ -861,7 +862,7 @@ class PandaSetupViewModel(
             _state.update { it.copy(isSaving = true, saveError = null) }
             try {
                 val s = _state.value
-                println("TORVE PANDA ┃ saveConfigAndInstall start: editMode=${s.isEditMode} hasToken=${s.pandaToken != null} hasConfigId=${!s.configId.isNullOrBlank()} hasMgmtToken=${s.hasManagementToken}")
+                torveVerboseLog { "TORVE PANDA | saveConfigAndInstall start editMode=${s.isEditMode} hasManifestCredential=${s.pandaToken != null} hasConfigId=${!s.configId.isNullOrBlank()} hasManagementCredential=${s.hasManagementToken}" }
                 s.selectedProvider ?: throw Exception("No provider selected")
                 val debridConnections = pandaDebridConnectionsForPayload(s)
                 val primaryDebrid = primaryPandaDebridConnection(s)
@@ -950,7 +951,7 @@ class PandaSetupViewModel(
                         if (hasUnchangedIndexerSecret) null else patchedFirstIndexer?.url.orEmpty()
                     val patchedNzbIndexerApiKey: String? =
                         if (hasUnchangedIndexerSecret) null else patchedFirstIndexer?.apiKey.orEmpty()
-                    println("TORVE PANDA ┃ saveConfigAndInstall edit: hasUnchangedIndexerSecret=$hasUnchangedIndexerSecret indexerRows=${s.nzbIndexers.size} configured=${configuredIndexers.size}")
+                    torveVerboseLog { "TORVE PANDA | saveConfigAndInstall edit hasUnchangedIndexerCredential=$hasUnchangedIndexerSecret indexerRows=${s.nzbIndexers.size} configured=${configuredIndexers.size}" }
                     pandaClient.updateConfig(
                         configId = configId,
                         bearerToken = bearer,
@@ -1206,10 +1207,10 @@ class PandaSetupViewModel(
                 }
 
                 settingsRefreshNotifier.notifyRefresh(kotlinx.datetime.Clock.System.now().toEpochMilliseconds())
-                println("TORVE PANDA ┃ saveConfigAndInstall succeeded")
+                torveVerboseLog { "TORVE PANDA | saveConfigAndInstall succeeded" }
             } catch (e: Exception) {
                 val safeMessage = DiagnosticsRedactor.redact(e.message).ifBlank { "Save failed" }
-                println("TORVE PANDA ┃ saveConfigAndInstall failed: $safeMessage")
+                torveVerboseLog { "TORVE PANDA | saveConfigAndInstall failed: $safeMessage" }
                 _state.update { it.copy(isSaving = false, saveError = safeMessage) }
             }
         }
@@ -1248,9 +1249,9 @@ class PandaSetupViewModel(
                             addonSyncService.onAddonInstalled(installed)
                         }
                         pandaAddon = installed
-                        println("TORVE PANDA ┃ checkExistingConfig: re-installed missing Panda addon for restored token")
+                        torveVerboseLog { "TORVE PANDA | checkExistingConfig re-installed missing Panda addon" }
                     }.onFailure { err ->
-                        println("TORVE PANDA ┃ checkExistingConfig: re-install failed: ${DiagnosticsRedactor.redact(err.message)}")
+                        torveVerboseLog { "TORVE PANDA | checkExistingConfig re-install failed: ${err::class.simpleName} ${DiagnosticsRedactor.redact(err.message)}" }
                     }
                 }
 
@@ -1273,15 +1274,15 @@ class PandaSetupViewModel(
                     )
                 } else null
 
-                println("TORVE PANDA ┃ checkExistingConfig: configId=${resolvedConfigId} torveToken=${!torveToken.isNullOrBlank()} mgmt=${!managementToken.isNullOrBlank()}")
+                torveVerboseLog { "TORVE PANDA | checkExistingConfig hasConfigId=${!resolvedConfigId.isNullOrBlank()} hasAuth=${!torveToken.isNullOrBlank()} hasManagementCredential=${!managementToken.isNullOrBlank()}" }
                 val record = if (!resolvedConfigId.isNullOrBlank() && !torveToken.isNullOrBlank()) {
                     val viaJwt = runCatching {
                         pandaClient.getConfigAsManager(resolvedConfigId, torveToken)
                     }
                     if (viaJwt.isSuccess) {
-                        println("TORVE PANDA ┃ checkExistingConfig: hydrated via Torve JWT")
+                        torveVerboseLog { "TORVE PANDA | checkExistingConfig hydrated via account auth" }
                     } else {
-                        println("TORVE PANDA ┃ checkExistingConfig: Torve JWT path failed: ${DiagnosticsRedactor.redact(viaJwt.exceptionOrNull()?.message)}")
+                        torveVerboseLog { "TORVE PANDA | checkExistingConfig account-auth path failed: ${DiagnosticsRedactor.redact(viaJwt.exceptionOrNull()?.message)}" }
                     }
                     viaJwt.getOrNull()
                         ?: managementToken?.takeIf { it.isNotBlank() }?.let { mgmt ->
@@ -1289,14 +1290,14 @@ class PandaSetupViewModel(
                                 pandaClient.getConfigAsManager(resolvedConfigId, mgmt)
                             }
                             if (viaMgmt.isSuccess) {
-                                println("TORVE PANDA ┃ checkExistingConfig: hydrated via management_token")
+                                torveVerboseLog { "TORVE PANDA | checkExistingConfig hydrated via management credential" }
                             } else {
-                                println("TORVE PANDA ┃ checkExistingConfig: management_token path failed: ${DiagnosticsRedactor.redact(viaMgmt.exceptionOrNull()?.message)}")
+                                torveVerboseLog { "TORVE PANDA | checkExistingConfig management credential path failed: ${DiagnosticsRedactor.redact(viaMgmt.exceptionOrNull()?.message)}" }
                             }
                             viaMgmt.getOrNull()
                         }
                         ?: run {
-                            println("TORVE PANDA ┃ checkExistingConfig: falling back to manifest-token read (secrets will be redacted)")
+                            torveVerboseLog { "TORVE PANDA | checkExistingConfig falling back to manifest credential read" }
                             manifestRecord
                         }
                 } else if (!resolvedConfigId.isNullOrBlank() && !managementToken.isNullOrBlank()) {
@@ -1304,13 +1305,13 @@ class PandaSetupViewModel(
                         pandaClient.getConfigAsManager(resolvedConfigId, managementToken)
                     }
                     if (viaMgmt.isSuccess) {
-                        println("TORVE PANDA ┃ checkExistingConfig: hydrated via management_token (no JWT available)")
+                        torveVerboseLog { "TORVE PANDA | checkExistingConfig hydrated via management credential without account auth" }
                     } else {
-                        println("TORVE PANDA ┃ checkExistingConfig: management_token path failed: ${DiagnosticsRedactor.redact(viaMgmt.exceptionOrNull()?.message)}; falling back to manifest read")
+                        torveVerboseLog { "TORVE PANDA | checkExistingConfig management credential path failed: ${DiagnosticsRedactor.redact(viaMgmt.exceptionOrNull()?.message)}; falling back to manifest read" }
                     }
                     viaMgmt.getOrNull() ?: manifestRecord
                 } else {
-                    println("TORVE PANDA ┃ checkExistingConfig: no JWT and no mgmt token — manifest-token read only (secrets will be redacted)")
+                    torveVerboseLog { "TORVE PANDA | checkExistingConfig no account auth or management credential; manifest credential read only" }
                     manifestRecord
                 }
                 val config = record.config ?: return@launch
@@ -1365,11 +1366,11 @@ class PandaSetupViewModel(
                         .also { result ->
                             if (result.isSuccess) {
                                 val s = result.getOrNull()
-                                println(
-                                    "TORVE PANDA ┃ getConfigSecrets ok: indexers=${s?.nzbIndexers?.size ?: 0} debrid=${s?.debridApiKey?.isNotBlank()} torbox=${s?.downloadClientApiKey?.isNotBlank()} usenetPw=${s?.usenetPassword?.isNotBlank()}",
-                                )
+                                torveVerboseLog {
+                                    "TORVE PANDA | getConfigSecrets ok indexers=${s?.nzbIndexers?.size ?: 0} hasDebridCredential=${s?.debridApiKey?.isNotBlank()} hasTorBoxCredential=${s?.downloadClientApiKey?.isNotBlank()} hasUsenetPassword=${s?.usenetPassword?.isNotBlank()}"
+                                }
                             } else {
-                                println("TORVE PANDA ┃ getConfigSecrets failed: ${result.exceptionOrNull()?.message}")
+                                torveVerboseLog { "TORVE PANDA | getConfigSecrets failed: ${DiagnosticsRedactor.redact(result.exceptionOrNull()?.message)}" }
                             }
                         }
                         .getOrNull()
@@ -1546,7 +1547,7 @@ class PandaSetupViewModel(
                         .joinToString("\n") { "${it.type}|${it.url}" },
                 )
 
-                println("TORVE PANDA ┃ checkExistingConfig hydrated: serverHasSecrets=$secretsOnServer enableUsenet=${config.enableUsenet} usenetProvider=${config.usenetProvider} indexerCount=${cleanedIndexerRows.size} cachedIndexerKeys=${cleanedIndexerRows.count { it.apiKey.isNotBlank() }}")
+                torveVerboseLog { "TORVE PANDA | checkExistingConfig hydrated serverHasCredentials=$secretsOnServer enableUsenet=${config.enableUsenet} usenetProvider=${config.usenetProvider} indexerCount=${cleanedIndexerRows.size} cachedIndexerCredentialCount=${cleanedIndexerRows.count { it.apiKey.isNotBlank() }}" }
 
                 _state.update {
                     it.copy(
@@ -1702,12 +1703,12 @@ class PandaSetupViewModel(
                 )
                 when (patchOutcome) {
                     com.torve.data.account.PatchCredentialsOutcome.Ok -> {
-                        println("[PandaRecover] Backfilled management_token server-side")
+                        torveVerboseLog { "[PandaRecover] Backfilled management credential server-side" }
                     }
                     com.torve.data.account.PatchCredentialsOutcome.RowMissing -> {
                         // No PANDA_TOKEN row yet — fall back to a full PUT
                         // so this device contributes both keys cleanly.
-                        println("[PandaRecover] PATCH 404 → fallback PUT")
+                        torveVerboseLog { "[PandaRecover] PATCH 404; fallback PUT" }
                         accountSessionCoordinator.saveIntegrationToBackend(
                             integrationType = "PANDA_TOKEN",
                             credentials = mapOf(
@@ -1727,7 +1728,7 @@ class PandaSetupViewModel(
                         }
                     }
                     is com.torve.data.account.PatchCredentialsOutcome.Error -> {
-                        println("[PandaRecover] PATCH error: ${patchOutcome.message}")
+                        torveVerboseLog { "[PandaRecover] PATCH error: ${DiagnosticsRedactor.redact(patchOutcome.message)}" }
                     }
                 }
                 _state.update {

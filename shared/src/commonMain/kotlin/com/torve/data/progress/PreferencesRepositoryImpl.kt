@@ -4,6 +4,8 @@ import com.torve.data.auth.UserIdProvider
 import com.torve.db.TorveDatabase
 import com.torve.domain.repository.DeviceLocalSettingsRepository
 import com.torve.domain.repository.PreferencesRepository
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 class PreferencesRepositoryImpl(
     private val database: TorveDatabase,
@@ -25,9 +27,9 @@ class PreferencesRepositoryImpl(
         return userIdProvider.currentUserIdOrNull()
     }
 
-    override suspend fun getString(key: String): String? {
+    override suspend fun getString(key: String): String? = withContext(Dispatchers.IO) {
         if (isDeviceLocalKey(key)) {
-            return database.torveQueries.getPreference(
+            return@withContext database.torveQueries.getPreference(
                 userId = DEVICE_LOCAL_USER_ID,
                 key = key,
             ).executeAsOneOrNull()
@@ -36,15 +38,15 @@ class PreferencesRepositoryImpl(
                     key = key,
                 ).executeAsOneOrNull()
         }
-        val userId = userIdForKeyOrNull(key) ?: return null
-        return database.torveQueries.getPreference(
+        val userId = userIdForKeyOrNull(key) ?: return@withContext null
+        database.torveQueries.getPreference(
             userId = userId,
             key = key,
         ).executeAsOneOrNull()
     }
 
-    override suspend fun setString(key: String, value: String) {
-        val userId = userIdForKeyOrNull(key) ?: return
+    override suspend fun setString(key: String, value: String) = withContext(Dispatchers.IO) {
+        val userId = userIdForKeyOrNull(key) ?: return@withContext
         database.torveQueries.setPreference(
             user_id = userId,
             key = key,
@@ -52,8 +54,8 @@ class PreferencesRepositoryImpl(
         )
     }
 
-    override suspend fun remove(key: String) {
-        val userId = userIdForKeyOrNull(key) ?: return
+    override suspend fun remove(key: String) = withContext(Dispatchers.IO) {
+        val userId = userIdForKeyOrNull(key) ?: return@withContext
         database.torveQueries.deletePreference(
             userId = userId,
             key = key,

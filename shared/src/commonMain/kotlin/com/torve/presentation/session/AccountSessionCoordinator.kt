@@ -483,8 +483,7 @@ class AccountSessionCoordinator(
     ): Boolean {
         val token = authClient.getValidAccessToken() ?: return false
         val normalizedType = playlistType.trim().lowercase().ifBlank { "m3u" }
-        val m3uEpgUrl = epgUrl?.trim()?.takeIf { it.isNotEmpty() }
-            ?.takeIf { normalizedType == "m3u" }
+        val normalizedEpgUrl = epgUrl?.trim()?.takeIf { it.isNotEmpty() }
         return accountSettingsApi.savePlaylist(
             accessToken = token,
             playlistId = playlistId,
@@ -492,7 +491,7 @@ class AccountSessionCoordinator(
                 playlistId = playlistId,
                 name = name,
                 url = url,
-                epgUrl = m3uEpgUrl,
+                epgUrl = normalizedEpgUrl,
                 playlistType = normalizedType,
                 server = server,
                 username = username,

@@ -107,7 +107,6 @@ object PremiumAccess {
     const val UNLOCK_WITH_LIFETIME_LABEL = "Upgrade to Premium"
 
     val lifetimeBenefitResIds: List<Int> = listOf(
-        R.string.premium_benefit_watchlist,
         R.string.premium_benefit_integrations,
         R.string.premium_benefit_pairing,
         R.string.premium_benefit_personalization,
@@ -118,7 +117,6 @@ object PremiumAccess {
         lifetimeBenefitResIds.map { context.getString(it) }
 
     val lifetimeBenefits: List<String> = listOf(
-        "Watchlist and Favorites",
         "Trakt, Simkl, Jellyfin, Plex, and Kodi integrations",
         "Phone pairing and cross-device sync",
         "Advanced personalization and library management",
@@ -160,8 +158,8 @@ object PremiumAccess {
         PremiumFeature.QR_PAIRING to PremiumFeaturePolicy(PremiumFeatureAccess.PREMIUM_LOCKED_VISIBLE, R.string.premium_qr_pairing),
 
         // Premium library / persistence
-        PremiumFeature.WATCHLIST_EDIT to PremiumFeaturePolicy(PremiumFeatureAccess.PREMIUM_LOCKED_VISIBLE, R.string.premium_watchlist_editing),
-        PremiumFeature.FAVORITES_EDIT to PremiumFeaturePolicy(PremiumFeatureAccess.PREMIUM_LOCKED_VISIBLE, R.string.premium_favorites_editing),
+        PremiumFeature.WATCHLIST_EDIT to PremiumFeaturePolicy(PremiumFeatureAccess.FREE, R.string.premium_watchlist_editing),
+        PremiumFeature.FAVORITES_EDIT to PremiumFeaturePolicy(PremiumFeatureAccess.FREE, R.string.premium_favorites_editing),
         PremiumFeature.WATCHED_STATUS_EDIT to PremiumFeaturePolicy(PremiumFeatureAccess.PREMIUM_LOCKED_VISIBLE, R.string.premium_watched_state),
         PremiumFeature.TRAKT_LIST_MANAGER to PremiumFeaturePolicy(PremiumFeatureAccess.PREMIUM_LOCKED_VISIBLE, R.string.premium_trakt_lists),
         PremiumFeature.FAVORITES_MANAGER to PremiumFeaturePolicy(PremiumFeatureAccess.PREMIUM_LOCKED_VISIBLE, R.string.premium_favorites_manager),

@@ -100,13 +100,7 @@ fun LiveChannelInfoOverlay(
     onClearRecent: () -> Unit,
     onDismiss: () -> Unit = {},
 ) {
-    val firstCardFocus = remember { FocusRequester() }
-
     BackHandler { onDismiss() }
-
-    LaunchedEffect(Unit) {
-        try { firstCardFocus.requestFocus() } catch (_: IllegalStateException) {}
-    }
 
     Box(
         modifier = Modifier
@@ -114,9 +108,8 @@ fun LiveChannelInfoOverlay(
             .background(
                 Brush.verticalGradient(
                     0f to Color.Transparent,
-                    0.15f to Color.Black.copy(alpha = 0.3f),
-                    0.85f to Color.Black.copy(alpha = 0.3f),
-                    1f to Color.Black.copy(alpha = 0.75f),
+                    0.55f to Color.Transparent,
+                    1f to Color.Black.copy(alpha = 0.72f),
                 ),
             ),
     ) {
@@ -167,22 +160,26 @@ fun LiveChannelInfoOverlay(
         // ── Centre: channel info ──
         Column(
             modifier = Modifier
-                .align(Alignment.CenterStart)
-                .padding(start = 48.dp, end = 200.dp),
+                .align(Alignment.BottomStart)
+                .padding(start = 44.dp, bottom = 36.dp)
+                .width(620.dp)
+                .background(Charcoal.copy(alpha = 0.74f), RoundedCornerShape(22.dp))
+                .border(1.dp, Color.White.copy(alpha = 0.08f), RoundedCornerShape(22.dp))
+                .padding(horizontal = 20.dp, vertical = 16.dp),
         ) {
             // Channel number + name
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
                     text = "$channelNumber",
                     color = Amber,
-                    fontSize = 32.sp,
+                    fontSize = 22.sp,
                     fontWeight = FontWeight.Bold,
                 )
                 Spacer(Modifier.width(14.dp))
                 Text(
                     text = currentChannel.channel.name,
                     color = Snow,
-                    fontSize = 26.sp,
+                    fontSize = 20.sp,
                     fontWeight = FontWeight.SemiBold,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
@@ -216,7 +213,7 @@ fun LiveChannelInfoOverlay(
                 Text(
                     text = prog.title,
                     color = Snow,
-                    fontSize = 18.sp,
+                    fontSize = 14.sp,
                     fontWeight = FontWeight.Medium,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
@@ -245,7 +242,7 @@ fun LiveChannelInfoOverlay(
                 Text(
                     text = stringResource(R.string.tv_live_next_label) + " " + next.title,
                     color = Silver,
-                    fontSize = 13.sp,
+                    fontSize = 12.sp,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
@@ -257,153 +254,7 @@ fun LiveChannelInfoOverlay(
             }
         }
 
-        // ── Bottom row: action cards + recent/favourite thumbnails ──
-        LazyRow(
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .fillMaxWidth()
-                .padding(start = 48.dp, end = 48.dp, bottom = 32.dp),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            // TV Guide card
-            item(key = "guide") {
-                ActionCard(
-                    label = stringResource(R.string.tv_live_tv_guide),
-                    icon = { Icon(Icons.Filled.CalendarMonth, contentDescription = null, tint = Snow, modifier = Modifier.size(20.dp)) },
-                    focusRequester = firstCardFocus,
-                    onClick = onOpenEpgGuide,
-                )
-            }
-
-            // History card
-            item(key = "history") {
-                ActionCard(
-                    label = stringResource(R.string.tv_live_history),
-                    icon = { Icon(Icons.Filled.History, contentDescription = null, tint = Snow, modifier = Modifier.size(20.dp)) },
-                    onClick = onOpenHistory,
-                )
-            }
-
-            // Recent channel thumbnails
-            items(recentChannels.take(8)) { ch ->
-                ChannelThumbCard(channel = ch, onClick = { onTuneChannel(ch) })
-            }
-
-            // Favourite channel thumbnails
-            items(favoriteChannels.take(8)) { ch ->
-                ChannelThumbCard(
-                    channel = ch,
-                    isFavorite = true,
-                    onClick = { onTuneChannel(ch) },
-                )
-            }
-
-            // Clear recent card
-            if (recentChannels.isNotEmpty()) {
-                item(key = "clear") {
-                    ActionCard(
-                        label = stringResource(R.string.tv_live_clear),
-                        icon = { Icon(Icons.Filled.Delete, contentDescription = null, tint = Silver, modifier = Modifier.size(18.dp)) },
-                        onClick = onClearRecent,
-                    )
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun ActionCard(
-    label: String,
-    icon: @Composable () -> Unit,
-    focusRequester: FocusRequester? = null,
-    onClick: () -> Unit,
-) {
-    val modifier = if (focusRequester != null) {
-        Modifier.focusRequester(focusRequester)
-    } else {
-        Modifier
-    }
-    Surface(
-        onClick = onClick,
-        modifier = modifier
-            .width(110.dp)
-            .height(64.dp),
-        shape = ClickableSurfaceDefaults.shape(RoundedCornerShape(10.dp)),
-        colors = ClickableSurfaceDefaults.colors(
-            containerColor = Graphite.copy(alpha = 0.85f),
-            focusedContainerColor = Amber.copy(alpha = 0.25f),
-        ),
-        border = ClickableSurfaceDefaults.border(
-            focusedBorder = androidx.tv.material3.Border(
-                border = androidx.compose.foundation.BorderStroke(2.dp, Amber),
-                shape = RoundedCornerShape(10.dp),
-            ),
-        ),
-    ) {
-        Column(
-            modifier = Modifier.fillMaxSize().padding(8.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center,
-        ) {
-            icon()
-            Spacer(Modifier.height(4.dp))
-            Text(text = label, color = Snow, fontSize = 11.sp, maxLines = 1)
-        }
-    }
-}
-
-@Composable
-private fun ChannelThumbCard(
-    channel: Channel,
-    isFavorite: Boolean = false,
-    onClick: () -> Unit,
-) {
-    Surface(
-        onClick = onClick,
-        modifier = Modifier
-            .width(90.dp)
-            .height(64.dp),
-        shape = ClickableSurfaceDefaults.shape(RoundedCornerShape(8.dp)),
-        colors = ClickableSurfaceDefaults.colors(
-            containerColor = Graphite.copy(alpha = 0.85f),
-            focusedContainerColor = Amber.copy(alpha = 0.25f),
-        ),
-        border = ClickableSurfaceDefaults.border(
-            focusedBorder = androidx.tv.material3.Border(
-                border = androidx.compose.foundation.BorderStroke(2.dp, Amber),
-                shape = RoundedCornerShape(8.dp),
-            ),
-        ),
-    ) {
-        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            if (channel.tvgLogo != null) {
-                AsyncImage(
-                    model = channel.tvgLogo,
-                    contentDescription = channel.name,
-                    modifier = Modifier.size(40.dp),
-                    contentScale = ContentScale.Fit,
-                )
-            } else {
-                Text(
-                    text = channel.name.take(6),
-                    color = Snow,
-                    fontSize = 10.sp,
-                    maxLines = 1,
-                )
-            }
-            if (isFavorite) {
-                Icon(
-                    Icons.Filled.Star,
-                    contentDescription = null,
-                    tint = Amber,
-                    modifier = Modifier
-                        .size(12.dp)
-                        .align(Alignment.TopEnd)
-                        .padding(2.dp),
-                )
-            }
-        }
+        // DPAD zapping uses this compact HUD only. The old bottom carousel was
+        // removed because it duplicated OK channel browsing and clipped at edges.
     }
 }

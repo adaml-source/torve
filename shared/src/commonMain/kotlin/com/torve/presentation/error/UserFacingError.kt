@@ -70,6 +70,7 @@ enum class UserFacingError(
     SEARCH_FAILED("error_search_failed"),
     STREAMS_LOAD_FAILED("error_streams_load_failed"),
     STREAM_RESOLVE_FAILED("error_stream_resolve_failed"),
+    STREAM_REFERENCE_UNAVAILABLE("error_stream_reference_unavailable"),
     STREAM_RESOLVE_TIMEOUT("error_stream_resolve_timeout"),
     STREAM_REAL_DEBRID_MISSING("error_stream_real_debrid_missing"),
     STREAM_REAL_DEBRID_RECONNECT("error_stream_real_debrid_reconnect"),
@@ -137,10 +138,8 @@ fun backendReasonToUserFacingError(reason: String?): UserFacingError {
         "premium_required" -> UserFacingError.PREMIUM_REQUIRED
         "rate_limited" -> UserFacingError.RATE_LIMITED
         "stream_expired", "invalid_handoff" -> UserFacingError.PLAYBACK_LINK_EXPIRED
-        "stream_reference_required",
-        "stream_reference_not_found",
-        "stream_handoff_unavailable",
-        -> UserFacingError.STREAM_RESOLVE_FAILED
+        "stream_reference_required", "stream_reference_not_found" -> UserFacingError.STREAM_REFERENCE_UNAVAILABLE
+        "stream_handoff_unavailable" -> UserFacingError.STREAM_RESOLVE_FAILED
         "already_registered" -> UserFacingError.ALREADY_REGISTERED
         else -> UserFacingError.UNKNOWN
     }
@@ -200,6 +199,7 @@ val defaultUserFacingMessages: Map<String, String> = mapOf(
     "error_search_failed" to "Search failed. Please try again.",
     "error_streams_load_failed" to "Could not load streams. Please try again.",
     "error_stream_resolve_failed" to "Could not resolve stream. Try another source.",
+    "error_stream_reference_unavailable" to "This source is no longer available. Refresh sources or try another one.",
     "error_stream_resolve_timeout" to "Stream resolution timed out. Try another source.",
     "error_stream_real_debrid_missing" to "Connect Real-Debrid in Panda to use this stream.",
     "error_stream_real_debrid_reconnect" to "Real-Debrid needs reconnecting. Open Settings > Advanced > Panda.",

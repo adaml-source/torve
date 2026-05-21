@@ -62,4 +62,33 @@ class TokenRefreshLogicTest {
         }
         assertEquals(0, refreshCalls)
     }
+
+    @Test
+    fun executeWithTokenRefresh_missingTokensRequireTraktConnection() = kotlinx.coroutines.test.runTest {
+        assertFailsWith<TraktAuthorizationRequiredException> {
+            executeWithTokenRefresh(
+                initial = null,
+                execute = { "unused" },
+                refresh = { error("should not refresh") },
+                isUnauthorized = { true },
+            )
+        }
+    }
+
+    @Test
+    fun executeWithTokenRefresh_failedRefreshRequiresTraktConnection() = kotlinx.coroutines.test.runTest {
+        assertFailsWith<TraktAuthorizationRequiredException> {
+            executeWithTokenRefresh(
+                initial = TraktTokens(
+                    accessToken = "expired",
+                    refreshToken = "revoked",
+                    expiresIn = 3600,
+                    createdAt = 0L,
+                ),
+                execute = { error("401 Unauthorized") },
+                refresh = { error("invalid_grant") },
+                isUnauthorized = { "401" in (it.message ?: "") },
+            )
+        }
+    }
 }

@@ -29,6 +29,7 @@ import com.torve.domain.model.RatingPillStyle
 import com.torve.domain.model.RatingSource
 import com.torve.domain.model.calculateTorveScore
 import com.torve.domain.model.deriveProvidersToRender
+import com.torve.domain.model.hasValueFor
 
 val LocalRatingPrefs = staticCompositionLocalOf { RatingDisplayPrefs() }
 
@@ -83,6 +84,47 @@ fun MultiRatingPills(
                 )
             }
         }
+    }
+}
+
+@Composable
+fun PreferredRatingPills(
+    ratings: MediaRatings,
+    modifier: Modifier = Modifier,
+    prefs: RatingDisplayPrefs = LocalRatingPrefs.current,
+) {
+    val selectedExternalProviders = if (prefs.enabledProviders.isEmpty()) {
+        listOf(RatingSource.TMDB)
+    } else {
+        prefs.enabledProviders.filterNot { it == RatingSource.TORVE }
+    }
+    val orderedExternalProviders = (prefs.providerOrder + RatingSource.entries)
+        .distinct()
+        .filter { it in selectedExternalProviders && ratings.hasValueFor(it) }
+    if (orderedExternalProviders.isNotEmpty()) {
+        MultiRatingPills(
+            ratings = ratings,
+            modifier = modifier,
+            prefs = prefs.copy(
+                enabledProviders = orderedExternalProviders,
+                maxRatingsOnCard = prefs.maxRatingsOnCard.coerceAtLeast(1),
+                showTorveScoreOnCards = false,
+            ),
+        )
+        return
+    }
+
+    if (calculateTorveScore(ratings, prefs.torveWeights) != null) {
+        MultiRatingPills(
+            ratings = ratings,
+            modifier = modifier,
+            prefs = prefs.copy(
+                enabledProviders = listOf(RatingSource.TORVE),
+                providerOrder = listOf(RatingSource.TORVE),
+                maxRatingsOnCard = 1,
+                showTorveScoreOnCards = true,
+            ),
+        )
     }
 }
 

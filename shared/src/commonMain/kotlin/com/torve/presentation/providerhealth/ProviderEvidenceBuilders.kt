@@ -30,7 +30,14 @@ import com.torve.presentation.transfer.TransferDiagnosticsSnapshot
 
 /** Derive the structured facets from a live [ChannelsUiState]. */
 fun iptvFacetsFrom(state: ChannelsUiState): IptvHealthFacets {
-    val playlistLoaded = state.playlists.isNotEmpty()
+    val cachedCatalogLoaded = state.selectedPlaylistId != null &&
+        (
+            state.channels.isNotEmpty() ||
+                state.categories.isNotEmpty() ||
+                state.groupedChannels.isNotEmpty() ||
+                state.categoryChannels.isNotEmpty()
+            )
+    val playlistLoaded = state.playlists.isNotEmpty() || cachedCatalogLoaded
     val storedChannelCount = state.selectedPlaylistId
         ?.let { id -> state.playlists.firstOrNull { it.id == id }?.channelCount }
         ?: state.playlists.firstOrNull()?.channelCount
@@ -38,7 +45,8 @@ fun iptvFacetsFrom(state: ChannelsUiState): IptvHealthFacets {
     val channelCount = maxOf(state.channels.size, storedChannelCount)
     val channelsLoaded = channelCount > 0 ||
         state.categories.isNotEmpty() ||
-        state.groupedChannels.isNotEmpty()
+        state.groupedChannels.isNotEmpty() ||
+        state.categoryChannels.isNotEmpty()
     val epg = state.epgState
     val epgLoaded = epg is EpgState.Loaded
     val matched = (epg as? EpgState.Loaded)?.matchedChannelCount ?: 0

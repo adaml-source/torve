@@ -13,6 +13,8 @@ import com.torve.domain.repository.PreferencesRepository
 import com.torve.domain.repository.WatchHistoryRepository
 import com.torve.domain.repository.WatchProgressRepository
 import com.torve.domain.repository.WatchlistRepository
+import com.torve.data.trakt.TraktCalendarEpisode
+import com.torve.data.trakt.api.TraktAuthorizedApi
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.awaitAll
@@ -43,32 +45,72 @@ data class SeeAllUiState(
     val isLoading: Boolean = false,
     val page: Int = 1,
     val hasMore: Boolean = true,
+    val totalResults: Int = 0,
     val sectionId: String = "",
     val sortMode: SeeAllSortMode = SeeAllSortMode.DEFAULT,
     val filterYearFrom: Int? = null,
     val filterYearTo: Int? = null,
     val filterGenreIds: Set<Int> = emptySet(),
+    val filterStudioIds: Set<Int> = emptySet(),
 ) {
     /** Items after applying the user's sort + filter selections. */
     val displayedItems: List<MediaItem>
-        get() = applySortAndFilter(items, sortMode, filterYearFrom, filterYearTo, filterGenreIds)
+        get() = applySortAndFilter(items, sortMode, filterYearFrom, filterYearTo, filterGenreIds, filterStudioIds)
 
     /** Distinct genre ids present in the current items, sorted by frequency (most common first). */
     val availableGenres: List<Pair<Int, String>>
         get() = items
-            .flatMap { it.genres.map { g -> g.id to g.name } }
+            .flatMap { item ->
+                val explicit = item.genres.map { g -> g.id to g.name }
+                if (explicit.isNotEmpty()) explicit
+                else item.genreIds.mapNotNull { id -> tmdbGenreLabel(id)?.let { id to it } }
+            }
             .groupingBy { it }
             .eachCount()
             .entries
             .sortedByDescending { it.value }
             .map { it.key }
 
+    /** TV network / studio chips, hydrated from TMDB detail responses when needed. */
+    val availableStudios: List<Pair<Int, String>>
+        get() = items
+            .filter { it.type == MediaType.SERIES }
+            .flatMap { it.studios.map { studio -> studio.id to studio.name } }
+            .groupingBy { it }
+            .eachCount()
+            .entries
+            .sortedByDescending { it.value }
+            .map { it.key }
+
+    val availableStudioBrands: List<com.torve.domain.model.MediaCompany>
+        get() = items
+            .filter { it.type == MediaType.SERIES }
+            .flatMap { it.studios }
+            .filter { it.id > 0 && it.name.isNotBlank() }
+            .groupingBy { it.id }
+            .eachCount()
+            .entries
+            .sortedByDescending { it.value }
+            .mapNotNull { (id, _) ->
+                items.asSequence()
+                    .filter { it.type == MediaType.SERIES }
+                    .flatMap { it.studios.asSequence() }
+                    .firstOrNull { it.id == id }
+            }
+
     val availableYearRange: IntRange?
         get() {
             val years = items.mapNotNull { it.year }.filter { it in 1900..2100 }
             return if (years.isEmpty()) null else years.min()..years.max()
-        }
+    }
 }
+
+private data class SeeAllFetchPage(
+    val title: String,
+    val items: List<MediaItem>,
+    val hasMore: Boolean,
+    val totalResults: Int,
+)
 
 fun applySortAndFilter(
     items: List<MediaItem>,
@@ -76,6 +118,7 @@ fun applySortAndFilter(
     yearFrom: Int?,
     yearTo: Int?,
     genreIds: Set<Int>,
+    studioIds: Set<Int> = emptySet(),
 ): List<MediaItem> {
     val filtered = items.asSequence()
         .filter { item ->
@@ -88,25 +131,66 @@ fun applySortAndFilter(
             genreIds.isEmpty() || item.genres.any { it.id in genreIds } ||
                 item.genreIds.any { it in genreIds }
         }
+        .filter { item ->
+            studioIds.isEmpty() || item.studios.any { it.id in studioIds }
+        }
         .toList()
     return when (sortMode) {
         SeeAllSortMode.DEFAULT -> filtered
         SeeAllSortMode.A_Z -> filtered.sortedBy { it.title.lowercase() }
         SeeAllSortMode.Z_A -> filtered.sortedByDescending { it.title.lowercase() }
-        SeeAllSortMode.IMDB_DESC -> filtered.sortedByDescending {
-            // Prefer real IMDb score from enricher; fall back to TMDB (still
-            // scaled 0-10) so un-enriched items don't sink to the bottom.
-            it.ratings?.imdbScore?.toDouble()
-                ?: it.ratings?.tmdbScore?.toDouble()
-                ?: it.rating
-                ?: -1.0
-        }
+        SeeAllSortMode.IMDB_DESC -> filtered.sortedWith(
+            compareByDescending<MediaItem> { it.ratings?.imdbScore != null }
+                .thenByDescending { it.ratings?.imdbScore ?: -1f }
+                .thenBy { it.title.lowercase() },
+        )
         SeeAllSortMode.TMDB_DESC -> filtered.sortedByDescending {
             it.ratings?.tmdbScore?.toDouble() ?: it.rating ?: -1.0
         }
-        SeeAllSortMode.YEAR_DESC -> filtered.sortedByDescending { it.year ?: Int.MIN_VALUE }
-        SeeAllSortMode.YEAR_ASC -> filtered.sortedBy { it.year ?: Int.MAX_VALUE }
+        SeeAllSortMode.YEAR_DESC -> filtered.sortedWith(
+            compareByDescending<MediaItem> { it.releaseSortKey().orEmpty() }
+                .thenBy { it.title.lowercase() },
+        )
+        SeeAllSortMode.YEAR_ASC -> filtered.sortedWith(
+            compareBy<MediaItem> { it.releaseSortKey() ?: "9999-99-99T99:99:99Z" }
+                .thenBy { it.title.lowercase() },
+        )
     }
+}
+
+private fun MediaItem.releaseSortKey(): String? =
+    releaseDate?.trim()?.takeIf { it.isNotEmpty() }
+        ?: year?.toString()?.padStart(4, '0')
+
+private fun tmdbGenreLabel(id: Int): String? = when (id) {
+    28 -> "Action"
+    12 -> "Adventure"
+    16 -> "Animation"
+    35 -> "Comedy"
+    80 -> "Crime"
+    99 -> "Documentary"
+    18 -> "Drama"
+    10751 -> "Family"
+    14 -> "Fantasy"
+    36 -> "History"
+    27 -> "Horror"
+    10402 -> "Music"
+    9648 -> "Mystery"
+    10749 -> "Romance"
+    878 -> "Science Fiction"
+    10770 -> "TV Movie"
+    53 -> "Thriller"
+    10752 -> "War"
+    37 -> "Western"
+    10759 -> "Action & Adventure"
+    10762 -> "Kids"
+    10763 -> "News"
+    10764 -> "Reality"
+    10765 -> "Sci-Fi & Fantasy"
+    10766 -> "Soap"
+    10767 -> "Talk"
+    10768 -> "War & Politics"
+    else -> null
 }
 
 class SeeAllViewModel(
@@ -120,6 +204,7 @@ class SeeAllViewModel(
     invalidationCoordinator: ContentPolicyCacheInvalidationCoordinator? = null,
     private val ratingsEnricher: RatingsEnricher? = null,
     private val integrationSecretStore: IntegrationSecretStore? = null,
+    private val traktApi: TraktAuthorizedApi? = null,
 ) {
     companion object {
         /** Temporary holder for shelf items that can't be paginated from an API. */
@@ -134,7 +219,7 @@ class SeeAllViewModel(
         if (invalidationCoordinator != null) {
             scope.launch {
                 invalidationCoordinator.events.collectLatest {
-                    _state.value.sectionId.takeIf { it.isNotBlank() }?.let { loadSection(it) }
+                    _state.value.sectionId.takeIf { it.isNotBlank() }?.let { loadSection(it, force = true) }
                 }
             }
         }
@@ -156,30 +241,59 @@ class SeeAllViewModel(
         }
     }
 
-    fun clearFilters() {
-        _state.update { it.copy(filterYearFrom = null, filterYearTo = null, filterGenreIds = emptySet()) }
+    fun clearGenres() {
+        _state.update { it.copy(filterGenreIds = emptySet()) }
     }
 
-    fun loadSection(sectionId: String) {
+    fun toggleStudio(studioId: Int) {
+        _state.update {
+            val next = if (studioId in it.filterStudioIds) it.filterStudioIds - studioId
+            else it.filterStudioIds + studioId
+            it.copy(filterStudioIds = next)
+        }
+    }
+
+    fun clearStudios() {
+        _state.update { it.copy(filterStudioIds = emptySet()) }
+    }
+
+    fun clearFilters() {
+        _state.update {
+            it.copy(
+                filterYearFrom = null,
+                filterYearTo = null,
+                filterGenreIds = emptySet(),
+                filterStudioIds = emptySet(),
+            )
+        }
+    }
+
+    fun loadSection(sectionId: String, force: Boolean = false) {
+        val current = _state.value
+        if (!force && current.sectionId == sectionId && current.items.isNotEmpty()) {
+            return
+        }
         _state.update { it.copy(sectionId = sectionId, isLoading = true) }
         scope.launch {
             try {
                 val page = 1
-                val (title, items, hasMore) = fetchSection(sectionId, page)
-                val filteredItems = applyContentPolicy(sectionId, items)
+                val result = fetchSection(sectionId, page)
+                val filteredItems = applyContentPolicy(sectionId, result.items)
                 _state.update {
                     it.copy(
-                        title = title,
+                        title = result.title,
                         items = filteredItems,
                         isLoading = false,
                         page = 2,
-                        hasMore = hasMore,
+                        hasMore = result.hasMore,
+                        totalResults = result.totalResults.takeIf { total -> total > 0 } ?: filteredItems.size,
                     )
                 }
                 // Fetch rating pills in background so every see-all page shows
                 // IMDb / TMDB / RT chips even if the section's fetchSection path
                 // didn't call enrichRatings itself.
                 enrichPillsAsync(filteredItems)
+                hydrateTvMetadataAsync(filteredItems)
             } catch (e: Exception) {
                 _state.update { it.copy(isLoading = false, hasMore = false) }
             }
@@ -209,14 +323,50 @@ class SeeAllViewModel(
         }
     }
 
+    /**
+     * TV list/discover endpoints usually carry only genre ids and no
+     * network/studio data. Detail hydration fills those fields in the
+     * background so See All can offer real TV network + genre filters without
+     * blocking first paint.
+     */
+    private fun hydrateTvMetadataAsync(items: List<MediaItem>) {
+        val targets = items
+            .filter { it.type == MediaType.SERIES && it.tmdbId != null && (it.studios.isEmpty() || it.genres.isEmpty()) }
+            .distinctBy { it.tmdbId }
+        if (targets.isEmpty()) return
+        scope.launch {
+            val hydrated = coroutineScope {
+                targets.map { item ->
+                    async(Dispatchers.IO) {
+                        val detail = runCatching { metadataRepo.getDetail("tv", item.tmdbId!!) }.getOrNull()
+                            ?: return@async null
+                        item.id to item.copy(
+                            imdbId = item.imdbId ?: detail.imdbId,
+                            genres = item.genres.ifEmpty { detail.genres },
+                            studios = item.studios.ifEmpty { detail.studios },
+                            logoUrl = item.logoUrl ?: detail.logoUrl,
+                            backdropUrl = item.backdropUrl ?: detail.backdropUrl,
+                            posterUrl = item.posterUrl ?: detail.posterUrl,
+                            ratings = item.ratings ?: detail.ratings,
+                        )
+                    }
+                }.awaitAll().filterNotNull().toMap()
+            }
+            if (hydrated.isEmpty()) return@launch
+            _state.update { state ->
+                state.copy(items = state.items.map { hydrated[it.id] ?: it })
+            }
+        }
+    }
+
     fun loadMore() {
         val s = _state.value
         if (!s.hasMore || s.isLoading) return
         _state.update { it.copy(isLoading = true) }
         scope.launch {
             try {
-                val (_, items, hasMore) = fetchSection(s.sectionId, s.page)
-                val filteredItems = applyContentPolicy(s.sectionId, items)
+                val result = fetchSection(s.sectionId, s.page)
+                val filteredItems = applyContentPolicy(s.sectionId, result.items)
                 val existingIds = _state.value.items.map { it.id }.toSet()
                 val newItems = filteredItems.filter { it.id !in existingIds }
                 _state.update {
@@ -224,25 +374,27 @@ class SeeAllViewModel(
                         items = it.items + newItems,
                         isLoading = false,
                         page = it.page + 1,
-                        hasMore = hasMore,
+                        hasMore = result.hasMore,
+                        totalResults = result.totalResults.takeIf { total -> total > 0 } ?: it.totalResults,
                     )
                 }
                 enrichPillsAsync(newItems)
+                hydrateTvMetadataAsync(newItems)
             } catch (_: Exception) {
                 _state.update { it.copy(isLoading = false) }
             }
         }
     }
 
-    private suspend fun fetchSection(sectionId: String, page: Int): Triple<String, List<MediaItem>, Boolean> {
+    private suspend fun fetchSection(sectionId: String, page: Int): SeeAllFetchPage {
         if (sectionId.startsWith("shelf:")) {
             val shelfId = sectionId.removePrefix("shelf:")
             // Peek rather than remove — on back-nav and re-open, the shelf
             // would otherwise be gone because the previous visit consumed it,
             // producing a blank "See all" page the second time around.
             val (title, items) = pendingItems[shelfId]
-                ?: return Triple("", emptyList(), false)
-            return Triple(title, items, false)
+                ?: return SeeAllFetchPage("", emptyList(), false, 0)
+            return SeeAllFetchPage(title, items, false, items.size)
         }
 
         if (sectionId.startsWith("MOVIE_GENRE_") || sectionId.startsWith("TV_GENRE_")) {
@@ -259,50 +411,57 @@ class SeeAllViewModel(
                     sortBy = "popularity.desc",
                 )
                 val label = if (isMovie) "$titleForGenre Movies" else "$titleForGenre TV Shows"
-                return Triple(label, result.items, result.page < result.totalPages)
+                return SeeAllFetchPage(label, result.items, result.page < result.totalPages, result.totalResults)
             }
         }
 
         if (sectionId.startsWith("custom:")) {
             val customId = sectionId.removePrefix("custom:")
             val section = loadCustomSections().firstOrNull { it.id == customId }
-                ?: return Triple("Custom Section", emptyList(), false)
+                ?: return SeeAllFetchPage("Custom Section", emptyList(), false, 0)
             val (items, hasMore) = fetchCustomSection(section, page)
-            return Triple(section.title, items, hasMore)
+            return SeeAllFetchPage(section.title, items, hasMore, items.size)
         }
 
         return when (sectionId) {
+            "upcoming_schedule" -> {
+                pendingItems[sectionId]?.let { (title, items) ->
+                    return SeeAllFetchPage(title, items, false, items.size)
+                }
+                val items = loadUpcomingScheduleItems()
+                SeeAllFetchPage("Upcoming Schedule", items, false, items.size)
+            }
             "TRENDING_MOVIES" -> {
                 val result = metadataRepo.getTrendingPaged("movie", page)
-                Triple("Trending Movies", result.items, result.page < result.totalPages)
+                SeeAllFetchPage("Trending Movies", result.items, result.page < result.totalPages, result.totalResults)
             }
             "TRENDING_TV" -> {
                 val result = metadataRepo.getTrendingPaged("tv", page)
-                Triple("Trending TV Shows", result.items, result.page < result.totalPages)
+                SeeAllFetchPage("Trending TV Shows", result.items, result.page < result.totalPages, result.totalResults)
             }
             "POPULAR_MOVIES" -> {
                 val result = metadataRepo.getPopularPaged("movie", page)
-                Triple("Popular Movies", result.items, result.page < result.totalPages)
+                SeeAllFetchPage("Popular Movies", result.items, result.page < result.totalPages, result.totalResults)
             }
             "POPULAR_TV" -> {
                 val result = metadataRepo.getPopularPaged("tv", page)
-                Triple("Popular TV Shows", result.items, result.page < result.totalPages)
+                SeeAllFetchPage("Popular TV Shows", result.items, result.page < result.totalPages, result.totalResults)
             }
             "NOW_PLAYING" -> {
                 val result = metadataRepo.discover(type = "movie", page = page)
-                Triple("Now Playing", result.items, result.page < result.totalPages)
+                SeeAllFetchPage("Now Playing", result.items, result.page < result.totalPages, result.totalResults)
             }
             "TOP_RATED", "TOP_RATED_MOVIES" -> {
                 val result = metadataRepo.getTopRatedPaged("movie", page)
-                Triple("Top Rated Movies", result.items, result.page < result.totalPages)
+                SeeAllFetchPage("Top Rated Movies", result.items, result.page < result.totalPages, result.totalResults)
             }
             "TOP_RATED_TV" -> {
                 val result = metadataRepo.getTopRatedPaged("tv", page)
-                Triple("Top Rated TV Shows", result.items, result.page < result.totalPages)
+                SeeAllFetchPage("Top Rated TV Shows", result.items, result.page < result.totalPages, result.totalResults)
             }
             "NEW_RELEASES", "UPCOMING" -> {
-                val result = metadataRepo.discover(type = "movie", page = page, sortBy = "primary_release_date.desc")
-                Triple("Upcoming", result.items, result.page < result.totalPages)
+                val items = metadataRepo.getUpcoming(page)
+                SeeAllFetchPage("Upcoming", items, items.size >= 20 && page < 5, items.size)
             }
             "continue_watching" -> {
                 // Use the same source as the home rail (in-progress, not history),
@@ -320,7 +479,7 @@ class SeeAllViewModel(
                     )
                 }
                 val items = enrichRatings(resolveImdbToTmdb(dedupePerShow(raw)))
-                Triple("Continue Watching", items, false)
+                SeeAllFetchPage("Continue Watching", items, false, items.size)
             }
             "watchlist" -> {
                 val items = watchlistRepo.getAll().map { wl ->
@@ -335,11 +494,11 @@ class SeeAllViewModel(
                         type = wl.mediaType,
                     )
                 }
-                Triple("My Watchlist", items, false)
+                SeeAllFetchPage("My Watchlist", items, false, items.size)
             }
             "recommended" -> {
                 // Recommendations don't paginate from TMDB directly; return what we have
-                Triple("Recommended For You", emptyList(), false)
+                SeeAllFetchPage("Recommended For You", emptyList(), false, 0)
             }
             "recently_watched" -> {
                 val raw = watchHistoryRepo.getRecent(80).map { entry ->
@@ -359,10 +518,64 @@ class SeeAllViewModel(
                     )
                 }
                 val items = enrichRatings(resolveImdbToTmdb(dedupePerShow(raw)))
-                Triple("Recently Watched", items, false)
+                SeeAllFetchPage("Recently Watched", items, false, items.size)
             }
-            else -> Triple(sectionId.replace("_", " "), emptyList(), false)
+            else -> SeeAllFetchPage(sectionId.replace("_", " "), emptyList(), false, 0)
         }
+    }
+
+    private suspend fun loadUpcomingScheduleItems(): List<MediaItem> {
+        val api = traktApi ?: return emptyList()
+        val connected = try {
+            api.hasConnection()
+        } catch (_: Exception) {
+            false
+        }
+        if (!connected) return emptyList()
+        val episodes = try {
+            api.getCalendar(days = 33)
+        } catch (_: Exception) {
+            emptyList()
+        }
+        if (episodes.isEmpty()) return emptyList()
+        return episodes
+            .sortedBy { it.firstAired }
+            .distinctBy { episode ->
+                "${episode.showTmdbId ?: episode.showTitle}:${episode.season}:${episode.episode}:${episode.firstAired}"
+            }
+            .map { it.toUpcomingScheduleItem() }
+    }
+
+    private fun TraktCalendarEpisode.toUpcomingScheduleItem(): MediaItem {
+        val airDateTime = firstAired.takeIf { it.isNotBlank() }
+        val episodeCode = "S${season}E${episode}"
+        val displayTitle = buildString {
+            append(showTitle)
+            append(" - ")
+            append(episodeCode)
+            if (episodeTitle.isNotBlank()) {
+                append(" - ")
+                append(episodeTitle)
+            }
+        }
+        val fallbackId = buildString {
+            append("trakt-calendar:")
+            append(showTmdbId ?: showTitle)
+            append(':')
+            append(season)
+            append(':')
+            append(episode)
+            append(':')
+            append(firstAired)
+        }
+        return MediaItem(
+            id = fallbackId,
+            tmdbId = showTmdbId,
+            type = MediaType.SERIES,
+            title = displayTitle,
+            year = null,
+            releaseDate = airDateTime,
+        )
     }
 
     private fun genreIdToLabel(id: Int?): String? = when (id) {

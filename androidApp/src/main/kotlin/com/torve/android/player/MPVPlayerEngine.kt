@@ -342,6 +342,13 @@ class MPVPlayerEngine(
         }
     }
 
+    fun setPlaybackVolume(volume: Float) {
+        if (!initialized) return
+        val percent = (volume.coerceIn(0f, 1f) * 100.0).coerceIn(0.0, 100.0)
+        runCatching { MPVLib.setPropertyDouble("volume", percent) }
+            .onFailure { Log.w(TAG, "Unable to set mpv playback volume=$percent", it) }
+    }
+
     fun setAudioOutputPreferences(
         passthroughEnabled: Boolean,
         preferSurround: Boolean,

@@ -8,6 +8,7 @@ import com.torve.domain.model.ResolvedStream
 import com.torve.domain.model.TranscodeUrls
 import com.torve.domain.model.apiValue
 import com.torve.domain.diagnostics.DiagnosticsRedactor
+import com.torve.platform.TorveRuntimeDebug
 import io.ktor.client.HttpClient
 import io.ktor.client.call.body
 import io.ktor.client.request.HttpRequestBuilder
@@ -55,6 +56,12 @@ class DebridClient(
     )
 
     private val cacheCheckMemory = mutableMapOf<String, CacheCheckEntry>()
+
+    private inline fun debridDebugLog(message: () -> String) {
+        if (TorveRuntimeDebug.verboseLoggingEnabled) {
+            println(DiagnosticsRedactor.redact(message()))
+        }
+    }
 
     companion object {
         const val RD_BASE = "https://api.real-debrid.com/rest/1.0"
@@ -293,7 +300,7 @@ class DebridClient(
                     // Token expired — try refresh and retry once
                     val newKey = rdTokenRefresher?.refresh()
                     if (newKey != null) {
-                        println("TORVE_RD: token refreshed, retrying resolve")
+                        debridDebugLog { "TORVE_RD: token refreshed, retrying resolve" }
                         rdResolveStream(newKey, normalizedHash, magnet, magnetMode, fileIdx, season, episode)
                     } else {
                         throw DebridNeedsReconnectException("Real-Debrid needs reconnecting. Open Panda settings.")
@@ -321,7 +328,7 @@ class DebridClient(
                 } catch (e: RdAuthException) {
                     val newKey = rdTokenRefresher?.refresh()
                     if (newKey != null) {
-                        println("TORVE_RD: token refreshed, retrying unrestrict")
+                        debridDebugLog { "TORVE_RD: token refreshed, retrying unrestrict" }
                         rdUnrestrictUrlInternal(newKey, url, provider)
                     } else {
                         throw DebridNeedsReconnectException("Real-Debrid needs reconnecting. Open Panda settings.")
@@ -402,7 +409,7 @@ class DebridClient(
             },
         )
         val bodyText = rawResp.bodyAsText()
-        println("TORVE_RD: token refresh HTTP ${rawResp.status.value}")
+        debridDebugLog { "TORVE_RD: token refresh HTTP ${rawResp.status.value}" }
         if (rawResp.status.value !in 200..299) {
             throw Exception("Token refresh failed (${rawResp.status.value}).")
         }
@@ -499,7 +506,7 @@ class DebridClient(
             header("Authorization", "Bearer $apiKey")
         }
         val bodyText = rawResp.bodyAsText()
-        println("TORVE_RD: addMagnet HTTP ${rawResp.status.value}")
+        debridDebugLog { "TORVE_RD: addMagnet HTTP ${rawResp.status.value}" }
         if (rawResp.status.value == 401) {
             throw RdAuthException("Session token expired (HTTP 401)")
         }
@@ -629,16 +636,16 @@ class DebridClient(
         season: Int?,
         episode: Int?,
     ): ResolvedStream {
-        println("TORVE_RD: resolve hash=${infoHash.redactedHash()} fileIdx=$fileIdx magnetMode=$magnetMode")
+        debridDebugLog { "TORVE_RD: resolve hash=${infoHash.redactedHash()} fileIdx=$fileIdx magnetMode=$magnetMode" }
         if (magnetMode == "hash_only") {
             val cached = try {
                 rdCheckCache(apiKey, listOf(infoHash))[infoHash]
             } catch (e: Exception) {
                 if (e is RdAuthException || e is DebridServiceUnavailableException) throw e
-                println("TORVE_RD: hashOnlyCacheCheck unknown hash=${infoHash.redactedHash()} reason=${e::class.simpleName}")
+                debridDebugLog { "TORVE_RD: hashOnlyCacheCheck unknown hash=${infoHash.redactedHash()} reason=${e::class.simpleName}" }
                 null
             }
-            println("TORVE_RD: hashOnlyCacheCheck hash=${infoHash.redactedHash()} cached=${cached ?: "unknown"}")
+            debridDebugLog { "TORVE_RD: hashOnlyCacheCheck hash=${infoHash.redactedHash()} cached=${cached ?: "unknown"}" }
             if (cached == false) {
                 rdResolveExistingTorrentByHash(apiKey, infoHash, fileIdx, season, episode)?.let { return it }
                 throw DebridNoCachedStreamException("Not cached on Real-Debrid.")
@@ -653,7 +660,7 @@ class DebridClient(
             rdResolveExistingTorrentByHash(apiKey, infoHash, fileIdx, season, episode)?.let { return it }
             throw e
         }
-        println("TORVE_RD: addMagnet accepted fileIdx=$fileIdx")
+        debridDebugLog { "TORVE_RD: addMagnet accepted fileIdx=$fileIdx" }
 
         return rdResolveTorrentId(apiKey, infoHash, torrentId, fileIdx, season, episode, origin = "addMagnet")
     }
@@ -666,7 +673,7 @@ class DebridClient(
         episode: Int?,
     ): ResolvedStream? {
         val existingId = rdFindExistingTorrentId(apiKey, infoHash) ?: return null
-        println("TORVE_RD: existingTorrent match hash=${infoHash.redactedHash()}")
+        debridDebugLog { "TORVE_RD: existingTorrent match hash=${infoHash.redactedHash()}" }
         return rdResolveTorrentId(apiKey, infoHash, existingId, fileIdx, season, episode, origin = "inventory")
     }
 
@@ -681,7 +688,7 @@ class DebridClient(
     ): ResolvedStream {
         // Get torrent info to find file IDs, then select the target file
         val initialInfo = rdGetTorrentInfo(apiKey, torrentId)
-        println("TORVE_RD: initialInfo origin=$origin status=${initialInfo.status} files=${initialInfo.files.size} links=${initialInfo.links.size}")
+        debridDebugLog { "TORVE_RD: initialInfo origin=$origin status=${initialInfo.status} files=${initialInfo.files.size} links=${initialInfo.links.size}" }
 
         // Select specific file if possible; fall back to "all" if no fileIdx
         val filesToSelect = if (fileIdx != null && initialInfo.files.isNotEmpty()) {
@@ -699,14 +706,14 @@ class DebridClient(
         } else {
             "all"
         }
-        println("TORVE_RD: selectFiles=$filesToSelect")
+        debridDebugLog { "TORVE_RD: selectFiles_count=${filesToSelect.split(',').size}" }
         rdSelectFiles(apiKey, torrentId, filesToSelect)
 
         // 3. Poll until ready
         var links: List<String> = emptyList()
         for (attempt in 0 until 30) {
             val info = rdGetTorrentInfo(apiKey, torrentId)
-            println("TORVE_RD: poll #$attempt status=${info.status} links=${info.links.size}")
+            debridDebugLog { "TORVE_RD: poll #$attempt status=${info.status} links=${info.links.size}" }
             if (info.status == "downloaded" && info.links.isNotEmpty()) {
                 links = info.links
                 break
@@ -730,7 +737,7 @@ class DebridClient(
 
         // 4. Unrestrict the first link (we selected only the target file)
         val file = rdUnrestrictLink(apiKey, links.first())
-        println("TORVE_RD: unrestricted filename=${file.filename} streamable=${file.streamable}")
+        debridDebugLog { "TORVE_RD: unrestricted hasFileName=${file.filename.isNotBlank()} streamable=${file.streamable}" }
 
         // 5. Get transcode URLs
         val transcode = if (file.streamable) rdGetTranscodeUrls(apiKey, file.id) else null
@@ -846,13 +853,13 @@ class DebridClient(
         magnetMode: String,
         fileIdx: Int?,
     ): ResolvedStream {
-        println("TORVE_AD: resolve hash=${infoHash.redactedHash()} fileIdx=$fileIdx magnetMode=$magnetMode")
+        debridDebugLog { "TORVE_AD: resolve hash=${infoHash.redactedHash()} fileIdx=$fileIdx magnetMode=$magnetMode" }
         if (magnetMode == "hash_only") {
             try {
                 val cached = adCheckCache(apiKey, listOf(infoHash))[infoHash] == true
-                println("TORVE_AD: hashOnlyCacheCheck hash=${infoHash.redactedHash()} cached=$cached")
+                debridDebugLog { "TORVE_AD: hashOnlyCacheCheck hash=${infoHash.redactedHash()} cached=$cached" }
             } catch (e: Exception) {
-                println("TORVE_AD: hashOnlyCacheCheck skipped hash=${infoHash.redactedHash()} reason=${e::class.simpleName}: ${DiagnosticsRedactor.redact(e.message)}")
+                debridDebugLog { "TORVE_AD: hashOnlyCacheCheck skipped hash=${infoHash.redactedHash()} reason=${e::class.simpleName}: ${DiagnosticsRedactor.redact(e.message)}" }
             }
         }
 
@@ -977,13 +984,13 @@ class DebridClient(
         magnet: String,
         magnetMode: String,
     ): ResolvedStream {
-        println("TORVE_PM: resolve hash=${infoHash.redactedHash()} magnetMode=$magnetMode")
+        debridDebugLog { "TORVE_PM: resolve hash=${infoHash.redactedHash()} magnetMode=$magnetMode" }
         if (magnetMode == "hash_only") {
             try {
                 val cached = pmCheckCache(apiKey, listOf(infoHash))[infoHash] == true
-                println("TORVE_PM: hashOnlyCacheCheck hash=${infoHash.redactedHash()} cached=$cached")
+                debridDebugLog { "TORVE_PM: hashOnlyCacheCheck hash=${infoHash.redactedHash()} cached=$cached" }
             } catch (e: Exception) {
-                println("TORVE_PM: hashOnlyCacheCheck skipped hash=${infoHash.redactedHash()} reason=${e::class.simpleName}: ${DiagnosticsRedactor.redact(e.message)}")
+                debridDebugLog { "TORVE_PM: hashOnlyCacheCheck skipped hash=${infoHash.redactedHash()} reason=${e::class.simpleName}: ${DiagnosticsRedactor.redact(e.message)}" }
             }
         }
 
@@ -1050,13 +1057,13 @@ class DebridClient(
         magnetMode: String,
         fileIdx: Int?,
     ): ResolvedStream {
-        println("TORVE_TB: resolve hash=${infoHash.redactedHash()} fileIdx=$fileIdx magnetMode=$magnetMode")
+        debridDebugLog { "TORVE_TB: resolve hash=${infoHash.redactedHash()} fileIdx=$fileIdx magnetMode=$magnetMode" }
         if (magnetMode == "hash_only") {
             try {
                 val cached = tbCheckCache(apiKey, listOf(infoHash))[infoHash] == true
-                println("TORVE_TB: hashOnlyCacheCheck hash=${infoHash.redactedHash()} cached=$cached")
+                debridDebugLog { "TORVE_TB: hashOnlyCacheCheck hash=${infoHash.redactedHash()} cached=$cached" }
             } catch (e: Exception) {
-                println("TORVE_TB: hashOnlyCacheCheck skipped hash=${infoHash.redactedHash()} reason=${e::class.simpleName}: ${DiagnosticsRedactor.redact(e.message)}")
+                debridDebugLog { "TORVE_TB: hashOnlyCacheCheck skipped hash=${infoHash.redactedHash()} reason=${e::class.simpleName}: ${DiagnosticsRedactor.redact(e.message)}" }
             }
         }
 
@@ -1171,7 +1178,7 @@ class DebridClient(
             }
         } catch (e: Exception) {
             if (e is RdAuthException || e is DebridServiceUnavailableException) throw e
-            println("TORVE_RD: inventory lookup skipped hash=${infoHash.redactedHash()} reason=${e::class.simpleName}: ${DiagnosticsRedactor.redact(e.message)}")
+            debridDebugLog { "TORVE_RD: inventory lookup skipped hash=${infoHash.redactedHash()} reason=${e::class.simpleName}: ${DiagnosticsRedactor.redact(e.message)}" }
             null
         }
     }

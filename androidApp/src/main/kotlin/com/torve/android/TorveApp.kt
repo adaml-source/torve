@@ -67,6 +67,11 @@ class TorveApp : Application() {
         com.torve.android.debug.AnrDebugLogger.log("STARTUP koinReady signalled")
 
         appScope.launch {
+            val isTvBuild = BuildConfig.FLAVOR.contains("tv", ignoreCase = true)
+            if (isTvBuild) {
+                runCatching { CatalogWarmupWorker.cancel(this@TorveApp) }
+            }
+
             com.torve.android.debug.AnrDebugLogger.log("STARTUP DB pre-warm BEGIN")
             runCatching { getKoin().get<com.torve.db.TorveDatabase>() }
             com.torve.android.debug.AnrDebugLogger.log("STARTUP DB pre-warm END")
@@ -78,8 +83,13 @@ class TorveApp : Application() {
             }
             launch {
                 TraktSyncWorker.schedule(this@TorveApp)
-                EpgWarmupWorker.schedule(this@TorveApp)
-                CatalogWarmupWorker.schedule(this@TorveApp)
+                if (isTvBuild) {
+                    CatalogWarmupWorker.cancel(this@TorveApp)
+                    EpgWarmupWorker.cancel(this@TorveApp)
+                } else {
+                    EpgWarmupWorker.schedule(this@TorveApp)
+                    CatalogWarmupWorker.schedule(this@TorveApp)
+                }
                 DownloadWorker.ensureChannel(this@TorveApp)
             }
             launch {

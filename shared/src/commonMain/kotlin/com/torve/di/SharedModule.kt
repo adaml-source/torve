@@ -275,6 +275,13 @@ val sharedModule = module {
             installationIdProvider = { get<com.torve.domain.device.DeviceIdProvider>().getDeviceId() },
         )
     }
+    single {
+        com.torve.data.telemetry.StreamPathTelemetryApi(
+            httpClient = get(),
+            baseUrlProvider = { com.torve.data.auth.AuthClient.DEFAULT_BASE_URL },
+            accessTokenProvider = { get<com.torve.data.auth.AuthClient>().getValidAccessToken() },
+        )
+    }
 
     // Parsers
     single { M3uParser() }
@@ -293,7 +300,7 @@ val sharedModule = module {
     single { StreamAggregator(get(), get(), get()) }
 
     // Stream Repository
-    single<StreamRepository> { StreamRepositoryImpl(get(), get(), get(), get(), get()) }
+    single<StreamRepository> { StreamRepositoryImpl(get(), get(), get(), get(), get(), get()) }
     single { AccelerationInventorySyncService(get(), get(), get()) }
 
     // User ID provider for DB scoping. Uses a lazy AuthClient lookup so it can be
@@ -788,7 +795,7 @@ val sharedModule = module {
     // ViewModels — singletons share state across screens (e.g. TvRoot ↔ TvIptvScreen).
     // The database is pre-warmed on a background thread in TorveApp.onCreate so the
     // first koinInject() doesn't block the main thread with schema DDL.
-    single { HomeViewModel(get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get()) }
+    single { HomeViewModel(get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get()) }
     single { SearchViewModel(get(), get(), get(), get(), get(), get(), get()) }
     factory {
         DetailViewModel(
@@ -866,7 +873,12 @@ val sharedModule = module {
     // otherwise we default to the wrapped NoOp.
     single<com.torve.domain.telemetry.TelemetryEmitter> {
         com.torve.domain.telemetry.RedactingTelemetryEmitter(
-            com.torve.domain.telemetry.NoOpTelemetryEmitter(),
+            com.torve.domain.telemetry.CompositeTelemetryEmitter(
+                listOf(
+                    com.torve.domain.telemetry.NoOpTelemetryEmitter(),
+                    com.torve.data.telemetry.StreamPathBackendTelemetryEmitter(get<com.torve.data.telemetry.StreamPathTelemetryApi>()),
+                ),
+            ),
         )
     }
     factory {
@@ -877,7 +889,7 @@ val sharedModule = module {
     }
     single { com.torve.domain.streams.UsenetWarmCoordinator(repository = get(), telemetry = get()) }
     single { com.torve.domain.streams.UsenetResolveCoordinator(repository = get(), telemetry = get()) }
-    single { com.torve.domain.streams.UsenetJobPoller(repository = get()) }
+    single { com.torve.domain.streams.UsenetJobPoller(repository = get(), telemetry = get()) }
     single {
         ChannelsViewModel(
             channelRepo = get(),
@@ -931,6 +943,7 @@ val sharedModule = module {
             invalidationCoordinator = get(),
             ratingsEnricher = getOrNull(),
             integrationSecretStore = getOrNull(),
+            traktApi = getOrNull(),
         )
     }
     factory { SensitiveMaterialSettingsViewModel(get()) }

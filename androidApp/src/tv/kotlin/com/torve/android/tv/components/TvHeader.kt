@@ -10,7 +10,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.layout.ContentScale
 import coil3.compose.AsyncImage
-import com.torve.android.ui.theme.HeroGradient
 import com.torve.android.ui.theme.Obsidian
 import com.torve.domain.model.MediaItem
 
@@ -28,7 +27,7 @@ fun TvHeroBackground(
 ) {
     Box(modifier = modifier.fillMaxSize()) {
         val imageUrl = featuredItem?.backdropUrl ?: featuredItem?.posterUrl
-        val scale = ContentScale.Fit
+        val scale = ContentScale.Crop
 
         Crossfade(
             targetState = imageUrl,
@@ -49,7 +48,19 @@ fun TvHeroBackground(
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .background(Brush.verticalGradient(HeroGradient)),
+                .background(
+                    Brush.verticalGradient(
+                        colors = listOf(
+                            Obsidian.copy(alpha = 0.12f),
+                            Obsidian.copy(alpha = 0.20f),
+                            Obsidian.copy(alpha = 0.36f),
+                            Obsidian.copy(alpha = 0.58f),
+                            Obsidian.copy(alpha = 0.80f),
+                            Obsidian.copy(alpha = 0.94f),
+                            Obsidian,
+                        ),
+                    ),
+                ),
         )
 
         // Left-side readability gradient for text overlay
@@ -59,8 +70,9 @@ fun TvHeroBackground(
                 .background(
                     Brush.horizontalGradient(
                         colors = listOf(
-                            Obsidian.copy(alpha = 0.7f),
-                            Obsidian.copy(alpha = 0.3f),
+                            Obsidian.copy(alpha = 0.84f),
+                            Obsidian.copy(alpha = 0.54f),
+                            Obsidian.copy(alpha = 0.16f),
                             Obsidian.copy(alpha = 0f),
                         ),
                         endX = 900f,

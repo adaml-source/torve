@@ -37,14 +37,14 @@ android {
         }
     }
 
-    val baseVersionCode = 74
+    val baseVersionCode = 77
 
     defaultConfig {
         applicationId = "com.torve.app"
         minSdk = 24
         targetSdk = 36
         versionCode = baseVersionCode
-        versionName = "1.0.64"
+        versionName = "1.0.67"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         multiDexEnabled = true
         multiDexKeepProguard = file("multidex-config.pro")
@@ -276,7 +276,7 @@ dependencies {
 
     // Amazon Appstore IAP - excluded from the sideloaded Fire TV variant
     // below because that build uses Stripe checkout.
-    "amazonImplementation"("com.amazon.device:amazon-appstore-sdk:3.0.5")
+    "amazonImplementation"("com.amazon.device:amazon-appstore-sdk:3.0.8")
 
     // Coroutines
     implementation(libs.kotlinx.coroutines.android)

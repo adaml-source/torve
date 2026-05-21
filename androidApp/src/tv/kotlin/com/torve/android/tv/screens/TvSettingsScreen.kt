@@ -79,6 +79,9 @@ import com.torve.presentation.session.AccountSessionCoordinator
 import com.torve.domain.model.PlaylistType
 import com.torve.android.tv.settings.isTvReduceMotionEnabled
 import com.torve.android.tv.settings.setTvReduceMotionEnabled
+import com.torve.android.tv.settings.TV_SEE_ALL_POSTER_COLUMN_OPTIONS
+import com.torve.android.tv.settings.setTvSeeAllPosterColumns
+import com.torve.android.tv.settings.tvSeeAllPosterColumns
 import com.torve.android.tv.components.TvClickToEditOutlinedTextField
 import com.torve.android.tv.components.TvDocumentModal
 import com.torve.android.tv.components.TvDocumentContentState
@@ -711,6 +714,7 @@ internal fun TvSettingsScreen(
     val homeLayoutCardRequester = homeLayoutFocusRequester ?: remember("home_layout_card") { FocusRequester() }
     val ratingsCardRequester = ratingsFocusRequester ?: remember("ratings_card") { FocusRequester() }
     val posterTitlesCardRequester = remember { FocusRequester() }
+    val seeAllPosterColumnsCardRequester = remember { FocusRequester() }
     val aboutVersionCardRequester = remember { FocusRequester() }
     val advancedPhoneEntryRequester = remember { FocusRequester() }
     val advancedTvEntryRequester = remember { FocusRequester() }
@@ -1193,6 +1197,14 @@ internal fun TvSettingsScreen(
             focusTargetType = "toggle",
         )
     }
+    val seeAllPosterColumnsTarget = remember {
+        TvSettingsFocusTarget(
+            itemId = TvSettingsItemIds.APPEARANCE_SEE_ALL_POSTER_COLUMNS,
+            category = TvSettingsCategory.APPEARANCE,
+            listIndex = 7,
+            focusTargetType = "selector",
+        )
+    }
     val libraryTopTarget = remember {
         TvSettingsFocusTarget(
             itemId = TvSettingsItemIds.LIBRARY_CHANNELS,
@@ -1513,7 +1525,7 @@ internal fun TvSettingsScreen(
                 runCatching { providerHealthCoordinator.runAll().join() }
                 PostSignInRefresh.enqueueContentWarmupAfterAccountActivation(context)
                 TvNotificationQueue.post(
-                    result.error ?: context.getString(R.string.tv_settings_account_refreshed),
+                    result.error ?: context.getString(R.string.tv_settings_account_refreshed_epg_hint),
                     if (result.error == null) NotificationType.SUCCESS else NotificationType.ERROR,
                 )
             } finally {
@@ -1601,8 +1613,11 @@ internal fun TvSettingsScreen(
 
     val selectedPlaylistForEpg = remember(channelsState.playlists, channelsState.selectedPlaylistId) {
         channelsState.playlists.firstOrNull { it.id == channelsState.selectedPlaylistId }
-            ?.takeIf { it.type == PlaylistType.M3U }
-            ?: channelsState.playlists.firstOrNull { it.type == PlaylistType.M3U }
+            ?: channelsState.playlists.firstOrNull()
+    }
+    val selectedPlaylistForActions = remember(channelsState.playlists, channelsState.selectedPlaylistId) {
+        channelsState.playlists.firstOrNull { it.id == channelsState.selectedPlaylistId }
+            ?: channelsState.playlists.firstOrNull()
     }
 
     LaunchedEffect(selectedPlaylistForEpg?.id, showEditSelectedPlaylistEpg) {
@@ -2037,7 +2052,11 @@ internal fun TvSettingsScreen(
             !showMaxQualityPicker &&
             !showMinQualityPicker,
     ) {
-        moveFocusToRailFromSettings()
+        if (confirmHideAllChannelGroups) {
+            confirmHideAllChannelGroups = false
+        } else {
+            moveFocusToRailFromSettings()
+        }
     }
     LazyColumn(
         state = settingsListState,
@@ -4853,12 +4872,24 @@ internal fun TvSettingsScreen(
                     isDefaultEntry = index == 0,
                 )
                 val isConfirming = confirmRemoveId == playlist.id
+                val loadedChannelCount = if (playlist.id == channelsState.selectedPlaylistId) {
+                    maxOf(
+                        channelsState.channels.size,
+                        channelsState.categoryChannels.size,
+                        channelsState.allCategories.sumOf { it.channelCount },
+                    )
+                } else {
+                    0
+                }
+                val displayChannelCount = maxOf(playlist.channelCount, loadedChannelCount)
                 TvSettingCard(
                     title = playlist.name,
                     subtitle = if (isConfirming) {
                         stringResource(R.string.tv_settings_playlist_confirm_remove)
+                    } else if (displayChannelCount > 0) {
+                        stringResource(R.string.tv_settings_channels_count, displayChannelCount)
                     } else {
-                        "${playlist.channelCount} ${stringResource(R.string.tv_settings_section_channels)}"
+                        stringResource(R.string.tv_settings_channels_count_pending)
                     },
                     modifier = Modifier.fillMaxWidth().focusProperties {
                         left = railFocusRequester
@@ -4868,16 +4899,25 @@ internal fun TvSettingsScreen(
                     },
                     focusRequester = requester,
                     onFocused = { onSettingsRowFocused(target, requester) },
+                    onFocusLost = {
+                        if (confirmRemoveId == playlist.id) {
+                            confirmRemoveId = null
+                        }
+                    },
                     onClick = {
                         if (isConfirming) {
                             channelsViewModel.removePlaylist(playlist.id)
                             confirmRemoveId = null
                             onContentFocused(addPlaylistCardRequester)
                         } else {
-                            confirmRemoveId = playlist.id
+                            confirmRemoveId = null
+                            channelsViewModel.selectPlaylist(playlist.id)
+                            selectedPlaylistEpgDraft = playlist.epgUrl.orEmpty()
+                            showEditSelectedPlaylistEpg = true
+                            onContentFocused(editPlaylistEpgCardRequester)
                         }
                     },
-                    rowType = if (isConfirming) TvSettingRowType.DANGEROUS else TvSettingRowType.ACTION,
+                    rowType = if (isConfirming) TvSettingRowType.DANGEROUS else TvSettingRowType.NAVIGATION,
                 )
             }
         }
@@ -5032,6 +5072,51 @@ internal fun TvSettingsScreen(
         }
 
         // ── Channel Manager ──
+        selectedPlaylistForActions?.let { playlist ->
+            item(key = "remove_selected_playlist") {
+                val isConfirming = confirmRemoveId == playlist.id
+                val target = remember(playlist.id) {
+                    TvSettingsFocusTarget(
+                        itemId = "settings/library/remove_playlist/${playlist.id}",
+                        category = TvSettingsCategory.LIBRARY,
+                        listIndex = 23,
+                        focusTargetType = "action",
+                    )
+                }
+                val requester = rememberSettingsRowRequester(
+                    target = target,
+                    externalRequester = remember("remove_playlist_${playlist.id}") { FocusRequester() },
+                )
+                TvSettingCard(
+                    title = stringResource(R.string.tv_settings_playlist_remove),
+                    subtitle = if (isConfirming) {
+                        stringResource(R.string.tv_settings_playlist_confirm_remove)
+                    } else {
+                        playlist.name
+                    },
+                    modifier = Modifier.fillMaxWidth().focusProperties { left = railFocusRequester },
+                    focusRequester = requester,
+                    onFocused = { onSettingsRowFocused(target, requester) },
+                    onFocusLost = {
+                        if (confirmRemoveId == playlist.id) {
+                            confirmRemoveId = null
+                        }
+                    },
+                    onClick = {
+                        if (confirmRemoveId == playlist.id) {
+                            channelsViewModel.removePlaylist(playlist.id)
+                            confirmRemoveId = null
+                            showEditSelectedPlaylistEpg = false
+                            onContentFocused(addPlaylistCardRequester)
+                        } else {
+                            confirmRemoveId = playlist.id
+                        }
+                    },
+                    rowType = if (isConfirming) TvSettingRowType.DANGEROUS else TvSettingRowType.ACTION,
+                )
+            }
+        }
+
         if (channelsState.playlists.isNotEmpty()) {
             item(key = "refresh_epg_now") {
                 val requester = rememberSettingsRowRequester(
@@ -5056,7 +5141,9 @@ internal fun TvSettingsScreen(
                     focusRequester = requester,
                     onFocused = { onSettingsRowFocused(libraryRefreshEpgTarget, requester) },
                     onClick = {
-                        if (selectedPlaylist?.epgUrl.isNullOrBlank()) {
+                        val canRefreshGuide = selectedPlaylist != null &&
+                            (selectedPlaylist.type == PlaylistType.XTREAM || !selectedPlaylist.epgUrl.isNullOrBlank())
+                        if (!canRefreshGuide) {
                             TvNotificationQueue.post(
                                 context.getString(R.string.tv_settings_refresh_epg_not_configured),
                                 NotificationType.ERROR,
@@ -5170,6 +5257,7 @@ internal fun TvSettingsScreen(
                             },
                         focusRequester = channelManagerHideAllRequester,
                         onFocused = { onSettingsRowFocused(hideAllTarget, channelManagerHideAllRequester) },
+                        onFocusLost = { confirmHideAllChannelGroups = false },
                         onClick = {
                             if (confirmHideAllChannelGroups) {
                                 channelsViewModel.hideAllCategories()
@@ -5443,6 +5531,42 @@ internal fun TvSettingsScreen(
                             label = { Text(stringResource(R.string.tv_settings_xtream_password)) },
                             singleLine = true,
                             modifier = Modifier.fillMaxWidth(),
+                        )
+                        TvClickToEditOutlinedTextField(
+                            value = channelsState.newPlaylistEpgUrl,
+                            onValueChange = { channelsViewModel.setNewPlaylistEpgUrl(it) },
+                            label = { Text(stringResource(R.string.tv_settings_custom_epg_url)) },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                        val checkRequester = remember { FocusRequester() }
+                        val checkTarget = remember {
+                            TvSettingsFocusTarget(
+                                itemId = "settings/library/playlist_form/xtream_check_epg",
+                                category = TvSettingsCategory.LIBRARY,
+                                listIndex = 2999,
+                                focusTargetType = "action",
+                            )
+                        }
+                        val registeredCheckRequester = rememberSettingsRowRequester(
+                            target = checkTarget,
+                            externalRequester = checkRequester,
+                        )
+                        TvSettingCard(
+                            title = if (channelsState.isCheckingEpg) {
+                                stringResource(R.string.channels_check_epg_checking)
+                            } else {
+                                stringResource(R.string.channels_check_epg)
+                            },
+                            subtitle = channelsState.epgCheckMessage.orEmpty(),
+                            modifier = Modifier.fillMaxWidth(),
+                            focusRequester = registeredCheckRequester,
+                            onFocused = { onSettingsRowFocused(checkTarget, registeredCheckRequester) },
+                            onClick = {
+                                if (!channelsState.isCheckingEpg) {
+                                    channelsViewModel.checkNewPlaylistEpgUrl()
+                                }
+                            },
                         )
                     }
 
@@ -5854,6 +5978,7 @@ internal fun TvSettingsScreen(
                 modifier = Modifier.fillMaxWidth().focusProperties {
                     left = railFocusRequester
                     up = ratingsCardRequester
+                    down = seeAllPosterColumnsCardRequester
                 },
                 focusRequester = requester,
                 onFocused = { onSettingsRowFocused(posterTitlesTarget, requester) },
@@ -5862,6 +5987,34 @@ internal fun TvSettingsScreen(
                     prefs.edit().putBoolean("tv_show_poster_titles", showPosterTitles).apply()
                 },
                 rowType = TvSettingRowType.TOGGLE,
+            )
+        }
+
+        item(key = "see_all_poster_columns") {
+            val requester = rememberSettingsRowRequester(
+                target = seeAllPosterColumnsTarget,
+                externalRequester = seeAllPosterColumnsCardRequester,
+            )
+            var posterColumns by remember {
+                mutableIntStateOf(tvSeeAllPosterColumns(context))
+            }
+            TvSettingCard(
+                title = stringResource(R.string.tv_settings_see_all_poster_columns),
+                subtitle = stringResource(R.string.tv_settings_see_all_poster_columns_value, posterColumns),
+                modifier = Modifier.fillMaxWidth().focusProperties {
+                    left = railFocusRequester
+                    up = posterTitlesCardRequester
+                },
+                focusRequester = requester,
+                onFocused = { onSettingsRowFocused(seeAllPosterColumnsTarget, requester) },
+                onClick = {
+                    val currentIndex = TV_SEE_ALL_POSTER_COLUMN_OPTIONS.indexOf(posterColumns).coerceAtLeast(0)
+                    posterColumns = TV_SEE_ALL_POSTER_COLUMN_OPTIONS[
+                        (currentIndex + 1) % TV_SEE_ALL_POSTER_COLUMN_OPTIONS.size
+                    ]
+                    setTvSeeAllPosterColumns(context, posterColumns)
+                },
+                rowType = TvSettingRowType.SELECTOR,
             )
         }
 

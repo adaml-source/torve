@@ -16,6 +16,7 @@ import com.torve.domain.model.MediaType
 import com.torve.domain.model.PagedResult
 import com.torve.domain.model.dedupeByStableKey
 import com.torve.domain.model.extractTmdbIdOrNull
+import com.torve.domain.discovery.tmdbDiscoverRating
 import com.torve.domain.integrations.IntegrationSecretKey
 import com.torve.domain.integrations.IntegrationSecretStore
 import com.torve.domain.repository.MetadataRepository
@@ -254,7 +255,8 @@ class CatalogViewModel(
                         } else {
                             chipSortBy(category)
                         }
-                        val chipMinRating = filter.minRating ?: chipMinRating(category)
+                        val chipMinRating = tmdbDiscoverRating(filter.minRating, filter.ratingSource)
+                            ?: chipMinRating(category)
                         metadataRepo.discover(
                             type = mediaType,
                             page = 1,
@@ -403,7 +405,8 @@ class CatalogViewModel(
                     } else {
                         chipSortBy(category)
                     }
-                    val chipMin = filter.minRating ?: chipMinRating(category)
+                    val chipMin = tmdbDiscoverRating(filter.minRating, filter.ratingSource)
+                        ?: chipMinRating(category)
                     metadataRepo.discover(
                         type = mediaType,
                         page = nextPage,

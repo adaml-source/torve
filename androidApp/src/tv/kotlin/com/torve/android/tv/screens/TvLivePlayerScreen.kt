@@ -1,9 +1,6 @@
 package com.torve.android.tv.screens
 
-import android.app.Activity
 import android.content.Context
-import android.app.PictureInPictureParams
-import android.os.Build
 import android.util.Log
 import android.view.ViewGroup
 import android.view.WindowManager
@@ -21,8 +18,11 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Text
@@ -49,10 +49,11 @@ import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.media3.ui.AspectRatioFrameLayout
-import androidx.media3.ui.PlayerView
 import com.torve.android.player.ExoPlayerEngine
 import com.torve.android.player.LiveAudioClientSurface
 import com.torve.android.player.LiveAudioCompatibilityHint
@@ -66,9 +67,12 @@ import com.torve.android.player.MPVPlayerEngine
 import com.torve.android.player.MPVTextureView
 import com.torve.android.player.PlaybackRuntimeInfo
 import com.torve.android.player.PlayerFactory
+import com.torve.android.player.TorvePlayerView
 import com.torve.android.player.LiveAudioPathSnapshot
 import com.torve.android.player.buildLiveAudioPreferencesKey
 import com.torve.android.player.buildLiveAudioPathLog
+import com.torve.android.player.clearPlayerSafely
+import com.torve.android.player.setPlayerSafely
 import com.torve.android.player.toDiagnosticSummary
 import com.torve.android.ui.theme.Amber
 import com.torve.android.ui.theme.Obsidian
@@ -86,6 +90,7 @@ import com.torve.android.tv.screens.shouldShowTvLiveTuneProgress
 import com.torve.data.auth.AuthClient
 import com.torve.domain.model.Channel
 import com.torve.domain.model.ChannelCategory
+import com.torve.domain.model.ChannelContentType
 import com.torve.domain.model.EnrichedChannel
 import com.torve.domain.model.EpgProgramme
 import com.torve.domain.model.programmesForEpgChannel
@@ -96,12 +101,17 @@ import com.torve.domain.player.PlayerEngine
 import com.torve.domain.player.PlayerListener
 import com.torve.domain.player.PlayerState
 import com.torve.domain.player.TrackDescription
+import com.torve.domain.telemetry.StreamPathDiagnostics
+import com.torve.domain.telemetry.StreamPathTelemetryContext
+import com.torve.domain.telemetry.StreamPlaybackPath
+import com.torve.domain.telemetry.TelemetryEmitter
 import com.torve.presentation.channels.CategoryNameCleaner
 import com.torve.presentation.channels.ChannelsViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlin.math.roundToInt
 import org.koin.compose.koinInject
 import java.util.Locale
 
@@ -181,6 +191,7 @@ fun TvLivePlayerScreen(
     onBack: () -> Unit,
     viewModel: ChannelsViewModel = koinInject(),
     localSettingsRepo: DeviceLocalSettingsRepository = koinInject(),
+    telemetry: TelemetryEmitter = koinInject(),
 ) {
     val context = LocalContext.current
     val state by viewModel.state.collectAsState()
@@ -296,6 +307,9 @@ fun TvLivePlayerScreen(
     var activeOverlay by remember { mutableStateOf(LivePlayerOverlay.NONE) }
     var overlayBackStack by remember { mutableStateOf<List<LivePlayerOverlay>>(emptyList()) }
     var overlayTimestamp by remember { mutableLongStateOf(0L) }
+    var volumeOverlayPercent by remember { mutableStateOf<Int?>(null) }
+    var volumeOverlayTimestamp by remember { mutableLongStateOf(0L) }
+    var playbackVolume by rememberSaveable { mutableStateOf(1f) }
 
     // ── Stream info for menu bar ──
     var videoResolution by remember { mutableStateOf("") }
@@ -309,7 +323,32 @@ fun TvLivePlayerScreen(
     var selectedBufferPreset by rememberSaveable { mutableStateOf(LiveBufferPreset.HIGH) }
     val bufferPrefs = remember { context.getSharedPreferences("live_buffer_prefs", Context.MODE_PRIVATE) }
     var audioDelayMs by rememberSaveable { mutableStateOf(0) }
-    var exoPlayerView by remember { mutableStateOf<PlayerView?>(null) }
+    var exoPlayerView by remember { mutableStateOf<TorvePlayerView?>(null) }
+
+    fun applyPlaybackVolumeToEngine(
+        session: LivePlayerEngineSession? = engineSession,
+        volume: Float = playbackVolume,
+    ) {
+        val clamped = volume.coerceIn(0f, 1f)
+        when (val activeEngine = session?.engine) {
+            is ExoPlayerEngine -> activeEngine.getExoPlayer()?.volume = clamped
+            is MPVPlayerEngine -> activeEngine.setPlaybackVolume(clamped)
+            else -> Unit
+        }
+    }
+
+    fun detachExoPlayerView() {
+        exoPlayerView?.clearPlayerSafely("tv_live_player_detach")
+        exoPlayerView = null
+    }
+
+    fun releaseEngineSession(session: LivePlayerEngineSession?) {
+        val activeSession = session ?: return
+        if (activeSession.engine is ExoPlayerEngine) {
+            detachExoPlayerView()
+        }
+        activeSession.engine.release()
+    }
 
     fun saveChannelBufferPreset(channelUrl: String, preset: LiveBufferPreset) {
         bufferPrefs.edit().putString(channelUrl, preset.key).apply()
@@ -364,12 +403,21 @@ fun TvLivePlayerScreen(
         session: LivePlayerEngineSession,
         channel: Channel,
     ) {
+        StreamPathDiagnostics.record(
+            path = StreamPlaybackPath.IPTV_DIRECT,
+            telemetry = telemetry,
+            context = StreamPathTelemetryContext(
+                contentType = "live_tv",
+                providerCategory = "iptv",
+            ),
+        )
         val playbackUrl = playbackUrlOverride ?: channel.url
         if (session.id == LivePlayerEngineId.MPV) {
             pendingPlaybackUrl = playbackUrl
         } else {
             pendingPlaybackUrl = null
             session.engine.play(playbackUrl)
+            applyPlaybackVolumeToEngine(session)
         }
         viewModel.recordChannelViewed(channel)
     }
@@ -427,11 +475,11 @@ fun TvLivePlayerScreen(
             mpvSurfaceAttached = false
             mpvSurfaceBindingToken = -1
             val nextSession = if (sameEngine) {
-                currentSession.engine.release()
+                releaseEngineSession(currentSession)
                 buildEngineSession(targetEngineId)
             } else {
                 val alternate = buildEngineSession(targetEngineId)
-                currentSession.engine.release()
+                releaseEngineSession(currentSession)
                 alternate
             }
             applyLiveEngineSettings(
@@ -745,6 +793,11 @@ fun TvLivePlayerScreen(
         )
         pendingPlaybackUrl = null
         session.engine.play(pendingUrl)
+        applyPlaybackVolumeToEngine(session)
+    }
+
+    LaunchedEffect(engineSession?.engine, playbackVolume) {
+        applyPlaybackVolumeToEngine()
     }
 
     LaunchedEffect(
@@ -778,8 +831,6 @@ fun TvLivePlayerScreen(
                 aspectRatio = selectedPictureFormat.frameAspectRatio,
                 fill = selectedPictureFormat == LivePictureFormat.FULLSCREEN,
             )
-        } else {
-            exoPlayerView?.resizeMode = selectedPictureFormat.exoResizeMode
         }
     }
 
@@ -1175,7 +1226,7 @@ fun TvLivePlayerScreen(
     fun exitPlayback() {
         Log.w("TvLivePlayer", "exitPlayback: stopping engine before nav pop session=${engineSession?.id}")
         engineSession?.engine?.stop()
-        engineSession?.engine?.release()
+        releaseEngineSession(engineSession)
         engineSession = null
         onBack()
     }
@@ -1213,7 +1264,7 @@ fun TvLivePlayerScreen(
         onDispose {
             lifecycleOwner.lifecycle.removeObserver(observer)
             window?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-            engineSession?.engine?.release()
+            releaseEngineSession(engineSession)
         }
     }
 
@@ -1241,15 +1292,70 @@ fun TvLivePlayerScreen(
         }
     }
 
+    LaunchedEffect(volumeOverlayTimestamp) {
+        val timestamp = volumeOverlayTimestamp
+        if (timestamp <= 0L) return@LaunchedEffect
+        delay(1_600L)
+        if (volumeOverlayTimestamp == timestamp) {
+            volumeOverlayPercent = null
+        }
+    }
+
     // ── Channel zapping helper ──
     // Cache the flattened channel list so flatMap doesn't run on every zap.
-    val zapChannels = remember(playbackGroupChannels, currentGroupName, state.categories) {
-        playbackGroupChannels.ifEmpty {
+    val cachedLiveShelves = TvScreenCache
+        .get<Map<String, LiveShelfLoad>>(liveShelvesCacheKey(state.selectedPlaylistId, state.xxxEnabled))
+        .orEmpty()
+    val zapChannels = remember(
+        playbackGroupChannels,
+        currentGroupName,
+        currentChannel?.url,
+        state.categories,
+        state.guideChannels,
+        cachedLiveShelves,
+    ) {
+        val currentUrl = currentChannel?.url
+        val selectedCategoryChannels = state.categories
+            .firstOrNull { categoryMatchesGroup(it, currentGroupName) }
+            ?.channels
+            .orEmpty()
+        val containingCategoryChannels = if (currentUrl.isNullOrBlank()) {
+            emptyList()
+        } else {
             state.categories
-                .firstOrNull { categoryMatchesGroup(it, currentGroupName) }
+                .firstOrNull { category ->
+                    category.channels.any { it.channel.url == currentUrl }
+                }
                 ?.channels
                 .orEmpty()
         }
+        val cachedSelectedCategoryChannels = cachedLiveShelves.entries
+            .firstOrNull { (name, _) -> categoryNameMatchesGroup(name, currentGroupName) }
+            ?.value
+            ?.channels
+            .orEmpty()
+        val cachedContainingCategoryChannels = if (currentUrl.isNullOrBlank()) {
+            emptyList()
+        } else {
+            cachedLiveShelves.values
+                .firstOrNull { shelf -> shelf.channels.any { it.channel.url == currentUrl } }
+                ?.channels
+                .orEmpty()
+        }
+
+        sequenceOf(
+            selectedCategoryChannels,
+            containingCategoryChannels,
+            cachedSelectedCategoryChannels,
+            cachedContainingCategoryChannels,
+            state.guideChannels,
+            playbackGroupChannels,
+        )
+            .firstOrNull { channels ->
+                channels.count { isPlayableLiveChannel(it.channel) } > 1
+            }
+            .orEmpty()
+            .filter { isPlayableLiveChannel(it.channel) }
     }
     // Throttle zap to prevent cascading channel switches from rapid D-pad repeats.
     var lastZapMs by remember { mutableLongStateOf(0L) }
@@ -1260,8 +1366,8 @@ fun TvLivePlayerScreen(
         lastZapMs = now
 
         val ch = currentChannel ?: return
-        val currentIdx = zapChannels.indexOfFirst { it.channel.url == ch.url }
-        if (currentIdx < 0 || zapChannels.isEmpty()) return
+        if (zapChannels.isEmpty()) return
+        val currentIdx = zapChannels.indexOfFirst { it.channel.url == ch.url }.takeIf { it >= 0 } ?: 0
 
         val newIdx = (currentIdx + delta).mod(zapChannels.size)
         val newEnriched = zapChannels[newIdx]
@@ -1271,6 +1377,14 @@ fun TvLivePlayerScreen(
             group = currentGroupName.ifBlank { newEnriched.channel.groupTitle.orEmpty() },
             index = newIdx,
         )
+    }
+
+    fun adjustPlaybackVolume(delta: Int) {
+        val step = if (delta < 0) -0.05f else 0.05f
+        playbackVolume = (playbackVolume + step).coerceIn(0f, 1f)
+        applyPlaybackVolumeToEngine(volume = playbackVolume)
+        volumeOverlayPercent = (playbackVolume * 100f).roundToInt().coerceIn(0, 100)
+        volumeOverlayTimestamp = System.currentTimeMillis()
     }
 
     fun reloadCurrentChannel() {
@@ -1495,8 +1609,8 @@ fun TvLivePlayerScreen(
                                 }
                                 val held = System.currentTimeMillis() - downTime
                                 if (held >= LONG_PRESS_THRESHOLD_MS) {
-                                    // Long press → settings
-                                    openOverlay(LivePlayerOverlay.SETTINGS_PANEL)
+                                    // Long press opens playback/video options.
+                                    openOverlay(LivePlayerOverlay.PLAYBACK_MENU)
                                 } else {
                                     // Short press on fullscreen playback → channel switch list
                                     openOverlay(LivePlayerOverlay.CHANNEL_LIST)
@@ -1523,11 +1637,11 @@ fun TvLivePlayerScreen(
                         true
                     }
 
-                    // ── D-pad Left/Right when no overlay → show channel info ──
+                    // D-pad left/right controls volume while fullscreen playback owns focus.
                     (event.key == Key.DirectionLeft || event.key == Key.DirectionRight) &&
                         event.type == KeyEventType.KeyDown &&
                         activeOverlay == LivePlayerOverlay.NONE -> {
-                        openOverlay(LivePlayerOverlay.CHANNEL_INFO)
+                        adjustPlaybackVolume(if (event.key == Key.DirectionLeft) -1 else 1)
                         true
                     }
 
@@ -1627,27 +1741,28 @@ fun TvLivePlayerScreen(
         } else {
             AndroidView(
                 factory = {
-                    PlayerView(context).apply {
+                    TorvePlayerView(context).apply {
                         useController = false
+                        resizeMode = selectedPictureFormat.exoResizeMode
                         layoutParams = FrameLayout.LayoutParams(
                             ViewGroup.LayoutParams.MATCH_PARENT,
                             ViewGroup.LayoutParams.MATCH_PARENT,
                         )
                         isFocusable = false
                         isFocusableInTouchMode = false
-                        resizeMode = selectedPictureFormat.exoResizeMode
                     }
                 },
                 update = { view ->
                     exoPlayerView = view
+                    view.useController = false
                     view.resizeMode = selectedPictureFormat.exoResizeMode
-                    view.player = (engine as? ExoPlayerEngine)?.getExoPlayer()
+                    view.setPlayerSafely((engine as? ExoPlayerEngine)?.getExoPlayer(), "tv_live_player_update")
                 },
                 onRelease = { view ->
                     if (exoPlayerView === view) {
                         exoPlayerView = null
                     }
-                    view.player = null
+                    view.clearPlayerSafely("tv_live_player_release")
                 },
                 modifier = videoSurfaceModifier,
             )
@@ -1700,6 +1815,15 @@ fun TvLivePlayerScreen(
             }
         }
 
+        volumeOverlayPercent?.let { percent ->
+            LiveVolumeOverlay(
+                percent = percent,
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(end = 48.dp, bottom = 44.dp),
+            )
+        }
+
         // ── Channel Info Overlay ──
         AnimatedVisibility(
             visible = activeOverlay == LivePlayerOverlay.CHANNEL_INFO,
@@ -1733,17 +1857,11 @@ fun TvLivePlayerScreen(
         }
 
         // ── Menu Bar Overlay ──
-        fun enterPipMode(): Boolean {
-            val activity = context as? Activity ?: return false
-            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return false
-            return runCatching {
-                val params = PictureInPictureParams.Builder().build()
-                activity.enterPictureInPictureMode(params)
-            }.isSuccess
-        }
+        val iptvPipEnabled = false
+        fun enterPipMode(): Boolean = false
 
-        val pipSupported = remember(context) {
-            context is Activity && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
+        val pipSupported = remember(iptvPipEnabled) {
+            iptvPipEnabled
         }
 
         AnimatedVisibility(
@@ -1980,6 +2098,51 @@ fun TvLivePlayerScreen(
 }
 
 // ── Helper functions ──
+
+@Composable
+private fun LiveVolumeOverlay(
+    percent: Int,
+    modifier: Modifier = Modifier,
+) {
+    Box(
+        modifier = modifier
+            .width(220.dp)
+            .background(Color(0xD8181E29), RoundedCornerShape(18.dp))
+            .border(1.dp, Amber.copy(alpha = 0.28f), RoundedCornerShape(18.dp))
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                text = "Volume",
+                color = Snow,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.width(64.dp),
+            )
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .height(5.dp)
+                    .background(Color.White.copy(alpha = 0.16f), RoundedCornerShape(999.dp)),
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth(percent / 100f)
+                        .height(5.dp)
+                        .background(Amber, RoundedCornerShape(999.dp)),
+                )
+            }
+            Text(
+                text = "$percent%",
+                color = Snow,
+                fontSize = 12.sp,
+                modifier = Modifier
+                    .width(44.dp)
+                    .padding(start = 10.dp),
+            )
+        }
+    }
+}
 
 private fun shouldAttemptSilentSessionRecovery(
     selectedTrack: TrackDescription?,
@@ -2218,22 +2381,49 @@ private fun findChannelByUrl(
     enrichedChannels: List<EnrichedChannel>,
 ): EnrichedChannel? = enrichedChannels.firstOrNull { it.channel.url == url }
 
+private fun isPlayableLiveChannel(channel: Channel): Boolean {
+    val url = channel.url.trim()
+    if (url.isBlank()) return false
+    if (url == "#" || url.equals("about:blank", ignoreCase = true)) return false
+    if (channel.contentType == ChannelContentType.VOD_MOVIE || channel.contentType == ChannelContentType.VOD_SERIES) {
+        return false
+    }
+    return !isDecorativeLiveChannelName(channel.name)
+}
+
+private fun isDecorativeLiveChannelName(name: String): Boolean {
+    val trimmed = name.trim()
+    if (trimmed.isBlank()) return true
+    if (trimmed.all { it == '#' || it == '-' || it == '_' || it == '*' || it == '=' || it.isWhitespace() }) {
+        return true
+    }
+    val hashCount = trimmed.count { it == '#' }
+    if (hashCount >= 6 && trimmed.startsWith("#") && trimmed.endsWith("#")) return true
+    val stripped = trimmed.trim('#', '-', '_', '*', '=', ' ')
+    return stripped.isBlank()
+}
+
 private fun categoryMatchesGroup(
     category: ChannelCategory,
+    groupName: String,
+): Boolean = categoryNameMatchesGroup(category.name, groupName)
+
+private fun categoryNameMatchesGroup(
+    categoryName: String,
     groupName: String,
 ): Boolean {
     val rawGroupName = groupName.trim()
     if (rawGroupName.isBlank()) return false
 
-    val categoryName = category.name.trim()
-    if (categoryName.equals(rawGroupName, ignoreCase = true)) return true
+    val trimmedCategoryName = categoryName.trim()
+    if (trimmedCategoryName.equals(rawGroupName, ignoreCase = true)) return true
 
     val cleanedGroupName = CategoryNameCleaner.clean(rawGroupName).name.trim()
-    if (cleanedGroupName.isNotBlank() && categoryName.equals(cleanedGroupName, ignoreCase = true)) {
+    if (cleanedGroupName.isNotBlank() && trimmedCategoryName.equals(cleanedGroupName, ignoreCase = true)) {
         return true
     }
 
-    val cleanedCategoryName = CategoryNameCleaner.clean(categoryName).name.trim()
+    val cleanedCategoryName = CategoryNameCleaner.clean(trimmedCategoryName).name.trim()
     return cleanedCategoryName.isNotBlank() &&
         (
             cleanedCategoryName.equals(rawGroupName, ignoreCase = true) ||

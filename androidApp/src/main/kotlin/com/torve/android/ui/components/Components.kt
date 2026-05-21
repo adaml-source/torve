@@ -1,5 +1,6 @@
 package com.torve.android.ui.components
 
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -11,6 +12,10 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.hoverable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsHoveredAsState
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -23,6 +28,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -51,6 +57,7 @@ import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
@@ -59,8 +66,13 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.res.stringResource
@@ -134,6 +146,27 @@ private fun resolveCardLayoutSpec(sizeOverride: CardSize?, cardStyle: CardStyle)
         val ratio = cardStyle.size.resolvedAspectRatio()
         val useBackdrop = cardStyle.size.orientation == CardOrientation.LANDSCAPE
         CardLayoutSpec(width = width, aspectRatio = ratio, useBackdrop = useBackdrop)
+    }
+}
+
+private fun MediaItem.upcomingScheduleMetadata(): String? {
+    if (!id.startsWith("trakt-calendar:")) return null
+    return formatUpcomingScheduleDateTime(
+        releaseDate ?: id.split(":", limit = 5).getOrNull(4),
+    )
+}
+
+private fun formatUpcomingScheduleDateTime(value: String?): String? {
+    val raw = value?.trim()?.takeIf { it.isNotEmpty() } ?: return null
+    return runCatching {
+        java.time.ZonedDateTime.parse(raw)
+            .withZoneSameInstant(java.time.ZoneId.systemDefault())
+            .format(java.time.format.DateTimeFormatter.ofPattern("MMM d, yyyy, h:mm a", java.util.Locale.US))
+    }.getOrElse {
+        raw.take(16)
+            .replace('T', ' ')
+            .removeSuffix("Z")
+            .takeIf { it.isNotBlank() }
     }
 }
 
@@ -373,13 +406,24 @@ fun PosterCard(
                         )
                         .padding(horizontal = 10.dp, vertical = 8.dp),
                 ) {
-                    Text(
-                        text = item.title,
-                        style = MaterialTheme.typography.titleSmall,
-                        color = Snow,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
+                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Text(
+                            text = item.title,
+                            style = MaterialTheme.typography.titleSmall,
+                            color = Snow,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        item.upcomingScheduleMetadata()?.let { metadata ->
+                            Text(
+                                text = metadata,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = Snow.copy(alpha = 0.78f),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -411,10 +455,10 @@ fun PosterCard(
                 modifier = Modifier.padding(horizontal = 2.dp),
             )
             if (appearance.showYear) {
-                val year = item.year?.toString() ?: ""
-                if (year.isNotBlank()) {
+                val metadata = item.upcomingScheduleMetadata() ?: item.year?.toString().orEmpty()
+                if (metadata.isNotBlank()) {
                     Text(
-                        text = year,
+                        text = metadata,
                         style = MaterialTheme.typography.bodySmall,
                         color = Torve.colors.textTertiary,
                         modifier = Modifier.padding(horizontal = 2.dp),
@@ -708,6 +752,189 @@ fun rememberPeekPasswordTransformation(currentValue: String): VisualTransformati
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+@Composable
+fun FloatingBackButton(
+    onBack: () -> Unit,
+    modifier: Modifier = Modifier,
+    label: String = "Back",
+    compact: Boolean = false,
+) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val hovered by interactionSource.collectIsHoveredAsState()
+    val pressed by interactionSource.collectIsPressedAsState()
+    var focused by remember { mutableStateOf(false) }
+    val active = focused || hovered
+    val scale by animateFloatAsState(
+        targetValue = when {
+            pressed -> 0.98f
+            active -> 1.035f
+            else -> 1f
+        },
+        label = "floatingBackScale",
+    )
+    val backgroundAlpha by animateFloatAsState(
+        targetValue = if (active) 0.70f else 0.54f,
+        label = "floatingBackBackgroundAlpha",
+    )
+    val borderColor by animateColorAsState(
+        targetValue = when {
+            focused -> Amber.copy(alpha = 0.72f)
+            hovered -> Amber.copy(alpha = 0.48f)
+            else -> Color.White.copy(alpha = 0.14f)
+        },
+        label = "floatingBackBorder",
+    )
+    val glowColor = if (active) Amber.copy(alpha = 0.26f) else Color.Black.copy(alpha = 0.40f)
+    val shape = RoundedCornerShape(999.dp)
+
+    Box(
+        modifier = modifier
+            .then(if (compact) Modifier.size(48.dp) else Modifier.height(48.dp).widthIn(min = 104.dp))
+            .graphicsLayer {
+                scaleX = scale
+                scaleY = scale
+            }
+            .shadow(
+                elevation = if (active) 22.dp else 12.dp,
+                shape = shape,
+                ambientColor = glowColor,
+                spotColor = glowColor,
+            )
+            .clip(shape)
+            .background(
+                Brush.verticalGradient(
+                    colors = listOf(
+                        Color.White.copy(alpha = if (active) 0.13f else 0.08f),
+                        Color(0xFF0B1220).copy(alpha = backgroundAlpha),
+                        Color(0xFF030711).copy(alpha = (backgroundAlpha + 0.08f).coerceAtMost(0.78f)),
+                    ),
+                ),
+            )
+            .border(1.dp, borderColor, shape)
+            .hoverable(interactionSource)
+            .onFocusChanged { focused = it.isFocused }
+            .semantics(mergeDescendants = true) {
+                contentDescription = label
+                role = Role.Button
+            }
+            .clickable(
+                interactionSource = interactionSource,
+                indication = null,
+                onClick = onBack,
+            ),
+        contentAlignment = Alignment.Center,
+    ) {
+        Box(
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .fillMaxWidth()
+                .height(1.dp)
+                .padding(horizontal = if (compact) 14.dp else 18.dp)
+                .background(Color.White.copy(alpha = if (active) 0.26f else 0.16f)),
+        )
+        Row(
+            modifier = Modifier.padding(horizontal = if (compact) 0.dp else 16.dp),
+            horizontalArrangement = Arrangement.Center,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                imageVector = Icons.AutoMirrored.Rounded.ArrowBack,
+                contentDescription = null,
+                tint = Color.White.copy(alpha = 0.92f),
+                modifier = Modifier.size(20.dp),
+            )
+            if (!compact) {
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    text = label,
+                    style = MaterialTheme.typography.labelLarge,
+                    color = Color.White.copy(alpha = 0.92f),
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                )
+            }
+        }
+    }
+}
+
+@Preview(name = "FloatingBackButtonDefaultPreview", backgroundColor = 0xFF05070D, showBackground = true)
+@Composable
+private fun FloatingBackButtonDefaultPreview() {
+    FloatingBackButton(onBack = {}, label = "Back", modifier = Modifier.padding(16.dp))
+}
+
+@Preview(name = "FloatingBackButtonFocusedPreview", backgroundColor = 0xFF101827, showBackground = true)
+@Composable
+private fun FloatingBackButtonFocusedPreview() {
+    FloatingBackButton(onBack = {}, label = "Back", modifier = Modifier.padding(16.dp))
+}
+
+@Preview(name = "FloatingBackButtonCompactPreview", backgroundColor = 0xFF05070D, showBackground = true)
+@Composable
+private fun FloatingBackButtonCompactPreview() {
+    FloatingBackButton(onBack = {}, compact = true, label = "Back", modifier = Modifier.padding(16.dp))
+}
+
+@Preview(name = "BrightBackdropFloatingBackPreview", backgroundColor = 0xFFE6EEF7, showBackground = true)
+@Composable
+private fun BrightBackdropFloatingBackPreview() {
+    FloatingBackButton(onBack = {}, label = "Back", modifier = Modifier.padding(16.dp))
+}
+
+@Preview(name = "ScrolledFloatingBackPreview", backgroundColor = 0xFF05070D, showBackground = true)
+@Composable
+private fun ScrolledFloatingBackPreview() {
+    FloatingBackButton(onBack = {}, compact = true, label = "Back", modifier = Modifier.padding(16.dp))
+}
+
+@Preview(name = "MovieDetailsWithFloatingBackPreview", backgroundColor = 0xFF05070D, showBackground = true)
+@Composable
+private fun MovieDetailsWithFloatingBackPreview() {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(220.dp)
+            .background(
+                Brush.verticalGradient(
+                    listOf(Color(0xFF25344B), Color(0xFF05070D)),
+                ),
+            )
+            .padding(16.dp),
+    ) {
+        FloatingBackButton(onBack = {}, label = "Back", modifier = Modifier.align(Alignment.TopStart))
+        Text(
+            text = "Movie Title",
+            color = Snow,
+            style = MaterialTheme.typography.headlineMedium,
+            modifier = Modifier.align(Alignment.BottomStart),
+        )
+    }
+}
+
+@Preview(name = "TvShowDetailsWithFloatingBackPreview", backgroundColor = 0xFF05070D, showBackground = true)
+@Composable
+private fun TvShowDetailsWithFloatingBackPreview() {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(220.dp)
+            .background(
+                Brush.verticalGradient(
+                    listOf(Color(0xFF382B22), Color(0xFF05070D)),
+                ),
+            )
+            .padding(16.dp),
+    ) {
+        FloatingBackButton(onBack = {}, label = "Back", modifier = Modifier.align(Alignment.TopStart))
+        Text(
+            text = "TV Show Title",
+            color = Snow,
+            style = MaterialTheme.typography.headlineMedium,
+            modifier = Modifier.align(Alignment.BottomStart),
+        )
+    }
+}
 
 @Composable
 fun BackButton(

@@ -73,6 +73,26 @@ class ProviderEvidenceBuildersTest {
     }
 
     @Test
+    fun `cached IPTV catalog counts as playlist loaded evidence`() {
+        val state = ChannelsUiState(
+            playlists = emptyList(),
+            selectedPlaylistId = "cached-p1",
+            categories = listOf(com.torve.domain.model.ChannelCategory("General", 12)),
+        )
+
+        val facets = iptvFacetsFrom(state)
+        val evidence = iptvEvidenceFrom(rawIptvEntry(), facets)
+
+        assertTrue(facets.playlistLoaded)
+        assertTrue(facets.channelsLoaded)
+        assertEquals(ProviderHealthStatus.GREEN, evidence.status)
+        assertFalse(
+            evidence.evidenceSummary.contains("No IPTV playlist added", ignoreCase = true),
+            "cached channel/catalog state must not produce the contradictory no-playlist copy",
+        )
+    }
+
+    @Test
     fun `EPG zero-match without usable channels surfaces YELLOW with action`() {
         // The rare real case: playlist has no channels AND EPG matched
         // nothing. Then warn — there's actually a problem to fix.

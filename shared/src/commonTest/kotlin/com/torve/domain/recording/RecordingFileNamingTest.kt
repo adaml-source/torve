@@ -43,6 +43,31 @@ class RecordingFileNamingTest {
     }
 
     @Test
+    fun `windows reserved names are made safe`() {
+        val out = RecordingFileNaming.relativePath(
+            channelName = "CON",
+            programmeTitle = "NUL",
+            startEpochMs = 0L,
+        )
+        assertTrue(out.startsWith("_CON/"), "got: $out")
+        assertTrue("/_NUL -" in out, "got: $out")
+    }
+
+    @Test
+    fun `unsafe program title characters are sanitized`() {
+        val out = RecordingFileNaming.relativePath(
+            channelName = "ZDF",
+            programmeTitle = """heute: journal / update? "late".""",
+            startEpochMs = 0L,
+        )
+        val filename = out.substringAfter("/")
+        assertFalse(":" in filename, "got: $out")
+        assertFalse("?" in filename, "got: $out")
+        assertFalse("\"" in filename, "got: $out")
+        assertFalse(filename.startsWith(" "), "got: $out")
+    }
+
+    @Test
     fun `empty title falls back to Untitled`() {
         val out = RecordingFileNaming.relativePath(
             channelName = "BBC One",

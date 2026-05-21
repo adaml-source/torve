@@ -60,6 +60,8 @@ data class DetailUiState(
     val isLoading: Boolean = true,
     val mediaItem: MediaItem? = null,
     val similar: List<MediaItem> = emptyList(),
+    val isLoadingSimilar: Boolean = false,
+    val similarError: String? = null,
     val availability: AvailabilityResult? = null,
     val isLoadingAvailability: Boolean = false,
     val availabilityError: String? = null,
@@ -97,6 +99,7 @@ data class DetailUiState(
     val selectedSeason: Int = 1,
     val seasonDetail: Season? = null,
     val isLoadingSeasonDetail: Boolean = false,
+    val seasonDetailError: String? = null,
     // Episode tracking: keys like "s1e1", "s1e2", etc.
     val watchedEpisodes: Set<String> = emptySet(),
     val isInLibrary: Boolean = false,

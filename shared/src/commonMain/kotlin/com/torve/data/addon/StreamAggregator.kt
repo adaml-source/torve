@@ -7,6 +7,8 @@ import com.torve.domain.model.MediaType
 import com.torve.domain.model.StreamFetchPolicy
 import com.torve.domain.model.StreamPreferences
 import com.torve.domain.model.StreamQuality
+import com.torve.domain.diagnostics.DiagnosticsRedactor
+import com.torve.platform.TorveRuntimeDebug
 import io.ktor.http.encodeURLPathPart
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -29,6 +31,12 @@ class StreamAggregator(
 ) {
     /** Track addon failures for diagnostics (addon URL → last error message). */
     private val addonFailures = mutableMapOf<String, String>()
+
+    private inline fun streamDebugLog(message: () -> String) {
+        if (TorveRuntimeDebug.verboseLoggingEnabled) {
+            println(DiagnosticsRedactor.redact(message()))
+        }
+    }
 
     fun getAddonHealth(): Map<String, String> = addonFailures.toMap()
 
@@ -83,7 +91,9 @@ class StreamAggregator(
                         if (isCached) cacheStatus[hash] = true
                     }
                 } catch (e: Exception) {
-                    // println("StreamAggregator: debrid cache check failed for $provider: ${e.message}")
+                    streamDebugLog {
+                        "StreamAggregator: debrid cache check failed provider=$provider error=${e::class.simpleName} ${DiagnosticsRedactor.redact(e.message)}"
+                    }
                 }
             }
         }
@@ -136,10 +146,10 @@ class StreamAggregator(
 
         // 6. Score and sort
         val scored = scorer.scoreAll(filtered, preferences)
-        println(
+        streamDebugLog {
             "TORVE_STREAMS: pipeline raw=${rawStreams.size} unique=${unique.size} " +
-                "filtered=${filtered.size} scored=${scored.size} addons=${scored.addonCounts()}",
-        )
+                "filtered=${filtered.size} scored=${scored.size} addons=${scored.addonCounts()}"
+        }
         scored
     }
 
@@ -169,7 +179,7 @@ class StreamAggregator(
             fetchPolicy = fetchPolicy,
         )
         if (fallback.isNotEmpty()) {
-            println("TORVE_STREAMS: addon=torrentio.strem.fun(debrid-fallback) streams=${fallback.size}")
+            streamDebugLog { "TORVE_STREAMS: addon=torrentio.strem.fun(debrid-fallback) streams=${fallback.size}" }
         }
         return (primary + fallback).distinctBy {
             it.directUrl ?: it.magnetUrl ?: it.infoHash ?: it.title
@@ -199,10 +209,10 @@ class StreamAggregator(
                 },
             )
 
-        println(
+        streamDebugLog {
             "TORVE_STREAMS: torrentPreflight start raw=${streams.size} passthrough=${passthrough.size} " +
-                "candidates=${allCandidates.size} checking=${candidates.size} policy=${fetchPolicy.label}",
-        )
+                "candidates=${allCandidates.size} checking=${candidates.size} policy=${fetchPolicy.label}"
+        }
         if (candidates.isEmpty()) return@coroutineScope passthrough
 
         val semaphore = Semaphore(TORRENT_PREFLIGHT_CONCURRENCY)
@@ -214,10 +224,10 @@ class StreamAggregator(
             }
         }.awaitAll().filterNotNull()
 
-        println(
+        streamDebugLog {
             "TORVE_STREAMS: torrentPreflight candidates=${candidates.size} verified=${resolved.size} " +
-                "passthrough=${passthrough.size}",
-        )
+                "passthrough=${passthrough.size}"
+        }
         passthrough + resolved
     }
 
@@ -268,7 +278,7 @@ class StreamAggregator(
                 val streams = withTimeout(fetchPolicy.addonTimeoutMs) {
                     addonClient.getStreams(url, type, imdbId, season, episode)
                 }
-                println("TORVE_STREAMS: addon=${safeAddonHealthKey(url)} streams=${streams.size}")
+                streamDebugLog { "TORVE_STREAMS: addon=${safeAddonHealthKey(url)} streams=${streams.size}" }
                 return streams
             } catch (e: Exception) {
                 lastError = e
@@ -278,7 +288,7 @@ class StreamAggregator(
             }
         }
 
-        addonFailures[safeAddonHealthKey(url)] = lastError?.message ?: "Unknown error"
+        addonFailures[safeAddonHealthKey(url)] = DiagnosticsRedactor.redact(lastError?.message ?: "Unknown error")
         return emptyList()
     }
 
@@ -398,8 +408,7 @@ private fun safeAddonHealthKey(url: String): String {
                 url.contains("torbox=", ignoreCase = true)
             if (configured) "torrentio.strem.fun(debrid)" else "torrentio.strem.fun(plain)"
         }
-        else -> url
-            .replace(Regex("([?&/](?:realdebrid|alldebrid|premiumize|torbox)%?3?D?=?)\\w+", RegexOption.IGNORE_CASE), "$1<redacted>")
-            .replace(Regex("/u/[^/]+/", RegexOption.IGNORE_CASE), "/u/<redacted>/")
+        host.isNotBlank() -> host
+        else -> "unknown-addon"
     }
 }

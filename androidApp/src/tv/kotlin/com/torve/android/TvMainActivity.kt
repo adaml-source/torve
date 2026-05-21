@@ -7,6 +7,7 @@ import android.os.Handler
 import android.os.Looper
 import android.util.TypedValue
 import android.view.Gravity
+import android.view.KeyEvent
 import android.widget.FrameLayout
 import android.widget.TextView
 import android.widget.Toast
@@ -63,6 +64,8 @@ import android.graphics.Color as AndroidColor
 class TvMainActivity : AppCompatActivity() {
     companion object {
         private const val FULL_UI_START_DELAY_MS = 5_000L
+        private const val DIRECTIONAL_REPEAT_THROTTLE_MS = 90L
+        private const val DIRECTIONAL_REPEAT_THROTTLE_AFTER_COUNT = 2
     }
 
     private val handler = Handler(Looper.getMainLooper())
@@ -71,17 +74,41 @@ class TvMainActivity : AppCompatActivity() {
     private var authEventCollectionStarted = false
     private var hasResumedBefore = false
     private var pendingAppLink by mutableStateOf<TorveAppLink?>(null)
+    private var lastDirectionalRepeatKeyCode = 0
+    private var lastDirectionalRepeatAtMs = 0L
 
-    override fun dispatchKeyEvent(event: android.view.KeyEvent): Boolean {
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        if (shouldThrottleDirectionalRepeat(event)) return true
         return try {
             super.dispatchKeyEvent(event)
         } catch (e: IllegalStateException) {
-            // Compose focusSearch can crash with "FocusRequester is not initialized"
-            // when a FocusRequester stored in focusProperties becomes detached during
-            // lazy-list recomposition. Swallow instead of crashing the app.
+            // Compose focus can throw while a TV lazy list is recycling the currently
+            // pinned row during rapid D-pad repeats. Consume the key so it cannot
+            // continue through fallback dispatch and crash the process.
             android.util.Log.w("TvMainActivity", "Focus dispatch error swallowed", e)
-            false
+            true
         }
+    }
+
+    private fun shouldThrottleDirectionalRepeat(event: KeyEvent): Boolean {
+        if (
+            event.action != KeyEvent.ACTION_DOWN ||
+            event.repeatCount <= DIRECTIONAL_REPEAT_THROTTLE_AFTER_COUNT
+        ) {
+            return false
+        }
+        val keyCode = event.keyCode
+        if (keyCode != KeyEvent.KEYCODE_DPAD_UP && keyCode != KeyEvent.KEYCODE_DPAD_DOWN) return false
+        val eventTime = event.eventTime
+        val elapsedMs = eventTime - lastDirectionalRepeatAtMs
+        val shouldThrottle = keyCode == lastDirectionalRepeatKeyCode &&
+            elapsedMs >= 0 &&
+            elapsedMs < DIRECTIONAL_REPEAT_THROTTLE_MS
+        if (!shouldThrottle) {
+            lastDirectionalRepeatKeyCode = keyCode
+            lastDirectionalRepeatAtMs = eventTime
+        }
+        return shouldThrottle
     }
 
     override fun onResume() {

@@ -118,6 +118,7 @@ import com.torve.presentation.settings.SettingsViewModel
 import org.koin.compose.koinInject
 import com.torve.presentation.catalog.RuntimeFilter
 import com.torve.presentation.catalog.SortOption
+import com.torve.presentation.home.HomeViewModel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.drop
@@ -152,9 +153,11 @@ fun CatalogScreen(
     title: String? = null,
     onMediaTypeChange: ((String) -> Unit)? = null,
     settingsViewModel: SettingsViewModel = koinInject(),
+    homeViewModel: HomeViewModel = koinInject(),
 ) {
     val state by viewModel.state.collectAsState()
     val settingsState by settingsViewModel.state.collectAsState()
+    val homeState by homeViewModel.state.collectAsState()
     val genres = if (mediaType == "movie") MOVIE_GENRES else TV_GENRES
     val gridState = rememberLazyGridState()
     val mdblistApiKey = settingsState.mdblistApiKey
@@ -220,6 +223,9 @@ fun CatalogScreen(
         (state.isSearching && state.searchResults.isNotEmpty())
     val displayItems = if (isSearchMode) state.searchResults else state.items
     val isLoadingMore = if (isSearchMode) state.isSearchingMore else state.isLoadingMore
+    val upcomingSchedule = remember(homeState.upcomingSchedule, mediaType, isSearchMode) {
+        if (mediaType == "tv" && !isSearchMode) homeState.upcomingSchedule else emptyList()
+    }
 
     // Track scroll direction for floating search bar visibility
     val previousScrollOffset = remember { mutableIntStateOf(0) }
@@ -315,6 +321,33 @@ fun CatalogScreen(
                         }
 
                         // ── Category Chips ──
+                        if (upcomingSchedule.isNotEmpty()) {
+                            item(key = "upcoming_schedule") {
+                                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                                    Text(
+                                        text = "Upcoming Schedule",
+                                        style = MaterialTheme.typography.headlineSmall,
+                                        color = Torve.colors.textPrimary,
+                                        modifier = Modifier.padding(horizontal = 16.dp),
+                                    )
+                                    LazyRow(
+                                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                        contentPadding = PaddingValues(horizontal = 16.dp),
+                                    ) {
+                                        items(
+                                            upcomingSchedule.size,
+                                            key = { index -> "upcoming_${upcomingSchedule[index].id}_$index" },
+                                        ) { index ->
+                                            PosterCard(
+                                                item = upcomingSchedule[index],
+                                                onClick = { onMediaClick(upcomingSchedule[index]) },
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
                         item(key = "categories") {
                             LazyRow(
                                 horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -513,6 +546,34 @@ fun CatalogScreen(
                         }
 
                         // ── Category Chips ──
+                        if (upcomingSchedule.isNotEmpty()) {
+                            item(
+                                key = "upcoming_schedule",
+                                span = { GridItemSpan(maxLineSpan) },
+                            ) {
+                                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                                    Text(
+                                        text = "Upcoming Schedule",
+                                        style = MaterialTheme.typography.headlineSmall,
+                                        color = Torve.colors.textPrimary,
+                                    )
+                                    LazyRow(
+                                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                    ) {
+                                        items(
+                                            upcomingSchedule.size,
+                                            key = { index -> "upcoming_${upcomingSchedule[index].id}_$index" },
+                                        ) { index ->
+                                            PosterCard(
+                                                item = upcomingSchedule[index],
+                                                onClick = { onMediaClick(upcomingSchedule[index]) },
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
                         item(
                             key = "categories",
                             span = { GridItemSpan(maxLineSpan) },
