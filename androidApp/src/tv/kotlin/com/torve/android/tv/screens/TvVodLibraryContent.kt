@@ -81,7 +81,6 @@ import com.torve.data.auth.AuthClient
 import com.torve.domain.model.Channel
 import com.torve.domain.model.ChannelContentType
 import com.torve.domain.model.MediaItem
-import com.torve.domain.model.MediaRatings
 import com.torve.domain.model.MediaType
 import com.torve.domain.model.stableChannelId
 import com.torve.domain.model.withFallbackTmdbScore
@@ -2048,7 +2047,6 @@ private fun Channel.toVodEntry(index: Int): TvVodEntry {
             year = parsed.year,
             posterUrl = tvgLogo,
             rating = xtreamRating,
-            ratings = xtreamRating?.let { MediaRatings(tmdbScore = it.toFloat()) },
         ),
         searchTitle = parsed.searchTitle,
         language = inferVodLanguage(this, rawTitle),
@@ -2250,8 +2248,8 @@ private fun normalizeLanguageToken(raw: String): String? {
 }
 
 private fun MediaItem.bestVodRating(): Float? {
-    val ratings = ratings.withFallbackTmdbScore(rating)
-    return ratings?.imdbScore
+    return rating?.toFloat()
+        ?: ratings?.imdbScore
         ?: ratings?.tmdbScore
         ?: ratings?.letterboxdScore?.times(2f)
         ?: ratings?.traktScore?.div(10f)

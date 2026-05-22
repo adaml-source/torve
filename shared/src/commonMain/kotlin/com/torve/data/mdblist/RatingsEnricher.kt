@@ -44,6 +44,8 @@ class RatingsEnricher(
     @Volatile
     private var rateLimitExpiresAt: Long = 0L
 
+    private var loggedMdbListDisabled = false
+
     val rateLimited: Boolean
         get() = Clock.System.now().toEpochMilliseconds() < rateLimitExpiresAt
 
@@ -142,7 +144,9 @@ class RatingsEnricher(
         // to incomplete data long past MDBList's cooldown.
         var mdbRateLimitSkipped = false
         var resolvedImdbId: String? = imdbId
-        if (apiKey.isNotBlank()) {
+        if (!apiKey.isUsableMdbListApiKey()) {
+            logMdbListDisabled()
+        } else {
             if (rateLimited) {
                 mdbRateLimitSkipped = true
             }
@@ -332,5 +336,16 @@ class RatingsEnricher(
             mdblistScore = existing.mdblistScore ?: fresh.mdblistScore,
             malScore = existing.malScore ?: fresh.malScore,
         )
+    }
+
+    private fun String.isUsableMdbListApiKey(): Boolean =
+        isNotBlank() &&
+            this != MdbListApi.DEFAULT_API_KEY &&
+            !contains("INSERT", ignoreCase = true)
+
+    private fun logMdbListDisabled() {
+        if (loggedMdbListDisabled) return
+        loggedMdbListDisabled = true
+        println("TORVE_RATINGS: MDBList disabled; configure MDBLIST_API_KEY to enable MDBList aggregate, RT audience, Letterboxd, MAL, and related provider ratings.")
     }
 }

@@ -87,6 +87,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
 import com.torve.android.R
+import com.torve.android.tv.TV_PAGE_CONTENT_GUTTER
 import com.torve.android.tv.focus.TvFocusTargetId
 import com.torve.android.tv.focus.rememberRegisteredTvFocusRequester
 import com.torve.android.tv.focus.rememberTvModalFocusRestoreController
@@ -537,7 +538,7 @@ internal fun TvMediaRails(
         }
 
         else -> {
-            val railStartPad = if (browseLayout == TvBrowseLayout.INFO_PANEL) 24.dp else 40.dp
+            val railStartPad = TV_PAGE_CONTENT_GUTTER
             val rowItemSpacing = if (libraryHeroMode) 14.dp else 12.dp
             val rowVerticalFocusInset = if (libraryHeroMode) 10.dp else 8.dp
             BoxWithConstraints(modifier = modifier.fillMaxSize()) {

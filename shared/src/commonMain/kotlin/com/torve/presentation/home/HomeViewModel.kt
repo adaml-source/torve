@@ -19,6 +19,7 @@ import com.torve.domain.model.dedupeAcrossShelves
 import com.torve.domain.model.dedupeByStableKey
 import com.torve.domain.model.extractImdbIdOrNull
 import com.torve.domain.model.extractTmdbIdOrNull
+import com.torve.domain.model.ratingEnrichmentLookupKeys
 import com.torve.domain.model.stableKey
 import com.torve.domain.model.updateSectionPresetId
 import com.torve.domain.integrations.IntegrationSecretKey
@@ -1708,9 +1709,9 @@ class HomeViewModel(
         val out = toMutableMap()
         items.forEach { item ->
             val r = item.ratings ?: return@forEach
-            out[item.id] = r
-            item.tmdbId?.let { out[it.toString()] = r }
-            item.imdbId?.let { out[it] = r }
+            item.ratingEnrichmentLookupKeys().forEach { key ->
+                out.putIfAbsent(key, r)
+            }
         }
         return out
     }
@@ -1899,9 +1900,9 @@ class HomeViewModel(
         val ratingsMap = mutableMapOf<String, MediaRatings>()
         items.forEach { item ->
             val ratings = item.ratings ?: return@forEach
-            ratingsMap[item.id] = ratings
-            item.tmdbId?.let { ratingsMap[it.toString()] = ratings }
-            item.imdbId?.let { ratingsMap[it] = ratings }
+            item.ratingEnrichmentLookupKeys().forEach { key ->
+                ratingsMap.putIfAbsent(key, ratings)
+            }
         }
         return ratingsMap
     }

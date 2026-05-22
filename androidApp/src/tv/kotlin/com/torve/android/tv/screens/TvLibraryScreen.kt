@@ -41,6 +41,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.torve.android.R
+import com.torve.android.tv.TV_PAGE_CONTENT_GUTTER
 import com.torve.android.tv.components.TvContentRail
 import com.torve.android.tv.components.TvMediaContextMenuAction
 import com.torve.android.tv.components.TvMediaRails
@@ -164,6 +165,7 @@ internal fun TvLibraryScreen(
     // Defer Jellyfin ViewModel creation until the tab is actually selected
     // Verified: rememberSaveable preserves tab selection across navigation (e.g. return from Details)
     var selectedTabIndex by rememberSaveable { mutableStateOf(0) }
+    var pendingClickedTabFocusIndex by remember { mutableStateOf<Int?>(null) }
     val availableTabs = listOf(
         LibraryTab.WATCHLIST,
         LibraryTab.FAVORITES,
@@ -175,17 +177,27 @@ internal fun TvLibraryScreen(
     }
     val currentTab = availableTabs.getOrElse(selectedTabIndex) { LibraryTab.WATCHLIST }
 
-    LaunchedEffect(shouldAutoFocus) {
+    LaunchedEffect(shouldAutoFocus, selectedTabIndex) {
         if (!shouldAutoFocus) return@LaunchedEffect
         delay(50)
-        runCatching { tabRequesters.firstOrNull()?.requestFocus() }
+        val requester = tabRequesters.getOrNull(selectedTabIndex) ?: return@LaunchedEffect
+        if (runCatching { requester.requestFocus() }.isSuccess) {
+            onContentFocused(requester)
+        }
     }
 
-    LaunchedEffect(selectedTabIndex) {
-        delay(20)
-        val requester = tabRequesters.getOrNull(selectedTabIndex) ?: return@LaunchedEffect
-        runCatching { requester.requestFocus() }
-        onContentFocused(requester)
+    LaunchedEffect(pendingClickedTabFocusIndex, selectedTabIndex, currentTab) {
+        val targetIndex = pendingClickedTabFocusIndex ?: return@LaunchedEffect
+        if (targetIndex != selectedTabIndex) return@LaunchedEffect
+        val requester = tabRequesters.getOrNull(targetIndex) ?: return@LaunchedEffect
+        repeat(5) {
+            delay(35)
+            if (runCatching { requester.requestFocus() }.isSuccess) {
+                onContentFocused(requester)
+                pendingClickedTabFocusIndex = null
+                return@LaunchedEffect
+            }
+        }
     }
 
     val selectedTabRequester = tabRequesters.getOrNull(selectedTabIndex) ?: headerFocusRequester
@@ -205,7 +217,7 @@ internal fun TvLibraryScreen(
         LazyRow(
             modifier = modifier,
             horizontalArrangement = Arrangement.spacedBy(12.dp),
-            contentPadding = PaddingValues(start = 40.dp, end = 12.dp, top = 14.dp, bottom = 8.dp),
+            contentPadding = PaddingValues(start = TV_PAGE_CONTENT_GUTTER, end = 12.dp, top = 14.dp, bottom = 8.dp),
         ) {
             itemsIndexed(
                 items = tabLabels,
@@ -227,6 +239,7 @@ internal fun TvLibraryScreen(
                         ),
                     onFocused = { onContentFocused(requester) },
                     onClick = {
+                        pendingClickedTabFocusIndex = index
                         selectedTabIndex = index
                         runCatching { requester.requestFocus() }
                         onContentFocused(requester)

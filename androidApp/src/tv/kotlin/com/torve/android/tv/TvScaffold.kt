@@ -16,12 +16,17 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
 import com.torve.android.ui.theme.Obsidian
 
 /** Collapsed rail width — content always starts here, never shifts. */
-internal val RAIL_COLLAPSED_WIDTH = 52.dp
+internal val TV_NAV_RAIL_WIDTH = 86.dp
+internal val TV_CONTENT_START_INSET = 60.dp
+// TV_CONTENT_START_INSET is the scaffold baseline only. Top-level TV pages
+// add this gutter exactly once so first functional content starts at 88.dp.
+internal val TV_PAGE_CONTENT_GUTTER = 28.dp
 
 /** Width of the left contextual info panel. */
 internal val INFO_PANEL_WIDTH = 280.dp
@@ -43,11 +48,26 @@ fun TvScaffold(
         // Full-bleed hero backdrop sits behind content and the collapsed rail.
         background()
 
+        Box(
+            modifier = Modifier
+                .fillMaxHeight()
+                .width(260.dp)
+                .background(
+                    Brush.horizontalGradient(
+                        colors = listOf(
+                            Obsidian.copy(alpha = 0.76f),
+                            Obsidian.copy(alpha = 0.62f),
+                            Obsidian.copy(alpha = 0f),
+                        ),
+                    ),
+                ),
+        )
+
         // Content area starts after the collapsed rail width.
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .then(if (isFullscreen) Modifier else Modifier.padding(start = RAIL_COLLAPSED_WIDTH)),
+                .then(if (isFullscreen) Modifier else Modifier.padding(start = TV_CONTENT_START_INSET)),
         ) {
             // Info panel + scrollable content side by side.
             Row(modifier = Modifier.fillMaxSize()) {

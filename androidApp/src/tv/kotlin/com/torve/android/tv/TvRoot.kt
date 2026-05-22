@@ -453,12 +453,10 @@ fun TvRoot(
 
     var isRailExpanded by rememberSaveable { mutableStateOf(false) }
     var isRailFocused by rememberSaveable { mutableStateOf(false) }
-    // Debounce rail expansion: only expand after sustained focus (prevents flash on transient focus).
+    // TV navigation is now a permanent slim rail. Keep the legacy state false
+    // for callers that still accept it, but never expand the rail on focus.
     LaunchedEffect(isRailFocused) {
-        if (isRailFocused) {
-            delay(100)
-            isRailExpanded = true
-        }
+        isRailExpanded = false
     }
     var focusedMediaItem by remember { mutableStateOf<MediaItem?>(null) }
 
@@ -1996,7 +1994,7 @@ fun TvRoot(
                     destinations = tvTopDestinations,
                     selectedRoute = highlightedTopRoute,
                     activeRoute = selectedTopRoute,
-                    isExpanded = if (showRail) isRailExpanded else false,
+                    isExpanded = false,
                     railFocusRequester = railFocusRequester,
                     preferredEntryRoute = pendingRailEntryRoute,
                     preferredEntryRequestNonce = pendingRailEntryRequestNonce,
@@ -2071,6 +2069,12 @@ fun TvRoot(
                         // on the rail, so the user couldn't enter content pages.
                         pendingContentEntryRoute = route
                         requestContentFocusFromRail(route)
+                    },
+                    onHighlight = { route ->
+                        railInteractionEpoch++
+                        pendingNavJob?.cancel()
+                        pendingNavJob = null
+                        highlightedTopRoute = route
                     },
                     onNavigate = { route ->
                         railInteractionEpoch++

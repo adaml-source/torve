@@ -85,6 +85,94 @@ fun MediaRatings?.withFallbackTmdbScore(tmdbRating: Double?): MediaRatings? {
     } ?: fallbackScore?.let { MediaRatings(tmdbScore = it) }
 }
 
+fun MediaRatings?.hasRichExternalRating(): Boolean {
+    val ratings = this ?: return false
+    return ratings.imdbScore.isValidRatingScore() ||
+        ratings.rottenTomatoesScore.isValidPercentScore() ||
+        ratings.rtAudienceScore.isValidPercentScore() ||
+        ratings.metacriticScore.isValidPercentScore() ||
+        ratings.letterboxdScore.isValidRatingScore() ||
+        ratings.traktScore.isValidRatingScore() ||
+        ratings.mdblistScore.isValidRatingScore() ||
+        ratings.malScore.isValidRatingScore()
+}
+
+fun MediaItem.hasExternalRatingLookupIdentity(): Boolean =
+    tmdbId != null ||
+        !imdbId.isNullOrBlank() ||
+        id.extractTmdbIdOrNull() != null ||
+        id.extractImdbIdOrNull() != null
+
+fun MediaItem.needsExternalRatingEnrichment(): Boolean =
+    hasExternalRatingLookupIdentity() && !ratings.hasRichExternalRating()
+
+fun MediaItem.ratingEnrichmentLookupKeys(): List<String> = buildList {
+    add("id:${type.name}:$id")
+    add(id)
+    tmdbId?.let { tmdb ->
+        add("tmdb:${type.name}:$tmdb")
+        add(tmdb.toString())
+    }
+    imdbId?.takeIf { it.isNotBlank() }?.lowercase()?.let { imdb ->
+        add("imdb:${type.name}:$imdb")
+        add(imdb)
+    }
+    val normalizedTitle = title.normalizedRatingLookupTitle()
+    if (normalizedTitle.isNotBlank() && year != null) {
+        add("title:${type.name}:$normalizedTitle:$year")
+    }
+}.distinct()
+
+fun MediaItem.withEnrichedRatingsFrom(
+    ratingsByKey: Map<String, MediaRatings>,
+): MediaItem {
+    if (ratingsByKey.isEmpty()) return this
+    val enriched = ratingEnrichmentLookupKeys()
+        .firstNotNullOfOrNull { key -> ratingsByKey[key] }
+        ?: return this
+    val merged = mergeRatingsPreservingExisting(ratings, enriched)
+    return if (merged == ratings) this else copy(ratings = merged)
+}
+
+fun List<MediaItem>.withEnrichedRatingsFrom(
+    ratingsByKey: Map<String, MediaRatings>,
+): List<MediaItem> =
+    if (ratingsByKey.isEmpty()) this else map { item -> item.withEnrichedRatingsFrom(ratingsByKey) }
+
+private fun Float?.isValidRatingScore(): Boolean {
+    val score = this ?: return false
+    return score > 0f && score <= 100f && !score.isNaN()
+}
+
+private fun Int?.isValidPercentScore(): Boolean {
+    val score = this ?: return false
+    return score in 1..100
+}
+
+private fun mergeRatingsPreservingExisting(
+    existing: MediaRatings?,
+    enriched: MediaRatings,
+): MediaRatings {
+    if (existing == null) return enriched
+    return MediaRatings(
+        imdbScore = existing.imdbScore ?: enriched.imdbScore,
+        imdbVotes = existing.imdbVotes ?: enriched.imdbVotes,
+        rottenTomatoesScore = existing.rottenTomatoesScore ?: enriched.rottenTomatoesScore,
+        rtAudienceScore = existing.rtAudienceScore ?: enriched.rtAudienceScore,
+        tmdbScore = existing.tmdbScore ?: enriched.tmdbScore,
+        metacriticScore = existing.metacriticScore ?: enriched.metacriticScore,
+        letterboxdScore = existing.letterboxdScore ?: enriched.letterboxdScore,
+        traktScore = existing.traktScore ?: enriched.traktScore,
+        mdblistScore = existing.mdblistScore ?: enriched.mdblistScore,
+        malScore = existing.malScore ?: enriched.malScore,
+    )
+}
+
+private fun String.normalizedRatingLookupTitle(): String =
+    lowercase()
+        .replace(Regex("[^a-z0-9]+"), "")
+        .trim()
+
 @Serializable
 enum class RatingPillStyle {
     ICON,

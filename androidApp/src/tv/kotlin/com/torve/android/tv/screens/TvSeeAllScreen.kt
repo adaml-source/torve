@@ -88,6 +88,7 @@ import com.torve.domain.model.PagedResult
 import com.torve.domain.repository.PreferencesRepository
 import com.torve.presentation.settings.SettingsViewModel
 import com.torve.domain.model.RatingDisplayPrefs
+import com.torve.domain.model.needsExternalRatingEnrichment
 import com.torve.domain.model.withFallbackTmdbScore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -257,6 +258,7 @@ internal fun TvSeeAllScreen(
     var focusedMediaItem by remember { mutableStateOf<MediaItem?>(null) }
     var lastFocusedIndex by remember { mutableIntStateOf(-1) }
     val focusRequesters = remember { mutableMapOf<Int, FocusRequester>() }
+    var ratingEnrichmentAttemptedKeys by remember(railKey, mediaType) { mutableStateOf<Set<String>>(emptySet()) }
     val screenId = remember(railKey, mediaType) { "see_all:$railKey:$mediaType" }
     val filterSignature = remember(selectedGenreIds, selectedStudioIds, selectedYear, selectedMinRating, selectedSortKey) {
         "${selectedGenreIds.sorted()}|${selectedStudioIds.sorted()}|${selectedYear ?: "all"}|${selectedMinRating ?: "all"}|$selectedSortKey"
@@ -801,26 +803,46 @@ internal fun TvSeeAllScreen(
         loadPage(currentPage + 1)
     }
 
-    // Background ratings enrichment — populates SQLite cache + updates items in place.
-    var enrichedPages by remember { mutableStateOf(setOf<Int>()) }
-    LaunchedEffect(items.size) {
-        if (items.isEmpty()) return@LaunchedEffect
-        val page = currentPage
-        if (page in enrichedPages) return@LaunchedEffect
-        enrichedPages = enrichedPages + page
+    // Background ratings enrichment — populate SQLite cache + update the visible
+    // window in place. TMDB fallback is display-only; it does not make a card
+    // "enriched enough", so newly paged/visible TMDB-only cards are still queued.
+    LaunchedEffect(renderedItems, gridState.firstVisibleItemIndex, posterColumns) {
+        if (renderedItems.isEmpty()) return@LaunchedEffect
+        val layoutInfo = gridState.layoutInfo
+        val firstVisible = layoutInfo.visibleItemsInfo.minOfOrNull { it.index }
+            ?: gridState.firstVisibleItemIndex
+        val visibleCount = layoutInfo.visibleItemsInfo.size.takeIf { it > 0 }
+            ?: (posterColumns * 3)
+        val start = firstVisible.coerceIn(0, renderedItems.lastIndex)
+        val end = (start + visibleCount + posterColumns * 2).coerceAtMost(renderedItems.size)
+        if (start >= end) return@LaunchedEffect
+
+        val snapshot = renderedItems.subList(start, end)
+            .filter { it.needsExternalRatingEnrichment() }
+            .filterNot { it.seeAllStableKey() in ratingEnrichmentAttemptedKeys }
+            .take(48)
+        if (snapshot.isEmpty()) return@LaunchedEffect
+
+        val originalKeys = snapshot.map { it.seeAllStableKey() }.toSet()
+        ratingEnrichmentAttemptedKeys = ratingEnrichmentAttemptedKeys + originalKeys
+
         launch(Dispatchers.IO) {
             val apiKey = runCatching {
                 secretStore.get(IntegrationSecretKey.MDBLIST_API_KEY)
                     ?: prefsRepo.getString(SettingsViewModel.KEY_MDBLIST_API_KEY)
                     ?: MdbListApi.DEFAULT_API_KEY
             }.getOrDefault(MdbListApi.DEFAULT_API_KEY)
-            val snapshot = items.take(40)
+            val remainingMs = ratingsEnricher.rateLimitRemainingMs()
+            if (remainingMs > 0L) delay(remainingMs + 2_000L)
             val enriched = ratingsEnricher.enrichList(snapshot, apiKey)
+            val enrichedByOriginalKey = snapshot.zip(enriched).associate { (before, after) ->
+                before.seeAllStableKey() to after
+            }
             withContext(Dispatchers.Main) {
-                enriched.forEach { enrichedItem ->
-                    val index = items.indexOfFirst { it.seeAllStableKey() == enrichedItem.seeAllStableKey() }
-                    if (index >= 0) {
-                        items[index] = enrichedItem
+                for (index in items.indices) {
+                    val replacement = enrichedByOriginalKey[items[index].seeAllStableKey()]
+                    if (replacement != null) {
+                        items[index] = replacement
                     }
                 }
             }

@@ -68,6 +68,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 // LocaleListCompat removed — no longer applying locale inline
 import com.torve.android.R
+import com.torve.android.tv.TV_PAGE_CONTENT_GUTTER
 import com.torve.android.catalog.CatalogWarmupWorker
 import com.torve.android.epg.EpgWarmupWorker
 import com.torve.android.session.PostSignInRefresh
@@ -1957,7 +1958,7 @@ internal fun TvSettingsScreen(
         LazyColumn(
             modifier = Modifier
                 .fillMaxSize(),
-            contentPadding = PaddingValues(start = 40.dp, top = 40.dp, end = 40.dp, bottom = 24.dp),
+            contentPadding = PaddingValues(start = TV_PAGE_CONTENT_GUTTER, top = 40.dp, end = 40.dp, bottom = 24.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             item(key = "prompt") {
@@ -2104,7 +2105,7 @@ internal fun TvSettingsScreen(
                     else -> false
                 }
             },
-        contentPadding = PaddingValues(start = 40.dp, top = 20.dp, end = 40.dp, bottom = 24.dp),
+        contentPadding = PaddingValues(start = TV_PAGE_CONTENT_GUTTER, top = 20.dp, end = 40.dp, bottom = 24.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         // Setup mode header — tap to change

@@ -27,7 +27,9 @@ import com.torve.domain.model.EnrichedChannel
 import com.torve.domain.model.HomeSection
 import com.torve.domain.model.HomeSectionConfig
 import com.torve.domain.model.MediaItem
+import com.torve.domain.model.MediaRatings
 import com.torve.domain.model.MediaType
+import com.torve.domain.model.withEnrichedRatingsFrom
 import com.torve.platform.NetworkMonitor
 import com.torve.platform.NetworkType
 import com.torve.presentation.home.HomeUiState
@@ -130,6 +132,7 @@ internal fun TvHomeScreen(
         customSections,
         homeLayoutOrder,
         outcomeState,
+        state.continueWatchingRatings,
         availableNowTitle,
         downloadsOnDesktopTitle,
         recentlyAddedTitle,
@@ -139,6 +142,7 @@ internal fun TvHomeScreen(
             availableNowTitle = availableNowTitle,
             downloadsOnDesktopTitle = downloadsOnDesktopTitle,
             recentlyAddedTitle = recentlyAddedTitle,
+            ratingsByKey = state.continueWatchingRatings,
         ) +
             buildTvHomeRails(
                 state = state,
@@ -287,27 +291,28 @@ private fun buildOutcomeRails(
     availableNowTitle: String,
     downloadsOnDesktopTitle: String,
     recentlyAddedTitle: String,
+    ratingsByKey: Map<String, MediaRatings>,
 ): List<TvContentRail> {
     val out = mutableListOf<TvContentRail>()
     if (outcome.availableNow.isNotEmpty()) {
         out += TvContentRail(
             key = "outcome:available_now",
             title = availableNowTitle,
-            items = outcome.availableNow,
+            items = outcome.availableNow.withEnrichedRatingsFrom(ratingsByKey),
         )
     }
     if (outcome.downloadsOnDesktop.isNotEmpty()) {
         out += TvContentRail(
             key = "outcome:downloads_on_desktop",
             title = downloadsOnDesktopTitle,
-            items = outcome.downloadsOnDesktop,
+            items = outcome.downloadsOnDesktop.withEnrichedRatingsFrom(ratingsByKey),
         )
     }
     if (outcome.recentlyAdded.isNotEmpty()) {
         out += TvContentRail(
             key = "outcome:recently_added",
             title = recentlyAddedTitle,
-            items = outcome.recentlyAdded,
+            items = outcome.recentlyAdded.withEnrichedRatingsFrom(ratingsByKey),
         )
     }
     return out
@@ -401,6 +406,7 @@ private fun buildBuiltInRails(
                 .mapNotNull { it.toMediaItemOrNull() }
                 .filter { it.tmdbId != null }
                 .take(20)
+                .withEnrichedRatingsFrom(state.continueWatchingRatings)
             if (items.isEmpty()) emptyList()
             else {
                 listOf(

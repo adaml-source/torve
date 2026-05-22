@@ -20,6 +20,8 @@ class OmdbClient(
         const val KEY_OMDB_API_KEY = "omdb_api_key"
     }
 
+    private var loggedOmdbDisabled = false
+
     /**
      * Fetches ratings from OMDB for a given IMDb ID.
      * Returns a partial MediaRatings with IMDb, Rotten Tomatoes, and Metacritic.
@@ -28,7 +30,10 @@ class OmdbClient(
     suspend fun fetchRatings(imdbId: String): MediaRatings? {
         val apiKey = secretStore.get(IntegrationSecretKey.OMDB_API_KEY)
             ?: prefsRepo.getString(KEY_OMDB_API_KEY)
-        if (apiKey.isNullOrBlank()) return null
+        if (apiKey.isNullOrBlank()) {
+            logOmdbDisabled()
+            return null
+        }
         if (!imdbId.startsWith("tt")) return null
 
         return runCatching {
@@ -66,6 +71,12 @@ class OmdbClient(
                 metacriticScore = metacriticScore,
             )
         }.getOrNull()
+    }
+
+    private fun logOmdbDisabled() {
+        if (loggedOmdbDisabled) return
+        loggedOmdbDisabled = true
+        println("TORVE_RATINGS: OMDb disabled; configure OMDB_API_KEY to enable IMDb votes, Rotten Tomatoes critics, and Metacritic ratings from OMDb.")
     }
 }
 

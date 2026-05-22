@@ -61,6 +61,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
 import coil3.compose.AsyncImage
 import com.torve.android.R
+import com.torve.android.tv.TV_PAGE_CONTENT_GUTTER
 import com.torve.android.tv.NotificationType
 import com.torve.android.tv.TvScreenCache
 import com.torve.android.tv.TvNotificationQueue
@@ -102,8 +103,10 @@ import com.torve.domain.model.ParentalFilter
 import com.torve.domain.model.ContentRating
 import com.torve.domain.model.RatingDisplayPrefs
 import com.torve.domain.model.dedupeByStableKey
-import com.torve.domain.model.hasAnyEnabledDisplayValue
+import com.torve.domain.model.needsExternalRatingEnrichment
+import com.torve.domain.model.ratingEnrichmentLookupKeys
 import com.torve.domain.model.withFallbackTmdbScore
+import com.torve.domain.model.withEnrichedRatingsFrom
 import com.torve.domain.repository.MetadataRepository
 import com.torve.domain.repository.DeviceLocalSettingsRepository
 import com.torve.data.mdblist.RatingsEnricher
@@ -450,7 +453,7 @@ internal fun TvCatalogRailsScreen(
     }
     LaunchedEffect(uiState.rails, enrichCacheKey) {
         if (uiState.rails.isEmpty()) return@LaunchedEffect
-        if (!uiState.rails.needsRatingEnrichment(catalogRatingPrefs)) {
+        if (!uiState.rails.needsRatingEnrichment()) {
             TvScreenCache.put(enrichCacheKey, true)
             return@LaunchedEffect
         }
@@ -490,13 +493,25 @@ internal fun TvCatalogRailsScreen(
         if (isMovieCatalog) R.string.tv_section_continue_watching_movies
         else R.string.tv_section_continue_watching_shows,
     )
-    val continueWatchingRail = remember(homeState.continueWatching, targetMediaType) {
+    var enrichedInjectedRailItems by remember(mediaType) {
+        mutableStateOf<Map<String, List<MediaItem>>>(emptyMap())
+    }
+    var attemptedInjectedRatingKeys by remember(mediaType, catalogRatingPrefs.enabledProviders) {
+        mutableStateOf<Set<String>>(emptySet())
+    }
+
+    val continueWatchingRail = remember(
+        homeState.continueWatching,
+        homeState.continueWatchingRatings,
+        targetMediaType,
+    ) {
         val items = homeState.continueWatching
             .filter { it.mediaType == targetMediaType }
             .sortedByDescending { it.updatedAt }
             .mapNotNull { it.toMediaItemOrNull() }
             .filter { it.tmdbId != null }
             .take(20)
+            .withEnrichedRatingsFrom(homeState.continueWatchingRatings)
         if (items.isEmpty()) null
         else TvContentRail(
             key = "continue_watching_$mediaType",
@@ -508,10 +523,16 @@ internal fun TvCatalogRailsScreen(
                 .associate { it.mediaId to it.progressPercent },
         )
     }
-    val upcomingScheduleRail = remember(homeState.upcomingSchedule, targetMediaType) {
+    val upcomingScheduleRail = remember(
+        homeState.upcomingSchedule,
+        homeState.continueWatchingRatings,
+        targetMediaType,
+    ) {
         if (targetMediaType != MediaType.SERIES) null
         else {
-            val items = homeState.upcomingSchedule.take(24)
+            val items = homeState.upcomingSchedule
+                .take(24)
+                .withEnrichedRatingsFrom(homeState.continueWatchingRatings)
             if (items.isEmpty()) null
             else TvContentRail(
                 key = "upcoming_schedule_tv",
@@ -522,7 +543,64 @@ internal fun TvCatalogRailsScreen(
         }
     }
 
-    val filteredRails = remember(uiState.rails, maxContentRating, continueWatchingRail, upcomingScheduleRail) {
+    val injectedRails = remember(continueWatchingRail, upcomingScheduleRail) {
+        listOfNotNull(continueWatchingRail, upcomingScheduleRail)
+    }
+    val displayInjectedRails = remember(injectedRails, enrichedInjectedRailItems) {
+        injectedRails.map { rail ->
+            enrichedInjectedRailItems[rail.key]?.let { items -> rail.copy(items = items) } ?: rail
+        }
+    }
+
+    LaunchedEffect(injectedRails, catalogRatingPrefs.enabledProviders) {
+        if (injectedRails.isEmpty()) return@LaunchedEffect
+        val hydratedRails = withContext(Dispatchers.IO) {
+            injectedRails.hydrateRailsFromRatingCache(ratingsEnricher)
+        }
+        if (railsRatingsChanged(injectedRails, hydratedRails)) {
+            enrichedInjectedRailItems = enrichedInjectedRailItems +
+                hydratedRails.associate { rail -> rail.key to rail.items }
+        }
+
+        val itemsNeedingEnrichment = hydratedRails
+            .flatMap { rail -> rail.items }
+            .filter { item -> item.needsExternalRatingEnrichment() }
+        val newAttemptKeys = itemsNeedingEnrichment
+            .map { item -> item.ratingEnrichmentAttemptKey() }
+            .filterNot { key -> key in attemptedInjectedRatingKeys }
+            .toSet()
+        if (newAttemptKeys.isEmpty()) return@LaunchedEffect
+        attemptedInjectedRatingKeys = attemptedInjectedRatingKeys + newAttemptKeys
+
+        val apiKey = runCatching {
+            secretStore.get(com.torve.domain.integrations.IntegrationSecretKey.MDBLIST_API_KEY)
+                ?: prefsRepo.getString(SettingsViewModel.KEY_MDBLIST_API_KEY)
+                ?: com.torve.data.mdblist.MdbListApi.DEFAULT_API_KEY
+        }.getOrDefault(com.torve.data.mdblist.MdbListApi.DEFAULT_API_KEY)
+
+        withContext(Dispatchers.IO) {
+            var currentRails = hydratedRails
+            var iterations = 0
+            while (iterations < 5 && currentRails.needsRatingEnrichment()) {
+                iterations++
+                val enrichedRails = currentRails.map { rail ->
+                    rail.copy(items = ratingsEnricher.enrichList(rail.items, apiKey))
+                }
+                withContext(Dispatchers.Main) {
+                    if (railsRatingsChanged(currentRails, enrichedRails)) {
+                        enrichedInjectedRailItems = enrichedInjectedRailItems +
+                            enrichedRails.associate { rail -> rail.key to rail.items }
+                    }
+                }
+                currentRails = enrichedRails
+                val remainingMs = ratingsEnricher.rateLimitRemainingMs()
+                if (remainingMs <= 0L) break
+                delay(remainingMs + 2_000L)
+            }
+        }
+    }
+
+    val filteredRails = remember(uiState.rails, maxContentRating, displayInjectedRails) {
         val catalogRails = if (maxContentRating == null) {
             uiState.rails
         } else {
@@ -531,7 +609,7 @@ internal fun TvCatalogRailsScreen(
                 if (filtered.isEmpty()) null else rail.copy(items = filtered)
             }
         }
-        listOfNotNull(continueWatchingRail, upcomingScheduleRail) + catalogRails
+        displayInjectedRails + catalogRails
     }
 
     val defaultHeroItem = remember(filteredRails, mediaType) {
@@ -700,7 +778,7 @@ internal fun TvCatalogRailsScreen(
                         .clipToBounds()
                         .graphicsLayer { alpha = if (searchEntryFocused) 1f else 0f }
                         .then(if (searchEntryFocused) Modifier else Modifier.clearAndSetSemantics { })
-                        .padding(start = 24.dp, end = 48.dp),
+                        .padding(start = TV_PAGE_CONTENT_GUTTER, end = 48.dp),
                 ) {
                     TvCatalogSearchEntry(
                         title = searchTitle,
@@ -2262,14 +2340,11 @@ private suspend fun List<TvContentRail>.enrichTopRatedRailsForImdbGate(
     }
 }
 
-private fun List<TvContentRail>.needsRatingEnrichment(
-    prefs: RatingDisplayPrefs,
-): Boolean = any { rail ->
-    rail.items.any { item ->
-        item.ratings.withFallbackTmdbScore(item.rating)
-            ?.hasAnyEnabledDisplayValue(prefs) != true
-    }
-}
+private fun List<TvContentRail>.needsRatingEnrichment(): Boolean =
+    any { rail -> rail.items.any { item -> item.needsExternalRatingEnrichment() } }
+
+private fun MediaItem.ratingEnrichmentAttemptKey(): String =
+    ratingEnrichmentLookupKeys().firstOrNull() ?: "${type.name}:$id"
 
 private fun railsRatingsChanged(
     before: List<TvContentRail>,

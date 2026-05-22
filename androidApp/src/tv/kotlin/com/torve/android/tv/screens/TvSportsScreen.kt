@@ -55,6 +55,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import com.torve.android.tv.TV_PAGE_CONTENT_GUTTER
 import com.torve.android.catalog.SportsBootstrapJson
 import com.torve.android.catalog.SportsBootstrapPayload
 import com.torve.android.catalog.sportsBootstrapKey
@@ -383,7 +384,7 @@ fun TvSportsScreen(
                     radius = 1550f,
                 ),
             )
-            .padding(horizontal = 40.dp, vertical = 22.dp),
+            .padding(start = TV_PAGE_CONTENT_GUTTER, top = 22.dp, end = 40.dp, bottom = 22.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
         Text(
