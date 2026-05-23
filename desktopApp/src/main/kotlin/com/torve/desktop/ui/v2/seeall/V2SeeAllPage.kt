@@ -4,7 +4,9 @@ import androidx.compose.animation.Crossfade
 import com.torve.desktop.ui.l10n.ds
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.VerticalScrollbar
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.horizontalScroll
@@ -27,14 +29,15 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.itemsIndexed
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
+import androidx.compose.foundation.rememberScrollbarAdapter
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.automirrored.filled.Sort
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -42,6 +45,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
@@ -49,12 +53,15 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.key.Key
@@ -67,19 +74,37 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import com.torve.desktop.ui.components.TorveDropdownScaffold
-import com.torve.desktop.ui.components.TorveFilterChip
 import com.torve.desktop.ui.theme.TorveDesktopThemeTokens
 import com.torve.desktop.ui.v2.components.DesktopRatingPills
 import com.torve.desktop.ui.v2.components.V2PosterCard
 import com.torve.desktop.ui.v2.components.rememberCachedBitmap
+import com.torve.desktop.ui.v2.discovery.BrandFilterUiModel
+import com.torve.desktop.ui.v2.discovery.DiscoveryControls
+import com.torve.desktop.ui.v2.discovery.DiscoveryDropdownKey
+import com.torve.desktop.ui.v2.discovery.DiscoveryDropdownOption
+import com.torve.desktop.ui.v2.discovery.DiscoveryDropdownUiModel
+import com.torve.desktop.ui.v2.discovery.GenreFilterUiModel
+import com.torve.desktop.ui.v2.discovery.MoodFilterUiModel
+import com.torve.desktop.ui.v2.discovery.mixedDiscoveryFilterConfig
+import com.torve.desktop.ui.v2.discovery.movieDiscoveryFilterConfig
+import com.torve.desktop.ui.v2.discovery.tvDiscoveryFilterConfig
+import com.torve.domain.discovery.DiscoveryRatingSource
+import com.torve.domain.discovery.applyMoodFilter
+import com.torve.domain.discovery.matchesRatingFilter
+import com.torve.domain.discovery.nextSelectedMoodId
+import com.torve.domain.discovery.ratingThresholdLabel
+import com.torve.domain.model.CardHoverPrefs
+import com.torve.domain.model.CardStyle
+import com.torve.domain.model.MediaCompany
 import com.torve.domain.model.MediaItem
 import com.torve.domain.model.MediaType
 import com.torve.domain.repository.MetadataRepository
 import com.torve.presentation.seeall.SeeAllSortMode
 import com.torve.presentation.seeall.SeeAllViewModel
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.util.Locale
 
 private val sortOptions = listOf(
     SeeAllSortMode.DEFAULT to "Default",
@@ -91,20 +116,148 @@ private val sortOptions = listOf(
     SeeAllSortMode.TMDB_DESC to "Highest rated (TMDB)",
 )
 
-private enum class YearBucket(val label: String, val range: IntRange?) {
-    ANY("Any year", null),
-    Y2020S("2020s", 2020..2099),
-    Y2010S("2010s", 2010..2019),
-    Y2000S("2000s", 2000..2009),
-    OLDER("Pre-2000", 0..1999),
+private fun upcomingScheduleDateTime(value: String?): String? {
+    val raw = value?.trim()?.takeIf { it.isNotEmpty() } ?: return null
+    return runCatching {
+        java.time.ZonedDateTime.parse(raw)
+            .withZoneSameInstant(java.time.ZoneId.systemDefault())
+            .format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm"))
+    }.getOrElse {
+        raw.take(16).replace('T', ' ').removeSuffix("Z").takeIf { it.isNotBlank() }
+    }
 }
 
-private enum class RatingBucket(val label: String, val min: Double) {
-    ANY("Any rating", 0.0),
-    R6("6+", 6.0),
-    R7("7+", 7.0),
-    R8("8+", 8.0),
-    R9("9+", 9.0),
+private fun MediaItem.matchesSeeAllQuery(query: String): Boolean {
+    val q = query.trim().lowercase()
+    if (q.isBlank()) return true
+    val haystack = buildString {
+        append(title.lowercase())
+        append(' ')
+        append(overview.orEmpty().lowercase())
+        append(' ')
+        append(director.orEmpty().lowercase())
+        append(' ')
+        append(genres.joinToString(" ") { it.name }.lowercase())
+        append(' ')
+        append(cast.take(8).joinToString(" ") { it.name }.lowercase())
+    }
+    return q in haystack
+}
+
+private enum class RatingBucket(val threshold: Float?) {
+    ANY(null),
+    R6(6f),
+    R7(7f),
+    R8(8f),
+    R9(9f),
+}
+
+private val seeAllTvMoodChips = listOf(
+    MoodFilterUiModel("all", "All moods"),
+    MoodFilterUiModel("dark", "Dark"),
+    MoodFilterUiModel("funny", "Funny"),
+    MoodFilterUiModel("cinematic", "Cinematic"),
+    MoodFilterUiModel("fast", "Fast-paced"),
+    MoodFilterUiModel("comfort", "Comfort watch"),
+    MoodFilterUiModel("acclaimed", "Critically acclaimed"),
+    MoodFilterUiModel("hidden", "Hidden gems"),
+)
+
+private val seeAllMovieMoodChips = listOf(
+    MoodFilterUiModel("all", "All moods"),
+    MoodFilterUiModel("blockbuster", "Blockbuster"),
+    MoodFilterUiModel("acclaimed", "Critically acclaimed"),
+    MoodFilterUiModel("easy", "Easy watch"),
+    MoodFilterUiModel("date", "Date night"),
+    MoodFilterUiModel("dark", "Dark"),
+    MoodFilterUiModel("funny", "Funny"),
+    MoodFilterUiModel("mind", "Mind-bending"),
+    MoodFilterUiModel("hidden", "Hidden gems"),
+    MoodFilterUiModel("family", "Family night"),
+)
+
+private val majorUsNetworkOrder = listOf(
+    "abc",
+    "cbs",
+    "nbc",
+    "fox",
+    "the cw",
+    "pbs",
+    "hbo",
+    "showtime",
+    "starz",
+    "amc",
+    "fx",
+    "fxx",
+    "usa network",
+    "tnt",
+    "tbs",
+    "espn",
+).withIndex().associate { it.value to it.index }
+
+private val majorUsNetworkAliases = setOf(
+    "abc",
+    "american broadcasting company",
+    "cbs",
+    "columbia broadcasting system",
+    "nbc",
+    "national broadcasting company",
+    "fox",
+    "fox broadcasting company",
+    "the cw",
+    "cw",
+    "pbs",
+    "public broadcasting service",
+    "hbo",
+    "home box office",
+    "showtime",
+    "starz",
+    "amc",
+    "fx",
+    "fxx",
+    "usa network",
+    "tnt",
+    "tbs",
+    "espn",
+)
+
+private fun MediaCompany.normalizedNetworkKey(): String =
+    name.lowercase()
+        .replace("&", " and ")
+        .replace(Regex("[^a-z0-9+ ]"), " ")
+        .replace(Regex("\\s+"), " ")
+        .trim()
+        .let { normalized ->
+            when (normalized) {
+                "american broadcasting company" -> "abc"
+                "columbia broadcasting system" -> "cbs"
+                "national broadcasting company" -> "nbc"
+                "fox broadcasting company" -> "fox"
+                "cw" -> "the cw"
+                "home box office" -> "hbo"
+                "public broadcasting service" -> "pbs"
+                else -> normalized
+            }
+        }
+
+private fun MediaCompany.isMajorUsNetworkBrand(): Boolean =
+    normalizedNetworkKey() in majorUsNetworkAliases
+
+private data class SeeAllScrollSnapshot(
+    val selectedIndex: Int = 0,
+    val firstVisibleItemIndex: Int = 0,
+    val firstVisibleItemScrollOffset: Int = 0,
+)
+
+private object SeeAllDesktopStateHolder {
+    private val snapshots = mutableMapOf<String, SeeAllScrollSnapshot>()
+
+    fun get(sectionId: String): SeeAllScrollSnapshot =
+        snapshots[sectionId] ?: SeeAllScrollSnapshot()
+
+    fun put(sectionId: String, snapshot: SeeAllScrollSnapshot) {
+        snapshots[sectionId] = snapshot
+    }
 }
 
 @OptIn(ExperimentalFoundationApi::class)
@@ -114,6 +267,7 @@ fun V2SeeAllPage(
     viewModel: SeeAllViewModel,
     metadataRepository: MetadataRepository,
     onBack: () -> Unit,
+    onPlay: (MediaItem) -> Unit = {},
     onOpenDetail: (MediaItem) -> Unit,
     onOpenPerson: (Int) -> Unit,
 ) {
@@ -121,22 +275,76 @@ fun V2SeeAllPage(
     val state by viewModel.state.collectAsState()
 
     LaunchedEffect(request.sectionId) {
-        if (request.sectionId.startsWith("shelf:")) {
+        val shouldInitializeSort = state.sectionId != request.sectionId || state.items.isEmpty()
+        val usesFallbackSnapshot = request.sectionId.startsWith("shelf:") ||
+            request.sectionId == "upcoming_schedule"
+        if (usesFallbackSnapshot && request.fallbackItems.isNotEmpty()) {
+            SeeAllViewModel.pendingItems[request.sectionId] = request.title to request.fallbackItems
+        }
+        if (request.sectionId.startsWith("shelf:") && request.fallbackItems.isNotEmpty()) {
             val key = request.sectionId.removePrefix("shelf:")
             SeeAllViewModel.pendingItems[key] = request.title to request.fallbackItems
         }
         viewModel.loadSection(request.sectionId)
-        // Desktop default: sort by IMDb rating (falls back to TMDB if IMDb absent).
-        viewModel.setSortMode(SeeAllSortMode.IMDB_DESC)
+        if (shouldInitializeSort) {
+            viewModel.setSortMode(
+                if (request.sectionId.startsWith("upcoming_schedule")) {
+                    SeeAllSortMode.YEAR_ASC
+                } else {
+                    SeeAllSortMode.DEFAULT
+                },
+            )
+        }
     }
 
     val displayed = state.displayedItems
-    var selectedIndex by remember(request.sectionId) { mutableStateOf(0) }
-    val safeIndex = selectedIndex.coerceIn(0, (displayed.size - 1).coerceAtLeast(0))
-    val baseSelected = displayed.getOrNull(safeIndex)
+    var ratingBucket by remember(request.sectionId) { mutableStateOf(RatingBucket.ANY) }
+    var ratingSource by remember(request.sectionId) { mutableStateOf(DiscoveryRatingSource.AnyRating) }
+    var seeAllSearchQuery by remember(request.sectionId) { mutableStateOf("") }
+    var selectedMoodId by remember(request.sectionId) { mutableStateOf("all") }
+    val isTvSection = displayed.any { it.type == MediaType.SERIES } ||
+        request.sectionId.contains("TV", ignoreCase = true) ||
+        request.sectionId.startsWith("upcoming_schedule")
+    val isMovieSection = displayed.isNotEmpty() && displayed.all { it.type == MediaType.MOVIE }
+    val majorNetworkBrands = remember(state.availableStudioBrands, isTvSection) {
+        if (!isTvSection) emptyList()
+        else state.availableStudioBrands
+            .filter { it.isMajorUsNetworkBrand() }
+            .distinctBy { it.normalizedNetworkKey() }
+            .sortedWith(
+                compareBy<MediaCompany> { majorUsNetworkOrder[it.normalizedNetworkKey()] ?: Int.MAX_VALUE }
+                    .thenBy { it.name },
+            )
+    }
+    LaunchedEffect(request.sectionId, majorNetworkBrands, state.filterStudioIds) {
+        val visibleIds = majorNetworkBrands.map { it.id }.toSet()
+        if (state.filterStudioIds.any { it !in visibleIds }) {
+            viewModel.clearStudios()
+        }
+    }
+    val locallyFiltered = remember(displayed, ratingBucket, ratingSource, seeAllSearchQuery, selectedMoodId) {
+        val explicitFiltered = displayed
+            .filter { item -> item.matchesRatingFilter(ratingBucket.threshold, ratingSource) }
+            .filter { item -> item.matchesSeeAllQuery(seeAllSearchQuery) }
+        explicitFiltered.applyMoodFilter(selectedMoodId)
+    }
+    val displayTotalCount = when {
+        seeAllSearchQuery.isBlank() &&
+            ratingBucket == RatingBucket.ANY &&
+            state.filterGenreIds.isEmpty() &&
+            state.filterStudioIds.isEmpty() &&
+            selectedMoodId == "all" &&
+            state.totalResults > locallyFiltered.size -> state.totalResults
+        state.hasMore -> locallyFiltered.size
+        else -> locallyFiltered.size
+    }
+    val savedSnapshot = remember(request.sectionId) { SeeAllDesktopStateHolder.get(request.sectionId) }
+    var selectedIndex by remember(request.sectionId) { mutableStateOf(savedSnapshot.selectedIndex) }
+    val safeIndex = selectedIndex.coerceIn(0, (locallyFiltered.size - 1).coerceAtLeast(0))
+    val baseSelected = locallyFiltered.getOrNull(safeIndex)
 
-    // Cache TMDB-fetched detail per item id. The list item's ratings (enricher updates them
-    // asynchronously) is the source of truth; we merge detail's cast/director/genres/logo on top.
+    // Cache TMDB-fetched detail per item id. The hydrated detail fills metadata gaps,
+    // including ratings, while list-level enrichment remains free to replace them later.
     val detailCache = remember(request.sectionId) { mutableStateMapOf<String, MediaItem>() }
     LaunchedEffect(baseSelected?.id, baseSelected?.tmdbId) {
         val base = baseSelected ?: return@LaunchedEffect
@@ -160,27 +368,58 @@ fun V2SeeAllPage(
             backdropUrl = base.backdropUrl ?: detail.backdropUrl,
             runtime = base.runtime ?: detail.runtime,
             tagline = base.tagline ?: detail.tagline,
-            // ratings intentionally kept from base so live enrichment updates are visible.
+            rating = base.rating ?: detail.rating,
+            ratings = base.ratings ?: detail.ratings,
         )
     }
 
-    var yearBucket by remember { mutableStateOf(YearBucket.ANY) }
-    var ratingBucket by remember { mutableStateOf(RatingBucket.ANY) }
-    val locallyFiltered = remember(displayed, yearBucket, ratingBucket) {
-        displayed
-            .filter { yearBucket.range?.let { r -> it.year != null && it.year in r } ?: true }
-            .filter { (it.rating ?: 0.0) >= ratingBucket.min }
-    }
-
-    val gridState = rememberLazyGridState()
-    val nearEnd by remember {
-        derivedStateOf {
-            val last = gridState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
-            last >= (locallyFiltered.size - 8)
+    val gridState = rememberLazyGridState(
+        initialFirstVisibleItemIndex = savedSnapshot.firstVisibleItemIndex,
+        initialFirstVisibleItemScrollOffset = savedSnapshot.firstVisibleItemScrollOffset,
+    )
+    val latestSelectedIndex by rememberUpdatedState(selectedIndex)
+    DisposableEffect(request.sectionId) {
+        onDispose {
+            SeeAllDesktopStateHolder.put(
+                request.sectionId,
+                SeeAllScrollSnapshot(
+                    selectedIndex = latestSelectedIndex,
+                    firstVisibleItemIndex = gridState.firstVisibleItemIndex,
+                    firstVisibleItemScrollOffset = gridState.firstVisibleItemScrollOffset,
+                ),
+            )
         }
     }
-    LaunchedEffect(nearEnd, state.hasMore, state.isLoading) {
-        if (nearEnd && state.hasMore && !state.isLoading && locallyFiltered.size >= 10) {
+    val ratingSourceContributes = ratingBucket != RatingBucket.ANY &&
+        ratingSource != DiscoveryRatingSource.AnyRating
+    val hasActiveLocalFilter = seeAllSearchQuery.isNotBlank() ||
+        ratingBucket != RatingBucket.ANY ||
+        state.filterGenreIds.isNotEmpty() ||
+        state.filterStudioIds.isNotEmpty() ||
+        selectedMoodId != "all"
+    val nearEnd by remember(locallyFiltered.size, hasActiveLocalFilter) {
+        derivedStateOf {
+            if (locallyFiltered.isEmpty()) {
+                hasActiveLocalFilter
+            } else {
+                val last = gridState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1
+                last >= (locallyFiltered.size - 8)
+            }
+        }
+    }
+    LaunchedEffect(nearEnd, state.hasMore, state.isLoading, hasActiveLocalFilter, state.page) {
+        val canProbeMoreFilteredPages = hasActiveLocalFilter && state.page <= 50
+        if (nearEnd && state.hasMore && !state.isLoading && (locallyFiltered.isNotEmpty() || canProbeMoreFilteredPages)) {
+            viewModel.loadMore()
+        }
+    }
+    LaunchedEffect(hasActiveLocalFilter, locallyFiltered.size, state.hasMore, state.isLoading, state.page) {
+        if (hasActiveLocalFilter &&
+            locallyFiltered.size < 60 &&
+            state.hasMore &&
+            !state.isLoading &&
+            state.page <= 50
+        ) {
             viewModel.loadMore()
         }
     }
@@ -198,7 +437,41 @@ fun V2SeeAllPage(
     val focusRequester = remember { FocusRequester() }
     LaunchedEffect(request.sectionId) { runCatching { focusRequester.requestFocus() } }
 
-    var sortMenuExpanded by remember { mutableStateOf(false) }
+    var filtersExpanded by remember(request.sectionId) { mutableStateOf(true) }
+    val browseMode by remember {
+        derivedStateOf { gridState.firstVisibleItemIndex > columns }
+    }
+    LaunchedEffect(browseMode) {
+        if (browseMode) filtersExpanded = false
+    }
+    val activeFilterCount = listOf(
+        seeAllSearchQuery.isNotBlank(),
+        ratingBucket != RatingBucket.ANY,
+        ratingSourceContributes,
+        state.filterGenreIds.isNotEmpty(),
+        state.filterStudioIds.isNotEmpty(),
+        selectedMoodId != "all",
+    ).count { it }
+    val scope = rememberCoroutineScope()
+    val browsePosterStyle = remember {
+        CardStyle(
+            hover = CardHoverPrefs(
+                enabled = true,
+                scalePercent = 103,
+                elevationOnHover = true,
+                borderOnHover = true,
+            ),
+        )
+    }
+    val fastScrollAnchors = remember(locallyFiltered, state.sortMode, ratingBucket, state.hasMore, displayTotalCount) {
+        fastScrollAnchorsFor(
+            items = locallyFiltered,
+            sortMode = state.sortMode,
+            ratingBucket = ratingBucket,
+            hasMore = state.hasMore,
+            totalResults = displayTotalCount,
+        )
+    }
 
     Box(
         Modifier
@@ -224,6 +497,7 @@ fun V2SeeAllPage(
                 }
             },
     ) {
+        SeeAllLiquidBackdrop(enrichedSelected)
         Column(Modifier.fillMaxSize()) {
             // Header - leave space on the right so sort button doesn't collide with user badge.
             Row(
@@ -252,86 +526,133 @@ fun V2SeeAllPage(
                 )
                 Spacer(Modifier.width(6.dp))
                 Text(
-                    "${locallyFiltered.size}${if (state.hasMore) "+" else ""} items",
+                    "${formatCount(displayTotalCount)}${if (state.hasMore && displayTotalCount == locallyFiltered.size) "+" else ""} items",
                     style = MaterialTheme.typography.bodyMedium,
                     color = colors.textMuted,
                 )
                 Spacer(Modifier.weight(1f))
-                Box {
-                    val label = sortOptions.firstOrNull { it.first == state.sortMode }?.second ?: "Default"
-                    Surface(
-                        modifier = Modifier.clickable(
-                            interactionSource = remember { MutableInteractionSource() },
-                            indication = null,
-                            onClick = { sortMenuExpanded = true },
-                        ),
-                        color = colors.fieldSurface.copy(alpha = 0.55f),
-                        shape = RoundedCornerShape(8.dp),
-                    ) {
-                        Row(
-                            Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        ) {
-                            Icon(Icons.AutoMirrored.Filled.Sort, null, tint = colors.textSecondary)
-                            Text("Sort: $label", style = MaterialTheme.typography.labelLarge, color = colors.textPrimary)
-                        }
-                    }
-                    TorveDropdownScaffold(
-                        expanded = sortMenuExpanded,
-                        onDismissRequest = { sortMenuExpanded = false },
-                        items = sortOptions.map { (mode, lbl) ->
-                            lbl to { sortMenuExpanded = false; viewModel.setSortMode(mode) }
-                        },
-                    )
-                }
             }
 
             Column(
                 Modifier.fillMaxWidth().padding(start = 72.dp, end = 28.dp, bottom = 10.dp),
-                verticalArrangement = Arrangement.spacedBy(6.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-                Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    YearBucket.entries.forEach { yf ->
-                        TorveFilterChip(yf.label, yearBucket == yf, onClick = { yearBucket = yf })
-                    }
-                }
-                Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    RatingBucket.entries.forEach { rf ->
-                        TorveFilterChip(rf.label, ratingBucket == rf, onClick = { ratingBucket = rf })
-                    }
-                }
-                val availableGenres = state.availableGenres
-                if (availableGenres.isNotEmpty()) {
-                    Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        TorveFilterChip(
-                            "All genres",
-                            state.filterGenreIds.isEmpty(),
-                            onClick = { viewModel.clearFilters() },
-                        )
-                        availableGenres.take(20).forEach { (id, name) ->
-                            TorveFilterChip(name, id in state.filterGenreIds, onClick = { viewModel.toggleGenre(id) })
-                        }
-                    }
-                }
-            }
-
-            Row(Modifier.fillMaxSize()) {
-                // Left: info panel with hero banner
-                Box(
-                    Modifier
-                        .fillMaxHeight()
-                        .width(420.dp)
-                        .padding(start = 72.dp, end = 18.dp, bottom = 24.dp),
-                ) {
-                    InfoPanel(
-                        item = enrichedSelected,
-                        onOpenDetail = onOpenDetail,
-                        onOpenPerson = onOpenPerson,
+                val config = when {
+                    isTvSection -> tvDiscoveryFilterConfig(
+                        providerAvailable = false,
+                        networkAvailable = majorNetworkBrands.isNotEmpty(),
+                        aiAvailable = false,
+                        geminiReadyAvailable = false,
+                        showYear = false,
+                        showStatus = false,
+                        showRuntime = false,
+                        showRating = true,
+                        showLanguage = false,
+                    )
+                    isMovieSection -> movieDiscoveryFilterConfig(
+                        aiAvailable = false,
+                        geminiReadyAvailable = false,
+                        showYear = false,
+                        showRuntime = false,
+                        showRating = true,
+                        showLanguage = false,
+                    )
+                    else -> mixedDiscoveryFilterConfig(
+                        aiAvailable = false,
+                        geminiReadyAvailable = false,
+                        showYear = false,
                     )
                 }
+                val ratingSourceOptions = listOf(
+                    DiscoveryRatingSource.AnyRating,
+                    DiscoveryRatingSource.TMDB,
+                    DiscoveryRatingSource.IMDB,
+                    DiscoveryRatingSource.TRAKT,
+                    DiscoveryRatingSource.ROTTEN_TOMATOES,
+                    DiscoveryRatingSource.METACRITIC,
+                )
+                val dropdowns = listOf(
+                    DiscoveryDropdownUiModel(
+                        key = DiscoveryDropdownKey.Rating,
+                        label = "Rating",
+                        value = ratingThresholdLabel(ratingBucket.threshold),
+                        options = RatingBucket.entries.map { bucket ->
+                            DiscoveryDropdownOption(ratingThresholdLabel(bucket.threshold)) {
+                                ratingBucket = bucket
+                            }
+                        },
+                    ),
+                    DiscoveryDropdownUiModel(
+                        key = DiscoveryDropdownKey.RatingSource,
+                        label = "Rating source",
+                        value = ratingSource.shortLabel,
+                        options = ratingSourceOptions.map { source ->
+                            DiscoveryDropdownOption(source.label) {
+                                ratingSource = source
+                            }
+                        },
+                    ),
+                    DiscoveryDropdownUiModel(
+                        key = DiscoveryDropdownKey.Sort,
+                        label = "Sort",
+                        value = sortOptions.firstOrNull { it.first == state.sortMode }?.second ?: "Default",
+                        options = sortOptions.map { (mode, label) ->
+                            DiscoveryDropdownOption(label) { viewModel.setSortMode(mode) }
+                        },
+                    ),
+                )
+                val genreChips = listOf(GenreFilterUiModel("all", "All genres")) +
+                    state.availableGenres.take(20).map { (id, name) -> GenreFilterUiModel(id.toString(), name) }
+                val networkChips = listOf(BrandFilterUiModel("all", "All networks")) +
+                    majorNetworkBrands.map { studio ->
+                        BrandFilterUiModel(studio.id.toString(), studio.name, studio.logoUrl)
+                    }
+                val moodChips = if (isTvSection) seeAllTvMoodChips else seeAllMovieMoodChips
+                DiscoveryControls(
+                    config = config,
+                    query = seeAllSearchQuery,
+                    onQueryChange = { seeAllSearchQuery = it },
+                    filtersExpanded = filtersExpanded,
+                    onFiltersClick = { filtersExpanded = !filtersExpanded },
+                    activeFilterCount = activeFilterCount,
+                    canReset = seeAllSearchQuery.isNotBlank() ||
+                        ratingBucket != RatingBucket.ANY ||
+                        ratingSource != DiscoveryRatingSource.AnyRating ||
+                        state.filterGenreIds.isNotEmpty() ||
+                        state.filterStudioIds.isNotEmpty() ||
+                        selectedMoodId != "all",
+                    onResetClick = {
+                        seeAllSearchQuery = ""
+                        ratingBucket = RatingBucket.ANY
+                        ratingSource = DiscoveryRatingSource.AnyRating
+                        selectedMoodId = "all"
+                        viewModel.clearFilters()
+                    },
+                    dropdowns = dropdowns,
+                    networks = if (isTvSection) networkChips else emptyList(),
+                    genres = genreChips,
+                    moods = moodChips,
+                    selectedNetworkIds = setOf(
+                        if (state.filterStudioIds.isEmpty()) "all" else "",
+                    ) + state.filterStudioIds.map { it.toString() },
+                    selectedGenreIds = setOf(
+                        if (state.filterGenreIds.isEmpty()) "all" else "",
+                    ) + state.filterGenreIds.map { it.toString() },
+                    selectedMoodIds = setOf(selectedMoodId),
+                    onNetworkClick = { network ->
+                        if (network.id == "all") viewModel.clearStudios()
+                        else network.id.toIntOrNull()?.let { viewModel.toggleStudio(it) }
+                    },
+                    onGenreClick = { genre ->
+                        if (genre.id == "all") viewModel.clearGenres()
+                        else genre.id.toIntOrNull()?.let { viewModel.toggleGenre(it) }
+                    },
+                    onMoodClick = { mood -> selectedMoodId = nextSelectedMoodId(selectedMoodId, mood.id) },
+                )
+            }
 
-                Box(Modifier.weight(1f).fillMaxHeight()) {
+            Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(18.dp)) {
+                Box(Modifier.weight(1f).fillMaxHeight().padding(start = 72.dp, bottom = 24.dp)) {
                     if (locallyFiltered.isEmpty() && !state.isLoading) {
                         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                             Text(ds("No items match your filters."), style = MaterialTheme.typography.bodyLarge, color = colors.textSecondary)
@@ -348,25 +669,36 @@ fun V2SeeAllPage(
                             LazyVerticalGrid(
                                 state = gridState,
                                 columns = GridCells.Adaptive(minSize = minCell.dp),
-                                modifier = Modifier.fillMaxSize().padding(end = 24.dp),
+                                modifier = Modifier.fillMaxSize().padding(end = 76.dp),
                                 contentPadding = PaddingValues(bottom = 40.dp, top = 4.dp),
                                 horizontalArrangement = Arrangement.spacedBy(14.dp),
                                 verticalArrangement = Arrangement.spacedBy(20.dp),
                             ) {
-                                items(locallyFiltered, key = { it.id + ":" + it.type.name }) { item ->
-                                    val idx = locallyFiltered.indexOf(item)
+                                itemsIndexed(locallyFiltered, key = { _, item -> item.id + ":" + item.type.name }) { idx, item ->
                                     val isSelected = idx == safeIndex
                                     Box(
-                                        Modifier.then(
-                                            if (isSelected) Modifier.background(colors.accent.copy(alpha = 0.15f), RoundedCornerShape(10.dp)).padding(3.dp)
-                                            else Modifier,
-                                        ),
+                                        Modifier
+                                            .padding(3.dp)
+                                            .graphicsLayer {
+                                                scaleX = if (isSelected) 1.025f else 1f
+                                                scaleY = if (isSelected) 1.025f else 1f
+                                            }
+                                            .background(
+                                                if (isSelected) colors.accent.copy(alpha = 0.15f) else Color.Transparent,
+                                                RoundedCornerShape(12.dp),
+                                            )
+                                            .padding(3.dp),
                                     ) {
                                         V2PosterCard(
                                             title = item.title,
                                             imageUrl = item.posterUrl,
                                             modifier = Modifier.width(160.dp),
-                                            year = item.year?.toString(),
+                                            cardStyle = browsePosterStyle,
+                                            year = if (item.id.startsWith("trakt-calendar:")) {
+                                                upcomingScheduleDateTime(item.releaseDate)
+                                            } else {
+                                                item.year?.toString()
+                                            },
                                             rating = item.rating?.let { String.format("%.1f", it) },
                                             ratings = item.ratings,
                                             backdropUrl = item.backdropUrl,
@@ -376,6 +708,26 @@ fun V2SeeAllPage(
                                     }
                                 }
                             }
+                            if (fastScrollAnchors.isNotEmpty() && (displayTotalCount > 500 || state.hasMore)) {
+                                FastScrollRail(
+                                    anchors = fastScrollAnchors,
+                                    positionLabel = "${formatCount((safeIndex + 1).coerceAtMost(displayTotalCount))} / ${formatCount(displayTotalCount)}",
+                                    onJump = { index ->
+                                        selectedIndex = index.coerceIn(0, (locallyFiltered.size - 1).coerceAtLeast(0))
+                                        scope.launch { gridState.animateScrollToItem(selectedIndex) }
+                                    },
+                                    modifier = Modifier
+                                        .align(Alignment.CenterEnd)
+                                        .padding(end = 18.dp),
+                                )
+                            }
+                            VerticalScrollbar(
+                                adapter = rememberScrollbarAdapter(gridState),
+                                modifier = Modifier
+                                    .align(Alignment.CenterEnd)
+                                    .fillMaxHeight()
+                                    .padding(end = 4.dp),
+                            )
                         }
                     }
                     if (state.isLoading && locallyFiltered.isEmpty()) {
@@ -391,14 +743,177 @@ fun V2SeeAllPage(
                         }
                     }
                 }
+                Box(
+                    Modifier
+                        .fillMaxHeight()
+                        .width(420.dp)
+                        .padding(end = 28.dp, bottom = 24.dp),
+                ) {
+                    InfoPanel(
+                        item = enrichedSelected,
+                        onPlay = onPlay,
+                        onOpenDetail = onOpenDetail,
+                        onOpenPerson = onOpenPerson,
+                    )
+                }
             }
         }
     }
 }
 
+private data class FastScrollAnchor(
+    val label: String,
+    val index: Int,
+)
+
+private fun formatCount(value: Int): String =
+    String.format(Locale.US, "%,d", value)
+
+@Composable
+private fun SeeAllLiquidBackdrop(item: MediaItem?) {
+    val colors = TorveDesktopThemeTokens.colors
+    val backdropUrl = item
+        ?.takeUnless { it.isContentPlaceholder || it.isStubDetail }
+        ?.let { it.backdropUrl ?: it.posterUrl }
+    val backdrop = rememberCachedBitmap(backdropUrl)
+    Box(Modifier.fillMaxSize().background(colors.shellBackground)) {
+        Crossfade(backdrop, label = "seeAllBackdrop") { bmp ->
+            if (bmp != null) {
+                Image(
+                    bitmap = bmp,
+                    contentDescription = null,
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Crop,
+                )
+            }
+        }
+        Box(
+            Modifier.fillMaxSize().background(
+                Brush.radialGradient(
+                    colors = listOf(
+                        colors.accent.copy(alpha = 0.16f),
+                        Color(0xFF0B1220).copy(alpha = 0.76f),
+                        colors.shellBackground.copy(alpha = 0.98f),
+                    ),
+                    radius = 1300f,
+                ),
+            ),
+        )
+        Box(
+            Modifier.fillMaxSize().background(
+                Brush.verticalGradient(
+                    0.0f to Color.Black.copy(alpha = 0.38f),
+                    0.34f to Color.Black.copy(alpha = 0.50f),
+                    1.0f to colors.shellBackground.copy(alpha = 0.98f),
+                ),
+            ),
+        )
+    }
+}
+
+@Composable
+private fun FastScrollRail(
+    anchors: List<FastScrollAnchor>,
+    positionLabel: String,
+    onJump: (Int) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val colors = TorveDesktopThemeTokens.colors
+    Column(
+        modifier
+            .clip(RoundedCornerShape(999.dp))
+            .background(Color.Black.copy(alpha = 0.34f))
+            .border(1.dp, Color.White.copy(alpha = 0.10f), RoundedCornerShape(999.dp))
+            .padding(horizontal = 6.dp, vertical = 10.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(5.dp),
+    ) {
+        Text(
+            positionLabel,
+            color = Color.White.copy(alpha = 0.62f),
+            style = MaterialTheme.typography.labelSmall,
+            maxLines = 1,
+        )
+        anchors.take(12).forEach { anchor ->
+            Surface(
+                modifier = Modifier
+                    .width(54.dp)
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null,
+                        onClick = { onJump(anchor.index) },
+                    ),
+                color = colors.fieldSurface.copy(alpha = 0.42f),
+                shape = RoundedCornerShape(999.dp),
+                border = androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = 0.09f)),
+            ) {
+                Text(
+                    anchor.label,
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp),
+                    color = Color.White.copy(alpha = 0.82f),
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    textAlign = TextAlign.Center,
+                )
+            }
+        }
+    }
+}
+
+private fun fastScrollAnchorsFor(
+    items: List<MediaItem>,
+    sortMode: SeeAllSortMode,
+    ratingBucket: RatingBucket,
+    hasMore: Boolean = false,
+    totalResults: Int = items.size,
+): List<FastScrollAnchor> {
+    if (items.isEmpty()) return emptyList()
+    if (items.size < 20 && !hasMore && totalResults < 500) return emptyList()
+    val anchors = linkedMapOf<String, Int>()
+    fun add(label: String, index: Int) {
+        anchors.putIfAbsent(label, index.coerceIn(0, items.lastIndex))
+    }
+
+    when (sortMode) {
+        SeeAllSortMode.YEAR_DESC, SeeAllSortMode.YEAR_ASC -> {
+            val yearAnchors = listOf(2026, 2025, 2024, 2020, 2010, 2000)
+            yearAnchors.forEach { year ->
+                val idx = items.indexOfFirst { (it.year ?: 0) <= year }
+                if (idx >= 0) add(if (year % 10 == 0) "${year}s" else year.toString(), idx)
+            }
+            val older = items.indexOfFirst { (it.year ?: Int.MAX_VALUE) < 2000 }
+            if (older >= 0) add("Older", older)
+        }
+        SeeAllSortMode.IMDB_DESC, SeeAllSortMode.TMDB_DESC -> {
+            listOf(9f, 8f, 7f, 6f).forEach { threshold ->
+                val idx = items.indexOfFirst { (it.rating?.toFloat() ?: 0f) <= threshold }
+                if (idx >= 0) add("${threshold.toInt()}+", idx)
+            }
+        }
+        SeeAllSortMode.A_Z, SeeAllSortMode.Z_A -> {
+            ('A'..'Z').forEach { letter ->
+                val idx = items.indexOfFirst { it.title.firstOrNull()?.uppercaseChar() == letter }
+                if (idx >= 0) add(letter.toString(), idx)
+            }
+        }
+        else -> {
+            add("Top", 0)
+            add("10%", (items.lastIndex * 0.10f).toInt())
+            add("25%", (items.lastIndex * 0.25f).toInt())
+            add("50%", (items.lastIndex * 0.50f).toInt())
+            add("Later", (items.lastIndex * 0.75f).toInt())
+        }
+    }
+    if (anchors.isEmpty() && ratingBucket != RatingBucket.ANY) add("Top", 0)
+    return anchors.map { (label, index) -> FastScrollAnchor(label, index) }
+}
+
 @Composable
 private fun InfoPanel(
     item: MediaItem?,
+    onPlay: (MediaItem) -> Unit,
     onOpenDetail: (MediaItem) -> Unit,
     onOpenPerson: (Int) -> Unit,
 ) {
@@ -559,26 +1074,53 @@ private fun InfoPanel(
                 }
             }
 
-            Surface(
-                modifier = Modifier.fillMaxWidth().clickable(
-                    interactionSource = remember { MutableInteractionSource() },
-                    indication = null,
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                SeeAllPanelAction(
+                    text = ds("Play"),
+                    primary = true,
+                    modifier = Modifier.weight(1f),
+                    onClick = { onPlay(item) },
+                )
+                SeeAllPanelAction(
+                    text = if (item.type == MediaType.SERIES) "Episodes" else ds("Details"),
+                    modifier = Modifier.weight(1f),
                     onClick = { onOpenDetail(item) },
-                ),
-                color = colors.accent,
-                shape = RoundedCornerShape(10.dp),
-            ) {
-                Text(
-                    text = ds("Open details"),
-                    modifier = Modifier.fillMaxWidth().padding(vertical = 10.dp),
-                    style = MaterialTheme.typography.labelLarge,
-                    fontWeight = FontWeight.SemiBold,
-                    color = Color(0xFF0A0B14),
-                    textAlign = TextAlign.Center,
                 )
             }
             Spacer(Modifier.height(8.dp))
         }
+    }
+}
+
+@Composable
+private fun SeeAllPanelAction(
+    text: String,
+    modifier: Modifier = Modifier,
+    primary: Boolean = false,
+    onClick: () -> Unit,
+) {
+    val colors = TorveDesktopThemeTokens.colors
+    Surface(
+        modifier = modifier.clickable(
+            interactionSource = remember { MutableInteractionSource() },
+            indication = null,
+            onClick = onClick,
+        ),
+        color = if (primary) colors.accent else colors.fieldSurface.copy(alpha = 0.62f),
+        shape = RoundedCornerShape(10.dp),
+        border = androidx.compose.foundation.BorderStroke(
+            1.dp,
+            if (primary) colors.accent.copy(alpha = 0.85f) else Color.White.copy(alpha = 0.12f),
+        ),
+    ) {
+        Text(
+            text = text,
+            modifier = Modifier.fillMaxWidth().padding(vertical = 10.dp),
+            style = MaterialTheme.typography.labelLarge,
+            fontWeight = FontWeight.SemiBold,
+            color = if (primary) Color(0xFF0A0B14) else colors.textPrimary,
+            textAlign = TextAlign.Center,
+        )
     }
 }
 

@@ -3,6 +3,7 @@ package com.torve.desktop.ui.v2.person
 import androidx.compose.animation.animateColorAsState
 import com.torve.desktop.ui.l10n.ds
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.VerticalScrollbar
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -12,6 +13,7 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -19,6 +21,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.rememberScrollbarAdapter
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -100,6 +103,7 @@ fun V2PersonPage(
 
         BoxWithConstraints(Modifier.fillMaxSize()) {
             val vpH = maxHeight
+            val scrollState = rememberScrollState()
 
             Box(Modifier.fillMaxSize()) {
                 Box(Modifier.align(Alignment.TopStart).zIndex(2f).padding(start = 72.dp, top = 18.dp)) {
@@ -124,7 +128,7 @@ fun V2PersonPage(
                 )
 
                 Column(
-                    Modifier.fillMaxSize().verticalScroll(rememberScrollState()),
+                    Modifier.fillMaxSize().verticalScroll(scrollState),
                 ) {
                     // ── Cinematic hero area ──
                     Box(Modifier.fillMaxWidth().height(vpH * 0.52f)) {
@@ -233,6 +237,13 @@ fun V2PersonPage(
                         Spacer(Modifier.height(32.dp))
                     }
                 }
+                VerticalScrollbar(
+                    adapter = rememberScrollbarAdapter(scrollState),
+                    modifier = Modifier
+                        .align(Alignment.CenterEnd)
+                        .fillMaxHeight()
+                        .padding(end = 4.dp),
+                )
             }
         }
     }

@@ -17,11 +17,13 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.rememberScrollbarAdapter
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
@@ -57,6 +59,8 @@ import com.torve.desktop.ui.theme.TorveDesktopThemeTokens
 import com.torve.domain.model.Channel
 import com.torve.domain.model.EnrichedChannel
 import com.torve.domain.model.EpgProgramme
+import com.torve.domain.model.LiveTvEpgResolver
+import com.torve.domain.model.LiveTvChannelLogoResolver
 import com.torve.domain.model.canonicalEpgChannelKey
 import com.torve.presentation.channels.GuideSortMode
 import kotlinx.coroutines.launch
@@ -141,7 +145,7 @@ fun V2EpgGrid(
         Column(modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
             TorvePlaceholderState(
                 title = ds("Guide failed to load"),
-                description = error,
+                description = "Unable to load guide data right now.",
             )
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 TorveGhostButton(text = ds("Retry"), onClick = onRetry)
@@ -187,8 +191,7 @@ fun V2EpgGrid(
                         "selected for the Guide yet. Open Channels, browse a category, and the " +
                         "matching channels will appear here automatically."
                 } else {
-                    "No EPG data is available for the selected playlist. Configure an EPG URL " +
-                        "in Settings > Playlists or wait for the first sync to complete."
+                    "Guide data is still loading or this playlist does not have matched EPG entries yet."
                 },
                 emoji = if (hasEpg) "📺" else "📡",
             )
@@ -278,7 +281,13 @@ fun V2EpgGrid(
                     items = displayChannels,
                     key = { index, ch -> "${epgRowKey(ch)}#$index" },
                 ) { _, enriched ->
-                    val programmes = programmesFor(playlistId, enriched, guideProgrammes)
+                    val programmes = programmesFor(
+                        playlistId = playlistId,
+                        enriched = enriched,
+                        guideProgrammes = guideProgrammes,
+                        gridStartMs = gridStartMs,
+                        gridEndMs = gridEndMs,
+                    )
                     GuideRow(
                         channel = enriched.channel,
                         currentProgramme = enriched.currentProgramme,
@@ -325,6 +334,18 @@ fun V2EpgGrid(
                 gridStartMs = gridStartMs,
                 gridEndMs = gridEndMs,
                 timeScrollPx = timeScroll.value,
+            )
+
+            PremiumVerticalScrollbar(
+                adapter = rememberScrollbarAdapter(listState),
+                modifier = Modifier.align(Alignment.CenterEnd),
+            )
+            PremiumHorizontalScrollbar(
+                adapter = rememberScrollbarAdapter(timeScroll),
+                modifier = Modifier
+                    .align(Alignment.BottomStart)
+                    .padding(start = ChannelColumnWidth, end = 10.dp)
+                    .fillMaxWidth(),
             )
 
             otherAiringsTitle?.let { title ->
@@ -379,15 +400,14 @@ private fun GuideControlsRow(
 
         Spacer(Modifier.width(4.dp))
 
-        TorveSearchField(
+        LiveTvSearchBar(
             value = searchQuery,
             onValueChange = onSearchQueryChange,
-            placeholder = ds("Search channels"),
-            modifier = Modifier.width(240.dp),
+            modifier = Modifier.width(260.dp),
         )
 
         Box {
-            TorveGhostButton(
+            LiveTvGlassButton(
                 text = when (sortMode) {
                     GuideSortMode.NUMBER -> ds("Sort: Number")
                     GuideSortMode.NAME -> ds("Sort: Name")
@@ -431,8 +451,8 @@ private fun GuideControlsRow(
                 strokeWidth = 2.dp,
             )
         }
-        TorveGhostButton(text = ds("Jump to Now"), onClick = onJumpToNow)
-        TorveGhostButton(text = ds("Refresh"), onClick = onRefresh, enabled = !isLoading)
+        LiveTvGlassButton(text = ds("Now"), onClick = onJumpToNow, contentDescription = "Jump to current time")
+        LiveTvGlassButton(text = ds("Refresh"), onClick = onRefresh, enabled = !isLoading)
     }
 }
 
@@ -547,6 +567,9 @@ private fun ChannelLabelCell(
     modifier: Modifier = Modifier,
 ) {
     val colors = TorveDesktopThemeTokens.colors
+    val logo = remember(channel.name, channel.tvgLogo) {
+        LiveTvChannelLogoResolver.resolveLogo(channel)
+    }
     Column(
         modifier = modifier
             .clip(RoundedCornerShape(6.dp))
@@ -555,7 +578,16 @@ private fun ChannelLabelCell(
             .padding(horizontal = 10.dp, vertical = 6.dp),
         verticalArrangement = Arrangement.Center,
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            LiveTvChannelLogo(
+                logo = logo,
+                channelName = channel.name,
+                modifier = Modifier.size(34.dp),
+                maxLogoWidth = 34.dp,
+                maxLogoHeight = 26.dp,
+            )
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             Text(
                 text = channel.name,
                 style = MaterialTheme.typography.bodyMedium,
@@ -580,6 +612,8 @@ private fun ChannelLabelCell(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
+        }
+            }
         }
     }
 }
@@ -849,7 +883,7 @@ private fun OtherAiringsSheet(
         // equality. Sorted by start time so the upcoming airings come first.
         val pid = playlistId ?: return@remember emptyList()
         guideChannels.flatMap { enriched ->
-            programmesFor(pid, enriched, guideProgrammes).asSequence()
+            LiveTvEpgResolver.resolveProgrammes(enriched.channel, pid, guideProgrammes).asSequence()
                 .filter { it.title.equals(title, ignoreCase = true) }
                 .map { enriched.channel to it }
                 .toList()
@@ -987,12 +1021,16 @@ private fun programmesFor(
     playlistId: String,
     enriched: EnrichedChannel,
     guideProgrammes: Map<String, List<EpgProgramme>>,
+    gridStartMs: Long,
+    gridEndMs: Long,
 ): List<EpgProgramme> {
-    val key = canonicalEpgChannelKey(
-        playlistId = playlistId,
+    return LiveTvEpgResolver.resolveProgrammesForRange(
         channel = enriched.channel,
-    ) ?: return emptyList()
-    return guideProgrammes[key].orEmpty()
+        playlistId = playlistId,
+        programmesByChannelKey = guideProgrammes,
+        rangeStartMs = gridStartMs,
+        rangeEndMs = gridEndMs,
+    )
 }
 
 private fun epgRowKey(enriched: EnrichedChannel): String {

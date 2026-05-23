@@ -15,6 +15,9 @@ import com.torve.presentation.providerhealth.ProviderHealthRefreshOnSettings
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import com.torve.presentation.providerhealth.AddonProbeTarget
 import com.torve.presentation.providerhealth.AddonProviderHealthChecker
@@ -140,6 +143,27 @@ class DesktopProviderHealthInit(
         )
 
         // ── Panda Usenet stack (state projection from PandaSetupVM) ──
+        observerScope.launch {
+            channelsViewModel.state
+                .map { state ->
+                    IptvHealthSignature(
+                        playlistCount = state.playlists.size,
+                        selectedPlaylistId = state.selectedPlaylistId,
+                        channelCount = state.channels.size,
+                        categoryChannelCount = state.categoryChannels.size,
+                        categoryCount = state.categories.size,
+                        groupedChannelCount = state.groupedChannels.values.sumOf { it.size },
+                        epgStateClass = state.epgState::class.simpleName.orEmpty(),
+                    )
+                }
+                .distinctUntilChanged()
+                .debounce(500L)
+                .collect {
+                    coordinator.runCheck("iptv:active")?.join()
+                    coordinator.runCheck("iptv:epg")?.join()
+                }
+        }
+
         coordinator.register(
             PandaUsenetProviderHealthChecker(stateSource = { pandaConfigStateStore.current }),
         )
@@ -174,4 +198,14 @@ class DesktopProviderHealthInit(
         DebridServiceType.PREMIUMIZE -> IntegrationSecretKey.DEBRID_API_KEY_PREMIUMIZE
         DebridServiceType.TORBOX -> IntegrationSecretKey.DEBRID_API_KEY_TORBOX
     }
+
+    private data class IptvHealthSignature(
+        val playlistCount: Int,
+        val selectedPlaylistId: String?,
+        val channelCount: Int,
+        val categoryChannelCount: Int,
+        val categoryCount: Int,
+        val groupedChannelCount: Int,
+        val epgStateClass: String,
+    )
 }

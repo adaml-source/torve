@@ -60,6 +60,8 @@ import com.torve.desktop.ui.v2.movies.V2CatalogFilterBar
 import com.torve.desktop.ui.v2.seeall.SeeAllRequest
 import com.torve.desktop.ui.v2.movies.rememberExtraRails
 import com.torve.desktop.ui.v2.movies.tvExtraRails
+import com.torve.domain.discovery.applyMoodFilter
+import com.torve.domain.discovery.matchesRatingFilter
 import com.torve.domain.model.MediaItem
 import com.torve.domain.repository.MetadataRepository
 import com.torve.presentation.catalog.CatalogViewModel
@@ -74,6 +76,7 @@ fun V2ShowsPage(
     onPlay: (MediaItem) -> Unit,
     onOpenDetail: (MediaItem) -> Unit,
     onSeeAll: (SeeAllRequest) -> Unit = {},
+    upcomingSchedule: List<MediaItem> = emptyList(),
     /** TV "Latest on Usenet" shelf - mirrors movies but groups
      *  per-episode NZBs under a single show poster via tmdbId. */
     nzbTvCatalogService: com.torve.desktop.adult.NzbTvCatalogService? = null,
@@ -96,8 +99,15 @@ fun V2ShowsPage(
     var aiLoading by remember { mutableStateOf(false) }
     var aiError by remember { mutableStateOf<String?>(null) }
     var aiItems by remember { mutableStateOf<List<MediaItem>>(emptyList()) }
+    var providerLogoUrls by remember { mutableStateOf<Map<Int, String>>(emptyMap()) }
+    var selectedMoodId by remember { mutableStateOf("all") }
 
     LaunchedEffect(Unit) { if (!state.shelvesLoaded) catalogViewModel.loadCatalog() }
+    LaunchedEffect(metadataRepository) {
+        providerLogoUrls = runCatching {
+            metadataRepository.getWatchProviderLogos(type = "tv", region = "US")
+        }.getOrDefault(emptyMap())
+    }
     LaunchedEffect(aiProviderConfigured) {
         if (!aiProviderConfigured) {
             aiMode = false
@@ -184,6 +194,7 @@ fun V2ShowsPage(
             val isFilteredView = state.selectedGenreId != null ||
                 state.filter.isActive ||
                 state.providerId != null ||
+                selectedMoodId != "all" ||
                 pageSearchQuery.isNotBlank() ||
                 aiMode
 
@@ -210,10 +221,29 @@ fun V2ShowsPage(
                         onAiQueryChange = { aiQuery = it },
                         onRunAiSearch = { runAiSearch(aiQuery) },
                         onOpenAiProviderSettings = onOpenAiProviderSettings,
+                        providerLogoUrls = providerLogoUrls,
+                        selectedMoodId = selectedMoodId,
+                        onMoodSelected = { selectedMoodId = it },
                     )
                     if (aiMode) {
+                        val filteredAiItems = remember(
+                            aiItems,
+                            selectedMoodId,
+                            state.selectedGenreId,
+                            state.filter.minRating,
+                            state.filter.ratingSource,
+                        ) {
+                            aiItems
+                                .filter { item ->
+                                    state.selectedGenreId == null ||
+                                        state.selectedGenreId in item.genreIds ||
+                                        item.genres.any { it.id == state.selectedGenreId }
+                                }
+                                .filter { item -> item.matchesRatingFilter(state.filter.minRating, state.filter.ratingSource) }
+                                .applyMoodFilter(selectedMoodId)
+                        }
                         V2CatalogAiResultsGrid(
-                            items = aiItems,
+                            items = filteredAiItems,
                             isLoading = aiLoading,
                             error = aiError,
                             onOpenDetail = onOpenDetail,
@@ -224,6 +254,7 @@ fun V2ShowsPage(
                             catalogViewModel = catalogViewModel,
                             onOpenDetail = onOpenDetail,
                             searchQuery = pageSearchQuery,
+                            selectedMoodId = selectedMoodId,
                             modifier = Modifier.weight(1f).fillMaxWidth(),
                         )
                     }
@@ -270,6 +301,9 @@ fun V2ShowsPage(
                     onAiQueryChange = { aiQuery = it },
                     onRunAiSearch = { runAiSearch(aiQuery) },
                     onOpenAiProviderSettings = onOpenAiProviderSettings,
+                    providerLogoUrls = providerLogoUrls,
+                    selectedMoodId = selectedMoodId,
+                    onMoodSelected = { selectedMoodId = it },
                 )
 
                 // Filtered path is handled above (separate Column without
@@ -283,6 +317,17 @@ fun V2ShowsPage(
                             com.torve.desktop.ui.v2.components.V2ShelfSkeleton(
                                 modifier = Modifier.padding(start = 72.dp),
                             )
+                        }
+                    }
+                    if (upcomingSchedule.isNotEmpty()) {
+                        V2Shelf(
+                            ds("Upcoming Schedule"),
+                            Modifier.padding(start = 72.dp),
+                            onSeeAll = { onSeeAll(SeeAllRequest("upcoming_schedule", "Upcoming Schedule", upcomingSchedule)) },
+                        ) {
+                            upcomingSchedule.take(20).forEach {
+                                V2PosterCard(it.title, it.posterUrl, Modifier.width(150.dp), upcomingScheduleDateTime(it.releaseDate), it.rating?.let { r -> String.format("%.1f", r) }, ratings = it.ratings, backdropUrl = it.backdropUrl, overview = it.overview) { onOpenDetail(it) }
+                            }
                         }
                     }
                     if (state.trendingItems.size > 1) {
@@ -344,27 +389,59 @@ fun V2ShowsPage(
     }
 }
 
+private fun upcomingScheduleDateTime(releaseDate: String?): String? {
+    val raw = releaseDate?.trim()?.takeIf { it.isNotEmpty() } ?: return null
+    return runCatching {
+        java.time.ZonedDateTime.parse(raw)
+            .withZoneSameInstant(java.time.ZoneId.systemDefault())
+            .format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm"))
+    }.getOrElse {
+        raw.take(16)
+            .replace('T', ' ')
+            .removeSuffix("Z")
+            .takeIf { it.isNotBlank() }
+    }
+}
+
 @Composable
 private fun FilteredShowsGrid(
     catalogViewModel: CatalogViewModel,
     onOpenDetail: (MediaItem) -> Unit,
     searchQuery: String = "",
+    selectedMoodId: String = "all",
     modifier: Modifier = Modifier,
 ) {
     val state by catalogViewModel.state.collectAsState()
     val colors = TorveDesktopThemeTokens.colors
     val gridState = rememberLazyGridState()
-    val visibleItems = remember(state.items, searchQuery) {
+    val visibleItems = remember(state.items, searchQuery, selectedMoodId, state.filter.minRating, state.filter.ratingSource) {
         val needle = searchQuery.trim().lowercase()
-        if (needle.isEmpty()) state.items
-        else state.items.filter { it.title.lowercase().contains(needle) }
+        val explicitFiltered = (if (needle.isEmpty()) state.items
+        else state.items.filter { it.title.lowercase().contains(needle) })
+            .filter { item -> item.matchesRatingFilter(state.filter.minRating, state.filter.ratingSource) }
+        explicitFiltered.applyMoodFilter(selectedMoodId)
     }
 
-    LaunchedEffect(gridState, state.items.size, state.hasMore) {
+    LaunchedEffect(selectedMoodId, visibleItems.size, state.hasMore, state.isLoading, state.isLoadingMore, state.currentPage) {
+        if (selectedMoodId != "all" &&
+            visibleItems.size < 30 &&
+            state.hasMore &&
+            !state.isLoading &&
+            !state.isLoadingMore &&
+            state.currentPage < 5
+        ) {
+            catalogViewModel.loadMore()
+        }
+    }
+    LaunchedEffect(gridState, state.items.size, state.hasMore, visibleItems.size) {
         androidx.compose.runtime.snapshotFlow {
             gridState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1
         }.collect { lastVisible ->
-            if (state.hasMore && !state.isLoadingMore && lastVisible >= state.items.size - 8) {
+            if (visibleItems.isNotEmpty() &&
+                state.hasMore &&
+                !state.isLoadingMore &&
+                lastVisible >= visibleItems.size - 8
+            ) {
                 catalogViewModel.loadMore()
             }
         }

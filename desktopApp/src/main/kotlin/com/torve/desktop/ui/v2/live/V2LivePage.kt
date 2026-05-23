@@ -1,21 +1,39 @@
 package com.torve.desktop.ui.v2.live
 
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollbarAdapter
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsFocusedAsState
+import androidx.compose.foundation.interaction.collectIsHoveredAsState
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -24,8 +42,13 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.focusable
+import androidx.compose.ui.draw.scale
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.input.key.Key
@@ -33,7 +56,10 @@ import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.runtime.rememberCoroutineScope
 import kotlinx.coroutines.delay
@@ -44,14 +70,11 @@ import java.time.format.DateTimeFormatter
 import com.torve.desktop.playback.DesktopPlayerController
 import com.torve.desktop.ui.components.TorveBadge
 import com.torve.desktop.ui.components.TorveBadgeTone
-import com.torve.desktop.ui.components.TorveFilterChip
 import com.torve.desktop.ui.components.TorveGhostButton
 import com.torve.desktop.ui.components.TorveListRow
-import com.torve.desktop.ui.components.TorvePageHeader
 import com.torve.desktop.ui.components.TorvePlaceholderState
 import com.torve.desktop.ui.components.TorvePrimaryButton
 import com.torve.desktop.ui.components.TorveSectionCard
-import com.torve.desktop.ui.components.TorveSearchField
 import com.torve.desktop.ui.l10n.ds
 import com.torve.desktop.ui.theme.TorveDesktopThemeTokens
 import com.torve.desktop.ui.v2.recording.recordingFailureNotification
@@ -59,11 +82,13 @@ import com.torve.desktop.ui.v2.recording.recordingFolderValidationError
 import com.torve.domain.model.Channel
 import com.torve.domain.model.ChannelCategory
 import com.torve.domain.model.EnrichedChannel
+import com.torve.domain.model.LiveTvChannelLogoResolver
 import com.torve.domain.model.channelIdentityCandidates
 import com.torve.presentation.channels.ChannelsSubTab
 import com.torve.presentation.channels.ChannelsUiState
 import com.torve.presentation.channels.ChannelsViewModel
 import com.torve.presentation.channels.EpgState
+import com.torve.presentation.channels.LiveTvGuideSourceResolver
 
 enum class DesktopLiveMode { CHANNELS, GUIDE, FAVORITES }
 
@@ -79,6 +104,9 @@ fun V2LivePage(
     val hasPremium = com.torve.desktop.premium.rememberHasPremium()
     var mode by remember { mutableStateOf(DesktopLiveMode.CHANNELS) }
     val visibleChannels = resolveVisibleChannels(channelsState, channelsViewModel)
+    val activeGuideChannels = remember(channelsState) {
+        LiveTvGuideSourceResolver.resolve(channelsState).ifEmpty { channelsState.guideChannels }
+    }
 
     // ── EPG reminders ─────────────────────────────────────────────
     // File-backed store under desktopDataDir; survives restarts. Each active
@@ -190,15 +218,17 @@ fun V2LivePage(
             // Apply pre-roll / post-roll buffers from settings so stations
             // that start a minute early or sports events that overrun get
             // captured. Defaults: pre=1min, post=5min.
+            val metadata = com.torve.domain.recording.EpgRecordingMetadataResolver.scheduled(ch, p)
             recordingsVm.schedule(
                 playlistId = channelsState.selectedPlaylistId.orEmpty(),
                 channelId = ch.url,
                 channelName = ch.name,
                 streamUrl = ch.url,
-                programmeTitle = p.title,
-                programmeDescription = p.description,
+                programmeTitle = metadata.programmeTitle,
+                programmeDescription = metadata.programmeDescription,
                 startMs = p.startTime - recordingPrefs.preRollMs,
                 endMs = p.endTime + recordingPrefs.postRollMs,
+                metadata = metadata,
             )
             onRecordingEvent("Recording scheduled: ${p.title}")
         }
@@ -210,15 +240,17 @@ fun V2LivePage(
     val onScheduleWithOverrun: (com.torve.domain.model.Channel, com.torve.domain.model.EpgProgramme, Int) -> Unit =
         { ch, p, overrunMin ->
             if (ensureRecordingFolderReady()) {
+                val metadata = com.torve.domain.recording.EpgRecordingMetadataResolver.scheduled(ch, p)
                 recordingsVm.schedule(
                     playlistId = channelsState.selectedPlaylistId.orEmpty(),
                     channelId = ch.url,
                     channelName = ch.name,
                     streamUrl = ch.url,
-                    programmeTitle = p.title,
-                    programmeDescription = p.description,
+                    programmeTitle = metadata.programmeTitle,
+                    programmeDescription = metadata.programmeDescription,
                     startMs = p.startTime - recordingPrefs.preRollMs,
                     endMs = p.endTime + recordingPrefs.postRollMs + overrunMin * 60_000L,
+                    metadata = metadata,
                 )
                 onRecordingEvent("Recording scheduled: ${p.title}")
             }
@@ -243,15 +275,21 @@ fun V2LivePage(
             // Use the user's configured default duration (Settings →
             // Recording). 0 sentinel = "Until I stop" → 24 hour cap.
             val now = System.currentTimeMillis()
+            val metadata = com.torve.domain.recording.EpgRecordingMetadataResolver.live(
+                channel = ch,
+                programmes = channelsState.programmes,
+                nowMs = now,
+            )
             recordingsVm.schedule(
                 playlistId = channelsState.selectedPlaylistId.orEmpty(),
                 channelId = ch.url,
                 channelName = ch.name,
                 streamUrl = ch.url,
                 programmeTitle = "Live recording — ${ch.name}",
-                programmeDescription = null,
+                programmeDescription = metadata.programmeDescription,
                 startMs = now,
                 endMs = now + recordingPrefs.defaultDurationMs,
+                metadata = metadata,
             )
             onRecordingEvent("Recording started: ${ch.name}")
         }
@@ -331,16 +369,32 @@ fun V2LivePage(
 
     LaunchedEffect(Unit) { runCatching { liveKeypadFocus.requestFocus() } }
 
-    Column(
+    BoxWithConstraints(
         modifier = Modifier
             .fillMaxSize()
-            .padding(start = 72.dp, end = 24.dp, top = 16.dp, bottom = 16.dp)
+            .background(
+                Brush.verticalGradient(
+                    0.0f to Color(0xFF050914),
+                    0.48f to Color(0xFF07111F),
+                    1.0f to TorveDesktopThemeTokens.colors.shellBackground,
+                ),
+            )
+            .padding(start = 72.dp, end = 30.dp, top = 20.dp, bottom = 20.dp)
             .focusRequester(liveKeypadFocus)
             .focusable()
             .onPreviewKeyEvent(::handleLiveKey),
-        verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
-        TorvePageHeader(
+        val upperGridHeight = when {
+            maxHeight < 820.dp -> 360.dp
+            maxHeight < 980.dp -> 430.dp
+            else -> 480.dp
+        }
+
+        Column(
+            modifier = Modifier.fillMaxSize(),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+        LiveTvPageHeader(
             title = ds("Live TV"),
             subtitle = "Search, switch playlists, then play. Toggle the Guide for an EPG view.",
             trailing = {
@@ -351,9 +405,9 @@ fun V2LivePage(
                             tone = TorveBadgeTone.Warning,
                         )
                     }
-                    TorveBadge(
+                    LiveTvStatusPill(
                         text = epgBadgeLabel(channelsState.epgState),
-                        tone = epgBadgeTone(channelsState.epgState),
+                        showDot = channelsState.epgState is EpgState.Loaded,
                     )
                 }
             },
@@ -365,7 +419,7 @@ fun V2LivePage(
                 description = "Add an M3U or Xtream playlist in Settings > Playlists to unlock channel browsing.",
                 emoji = "📻",
             )
-            return
+            return@Column
         }
 
         // Inline EPG error banner - surfaces the upstream message and offers a
@@ -393,7 +447,7 @@ fun V2LivePage(
             onPlayRecent = playLive,
             mode = mode,
             favoritesCount = channelsState.favorites.size,
-            guideChannelCount = channelsState.guideChannels.size,
+            guideChannelCount = activeGuideChannels.size,
             onSelectMode = { next ->
                 mode = next
                 when (next) {
@@ -410,7 +464,7 @@ fun V2LivePage(
         when (mode) {
             DesktopLiveMode.GUIDE -> V2EpgGrid(
                 playlistId = channelsState.selectedPlaylistId,
-                guideChannels = channelsState.guideChannels,
+                guideChannels = activeGuideChannels,
                 guideProgrammes = channelsState.guideProgrammes,
                 isLoading = channelsState.isLoadingGuide,
                 error = channelsState.guideError,
@@ -451,33 +505,60 @@ fun V2LivePage(
                 modifier = Modifier.weight(1f).fillMaxWidth(),
             )
 
-            DesktopLiveMode.CHANNELS -> Row(
+            DesktopLiveMode.CHANNELS -> Column(
                 modifier = Modifier.fillMaxSize(),
-                horizontalArrangement = Arrangement.spacedBy(16.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp),
             ) {
-                CategoryPane(
-                    categories = channelsState.categories,
-                    selectedGroup = channelsState.selectedGroup,
-                    onSelectCategory = { channelsViewModel.loadCategoryChannels(it.name) },
-                    modifier = Modifier.width(240.dp).fillMaxHeight(),
-                )
+                Row(
+                    modifier = Modifier.fillMaxWidth().height(upperGridHeight),
+                    horizontalArrangement = Arrangement.spacedBy(18.dp),
+                ) {
+                    CategoryPane(
+                        categories = channelsState.categories,
+                        selectedGroup = channelsState.selectedGroup,
+                        onSelectCategory = { channelsViewModel.loadCategoryChannels(it.name) },
+                        modifier = Modifier.width(300.dp).fillMaxHeight(),
+                    )
 
-                ChannelListPane(
-                    visibleChannels = visibleChannels,
+                    ChannelListPane(
+                        visibleChannels = visibleChannels,
+                        channelsState = channelsState,
+                        onSelect = { channelsViewModel.selectChannel(it) },
+                        onToggleFavorite = { channelsViewModel.toggleFavorite(it) },
+                        onPlay = playLive,
+                        modifier = Modifier.weight(1f).fillMaxHeight(),
+                    )
+
+                    PremiumSelectedChannelPane(
+                        selectedChannel = channelsState.selectedChannel,
+                        programmes = channelsState.programmes,
+                        onPlay = playLive,
+                        isRecording = isRecordingChannel,
+                        onToggleRecord = onToggleRecordNow,
+                        modifier = Modifier.width(440.dp).fillMaxHeight(),
+                    )
+                }
+
+                LiveTvEpgPanel(
                     channelsState = channelsState,
-                    onSelect = { channelsViewModel.selectChannel(it) },
-                    onToggleFavorite = { channelsViewModel.toggleFavorite(it) },
-                    onPlay = playLive,
-                    modifier = Modifier.weight(1f).fillMaxHeight(),
-                )
-
-                SelectedChannelPane(
-                    selectedChannel = channelsState.selectedChannel,
-                    programmes = channelsState.programmes,
-                    onPlay = playLive,
-                    isRecording = isRecordingChannel,
-                    onToggleRecord = onToggleRecordNow,
-                    modifier = Modifier.width(300.dp).fillMaxHeight(),
+                    guideChannels = activeGuideChannels,
+                    channelsViewModel = channelsViewModel,
+                    playLive = playLive,
+                    hasPremium = hasPremium,
+                    onPremiumBlocked = onPremiumBlocked,
+                    onDirectPlaybackStarted = onDirectPlaybackStarted,
+                    playerController = playerController,
+                    isFavoriteFor = isFavoriteFor,
+                    reminders = reminders,
+                    reminderKey = reminderKey,
+                    toggleReminder = toggleReminder,
+                    recordingStatusFor = recordingStatusFor,
+                    onToggleRecord = onToggleRecord,
+                    onSwitchToChannels = {
+                        mode = DesktopLiveMode.CHANNELS
+                        channelsViewModel.selectSubTab(ChannelsSubTab.LIVE)
+                    },
+                    modifier = Modifier.fillMaxWidth().weight(1f).heightIn(min = 240.dp),
                 )
             }
 
@@ -495,6 +576,7 @@ fun V2LivePage(
     // ── Conflict dialog (Prompt 10B) ──────────────────────────────
     // Surfaces overlapping schedule attempts with an explicit
     // "Schedule anyway" affordance. Dismiss = no rows changed.
+    }
     recordingsState.conflict?.let { pending ->
         androidx.compose.material3.AlertDialog(
             onDismissRequest = { recordingsVm.dismissConflict() },
@@ -521,6 +603,111 @@ fun V2LivePage(
 }
 
 @Composable
+private fun LiveTvPageHeader(
+    title: String,
+    subtitle: String,
+    trailing: @Composable () -> Unit,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(18.dp),
+    ) {
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(
+                title,
+                color = Color.White.copy(alpha = 0.98f),
+                style = MaterialTheme.typography.headlineMedium,
+                fontWeight = FontWeight.Bold,
+            )
+            Text(
+                subtitle,
+                color = Color.White.copy(alpha = 0.70f),
+                style = MaterialTheme.typography.bodyMedium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            trailing()
+        }
+    }
+}
+
+@Composable
+private fun LiveTvEpgPanel(
+    channelsState: ChannelsUiState,
+    guideChannels: List<EnrichedChannel>,
+    channelsViewModel: ChannelsViewModel,
+    playLive: (Channel) -> Unit,
+    hasPremium: Boolean,
+    onPremiumBlocked: (() -> Unit)?,
+    onDirectPlaybackStarted: () -> Unit,
+    playerController: DesktopPlayerController,
+    isFavoriteFor: (Channel) -> Boolean,
+    reminders: Set<String>,
+    reminderKey: (Channel, com.torve.domain.model.EpgProgramme) -> String,
+    toggleReminder: (Channel, com.torve.domain.model.EpgProgramme) -> Unit,
+    recordingStatusFor: (Channel, com.torve.domain.model.EpgProgramme) -> com.torve.presentation.recording.RecordingSlotStatus,
+    onToggleRecord: (Channel, com.torve.domain.model.EpgProgramme) -> Unit,
+    onSwitchToChannels: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    LiveTvGlassPanel(modifier) {
+        Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                LiveTvPanelTitle(
+                    title = "Guide (EPG)",
+                    subtitle = "Browse current and upcoming programmes",
+                    modifier = Modifier.weight(1f),
+                )
+                val count = (channelsState.epgState as? EpgState.Loaded)?.sourceProgrammeCount ?: 0
+                if (count > 0) LiveTvStatusPill("EPG: $count programs")
+            }
+            V2EpgGrid(
+                playlistId = channelsState.selectedPlaylistId,
+                guideChannels = guideChannels,
+                guideProgrammes = channelsState.guideProgrammes,
+                isLoading = channelsState.isLoadingGuide,
+                error = channelsState.guideError,
+                onRetry = { channelsViewModel.retryGuideLoad() },
+                canCatchup = channelsViewModel::canCatchup,
+                resolveCatchupUrl = channelsViewModel::resolveCatchupUrl,
+                onPlayChannel = playLive,
+                onPlayCatchup = { channel, _, url ->
+                    if (!hasPremium) {
+                        onPremiumBlocked?.invoke()
+                        return@V2EpgGrid
+                    }
+                    channelsViewModel.selectChannel(channel)
+                    channelsViewModel.recordChannelViewed(channel)
+                    onDirectPlaybackStarted()
+                    playerController.playDirectStream(
+                        title = channel.name,
+                        url = url,
+                        artworkUrl = channel.tvgLogo,
+                        sourceSurface = "live_tv_catchup",
+                    )
+                },
+                onSwitchToChannels = onSwitchToChannels,
+                epgProgrammeCount = (channelsState.epgState as? EpgState.Loaded)?.sourceProgrammeCount ?: 0,
+                isFavorite = isFavoriteFor,
+                onToggleFavorite = { ch -> channelsViewModel.toggleFavorite(ch) },
+                isReminderSet = { ch, p -> reminders.contains(reminderKey(ch, p)) },
+                onToggleReminder = toggleReminder,
+                recordingStatusFor = recordingStatusFor,
+                onToggleRecord = onToggleRecord,
+                searchQuery = channelsState.guideSearchQuery,
+                onSearchQueryChange = channelsViewModel::setGuideSearchQuery,
+                sortMode = channelsState.guideSortMode,
+                onSortModeChange = channelsViewModel::setGuideSortMode,
+                modifier = Modifier.weight(1f).fillMaxWidth(),
+            )
+        }
+    }
+}
+
+@Composable
 private fun ChannelListPane(
     visibleChannels: List<EnrichedChannel>,
     channelsState: ChannelsUiState,
@@ -529,38 +716,47 @@ private fun ChannelListPane(
     onPlay: (Channel) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    if (visibleChannels.isEmpty()) {
-        TorvePlaceholderState(
-            modifier = modifier,
-            title = emptyTitleFor(channelsState.selectedSubTab),
-            description = emptyDescriptionFor(channelsState.selectedSubTab),
-        )
-        return
-    }
-    LazyColumn(
-        modifier = modifier,
-        verticalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        // IPTV catalogues frequently emit duplicates (same tvg-id across
-        // multiple providers, identical URLs in stitched playlists). Keys
-        // must include the index or LazyColumn crashes the composition -
-        // which on Compose Desktop kills the whole app.
-        itemsIndexed(
-            items = visibleChannels,
-            key = { index, enriched -> "${channelRowKey(enriched)}#$index" },
-        ) { _, enriched ->
-            ChannelRow(
-                channel = enriched.channel,
-                currentProgramme = enriched.currentProgramme?.title,
-                nextProgramme = enriched.nextProgramme?.title,
-                isSelected = channelsState.selectedChannel?.url == enriched.channel.url,
-                isFavorite = channelsState.favorites.any {
-                    it.url == enriched.channel.url || it.name == enriched.channel.name
-                },
-                onSelect = { onSelect(enriched.channel) },
-                onToggleFavorite = { onToggleFavorite(enriched.channel) },
-                onPlay = { onPlay(enriched.channel) },
-            )
+    LiveTvGlassPanel(modifier) {
+        Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            LiveTvPanelTitle("Channels", "${visibleChannels.size} visible")
+            if (visibleChannels.isEmpty()) {
+                TorvePlaceholderState(
+                    modifier = Modifier.fillMaxSize(),
+                    title = emptyTitleFor(channelsState.selectedSubTab),
+                    description = emptyDescriptionFor(channelsState.selectedSubTab),
+                )
+                return@Column
+            }
+            val listState = rememberLazyListState()
+            Box(Modifier.fillMaxSize()) {
+                LazyColumn(
+                    state = listState,
+                    modifier = Modifier.fillMaxSize().padding(end = 10.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    itemsIndexed(
+                        items = visibleChannels,
+                        key = { index, enriched -> "${channelRowKey(enriched)}#$index" },
+                    ) { _, enriched ->
+                        PremiumChannelRow(
+                            channel = enriched.channel,
+                            currentProgramme = enriched.currentProgramme?.title,
+                            nextProgramme = enriched.nextProgramme?.title,
+                            isSelected = channelsState.selectedChannel?.url == enriched.channel.url,
+                            isFavorite = channelsState.favorites.any {
+                                it.url == enriched.channel.url || it.name == enriched.channel.name
+                            },
+                            onSelect = { onSelect(enriched.channel) },
+                            onToggleFavorite = { onToggleFavorite(enriched.channel) },
+                            onPlay = { onPlay(enriched.channel) },
+                        )
+                    }
+                }
+                PremiumVerticalScrollbar(
+                    adapter = rememberScrollbarAdapter(listState),
+                    modifier = Modifier.align(Alignment.CenterEnd),
+                )
+            }
         }
     }
 }
@@ -651,6 +847,15 @@ private fun epgBadgeTone(state: EpgState): TorveBadgeTone = when (state) {
     is EpgState.Error -> TorveBadgeTone.Warning
 }
 
+private fun compactChannelCount(count: Int): String = when {
+    count >= 10_000 -> "${count / 1000}K"
+    count >= 1_000 -> {
+        val tenths = count / 100
+        "${tenths / 10}.${tenths % 10}K"
+    }
+    else -> count.toString()
+}
+
 @Composable
 private fun LiveControlRow(
     searchQuery: String,
@@ -664,16 +869,16 @@ private fun LiveControlRow(
     favoritesCount: Int,
     guideChannelCount: Int,
     onSelectMode: (DesktopLiveMode) -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     Row(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(10.dp),
-        verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        TorveSearchField(
+        LiveTvSearchBar(
             value = searchQuery,
             onValueChange = onSearchChange,
-            placeholder = "Search channels",
             modifier = Modifier.weight(1f),
         )
         PlaylistDropdown(
@@ -704,11 +909,15 @@ private fun PlaylistDropdown(
 ) {
     var expanded by remember { mutableStateOf(false) }
     val active = playlists.firstOrNull { it.id == selectedPlaylistId }
-    val label = active?.name?.takeIf { it.isNotBlank() } ?: "Select playlist"
+    val label = active?.channelCount?.takeIf { it > 0 }?.let { compactChannelCount(it) }
+        ?: active?.name?.takeIf { it.isNotBlank() }
+        ?: "Select playlist"
     Box {
-        TorveGhostButton(
-            text = "Playlist · $label",
+        LiveTvTabPill(
+            text = "Playlist: $label",
+            selected = false,
             onClick = { expanded = true },
+            contentDescription = "Playlist",
         )
         com.torve.desktop.ui.components.TorveDropdownScaffold(
             expanded = expanded,
@@ -730,9 +939,11 @@ private fun RecentChannelsDropdown(
 ) {
     var expanded by remember { mutableStateOf(false) }
     Box {
-        TorveGhostButton(
+        LiveTvTabPill(
             text = "Recent (${channels.size})",
+            selected = false,
             onClick = { expanded = true },
+            contentDescription = "Recent channels",
         )
         com.torve.desktop.ui.components.TorveDropdownScaffold(
             expanded = expanded,
@@ -758,20 +969,23 @@ private fun LiveModeToggle(
     val guideLabel = ds("Guide")
     val favoritesLabel = ds("Favorites")
     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-        TorveFilterChip(
+        LiveTvTabPill(
             text = channelsLabel,
             selected = mode == DesktopLiveMode.CHANNELS,
             onClick = { onSelect(DesktopLiveMode.CHANNELS) },
+            contentDescription = "Channels",
         )
-        TorveFilterChip(
+        LiveTvTabPill(
             text = if (guideChannelCount > 0) "$guideLabel ($guideChannelCount)" else guideLabel,
             selected = mode == DesktopLiveMode.GUIDE,
             onClick = { onSelect(DesktopLiveMode.GUIDE) },
+            contentDescription = "Guide",
         )
-        TorveFilterChip(
+        LiveTvTabPill(
             text = if (favoritesCount > 0) "$favoritesLabel ($favoritesCount)" else favoritesLabel,
             selected = mode == DesktopLiveMode.FAVORITES,
             onClick = { onSelect(DesktopLiveMode.FAVORITES) },
+            contentDescription = "Favorites",
         )
     }
 }
@@ -788,7 +1002,7 @@ private fun EpgErrorBanner(
     ) {
         com.torve.desktop.ui.components.TorveBanner(
             title = "EPG didn't load",
-            description = message,
+            description = "Unable to load guide data right now.",
             tone = com.torve.desktop.ui.components.TorveBannerTone.Warning,
             modifier = Modifier.weight(1f),
         )
@@ -803,33 +1017,104 @@ private fun CategoryPane(
     onSelectCategory: (ChannelCategory) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    TorveSectionCard(
-        modifier = modifier,
-        title = "Categories",
-        supportingText = "Pick a channel group to load it from your active playlist.",
-    ) {
+    LiveTvGlassPanel(modifier) {
+        Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            LiveTvPanelTitle("Categories", "Choose a channel group")
         if (categories.isEmpty()) {
             TorvePlaceholderState(
                 title = "No categories yet",
                 description = "Select a playlist and let Torve load category counts.",
             )
         } else {
+            val listState = rememberLazyListState()
+            Box(Modifier.fillMaxSize()) {
             LazyColumn(
-                modifier = Modifier.fillMaxHeight().fillMaxWidth(),
-                verticalArrangement = Arrangement.spacedBy(4.dp),
+                state = listState,
+                modifier = Modifier.fillMaxHeight().fillMaxWidth().padding(end = 10.dp),
+                verticalArrangement = Arrangement.spacedBy(7.dp),
             ) {
                 items(
                     items = categories,
                     key = { it.name },
                 ) { category ->
-                    TorveListRow(
-                        title = formatCategoryLabel(category),
-                        subtitle = "${category.channelCount} channels",
+                    CategoryRow(
+                        category = category,
                         selected = selectedGroup == category.name,
                         onClick = { onSelectCategory(category) },
                     )
                 }
             }
+                PremiumVerticalScrollbar(
+                    adapter = rememberScrollbarAdapter(listState),
+                    modifier = Modifier.align(Alignment.CenterEnd),
+                )
+            }
+        }
+        }
+    }
+}
+
+@Composable
+private fun CategoryRow(
+    category: ChannelCategory,
+    selected: Boolean,
+    onClick: () -> Unit,
+) {
+    val colors = TorveDesktopThemeTokens.colors
+    val interaction = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
+    val focused by interaction.collectIsFocusedAsState()
+    val hovered by interaction.collectIsHoveredAsState()
+    val active = focused || hovered
+    val scale by androidx.compose.animation.core.animateFloatAsState(if (active) 1.018f else 1f, tween(140), label = "categoryScale")
+    val background by animateColorAsState(
+        when {
+            selected -> colors.accent.copy(alpha = 0.15f)
+            active -> Color(0xFF111C2F).copy(alpha = 0.68f)
+            else -> Color(0xFF0A1322).copy(alpha = 0.44f)
+        },
+        tween(140),
+        label = "categoryBg",
+    )
+    val border by animateColorAsState(
+        when {
+            selected -> colors.accent.copy(alpha = 0.60f)
+            active -> colors.accent.copy(alpha = 0.52f)
+            else -> Color.White.copy(alpha = 0.10f)
+        },
+        tween(140),
+        label = "categoryBorder",
+    )
+
+    Surface(
+        modifier = Modifier
+            .scale(scale)
+            .clip(RoundedCornerShape(16.dp))
+            .focusable(true, interaction)
+            .clickable(interactionSource = interaction, indication = null, onClick = onClick)
+            .semantics {
+                contentDescription = "Category ${category.name}, ${category.channelCount} channels" +
+                    if (selected) ", selected" else ""
+            },
+        color = background,
+        shape = RoundedCornerShape(16.dp),
+        border = BorderStroke(1.dp, border),
+    ) {
+        Row(
+            modifier = Modifier.height(56.dp).padding(horizontal = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            LiveTvFallbackIcon()
+            Text(
+                formatCategoryLabel(category),
+                color = Color.White.copy(alpha = 0.93f),
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
+            )
+            LiveTvQualityBadge(category.channelCount.toString())
         }
     }
 }
@@ -837,6 +1122,129 @@ private fun CategoryPane(
 private fun formatCategoryLabel(category: ChannelCategory): String {
     val countryCode = category.countryCode?.trim()?.uppercase()?.takeIf { it.isNotBlank() }
     return if (countryCode != null) "[$countryCode] ${category.name}" else category.name
+}
+
+@Composable
+private fun PremiumChannelRow(
+    channel: Channel,
+    currentProgramme: String?,
+    nextProgramme: String?,
+    isSelected: Boolean,
+    isFavorite: Boolean,
+    onSelect: () -> Unit,
+    onToggleFavorite: () -> Unit,
+    onPlay: () -> Unit,
+) {
+    val colors = TorveDesktopThemeTokens.colors
+    val interaction = remember { MutableInteractionSource() }
+    val focused by interaction.collectIsFocusedAsState()
+    val hovered by interaction.collectIsHoveredAsState()
+    val active = focused || hovered
+    val scale by animateFloatAsState(if (active) 1.012f else 1f, tween(140), label = "channelRowScale")
+    val background by animateColorAsState(
+        when {
+            isSelected -> colors.accent.copy(alpha = 0.15f)
+            active -> Color(0xFF111C2F).copy(alpha = 0.70f)
+            else -> Color(0xFF08111F).copy(alpha = 0.45f)
+        },
+        tween(140),
+        label = "channelRowBg",
+    )
+    val border by animateColorAsState(
+        when {
+            isSelected -> colors.accent.copy(alpha = 0.62f)
+            active -> colors.accent.copy(alpha = 0.56f)
+            else -> Color.White.copy(alpha = 0.10f)
+        },
+        tween(140),
+        label = "channelRowBorder",
+    )
+    val subtitle = buildString {
+        append(channel.groupTitle ?: "Ungrouped")
+        currentProgramme?.takeIf { it.isNotBlank() }?.let {
+            append(" - Now: ")
+            append(it)
+        }
+        nextProgramme?.takeIf { it.isNotBlank() }?.let {
+            append(" - Next: ")
+            append(it)
+        }
+    }
+    val badges = remember(channel.name) { qualityBadgesFor(channel.name) }
+
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .scale(scale)
+            .clip(RoundedCornerShape(18.dp))
+            .focusable(true, interaction)
+            .clickable(interactionSource = interaction, indication = null, onClick = onSelect)
+            .semantics {
+                contentDescription = "Channel ${channel.name}, ${channel.groupTitle ?: "Ungrouped"}" +
+                    if (isSelected) ", selected" else ""
+            },
+        color = background,
+        shape = RoundedCornerShape(18.dp),
+        border = BorderStroke(1.dp, border),
+    ) {
+        Row(
+            modifier = Modifier.height(74.dp).padding(horizontal = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            val logo = remember(channel.name, channel.tvgLogo) {
+                LiveTvChannelLogoResolver.resolveLogo(channel)
+            }
+            LiveTvChannelLogo(
+                logo = logo,
+                channelName = channel.name,
+                modifier = Modifier.size(44.dp),
+                maxLogoWidth = 44.dp,
+                maxLogoHeight = 34.dp,
+            )
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+                    Text(
+                        text = channel.name,
+                        color = Color.White.copy(alpha = 0.96f),
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f),
+                    )
+                    LiveTvFavoriteMark(isFavorite)
+                }
+                Text(
+                    text = subtitle,
+                    color = Color.White.copy(alpha = 0.66f),
+                    style = MaterialTheme.typography.bodySmall,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                if (badges.isNotEmpty()) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                        badges.forEach { badge -> LiveTvQualityBadge(badge) }
+                    }
+                }
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                LiveTvGlassButton(
+                    text = if (isFavorite) "Saved" else "Save",
+                    selected = isFavorite,
+                    onClick = onToggleFavorite,
+                    contentDescription = "Save channel",
+                )
+                LiveTvPlayButton(
+                    onClick = onPlay,
+                    contentDescription = "Play channel",
+                )
+            }
+        }
+    }
 }
 
 @Composable
@@ -881,6 +1289,189 @@ private fun ChannelRow(
             }
         },
     )
+}
+
+@Composable
+private fun PremiumSelectedChannelPane(
+    selectedChannel: Channel?,
+    programmes: List<com.torve.domain.model.EpgProgramme>,
+    onPlay: (Channel) -> Unit,
+    isRecording: (Channel) -> Boolean = { false },
+    onToggleRecord: (Channel) -> Unit = {},
+    modifier: Modifier = Modifier,
+) {
+    LiveTvGlassPanel(modifier) {
+        if (selectedChannel == null) {
+            TorvePlaceholderState(
+                modifier = Modifier.fillMaxSize(),
+                title = "Nothing selected",
+                description = "Select a channel from the center list to view guide details and start playback.",
+            )
+        } else {
+            val colors = TorveDesktopThemeTokens.colors
+            val scrollState = rememberScrollState()
+            val nowMs = remember(selectedChannel, programmes) { System.currentTimeMillis() }
+            val current = programmes.firstOrNull { it.startTime <= nowMs && it.endTime > nowMs }
+                ?: programmes.firstOrNull()
+            val next = programmes.firstOrNull { programme ->
+                programme.startTime > nowMs && programme != current
+            }
+            val progress = current
+                ?.takeIf { it.startTime <= nowMs && it.endTime > nowMs && it.endTime > it.startTime }
+                ?.let {
+                    ((nowMs - it.startTime).toFloat() / (it.endTime - it.startTime).toFloat())
+                        .coerceIn(0f, 1f)
+                }
+
+            Box(Modifier.fillMaxSize()) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(end = 10.dp)
+                        .verticalScroll(scrollState),
+                    verticalArrangement = Arrangement.spacedBy(14.dp),
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        val logo = remember(selectedChannel.name, selectedChannel.tvgLogo) {
+                            LiveTvChannelLogoResolver.resolveLogo(selectedChannel)
+                        }
+                        LiveTvChannelLogo(
+                            logo = logo,
+                            channelName = selectedChannel.name,
+                            modifier = Modifier.size(54.dp),
+                            maxLogoWidth = 72.dp,
+                            maxLogoHeight = 50.dp,
+                        )
+                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                            Text(
+                                text = selectedChannel.name,
+                                color = Color.White.copy(alpha = 0.98f),
+                                style = MaterialTheme.typography.titleLarge,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                            Text(
+                                text = selectedChannel.groupTitle ?: "Ungrouped",
+                                color = Color.White.copy(alpha = 0.68f),
+                                style = MaterialTheme.typography.bodySmall,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                        LiveTvQualityBadge(selectedChannel.tvgCountry?.takeIf { it.isNotBlank() } ?: "LIVE")
+                    }
+
+                    if (current == null) {
+                        TorvePlaceholderState(
+                            title = "No guide data yet",
+                            description = "Guide data is still loading or this channel is not matched to an EPG entry.",
+                        )
+                    } else {
+                        LiveTvStatusPill("EPG: Available", showDot = true, modifier = Modifier.widthIn(max = 180.dp))
+                        Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
+                            Text(
+                                "Now",
+                                color = colors.accent.copy(alpha = 0.94f),
+                                style = MaterialTheme.typography.labelLarge,
+                            )
+                            Text(
+                                text = current.title,
+                                color = Color.White.copy(alpha = 0.96f),
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.SemiBold,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                            Text(
+                                text = formatLiveTimeRange(current.startTime, current.endTime),
+                                color = Color.White.copy(alpha = 0.68f),
+                                style = MaterialTheme.typography.bodySmall,
+                            )
+                            progress?.let { pct ->
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(6.dp)
+                                        .clip(RoundedCornerShape(999.dp))
+                                        .background(Color.White.copy(alpha = 0.10f)),
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxWidth(pct)
+                                            .height(6.dp)
+                                            .clip(RoundedCornerShape(999.dp))
+                                            .background(colors.accent.copy(alpha = 0.78f)),
+                                    )
+                                }
+                            }
+                            current.description?.takeIf { it.isNotBlank() }?.let {
+                                Text(
+                                    text = it,
+                                    color = Color.White.copy(alpha = 0.68f),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    maxLines = 4,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
+                        }
+                    }
+
+                    next?.let { programme ->
+                        Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                            Text("Next", color = Color.White.copy(alpha = 0.72f), style = MaterialTheme.typography.labelLarge)
+                            Text(
+                                text = programme.title,
+                                color = Color.White.copy(alpha = 0.90f),
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.SemiBold,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                            Text(
+                                text = formatLiveTimeRange(programme.startTime, programme.endTime),
+                                color = Color.White.copy(alpha = 0.62f),
+                                style = MaterialTheme.typography.bodySmall,
+                            )
+                        }
+                    }
+
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                        LiveTvPlayButton(
+                            text = "Play Channel",
+                            onClick = { onPlay(selectedChannel) },
+                            modifier = Modifier.weight(1f),
+                            contentDescription = "Play selected channel",
+                        )
+                        val recording = isRecording(selectedChannel)
+                        LiveTvGlassButton(
+                            text = if (recording) "Stop Recording" else "Record Now (2h)",
+                            onClick = { onToggleRecord(selectedChannel) },
+                            contentDescription = if (recording) "Stop recording" else "Record channel for two hours",
+                        )
+                    }
+                    if (isRecording(selectedChannel)) {
+                        Text(
+                            text = "Recording in progress. Files appear in your recordings folder as they are written.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Color.White.copy(alpha = 0.66f),
+                        )
+                    }
+                    Text(
+                        text = "Source: ${selectedChannel.groupTitle ?: "Live TV"}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Color.White.copy(alpha = 0.58f),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                PremiumVerticalScrollbar(
+                    adapter = rememberScrollbarAdapter(scrollState),
+                    modifier = Modifier.align(Alignment.CenterEnd),
+                )
+            }
+        }
+    }
 }
 
 @Composable
@@ -977,6 +1568,9 @@ private val ReminderTimeFormatter: DateTimeFormatter =
 
 private fun formatReminderTime(epochMs: Long): String =
     ReminderTimeFormatter.format(Instant.ofEpochMilli(epochMs))
+
+private fun formatLiveTimeRange(startMs: Long, endMs: Long): String =
+    "${formatReminderTime(startMs)}-${formatReminderTime(endMs)}"
 
 /**
  * Strip Xtream username/password segments and `username=` /

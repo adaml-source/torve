@@ -4,6 +4,7 @@ package com.torve.desktop.ui.v2.nzbmovies
 
 import androidx.compose.foundation.background
 import com.torve.desktop.ui.l10n.ds
+import androidx.compose.foundation.VerticalScrollbar
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -13,6 +14,7 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -21,6 +23,7 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.rememberScrollbarAdapter
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -345,13 +348,14 @@ fun V2NzbMoviesPage(
                     text = ds("No results."),
                     color = colors.textSecondary,
                 )
-                else -> LazyVerticalGrid(
-                    columns = GridCells.Adaptive(minSize = 160.dp),
-                    state = gridState,
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp),
-                    modifier = Modifier.fillMaxSize(),
-                ) {
+                else -> Box(Modifier.fillMaxSize()) {
+                    LazyVerticalGrid(
+                        columns = GridCells.Adaptive(minSize = 160.dp),
+                        state = gridState,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                        modifier = Modifier.fillMaxSize().padding(end = 24.dp),
+                    ) {
                     items(allItems, key = { it.guid ?: it.nzbUrl }) { item ->
                         val rowKey = item.guid ?: item.nzbUrl
                         val status = resolveStatus[rowKey]
@@ -419,6 +423,14 @@ fun V2NzbMoviesPage(
                             },
                         )
                     }
+                    }
+                    VerticalScrollbar(
+                        adapter = rememberScrollbarAdapter(gridState),
+                        modifier = Modifier
+                            .align(Alignment.CenterEnd)
+                            .fillMaxHeight()
+                            .padding(end = 4.dp),
+                    )
                 }
             }
         }

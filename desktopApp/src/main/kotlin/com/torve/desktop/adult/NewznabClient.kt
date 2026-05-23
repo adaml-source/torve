@@ -1,5 +1,7 @@
 package com.torve.desktop.adult
 
+import com.torve.domain.diagnostics.DiagnosticsRedactor
+import com.torve.platform.TorveRuntimeDebug
 import java.net.URI
 import java.net.URLEncoder
 import java.net.http.HttpRequest
@@ -23,6 +25,12 @@ class NewznabClient {
         java.net.http.HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(10))
             .build()
+    }
+
+    private inline fun newznabDebugLog(message: () -> String) {
+        if (TorveRuntimeDebug.verboseLoggingEnabled) {
+            println(DiagnosticsRedactor.redact(message()))
+        }
     }
 
     /**
@@ -172,12 +180,7 @@ class NewznabClient {
             .build()
         val resp = http.send(req, HttpResponse.BodyHandlers.ofString())
         val body = resp.body().orEmpty()
-        // Log so we can debug "0 results" cases - print URL, status, and
-        // the first 200 chars of the body. Newznab error responses come
-        // back as `<error code="..." description="..."/>`; visible in
-        // the body so the user / dev can copy-paste it.
-        val safeUrl = url.replace(Regex("apikey=[^&]+"), "apikey=***")
-        println("TORVE NEWZNAB ┃ GET $safeUrl → ${resp.statusCode()}; body[0..200]=${body.take(200).replace("\n", " ")}")
+        newznabDebugLog { "TORVE NEWZNAB | GET status=${resp.statusCode()} bodyBytes=${body.length}" }
         if (resp.statusCode() in 200..299) body else null
     }.getOrNull()
 

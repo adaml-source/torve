@@ -55,6 +55,8 @@ import com.torve.desktop.ui.v2.components.V2PosterCard
 import com.torve.desktop.ui.v2.components.V2Shelf
 import com.torve.desktop.ui.v2.components.rememberCachedBitmap
 import com.torve.desktop.ui.v2.seeall.SeeAllRequest
+import com.torve.domain.discovery.applyMoodFilter
+import com.torve.domain.discovery.matchesRatingFilter
 import com.torve.domain.model.MediaItem
 import com.torve.domain.repository.MetadataRepository
 import com.torve.presentation.catalog.CatalogViewModel
@@ -95,6 +97,7 @@ fun V2MoviesPage(
     var aiLoading by remember { mutableStateOf(false) }
     var aiError by remember { mutableStateOf<String?>(null) }
     var aiItems by remember { mutableStateOf<List<MediaItem>>(emptyList()) }
+    var selectedMoodId by remember { mutableStateOf("all") }
 
     LaunchedEffect(Unit) { if (!state.shelvesLoaded) catalogViewModel.loadCatalog() }
     LaunchedEffect(aiProviderConfigured) {
@@ -183,6 +186,7 @@ fun V2MoviesPage(
             val isFilteredView = state.selectedGenreId != null ||
                 state.filter.isActive ||
                 state.providerId != null ||
+                selectedMoodId != "all" ||
                 pageSearchQuery.isNotBlank() ||
                 aiMode
 
@@ -216,10 +220,28 @@ fun V2MoviesPage(
                         onAiQueryChange = { aiQuery = it },
                         onRunAiSearch = { runAiSearch(aiQuery) },
                         onOpenAiProviderSettings = onOpenAiProviderSettings,
+                        selectedMoodId = selectedMoodId,
+                        onMoodSelected = { selectedMoodId = it },
                     )
                     if (aiMode) {
+                        val filteredAiItems = remember(
+                            aiItems,
+                            selectedMoodId,
+                            state.selectedGenreId,
+                            state.filter.minRating,
+                            state.filter.ratingSource,
+                        ) {
+                            aiItems
+                                .filter { item ->
+                                    state.selectedGenreId == null ||
+                                        state.selectedGenreId in item.genreIds ||
+                                        item.genres.any { it.id == state.selectedGenreId }
+                                }
+                                .filter { item -> item.matchesRatingFilter(state.filter.minRating, state.filter.ratingSource) }
+                                .applyMoodFilter(selectedMoodId)
+                        }
                         V2CatalogAiResultsGrid(
-                            items = aiItems,
+                            items = filteredAiItems,
                             isLoading = aiLoading,
                             error = aiError,
                             onOpenDetail = onOpenDetail,
@@ -230,6 +252,7 @@ fun V2MoviesPage(
                             catalogViewModel = catalogViewModel,
                             onOpenDetail = onOpenDetail,
                             searchQuery = pageSearchQuery,
+                            selectedMoodId = selectedMoodId,
                             modifier = Modifier.weight(1f).fillMaxWidth(),
                         )
                     }
@@ -276,6 +299,8 @@ fun V2MoviesPage(
                     onAiQueryChange = { aiQuery = it },
                     onRunAiSearch = { runAiSearch(aiQuery) },
                     onOpenAiProviderSettings = onOpenAiProviderSettings,
+                    selectedMoodId = selectedMoodId,
+                    onMoodSelected = { selectedMoodId = it },
                 )
 
                 // Filtered path is handled above (separate Column without
@@ -359,15 +384,18 @@ private fun FilteredCatalogGrid(
     catalogViewModel: CatalogViewModel,
     onOpenDetail: (MediaItem) -> Unit,
     searchQuery: String = "",
+    selectedMoodId: String = "all",
     modifier: Modifier = Modifier,
 ) {
     val state by catalogViewModel.state.collectAsState()
     val colors = TorveDesktopThemeTokens.colors
     val gridState = rememberLazyGridState()
-    val visibleItems = remember(state.items, searchQuery) {
+    val visibleItems = remember(state.items, searchQuery, selectedMoodId, state.filter.minRating, state.filter.ratingSource) {
         val needle = searchQuery.trim().lowercase()
-        if (needle.isEmpty()) state.items
-        else state.items.filter { it.title.lowercase().contains(needle) }
+        val explicitFiltered = (if (needle.isEmpty()) state.items
+        else state.items.filter { it.title.lowercase().contains(needle) })
+            .filter { item -> item.matchesRatingFilter(state.filter.minRating, state.filter.ratingSource) }
+        explicitFiltered.applyMoodFilter(selectedMoodId)
     }
     // UI-side diagnostic: log when the grid recomposes with a count.
     // If state.items has 20 items but visibleItems shows 0, search
@@ -388,10 +416,25 @@ private fun FilteredCatalogGrid(
     }
 
     // Trigger loadMore when the user scrolls near the end.
-    LaunchedEffect(gridState, state.items.size, state.hasMore) {
+    LaunchedEffect(selectedMoodId, visibleItems.size, state.hasMore, state.isLoading, state.isLoadingMore, state.currentPage) {
+        if (selectedMoodId != "all" &&
+            visibleItems.size < 30 &&
+            state.hasMore &&
+            !state.isLoading &&
+            !state.isLoadingMore &&
+            state.currentPage < 5
+        ) {
+            catalogViewModel.loadMore()
+        }
+    }
+    LaunchedEffect(gridState, state.items.size, state.hasMore, visibleItems.size) {
         snapshotFlowSafe { gridState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1 }
             .collect { lastVisible ->
-                if (state.hasMore && !state.isLoadingMore && lastVisible >= state.items.size - 8) {
+                if (visibleItems.isNotEmpty() &&
+                    state.hasMore &&
+                    !state.isLoadingMore &&
+                    lastVisible >= visibleItems.size - 8
+                ) {
                     catalogViewModel.loadMore()
                 }
             }

@@ -4,6 +4,7 @@ package com.torve.desktop.ui.v2.nzbmovies
 
 import androidx.compose.foundation.background
 import com.torve.desktop.ui.l10n.ds
+import androidx.compose.foundation.VerticalScrollbar
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -13,6 +14,7 @@ import androidx.compose.foundation.layout.FlowRowScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -22,6 +24,7 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
+import androidx.compose.foundation.rememberScrollbarAdapter
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -62,7 +65,7 @@ import com.torve.domain.model.hasValueFor
  * "See all" surface for the Latest-on-Usenet TV shelf. Mirrors the
  * movies see-all but operates on [NzbTvCatalogService.ShowCard]
  * (one card per show, episodes aggregated). Filters: search, language,
- * year, genre, min rating, rating source.
+ * genre, min rating, rating source.
  */
 @Composable
 fun V2NzbTvSeeAllPage(
@@ -78,7 +81,6 @@ fun V2NzbTvSeeAllPage(
 
     var query by remember { mutableStateOf("") }
     var language by remember { mutableStateOf(MovieLanguage.ANY) }
-    var yearFilter by remember { mutableStateOf<Int?>(null) }
     var genreFilter by remember { mutableStateOf<Int?>(null) }
     var minRating by remember { mutableStateOf<Float?>(null) }
     var requiredRatingSource by remember { mutableStateOf<RatingSource?>(null) }
@@ -99,9 +101,6 @@ fun V2NzbTvSeeAllPage(
         )
     }
 
-    val availableYears = remember(items) {
-        items.mapNotNull { it.match.year }.distinct().sortedDescending()
-    }
     val availableGenres = remember(items) {
         items.flatMap { it.match.genreIds }
             .filter { it in TMDB_TV_GENRES }
@@ -109,11 +108,11 @@ fun V2NzbTvSeeAllPage(
             .sortedBy { TMDB_TV_GENRES[it] }
     }
 
-    val filteredSize = remember(items, yearFilter, genreFilter, minRating, requiredRatingSource) {
-        items.count { matchesTvClientFilters(it, yearFilter, genreFilter, minRating, requiredRatingSource) }
+    val filteredSize = remember(items, genreFilter, minRating, requiredRatingSource) {
+        items.count { matchesTvClientFilters(it, genreFilter, minRating, requiredRatingSource) }
     }
-    val visible = remember(items, yearFilter, genreFilter, minRating, requiredRatingSource) {
-        items.filter { matchesTvClientFilters(it, yearFilter, genreFilter, minRating, requiredRatingSource) }
+    val visible = remember(items, genreFilter, minRating, requiredRatingSource) {
+        items.filter { matchesTvClientFilters(it, genreFilter, minRating, requiredRatingSource) }
     }
 
     LaunchedEffect(gridState, items.size, filteredSize, hasMore, loading) {
@@ -180,14 +179,6 @@ fun V2NzbTvSeeAllPage(
                 TvCompactFilterChip(text = lang.label, selected = lang == language) { language = lang }
             }
         }
-        if (availableYears.isNotEmpty()) {
-            TvFilterRow(label = ds("Year")) {
-                TvCompactFilterChip(text = ds("Any"), selected = yearFilter == null) { yearFilter = null }
-                availableYears.take(20).forEach { year ->
-                    TvCompactFilterChip(text = year.toString(), selected = yearFilter == year) { yearFilter = year }
-                }
-            }
-        }
         if (availableGenres.isNotEmpty()) {
             TvFilterRow(label = ds("Genre")) {
                 TvCompactFilterChip(text = ds("Any"), selected = genreFilter == null) { genreFilter = null }
@@ -234,36 +225,45 @@ fun V2NzbTvSeeAllPage(
                         style = MaterialTheme.typography.bodyMedium,
                     )
                 }
-                else -> LazyVerticalGrid(
-                    state = gridState,
-                    columns = GridCells.Adaptive(minSize = 150.dp),
-                    contentPadding = PaddingValues(start = 72.dp, end = 24.dp, top = 8.dp, bottom = 24.dp),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    verticalArrangement = Arrangement.spacedBy(16.dp),
-                    modifier = Modifier.fillMaxSize(),
-                ) {
-                    items(visible, key = { it.match.tmdbId }) { card ->
-                        V2PosterCard(
-                            card.match.title,
-                            card.match.posterUrl,
-                            Modifier.width(150.dp),
-                            card.match.year?.toString(),
-                            card.match.voteAverage?.let { String.format("%.1f", it) },
-                            ratings = card.mediaItem.ratings,
-                            backdropUrl = card.match.backdropUrl,
-                            overview = card.match.overview,
-                        ) {
-                            // Stash this show's NZB releases so the
-                            // detail page's Play button can fall back
-                            // to the original NZB when Stremio addons
-                            // return zero candidates.
-                            com.torve.desktop.adult.NzbPlaybackHints.setTv(
-                                card.match.tmdbId,
-                                card.releases,
-                            )
-                            onOpenDetail(card.mediaItem)
+                else -> {
+                    LazyVerticalGrid(
+                        state = gridState,
+                        columns = GridCells.Adaptive(minSize = 150.dp),
+                        contentPadding = PaddingValues(start = 72.dp, end = 32.dp, top = 8.dp, bottom = 24.dp),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(16.dp),
+                        modifier = Modifier.fillMaxSize(),
+                    ) {
+                        items(visible, key = { it.match.tmdbId }) { card ->
+                            V2PosterCard(
+                                card.match.title,
+                                card.match.posterUrl,
+                                Modifier.width(150.dp),
+                                card.match.year?.toString(),
+                                card.match.voteAverage?.let { String.format("%.1f", it) },
+                                ratings = card.mediaItem.ratings,
+                                backdropUrl = card.match.backdropUrl,
+                                overview = card.match.overview,
+                            ) {
+                                // Stash this show's NZB releases so the
+                                // detail page's Play button can fall back
+                                // to the original NZB when Stremio addons
+                                // return zero candidates.
+                                com.torve.desktop.adult.NzbPlaybackHints.setTv(
+                                    card.match.tmdbId,
+                                    card.releases,
+                                )
+                                onOpenDetail(card.mediaItem)
+                            }
                         }
                     }
+                    VerticalScrollbar(
+                        adapter = rememberScrollbarAdapter(gridState),
+                        modifier = Modifier
+                            .align(Alignment.CenterEnd)
+                            .fillMaxHeight()
+                            .padding(end = 4.dp),
+                    )
                 }
             }
         }
@@ -329,12 +329,10 @@ private val TV_RATING_SOURCE_FILTERS: List<RatingSource> = listOf(
 
 private fun matchesTvClientFilters(
     card: NzbTvCatalogService.ShowCard,
-    yearFilter: Int?,
     genreFilter: Int?,
     minRating: Float?,
     requiredRatingSource: RatingSource?,
 ): Boolean {
-    if (yearFilter != null && card.match.year != yearFilter) return false
     if (genreFilter != null && genreFilter !in card.match.genreIds) return false
     val ratings = card.mediaItem.ratings
     if (requiredRatingSource != null) {

@@ -1900,7 +1900,7 @@ private fun PlaylistsSection(
     onOpenRecordings: () -> Unit,
 ) {
     val selectedPlaylist = channelsState.playlists.firstOrNull { it.id == channelsState.selectedPlaylistId }
-    val selectedM3uPlaylist = selectedPlaylist?.takeIf { it.type == PlaylistType.M3U }
+    val selectedPlaylistForEpg = selectedPlaylist
     val hasPremium = com.torve.desktop.premium.rememberHasPremium()
     var selectedPlaylistEpgDraft by remember { mutableStateOf("") }
 
@@ -1914,8 +1914,8 @@ private fun PlaylistsSection(
             channelsViewModel.ensureEpgLoaded()
         }
     }
-    LaunchedEffect(selectedM3uPlaylist?.id, selectedM3uPlaylist?.epgUrl) {
-        selectedPlaylistEpgDraft = selectedM3uPlaylist?.epgUrl.orEmpty()
+    LaunchedEffect(selectedPlaylistForEpg?.id, selectedPlaylistForEpg?.epgUrl) {
+        selectedPlaylistEpgDraft = selectedPlaylistForEpg?.epgUrl.orEmpty()
     }
 
     Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
@@ -1998,6 +1998,35 @@ private fun PlaylistsSection(
                         label = ds("Password"),
                         modifier = Modifier.weight(1f),
                         visualTransformation = PasswordVisualTransformation(),
+                    )
+                }
+                TorveTextField(
+                    value = channelsState.newPlaylistEpgUrl,
+                    onValueChange = channelsViewModel::setNewPlaylistEpgUrl,
+                    label = ds("EPG URL"),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    TorveGhostButton(
+                        text = if (channelsState.isCheckingEpg) ds("Checking EPG...") else ds("Check EPG"),
+                        onClick = channelsViewModel::checkNewPlaylistEpgUrl,
+                        enabled = !channelsState.isCheckingEpg && channelsState.newPlaylistEpgUrl.isNotBlank(),
+                    )
+                    if (channelsState.isCheckingEpg) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(18.dp),
+                            strokeWidth = 2.dp,
+                        )
+                    }
+                }
+                channelsState.epgCheckMessage?.let { message ->
+                    TorveBanner(
+                        title = if (channelsState.epgCheckSuccess == true) ds("EPG check passed") else ds("EPG check failed"),
+                        description = message,
+                        tone = if (channelsState.epgCheckSuccess == true) TorveBannerTone.Success else TorveBannerTone.Error,
                     )
                 }
             } else {
@@ -2095,7 +2124,7 @@ private fun PlaylistsSection(
             title = ds("EPG Status"),
             supportingText = ds("EPG loading now starts automatically for the selected playlist and can be retried here."),
         ) {
-            if (selectedM3uPlaylist != null) {
+            if (selectedPlaylistForEpg != null) {
                 TorveTextField(
                     value = selectedPlaylistEpgDraft,
                     onValueChange = { selectedPlaylistEpgDraft = it },
@@ -2110,7 +2139,7 @@ private fun PlaylistsSection(
                         text = ds("Save"),
                         onClick = {
                             channelsViewModel.updatePlaylistEpgUrl(
-                                playlistId = selectedM3uPlaylist.id,
+                                playlistId = selectedPlaylistForEpg.id,
                                 epgUrl = selectedPlaylistEpgDraft,
                             )
                         },
@@ -2124,7 +2153,7 @@ private fun PlaylistsSection(
                         text = ds("Clear"),
                         onClick = {
                             selectedPlaylistEpgDraft = ""
-                            channelsViewModel.updatePlaylistEpgUrl(selectedM3uPlaylist.id, "")
+                            channelsViewModel.updatePlaylistEpgUrl(selectedPlaylistForEpg.id, "")
                         },
                     )
                 }

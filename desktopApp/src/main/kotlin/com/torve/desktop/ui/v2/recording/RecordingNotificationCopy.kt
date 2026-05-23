@@ -2,6 +2,9 @@ package com.torve.desktop.ui.v2.recording
 
 import com.torve.domain.recording.Recording
 import com.torve.domain.recording.RecordingFailureReason
+import com.torve.desktop.recording.RecordingFolderIssue
+import com.torve.desktop.recording.RecordingFolderValidator
+import com.torve.desktop.recording.RecordingPathResult
 import java.io.File
 
 internal fun recordingFolderValidationError(path: String): String? {
@@ -10,16 +13,23 @@ internal fun recordingFolderValidationError(path: String): String? {
         return "Set a Recordings Folder under Settings > Preferences > Downloads first."
     }
     val root = File(trimmed)
-    val ready = runCatching {
-        if (root.exists()) root.isDirectory else root.mkdirs()
-    }.getOrDefault(false)
-    if (!ready) {
-        return "Recording folder is unavailable: ${root.absolutePath}"
+    return when (val result = RecordingFolderValidator.ensureWritableDirectory(root)) {
+        is RecordingPathResult.Ready -> null
+        is RecordingPathResult.Failed -> when (result.failure.issue) {
+            RecordingFolderIssue.RECORDING_PATH_IS_FILE ->
+                "Recording path points to a file. Choose a folder in Settings."
+            RecordingFolderIssue.RECORDING_FOLDER_PERMISSION_DENIED ->
+                "Torve does not have permission to write to the recordings folder."
+            RecordingFolderIssue.RECORDING_FOLDER_NOT_WRITABLE ->
+                "Recording folder is not writable. Choose another folder in Settings."
+            RecordingFolderIssue.RECORDING_FOLDER_INVALID ->
+                "Recording folder path is invalid. Choose another folder in Settings."
+            RecordingFolderIssue.RECORDING_STORAGE_FULL_OR_UNAVAILABLE ->
+                "Recording storage is full or unavailable."
+            RecordingFolderIssue.FILE_WRITE_ERROR ->
+                "Torve could not write to the recordings folder."
+        }
     }
-    if (!root.canWrite()) {
-        return "Recording folder is not writable: ${root.absolutePath}"
-    }
-    return null
 }
 
 internal fun recordingFailureNotification(row: Recording): String {

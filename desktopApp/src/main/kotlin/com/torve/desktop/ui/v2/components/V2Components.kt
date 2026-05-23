@@ -4,6 +4,7 @@ import androidx.compose.animation.core.animateFloatAsState
 import com.torve.desktop.ui.l10n.ds
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.foundation.HorizontalScrollbar
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -28,6 +29,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.rememberScrollbarAdapter
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -371,7 +373,7 @@ fun V2PosterCard(
     val pri by animateColorAsState(palette.primary, label = "posterPri")
     val sec by animateColorAsState(palette.secondary, label = "posterSec")
     val hoverScaleTarget = if (hovered && cardStyle.hover.enabled)
-        (cardStyle.hover.scalePercent / 100f).coerceAtLeast(1f)
+        (cardStyle.hover.scalePercent / 100f).coerceIn(1f, 1.035f)
     else 1f
     val posterScale by animateFloatAsState(hoverScaleTarget, label = "posterScale")
     val cornerRadius = cardStyle.appearance.cornerRadiusDp.dp
@@ -572,6 +574,13 @@ fun V2Shelf(
             Spacer(Modifier.width(4.dp))
             content()
         }
+        HorizontalScrollbar(
+            adapter = rememberScrollbarAdapter(scrollState),
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(4.dp)
+                .padding(end = 64.dp),
+        )
     }
 }
 

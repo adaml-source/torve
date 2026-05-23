@@ -125,7 +125,12 @@ object ImageBitmapCache {
     fun readDiskBytes(url: String): ByteArray? {
         return runCatching {
             val f = diskFileFor(url)
-            if (f.exists() && f.length() > 0) f.readBytes() else null
+            if (f.exists() && f.length() > 0) {
+                runCatching { f.setLastModified(System.currentTimeMillis()) }
+                f.readBytes()
+            } else {
+                null
+            }
         }.getOrNull()
     }
 

@@ -3,14 +3,18 @@ package com.torve.desktop.recording
 import com.torve.desktop.lanlibrary.DownloadFolderAllowlist
 import com.torve.domain.recording.Recording
 import com.torve.domain.recording.RecordingFailureReason
-import com.torve.domain.recording.RecordingFileNaming
 import com.torve.domain.recording.RecordingScheduler
 import com.torve.domain.recording.RecordingStatus
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -102,14 +106,18 @@ class DesktopRecordingService(
      * Cancel an in-flight recording. Returns true if the job was
      * actually cancelled (false if already terminated).
      */
+    override suspend fun stopRunning(id: String): Boolean = cancelRunning(id)
+
     suspend fun cancelRunning(id: String): Boolean = mutex.withLock {
-        val job = activeJobs.remove(id)
+        val job = activeJobs[id]
         if (job != null) {
             // Cancel the coroutine and let runRecording's catch block decide
             // whether to mark COMPLETED (partial file with bytes) or CANCELLED
             // (nothing was written yet). Calling scheduler.cancel() here would
             // pre-set the status to CANCELLED, which markCompleted then refuses
             // to overwrite -- losing the partial recording from the library.
+            // Keep the job in activeJobs until runRecording finalizes it so a
+            // repeated Stop click cannot route through the scheduled-cancel path.
             job.cancel()
             true
         } else {
@@ -137,26 +145,23 @@ class DesktopRecordingService(
             )
             return
         }
-        if (!ensureWritableDirectory(root)) {
-            scheduler.markFailed(
-                rec.id,
-                RecordingFailureReason.FILE_WRITE_ERROR,
-                "Recordings folder is unavailable or not writable: ${root.absolutePath}",
-            )
-            return
+        val target = when (val resolved = RecordingPathResolver.resolve(root, rec)) {
+            is RecordingPathResult.Ready -> resolved.file
+            is RecordingPathResult.Failed -> {
+                scheduler.markFailed(
+                    rec.id,
+                    failureReasonFor(resolved.failure.issue),
+                    resolved.failure.message,
+                )
+                return
+            }
         }
-        val relative = RecordingFileNaming.relativePath(
-            channelName = rec.channelName,
-            programmeTitle = rec.programmeTitle,
-            startEpochMs = rec.startMs,
-        )
-        val target = File(root, relative)
         val parent = target.parentFile
-        if (parent == null || !ensureWritableDirectory(parent)) {
+        if (parent == null) {
             scheduler.markFailed(
                 rec.id,
                 RecordingFailureReason.FILE_WRITE_ERROR,
-                "Could not create recording folder: ${parent?.absolutePath ?: root.absolutePath}",
+                "Code: RECORDING_FOLDER_INVALID; Folder: ${root.absolutePath}",
             )
             return
         }
@@ -184,6 +189,7 @@ class DesktopRecordingService(
         }
 
         val started = scheduler.markStarted(rec.id, target.absolutePath) ?: return
+        writeSidecarMetadata(started, target)
         val streamResult = runCatching {
             withContext(Dispatchers.IO) { writeStreamToFile(started, target) }
         }
@@ -258,8 +264,10 @@ class DesktopRecordingService(
     ) {
         val buf = ByteArray(BUFFER_BYTES)
         while (true) {
+            kotlinx.coroutines.currentCoroutineContext().ensureActive()
             if (nowMs() >= deadlineMs) return
             val read = input.read(buf)
+            kotlinx.coroutines.currentCoroutineContext().ensureActive()
             if (read < 0) return
             output.write(buf, 0, read)
             onChunk(read.toLong())
@@ -278,16 +286,6 @@ class DesktopRecordingService(
         }
     }
 
-    private fun ensureWritableDirectory(dir: File): Boolean {
-        return runCatching {
-            if (dir.exists()) {
-                dir.isDirectory && dir.canWrite()
-            } else {
-                dir.mkdirs() && dir.isDirectory && dir.canWrite()
-            }
-        }.getOrDefault(false)
-    }
-
     private fun isWithinRoot(target: File, root: File): Boolean {
         val rootPath = runCatching { root.canonicalFile.absolutePath }.getOrNull() ?: return false
         // We don't yet have a canonical form for `target` because the
@@ -304,7 +302,38 @@ class DesktopRecordingService(
         return osName.contains("windows") || osName.contains("mac")
     }
 
+    private fun failureReasonFor(issue: RecordingFolderIssue): RecordingFailureReason = when (issue) {
+        RecordingFolderIssue.RECORDING_STORAGE_FULL_OR_UNAVAILABLE -> RecordingFailureReason.DISK_FULL
+        else -> RecordingFailureReason.FILE_WRITE_ERROR
+    }
+
+    private fun writeSidecarMetadata(rec: Recording, target: File) {
+        runCatching {
+            val json = buildJsonObject {
+                put("id", rec.id)
+                put("title", rec.displayTitle)
+                put("channelName", rec.channelName)
+                put("programmeDescription", rec.programmeDescription)
+                put("epgProgrammeTitle", rec.epgProgrammeTitle)
+                put("epgProgrammeSubtitle", rec.epgProgrammeSubtitle)
+                put("epgProgrammeCategory", rec.epgProgrammeCategory)
+                put("epgChannelId", rec.epgChannelId)
+                put("recordingKind", rec.recordingKind.name)
+                put("epgMatchStatus", rec.epgMatchStatus.name)
+                put("sourceLabel", rec.sourceLabel)
+                put("startMs", rec.startMs)
+                put("endMs", rec.endMs)
+            }
+            File(target.parentFile, target.nameWithoutExtension + ".json")
+                .writeText(SidecarJson.encodeToString(JsonObject.serializer(), json))
+        }.onFailure { t ->
+            println("TORVE RECORDINGS | sidecar metadata failed: ${t.message}")
+        }
+    }
+
     companion object {
+        private val SidecarJson = Json { prettyPrint = true }
+
         const val DEFAULT_POLL_MS: Long = 30_000L
         private const val BUFFER_BYTES: Int = 64 * 1024
 

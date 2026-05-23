@@ -4,6 +4,7 @@ package com.torve.desktop.ui.v2.nzbmovies
 
 import androidx.compose.foundation.background
 import com.torve.desktop.ui.l10n.ds
+import androidx.compose.foundation.VerticalScrollbar
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -12,6 +13,7 @@ import androidx.compose.foundation.layout.FlowRowScope
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -21,6 +23,7 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
+import androidx.compose.foundation.rememberScrollbarAdapter
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -61,7 +64,6 @@ import com.torve.domain.model.hasValueFor
  *   • Language - drives the Newznab `cat=` parameter via
  *     IndexerCategoryMap. Triggers a refetch.
  *   • Search - drives the Newznab `q=` parameter. Triggers a refetch.
- *   • Year - client-side filter on TMDB release year.
  *   • Genre - client-side filter on TMDB genre IDs.
  *
  * Posters use the standard [V2PosterCard] so click-to-detail and the
@@ -92,7 +94,6 @@ fun V2NzbSeeAllPage(
             if (saved == NzbSeeAllStateHolder.State()) initialLanguage else saved.language,
         )
     }
-    var yearFilter by remember { mutableStateOf(saved.yearFilter) }
     var genreFilter by remember { mutableStateOf(saved.genreFilter) }
     var minRating by remember { mutableStateOf(saved.minRating) }
     var requiredRatingSource by remember { mutableStateOf(saved.requiredRatingSource) }
@@ -107,14 +108,14 @@ fun V2NzbSeeAllPage(
 
     // Mirror every filter / scroll change back to the holder.
     LaunchedEffect(
-        query, language, yearFilter, genreFilter, minRating, requiredRatingSource,
+        query, language, genreFilter, minRating, requiredRatingSource,
         gridState.firstVisibleItemIndex, gridState.firstVisibleItemScrollOffset,
     ) {
         NzbSeeAllStateHolder.put(
             NzbSeeAllStateHolder.State(
                 query = query,
                 language = language,
-                yearFilter = yearFilter,
+                yearFilter = null,
                 genreFilter = genreFilter,
                 minRating = minRating,
                 requiredRatingSource = requiredRatingSource,
@@ -125,7 +126,7 @@ fun V2NzbSeeAllPage(
     }
 
     // Re-trigger fetch whenever the indexer-driven filters (language /
-    // search) change. Year + genre are client-side and don't require a
+    // search) change. Genre is client-side and doesn't require a
     // network round trip - they filter [items] in place. When the
     // filtered subset is too thin, the load-more effect below still
     // pulls more pages so the user gets a deep enough corpus.
@@ -150,8 +151,8 @@ fun V2NzbSeeAllPage(
     // Compute the visible (post-client-filter) count *first* so the
     // load-more effect below can chase it. Mirrors the [visible] memo
     // below - keep the predicate identical.
-    val filteredSize = remember(items, yearFilter, genreFilter, minRating, requiredRatingSource) {
-        items.count { rel -> matchesClientFilters(rel, yearFilter, genreFilter, minRating, requiredRatingSource) }
+    val filteredSize = remember(items, genreFilter, minRating, requiredRatingSource) {
+        items.count { rel -> matchesClientFilters(rel, genreFilter, minRating, requiredRatingSource) }
     }
 
     // Lazy load triggers in two cases:
@@ -173,11 +174,8 @@ fun V2NzbSeeAllPage(
             }
     }
 
-    // Available years + genres are derived from whatever's loaded right
+    // Available genres are derived from whatever's loaded right
     // now - the chip set updates as the indexer feed changes.
-    val availableYears = remember(items) {
-        items.mapNotNull { it.match.year }.distinct().sortedDescending()
-    }
     val availableGenres = remember(items) {
         items.flatMap { it.match.genreIds }
             .filter { it in TMDB_MOVIE_GENRES }
@@ -185,8 +183,8 @@ fun V2NzbSeeAllPage(
             .sortedBy { TMDB_MOVIE_GENRES[it] }
     }
 
-    val visible = remember(items, yearFilter, genreFilter, minRating, requiredRatingSource) {
-        items.filter { rel -> matchesClientFilters(rel, yearFilter, genreFilter, minRating, requiredRatingSource) }
+    val visible = remember(items, genreFilter, minRating, requiredRatingSource) {
+        items.filter { rel -> matchesClientFilters(rel, genreFilter, minRating, requiredRatingSource) }
     }
 
     Column(
@@ -252,20 +250,6 @@ fun V2NzbSeeAllPage(
             }
         }
 
-        // Year filter - only render the row if anything's loaded.
-        if (availableYears.isNotEmpty()) {
-            FilterRow(label = ds("Year")) {
-                CompactFilterChip(text = ds("Any"), selected = yearFilter == null, onClick = { yearFilter = null })
-                availableYears.take(20).forEach { year ->
-                    CompactFilterChip(
-                        text = year.toString(),
-                        selected = yearFilter == year,
-                        onClick = { yearFilter = year },
-                    )
-                }
-            }
-        }
-
         // Genre filter.
         if (availableGenres.isNotEmpty()) {
             FilterRow(label = ds("Genre")) {
@@ -328,31 +312,40 @@ fun V2NzbSeeAllPage(
                         style = MaterialTheme.typography.bodyMedium,
                     )
                 }
-                else -> LazyVerticalGrid(
-                    state = gridState,
-                    columns = GridCells.Adaptive(minSize = 150.dp),
-                    contentPadding = PaddingValues(start = 72.dp, end = 24.dp, top = 8.dp, bottom = 24.dp),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    verticalArrangement = Arrangement.spacedBy(16.dp),
-                    modifier = Modifier.fillMaxSize(),
-                ) {
-                    items(visible, key = { it.match.tmdbId }) { rel ->
-                        V2PosterCard(
-                            rel.match.title,
-                            rel.match.posterUrl,
-                            Modifier.width(150.dp),
-                            rel.match.year?.toString(),
-                            rel.match.voteAverage?.let { String.format("%.1f", it) },
-                            ratings = rel.mediaItem.ratings,
-                            backdropUrl = rel.match.backdropUrl,
-                            overview = rel.match.overview,
-                        ) {
-                            // Register the NZB so launchPlayback can
-                            // fall back to it if Stremio sources fail.
-                            com.torve.desktop.adult.NzbPlaybackHints.set(rel.match.tmdbId, rel.nzb)
-                            onOpenDetail(rel.mediaItem)
+                else -> {
+                    LazyVerticalGrid(
+                        state = gridState,
+                        columns = GridCells.Adaptive(minSize = 150.dp),
+                        contentPadding = PaddingValues(start = 72.dp, end = 32.dp, top = 8.dp, bottom = 24.dp),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(16.dp),
+                        modifier = Modifier.fillMaxSize(),
+                    ) {
+                        items(visible, key = { it.match.tmdbId }) { rel ->
+                            V2PosterCard(
+                                rel.match.title,
+                                rel.match.posterUrl,
+                                Modifier.width(150.dp),
+                                rel.match.year?.toString(),
+                                rel.match.voteAverage?.let { String.format("%.1f", it) },
+                                ratings = rel.mediaItem.ratings,
+                                backdropUrl = rel.match.backdropUrl,
+                                overview = rel.match.overview,
+                            ) {
+                                // Register the NZB so launchPlayback can
+                                // fall back to it if Stremio sources fail.
+                                com.torve.desktop.adult.NzbPlaybackHints.set(rel.match.tmdbId, rel.nzb)
+                                onOpenDetail(rel.mediaItem)
+                            }
                         }
                     }
+                    VerticalScrollbar(
+                        adapter = rememberScrollbarAdapter(gridState),
+                        modifier = Modifier
+                            .align(Alignment.CenterEnd)
+                            .fillMaxHeight()
+                            .padding(end = 4.dp),
+                    )
                 }
             }
         }
@@ -463,12 +456,10 @@ private val RATING_SOURCE_FILTERS: List<com.torve.domain.model.RatingSource> = l
  */
 private fun matchesClientFilters(
     rel: com.torve.desktop.adult.NzbCatalogService.MatchedRelease,
-    yearFilter: Int?,
     genreFilter: Int?,
     minRating: Float?,
     requiredRatingSource: com.torve.domain.model.RatingSource?,
 ): Boolean {
-    if (yearFilter != null && rel.match.year != yearFilter) return false
     if (genreFilter != null && genreFilter !in rel.match.genreIds) return false
     val ratings = rel.mediaItem.ratings
     if (requiredRatingSource != null) {

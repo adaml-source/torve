@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -32,6 +33,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.foundation.VerticalScrollbar
 import com.torve.desktop.ui.components.TorveGhostButton
 import com.torve.desktop.ui.components.TorvePrimaryButton
 import com.torve.desktop.ui.l10n.ds
@@ -39,7 +41,10 @@ import com.torve.desktop.ui.theme.TorveDesktopThemeTokens
 import com.torve.desktop.ui.v2.components.V2PosterCard
 import com.torve.desktop.ui.v2.components.V2Shelf
 import com.torve.desktop.ui.v2.components.rememberCachedBitmap
+import com.torve.desktop.ui.v2.movies.DESKTOP_WATCH_PROVIDERS
 import com.torve.desktop.ui.v2.seeall.SeeAllRequest
+import androidx.compose.foundation.rememberScrollbarAdapter
+import com.torve.domain.model.CatalogShelf
 import com.torve.domain.model.CardStyle
 import com.torve.domain.model.HomeSection
 import com.torve.domain.model.HomeSectionConfig
@@ -56,7 +61,10 @@ fun V2HomePage(
     onOpenDetail: (MediaItem) -> Unit = {},
     onSeeAll: (SeeAllRequest) -> Unit = {},
     sectionConfigs: List<HomeSectionConfig> = emptyList(),
+    enabledServiceIds: Set<Int> = emptySet(),
+    providerLogos: Map<Int, String> = emptyMap(),
     cardStyleFor: (HomeSection?) -> CardStyle = { CardStyle() },
+    onOpenPerson: (Int) -> Unit = {},
     // Optional CTA hooks for the zero-source empty state. When the
     // user skipped onboarding without configuring any source, Home
     // has nothing to render — these callbacks let the empty-state
@@ -75,13 +83,18 @@ fun V2HomePage(
         sectionConfigs.associateBy { it.section }
     }
     fun isSectionVisible(section: HomeSection): Boolean =
-        configBySection[section]?.enabled ?: true
+        configBySection[section]?.enabled ?: section.defaultEnabled
+    @Composable
+    fun titleFor(section: HomeSection, fallback: String = section.defaultTitle): String =
+        configBySection[section]?.customTitle?.takeIf { it.isNotBlank() } ?: ds(fallback)
 
     // Resolve CardStyle and width per section. Falls back to a non-null default
     // when no preset is configured (CardStyle() defaults render the legacy look).
     val defaultCardStyle = remember { CardStyle() }
     fun cardStyleForOrDefault(section: HomeSection?): CardStyle =
-        cardStyleFor(section).let { if (it == defaultCardStyle) defaultCardStyle else it }
+        cardStyleFor(section)
+            .let { if (it == defaultCardStyle) defaultCardStyle else it }
+            .couchFirstHomeStyle()
     fun widthFor(section: HomeSection?): androidx.compose.ui.unit.Dp {
         val style = cardStyleForOrDefault(section)
         // When the user hasn't customized, keep the historical 150dp shelf card
@@ -91,7 +104,8 @@ fun V2HomePage(
     }
     val heroItem = remember(homeState) {
         // Prefer items with full metadata (logo, overview) for the hero
-        homeState.shelves.firstOrNull()?.items?.firstOrNull { it.logoUrl != null }
+        homeState.heroItem
+            ?: homeState.shelves.firstOrNull()?.items?.firstOrNull { it.logoUrl != null }
             ?: homeState.recommendedItems.firstOrNull()?.item
             ?: homeState.watchlistItems.firstOrNull()
             ?: homeState.shelves.firstOrNull()?.items?.firstOrNull()
@@ -130,8 +144,9 @@ fun V2HomePage(
                 ),
             )
 
-            Column(Modifier.fillMaxSize().verticalScroll(scrollState)) {
+            Column(Modifier.fillMaxWidth().height(vpH).verticalScroll(scrollState)) {
                 // ── Hero area ──
+                if (isSectionVisible(HomeSection.HERO)) {
                 Box(Modifier.fillMaxWidth().height(vpH * 0.78f)) {
                     if (heroItem != null) {
                         Column(
@@ -164,6 +179,9 @@ fun V2HomePage(
                         }
                     }
                 }
+                } else {
+                    Spacer(Modifier.height(96.dp))
+                }
 
                 // ── Zero-source empty state ──
                 // When the user skipped onboarding (no sources
@@ -176,6 +194,7 @@ fun V2HomePage(
                 val isHomeEmpty = heroItem == null &&
                     homeState.shelves.isEmpty() &&
                     homeState.watchlistItems.isEmpty() &&
+                    homeState.upcomingSchedule.isEmpty() &&
                     homeState.continueWatching.isEmpty() &&
                     homeState.recommendedItems.isEmpty() &&
                     homeState.recentlyWatched.isEmpty()
@@ -249,6 +268,39 @@ fun V2HomePage(
                         }
                     }
 
+                    if (homeState.upcomingSchedule.isNotEmpty() && isSectionVisible(HomeSection.UPCOMING_SCHEDULE)) {
+                        val scheduleStyle = cardStyleForOrDefault(HomeSection.UPCOMING_SCHEDULE)
+                        val scheduleWidth = widthFor(HomeSection.UPCOMING_SCHEDULE)
+                        V2Shelf(
+                            ds("Upcoming Schedule"),
+                            modifier = Modifier.padding(start = 72.dp),
+                            onSeeAll = {
+                                onSeeAll(
+                                    SeeAllRequest(
+                                        "upcoming_schedule",
+                                        "Upcoming Schedule",
+                                        homeState.upcomingSchedule,
+                                    ),
+                                )
+                            },
+                        ) {
+                            homeState.upcomingSchedule.take(20).forEach { item ->
+                                V2PosterCard(
+                                    item.title,
+                                    item.posterUrl,
+                                    Modifier.width(scheduleWidth),
+                                    upcomingScheduleDateTime(item.releaseDate),
+                                    item.rating?.let { String.format("%.1f", it) },
+                                    ratings = item.ratings,
+                                    backdropUrl = item.backdropUrl,
+                                    overview = item.overview,
+                                    cardStyle = scheduleStyle,
+                                    onClick = { onOpenDetail(item) },
+                                )
+                            }
+                        }
+                    }
+
                     val curatedItems = homeState.becauseYouWatched.firstOrNull()?.items ?: homeState.recommendedItems.map { it.item }
                     val curatedSection = if (homeState.becauseYouWatched.isNotEmpty()) HomeSection.BECAUSE_YOU_WATCHED else HomeSection.RECOMMENDED
                     if (curatedItems.isNotEmpty() && isSectionVisible(curatedSection)) {
@@ -274,10 +326,7 @@ fun V2HomePage(
                     val allShelves = homeState.shelves +
                         homeState.addonShelves +
                         homeState.mdbListShelves +
-                        listOfNotNull(homeState.hiddenGemsShelf) +
-                        homeState.customShelves.map { (title, items) ->
-                            com.torve.domain.model.CatalogShelf(id = "custom_$title", title = title, items = items)
-                        }
+                        listOfNotNull(homeState.hiddenGemsShelf)
                     // Skeleton placeholders while the home state is
                     // still loading and no shelves have arrived yet.
                     // Once any shelf shows up, real cards take over.
@@ -291,8 +340,12 @@ fun V2HomePage(
                         }
                     }
                     allShelves.forEach { shelf ->
-                        val mappedSection = HomeSection.entries.firstOrNull { it.shelfId == shelf.id }
-                        val visible = mappedSection?.let { isSectionVisible(it) } ?: true
+                        val mappedSection = sectionForHomeShelf(
+                            shelf = shelf,
+                            addonShelves = homeState.addonShelves,
+                            mdbListShelves = homeState.mdbListShelves,
+                        )
+                        val visible = mappedSection?.let { isSectionVisible(it) } ?: false
                         if (shelf.items.isNotEmpty() && visible) {
                             val request = shelfToSeeAllRequest(shelf.id, shelf.title, shelf.items)
                             val shelfStyle = cardStyleForOrDefault(mappedSection)
@@ -317,7 +370,7 @@ fun V2HomePage(
                         val rwStyle = cardStyleForOrDefault(HomeSection.RECENTLY_WATCHED)
                         val rwWidth = widthFor(HomeSection.RECENTLY_WATCHED)
                         V2Shelf(
-                            ds("Recently Watched"),
+                            titleFor(HomeSection.RECENTLY_WATCHED, "Recently Watched"),
                             modifier = Modifier.padding(start = 72.dp),
                             onSeeAll = { onSeeAll(SeeAllRequest("recently_watched", "Recently Watched")) },
                         ) {
@@ -331,12 +384,89 @@ fun V2HomePage(
                         }
                     }
 
+                    if (enabledServiceIds.isNotEmpty() && isSectionVisible(HomeSection.STREAMING_SERVICES)) {
+                        val services = DESKTOP_WATCH_PROVIDERS.filter { it.id in enabledServiceIds }
+                        if (services.isNotEmpty()) {
+                            val serviceStyle = cardStyleForOrDefault(HomeSection.STREAMING_SERVICES)
+                            val serviceWidth = widthFor(HomeSection.STREAMING_SERVICES).coerceAtLeast(132.dp)
+                            V2Shelf(
+                                titleFor(HomeSection.STREAMING_SERVICES, "Streaming Services"),
+                                modifier = Modifier.padding(start = 72.dp),
+                            ) {
+                                services.forEach { provider ->
+                                    V2PosterCard(
+                                        provider.label,
+                                        providerLogos[provider.id],
+                                        Modifier.width(serviceWidth),
+                                        cardStyle = serviceStyle,
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    if (homeState.popularActors.isNotEmpty() && isSectionVisible(HomeSection.ACTORS)) {
+                        val actorStyle = cardStyleForOrDefault(HomeSection.ACTORS)
+                        val actorWidth = widthFor(HomeSection.ACTORS)
+                        V2Shelf(
+                            titleFor(HomeSection.ACTORS, "Popular Actors"),
+                            modifier = Modifier.padding(start = 72.dp),
+                        ) {
+                            homeState.popularActors.take(20).forEach { person ->
+                                V2PosterCard(
+                                    person.name,
+                                    person.profileUrl,
+                                    Modifier.width(actorWidth),
+                                    cardStyle = actorStyle,
+                                    onClick = { onOpenPerson(person.id) },
+                                )
+                            }
+                        }
+                    }
+
+                    if (homeState.popularDirectors.isNotEmpty() && isSectionVisible(HomeSection.DIRECTORS)) {
+                        val directorStyle = cardStyleForOrDefault(HomeSection.DIRECTORS)
+                        val directorWidth = widthFor(HomeSection.DIRECTORS)
+                        V2Shelf(
+                            titleFor(HomeSection.DIRECTORS, "Popular Directors"),
+                            modifier = Modifier.padding(start = 72.dp),
+                        ) {
+                            homeState.popularDirectors.take(20).forEach { person ->
+                                V2PosterCard(
+                                    person.name,
+                                    person.profileUrl,
+                                    Modifier.width(directorWidth),
+                                    cardStyle = directorStyle,
+                                    onClick = { onOpenPerson(person.id) },
+                                )
+                            }
+                        }
+                    }
+
                     Spacer(Modifier.height(32.dp))
                 }
             }
+            VerticalScrollbar(
+                adapter = rememberScrollbarAdapter(scrollState),
+                modifier = Modifier
+                    .align(Alignment.CenterEnd)
+                    .fillMaxHeight()
+                    .padding(end = 4.dp),
+            )
         }
     }
 }
+
+private fun CardStyle.couchFirstHomeStyle(): CardStyle =
+    copy(
+        hover = hover.copy(
+            scalePercent = hover.scalePercent.coerceAtMost(103),
+            animationDurationMs = hover.animationDurationMs.coerceAtMost(180),
+        ),
+        appearance = appearance.copy(
+            cornerRadiusDp = appearance.cornerRadiusDp.coerceAtLeast(14),
+        ),
+    )
 
 internal data class WatchlistHeatBadge(
     val label: String,
@@ -345,6 +475,20 @@ internal data class WatchlistHeatBadge(
 
 private fun watchlistHeatBadge(releaseDate: String?): WatchlistHeatBadge? =
     classifyWatchlistHeat(releaseDate, java.time.LocalDate.now())
+
+private fun upcomingScheduleDateTime(releaseDate: String?): String? {
+    val raw = releaseDate?.trim()?.takeIf { it.isNotEmpty() } ?: return null
+    return runCatching {
+        java.time.ZonedDateTime.parse(raw)
+            .withZoneSameInstant(java.time.ZoneId.systemDefault())
+            .format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm"))
+    }.getOrElse {
+        raw.take(16)
+            .replace('T', ' ')
+            .removeSuffix("Z")
+            .takeIf { it.isNotBlank() }
+    }
+}
 
 /**
  * Pure classifier for watchlist heat-map badging. Injects [today] so unit
@@ -390,6 +534,19 @@ private fun shelfToSeeAllRequest(shelfId: String, title: String, items: List<Med
     }
     return SeeAllRequest(sectionId, title, items)
 }
+
+private fun sectionForHomeShelf(
+    shelf: CatalogShelf,
+    addonShelves: List<CatalogShelf>,
+    mdbListShelves: List<CatalogShelf>,
+): HomeSection? =
+    HomeSection.entries.firstOrNull { it.shelfId == shelf.id }
+        ?: when {
+            shelf.id == "hidden_gems" -> HomeSection.HIDDEN_GEMS
+            addonShelves.any { it.id == shelf.id } -> HomeSection.ADDON_SHELVES
+            mdbListShelves.any { it.id == shelf.id } -> HomeSection.MDBLIST_SHELVES
+            else -> null
+        }
 
 /**
  * Empty state shown on Home when the user skipped source setup

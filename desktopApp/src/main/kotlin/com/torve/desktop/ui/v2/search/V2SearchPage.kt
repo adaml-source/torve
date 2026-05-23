@@ -1,5 +1,6 @@
 package com.torve.desktop.ui.v2.search
 
+import androidx.compose.foundation.VerticalScrollbar
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -7,12 +8,14 @@ import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.rememberScrollbarAdapter
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -32,18 +35,23 @@ import com.torve.data.ai.KeywordSearchResult
 import com.torve.data.ai.KeywordSearchService
 import com.torve.data.metadata.TmdbApiClient
 import com.torve.data.metadata.TmdbMappers
-import com.torve.desktop.ui.components.TorveBadge
-import com.torve.desktop.ui.components.TorveBadgeTone
 import com.torve.desktop.ui.components.TorveBanner
 import com.torve.desktop.ui.components.TorveBannerTone
-import com.torve.desktop.ui.components.TorveFilterChip
 import com.torve.desktop.ui.components.TorveGhostButton
-import com.torve.desktop.ui.components.TorveSearchField
 import com.torve.desktop.ui.l10n.ds
 import com.torve.desktop.ui.theme.TorveDesktopThemeTokens
 import com.torve.desktop.ui.v2.components.V2Atmosphere
 import com.torve.desktop.ui.v2.components.V2PosterCard
+import com.torve.desktop.ui.v2.discovery.DiscoveryControls
+import com.torve.desktop.ui.v2.discovery.DiscoveryDropdownKey
+import com.torve.desktop.ui.v2.discovery.DiscoveryDropdownOption
+import com.torve.desktop.ui.v2.discovery.DiscoveryDropdownUiModel
+import com.torve.desktop.ui.v2.discovery.MoodFilterUiModel
+import com.torve.desktop.ui.v2.discovery.mixedDiscoveryFilterConfig
+import com.torve.domain.discovery.applyMoodFilter
+import com.torve.domain.discovery.nextSelectedMoodId
 import com.torve.domain.model.MediaItem
+import com.torve.domain.model.MediaType
 import com.torve.presentation.search.SearchUiState
 import kotlinx.coroutines.launch
 
@@ -95,6 +103,18 @@ fun V2SearchPage(
     var aiResult by remember { mutableStateOf<KeywordSearchResult?>(null) }
     var aiItems by remember { mutableStateOf<List<MediaItem>>(emptyList()) }
     var notConfiguredNotice by remember { mutableStateOf(false) }
+    var filtersExpanded by remember { mutableStateOf(true) }
+    var selectedMoodId by remember { mutableStateOf("all") }
+    val searchMoodChips = remember {
+        listOf(
+            MoodFilterUiModel("all", "All moods"),
+            MoodFilterUiModel("dark", "Dark"),
+            MoodFilterUiModel("funny", "Funny"),
+            MoodFilterUiModel("cinematic", "Cinematic"),
+            MoodFilterUiModel("acclaimed", "Critically acclaimed"),
+            MoodFilterUiModel("hidden", "Hidden gems"),
+        )
+    }
 
     // If the user disconnects the provider mid-session, force AI mode
     // off so the search bar doesn't keep accepting AI prompts that
@@ -162,6 +182,8 @@ fun V2SearchPage(
         }
     }
 
+    val scrollState = rememberScrollState()
+
     Box(Modifier.fillMaxSize()) {
         val atmosphereBackdrop = if (aiMode) {
             aiItems.firstOrNull()?.backdropUrl
@@ -174,69 +196,74 @@ fun V2SearchPage(
             Modifier
                 .fillMaxSize()
                 .padding(start = 72.dp, end = 24.dp, top = 16.dp, bottom = 16.dp)
-                .verticalScroll(rememberScrollState()),
+                .verticalScroll(scrollState),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
-            // ── Search bar with inline AI toggle + provider status ──
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                if (aiMode) {
-                    TorveSearchField(
-                        value = aiQuery,
-                        onValueChange = { aiQuery = it },
-                        modifier = Modifier.fillMaxWidth(0.5f),
-                        placeholder = ds("Ask Torve in plain English..."),
-                    )
-                    com.torve.desktop.ui.components.TorvePrimaryButton(
-                        text = if (aiLoading) "Asking..." else "Ask",
-                        onClick = { runAiSearch(aiQuery) },
-                        enabled = !aiLoading && aiQuery.isNotBlank(),
-                    )
-                } else {
-                    TorveSearchField(
-                        value = searchState.query,
-                        onValueChange = onQueryChange,
-                        modifier = Modifier.fillMaxWidth(0.55f),
-                        placeholder = ds("Search movies, shows, people..."),
-                    )
-                }
-
-                // AI mode toggle: switch on if configured; otherwise
-                // show notice instead of flipping silently.
-                TorveFilterChip(
-                    text = if (aiMode) "AI on" else "AI off",
-                    selected = aiMode,
-                    onClick = {
-                        if (aiMode) {
-                            // Always allow turning off.
-                            aiMode = false
-                            notConfiguredNotice = false
-                        } else if (providerConfigured) {
-                            aiMode = true
-                            notConfiguredNotice = false
-                        } else {
-                            // Refused - render the banner below.
-                            notConfiguredNotice = true
-                        }
-                    },
-                )
-                // Provider status badge - visible whenever a provider is
-                // configured, so the user always sees who would answer.
-                if (providerConfigured) {
-                    TorveBadge(
-                        text = "${aiProvider.label} ready",
-                        tone = if (aiMode) TorveBadgeTone.Accent else TorveBadgeTone.Success,
-                    )
-                } else {
-                    TorveBadge(
-                        text = ds("AI not set up"),
-                        tone = TorveBadgeTone.Warning,
-                    )
-                }
+            val contentTypeValue = when (searchState.filter.mediaType) {
+                "movie" -> "Movies"
+                "tv" -> "TV Shows"
+                else -> "All"
             }
-
+            DiscoveryControls(
+                config = mixedDiscoveryFilterConfig(
+                    aiAvailable = true,
+                    geminiReadyAvailable = aiProvider == AiProvider.GEMINI && providerConfigured,
+                    showYear = false,
+                ),
+                query = if (aiMode) aiQuery else searchState.query,
+                onQueryChange = if (aiMode) ({ value -> aiQuery = value }) else onQueryChange,
+                isGeminiReady = aiProvider == AiProvider.GEMINI && providerConfigured,
+                isAiSearchEnabled = providerConfigured,
+                isAiSearchActive = aiMode,
+                aiLoading = aiLoading,
+                onSearchSubmit = if (aiMode) ({ runAiSearch(aiQuery) }) else null,
+                onAiSearchClick = {
+                    if (aiMode) {
+                        aiMode = false
+                        notConfiguredNotice = false
+                    } else if (providerConfigured) {
+                        aiMode = true
+                        notConfiguredNotice = false
+                    } else {
+                        notConfiguredNotice = true
+                    }
+                },
+                filtersExpanded = filtersExpanded,
+                onFiltersClick = { filtersExpanded = !filtersExpanded },
+                canReset = searchState.filter.mediaType != null ||
+                    searchState.query.isNotBlank() ||
+                    aiQuery.isNotBlank() ||
+                    aiMode ||
+                    selectedMoodId != "all",
+                onResetClick = {
+                    onApplyFilter(null)
+                    onQueryChange("")
+                    aiQuery = ""
+                    aiMode = false
+                    selectedMoodId = "all"
+                    aiResult = null
+                    aiItems = emptyList()
+                    notConfiguredNotice = false
+                },
+                dropdowns = listOf(
+                    DiscoveryDropdownUiModel(
+                        key = DiscoveryDropdownKey.ContentType,
+                        label = "Type",
+                        value = contentTypeValue,
+                        options = listOf(
+                            DiscoveryDropdownOption("All") { onApplyFilter(null) },
+                            DiscoveryDropdownOption("Movies") { onApplyFilter("movie") },
+                            DiscoveryDropdownOption("TV Shows") { onApplyFilter("tv") },
+                        ),
+                    ),
+                ),
+                moods = searchMoodChips,
+                selectedMoodIds = setOf(selectedMoodId),
+                onMoodClick = { mood ->
+                    selectedMoodId = nextSelectedMoodId(selectedMoodId, mood.id)
+                },
+            )
+            // ── Search bar with inline AI toggle + provider status ──
             if (notConfiguredNotice && !providerConfigured) {
                 TorveBanner(
                     title = ds("AI search needs a provider"),
@@ -257,28 +284,6 @@ fun V2SearchPage(
                             onClick = { notConfiguredNotice = false },
                         )
                     }
-                }
-            }
-
-            // Filter chips - only meaningful for catalogue search; the
-            // AI flow infers the media type from the prompt itself.
-            if (!aiMode) {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    TorveFilterChip(
-                        text = ds("All"),
-                        selected = searchState.filter.mediaType == null,
-                        onClick = { onApplyFilter(null) },
-                    )
-                    TorveFilterChip(
-                        text = ds("Movies"),
-                        selected = searchState.filter.mediaType == "movie",
-                        onClick = { onApplyFilter("movie") },
-                    )
-                    TorveFilterChip(
-                        text = ds("TV Shows"),
-                        selected = searchState.filter.mediaType == "tv",
-                        onClick = { onApplyFilter("tv") },
-                    )
                 }
             }
 
@@ -306,9 +311,20 @@ fun V2SearchPage(
                         )
                     }
                 }
-                if (aiItems.isNotEmpty()) {
+                val filteredAiItems = remember(aiItems, selectedMoodId, searchState.filter.mediaType) {
+                    aiItems
+                        .filter { item ->
+                            when (searchState.filter.mediaType) {
+                                "movie" -> item.type == MediaType.MOVIE
+                                "tv" -> item.type == MediaType.SERIES
+                                else -> true
+                            }
+                        }
+                        .applyMoodFilter(selectedMoodId)
+                }
+                if (filteredAiItems.isNotEmpty()) {
                     Text(
-                        text = "${aiItems.size} AI results",
+                        text = "${filteredAiItems.size} AI results",
                         style = MaterialTheme.typography.labelMedium,
                         color = colors.textSecondary,
                     )
@@ -316,7 +332,7 @@ fun V2SearchPage(
                         horizontalArrangement = Arrangement.spacedBy(14.dp),
                         verticalArrangement = Arrangement.spacedBy(16.dp),
                     ) {
-                        aiItems.forEach { item ->
+                        filteredAiItems.forEach { item ->
                             V2PosterCard(
                                 title = item.title,
                                 imageUrl = item.posterUrl,
@@ -346,7 +362,9 @@ fun V2SearchPage(
                     color = colors.error,
                 )
             }
-            val results = searchState.results
+            val results = remember(searchState.results, selectedMoodId) {
+                searchState.results.applyMoodFilter(selectedMoodId)
+            }
             if (results.isNotEmpty()) {
                 Text(
                     text = "${results.size} results",
@@ -378,7 +396,10 @@ fun V2SearchPage(
                     emoji = "🔎",
                 )
             }
-            if (searchState.discoverResults.isNotEmpty() && searchState.query.isBlank()) {
+            val discoverResults = remember(searchState.discoverResults, selectedMoodId) {
+                searchState.discoverResults.applyMoodFilter(selectedMoodId)
+            }
+            if (discoverResults.isNotEmpty() && searchState.query.isBlank()) {
                 Text(
                     text = ds("Discover"),
                     style = MaterialTheme.typography.titleMedium,
@@ -388,7 +409,7 @@ fun V2SearchPage(
                     horizontalArrangement = Arrangement.spacedBy(14.dp),
                     verticalArrangement = Arrangement.spacedBy(16.dp),
                 ) {
-                    searchState.discoverResults.forEach { item ->
+                    discoverResults.forEach { item ->
                         V2PosterCard(
                             title = item.title,
                             imageUrl = item.posterUrl,
@@ -403,5 +424,12 @@ fun V2SearchPage(
                 }
             }
         }
+        VerticalScrollbar(
+            adapter = rememberScrollbarAdapter(scrollState),
+            modifier = Modifier
+                .align(Alignment.CenterEnd)
+                .fillMaxHeight()
+                .padding(end = 4.dp),
+        )
     }
 }

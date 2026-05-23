@@ -9,6 +9,7 @@ import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Test
 import java.io.ByteArrayInputStream
+import java.io.InputStream
 import java.io.File
 import java.nio.file.Files
 import kotlin.test.assertEquals
@@ -95,6 +96,9 @@ class DesktopRecordingServiceTest {
         assertTrue(on.exists())
         assertTrue(on.canonicalPath.startsWith(root.canonicalPath))
         assertEquals(payload.size, on.length().toInt())
+        val sidecar = File(on.parentFile, on.nameWithoutExtension + ".json")
+        assertTrue(sidecar.exists(), "recording metadata sidecar should be written")
+        assertTrue(!sidecar.readText().contains(rec.streamUrl), "sidecar must not expose stream URLs")
     }
 
     @Test
@@ -202,6 +206,48 @@ class DesktopRecordingServiceTest {
         assertEquals(RecordingFailureReason.UPSTREAM_REJECTED, final.failureReason)
     }
 
+    @Test
+    fun `stopping active recording saves partial file instead of cancelling`() = runBlocking {
+        val root = tmpDir("torve-stop-partial")
+        val repo = com.torve.desktop.recording.FileBackedRecordingRepository(tmpDir("repo"))
+        val scheduler = RecordingScheduler(repo, nowMs = { System.currentTimeMillis() })
+        val stream = object : RecordingHttpStream {
+            override val input: java.io.InputStream = SlowChunkInputStream()
+            override fun disconnect() {}
+        }
+        val service = DesktopRecordingService(
+            scheduler = scheduler,
+            repository = repo,
+            allowlist = DownloadFolderAllowlist { listOf(root) },
+            recordingsRootProvider = { root },
+            nowMs = { System.currentTimeMillis() },
+            openConnection = { stream },
+        )
+        val rec = mkRecording(
+            id = "rec-stop",
+            startMs = System.currentTimeMillis(),
+            endMs = System.currentTimeMillis() + 60_000L,
+        )
+        repo.upsert(rec)
+
+        service.runNow(rec)
+        val active = waitFor(repo, "rec-stop") { row ->
+            row.status == RecordingStatus.RECORDING &&
+                row.filePath?.let { File(it).exists() && File(it).length() > 0L } == true
+        }
+        assertEquals(RecordingStatus.RECORDING, active.status)
+
+        assertTrue(service.cancelRunning("rec-stop"))
+        assertTrue(service.cancelRunning("rec-stop"), "repeated Stop should not pre-mark the row cancelled")
+
+        val final = waitFor(repo, "rec-stop") {
+            it.status == RecordingStatus.COMPLETED || it.status == RecordingStatus.CANCELLED
+        }
+        assertEquals(RecordingStatus.COMPLETED, final.status)
+        assertTrue((final.fileSizeBytes ?: 0L) > 0L)
+        assertTrue(File(final.filePath!!).exists())
+    }
+
     /**
      * Polls the repository for up to [timeoutMs] for [predicate] to
      * pass. The recording job runs on Dispatchers.IO; we need a tiny
@@ -220,5 +266,26 @@ class DesktopRecordingServiceTest {
             Thread.sleep(50)
         }
         error("recording $id never reached terminal status within $timeoutMs ms")
+    }
+
+    private class SlowChunkInputStream : InputStream() {
+        private var remaining = 512 * 1024
+
+        override fun read(): Int {
+            val one = ByteArray(1)
+            val read = read(one, 0, 1)
+            return if (read < 0) -1 else one[0].toInt() and 0xFF
+        }
+
+        override fun read(buffer: ByteArray, off: Int, len: Int): Int {
+            if (remaining <= 0) return -1
+            Thread.sleep(20)
+            val count = minOf(len, 4096, remaining)
+            for (i in 0 until count) {
+                buffer[off + i] = (i and 0xFF).toByte()
+            }
+            remaining -= count
+            return count
+        }
     }
 }

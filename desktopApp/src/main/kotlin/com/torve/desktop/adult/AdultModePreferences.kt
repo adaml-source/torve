@@ -1,5 +1,7 @@
 package com.torve.desktop.adult
 
+import com.torve.domain.diagnostics.DiagnosticsRedactor
+import com.torve.platform.TorveRuntimeDebug
 import com.torve.desktop.platform.desktopDataDir
 import java.io.File
 import java.util.Properties
@@ -78,7 +80,9 @@ object AdultModePreferences {
             file.outputStream().use { props.store(it, "Torve adult-mode preferences") }
             cached = props
         }.onFailure { t ->
-            println("TORVE ADULT | preferences write failed: ${t.message}")
+            if (TorveRuntimeDebug.verboseLoggingEnabled) {
+                println("TORVE ADULT | preferences write failed: ${t::class.simpleName} ${DiagnosticsRedactor.redact(t.message)}")
+            }
         }
     }
 }

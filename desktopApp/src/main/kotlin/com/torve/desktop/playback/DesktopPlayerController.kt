@@ -6,6 +6,7 @@ import com.torve.data.addon.SubtitleAggregator
 import com.torve.data.addon.canUseGenericStreamHandoff
 import com.torve.data.addon.isAddonHostedUrl
 import com.torve.domain.model.DebridServiceType
+import com.torve.domain.diagnostics.DiagnosticsRedactor
 import com.torve.domain.model.MediaItem
 import com.torve.domain.model.MediaType
 import com.torve.domain.model.ResolvedStream
@@ -19,6 +20,12 @@ import com.torve.domain.repository.MetadataRepository
 import com.torve.domain.repository.StreamRepository
 import com.torve.domain.repository.WatchHistoryRepository
 import com.torve.domain.repository.WatchProgressRepository
+import com.torve.domain.telemetry.StreamPathDiagnostics
+import com.torve.domain.telemetry.StreamPathTelemetryContext
+import com.torve.domain.telemetry.StreamPlaybackPath
+import com.torve.domain.telemetry.NoOpTelemetryEmitter
+import com.torve.domain.telemetry.TelemetryEmitter
+import com.torve.platform.TorveRuntimeDebug
 import com.torve.presentation.detail.episodeKey
 import com.torve.presentation.player.TraktScrobbler
 import com.torve.presentation.settings.SettingsViewModel
@@ -68,6 +75,12 @@ enum class DesktopPlayerCommand {
     PAUSE,
     STOP,
     CLOSE,
+}
+
+private inline fun desktopVerboseLog(message: () -> String) {
+    if (TorveRuntimeDebug.verboseLoggingEnabled) {
+        println(DiagnosticsRedactor.redact(message()))
+    }
 }
 
 data class DesktopPlayerError(
@@ -145,6 +158,9 @@ data class DesktopPlaybackSession(
     val resolvedFileName: String? = null,
     val resolvedMimeType: String? = null,
     val resolvedFileSize: Long? = null,
+    val resolvedIsTemporary: Boolean = false,
+    val resolvedStreamId: String? = null,
+    val resolvedExpiresInSeconds: Int? = null,
     val transcodeUrls: Map<String, String> = emptyMap(),
     val requestHeaders: Map<String, String> = emptyMap(),
     val subtitleCandidates: List<DesktopPlaybackSubtitleCandidate> = emptyList(),
@@ -212,6 +228,7 @@ class DesktopPlayerController(
      *  this router and rewrites the stream URL to `file://...` for any
      *  PlaybackRoute.LocalFile pick. Null in tests / legacy paths. */
     private val localFirstPlaybackRouter: com.torve.desktop.lanlibrary.LocalFirstPlaybackRouter? = null,
+    private val telemetry: TelemetryEmitter = NoOpTelemetryEmitter(),
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val _state = MutableStateFlow(DesktopPlayerUiState())
@@ -221,6 +238,9 @@ class DesktopPlayerController(
     private var progressSyncJob: Job? = null
     private var stopJob: Job? = null
     private var closeJob: Job? = null
+    private var handoffRefreshJob: Job? = null
+    private var handoffRefreshKey: String? = null
+    private var handoffRefreshAttempts: Int = 0
     private val engineEventJob: Job
     private var activeStartupTrace: PlaybackStartupTrace? = null
     private var recordedHistorySessionKey: String? = null
@@ -329,6 +349,7 @@ class DesktopPlayerController(
     fun open(request: DesktopPlaybackRequest) {
         resolutionJob?.cancel()
         subtitleJob?.cancel()
+        resetHandoffRefreshState()
         progressSyncJob?.cancel()
         recordedHistorySessionKey = null
         activeScrobbleSessionKey = null
@@ -410,8 +431,14 @@ class DesktopPlayerController(
                 resolvedFileName = if (session.resolvedCandidateId == candidateId) session.resolvedFileName else null,
                 resolvedMimeType = if (session.resolvedCandidateId == candidateId) session.resolvedMimeType else null,
                 resolvedFileSize = if (session.resolvedCandidateId == candidateId) session.resolvedFileSize else null,
+                resolvedIsTemporary = if (session.resolvedCandidateId == candidateId) session.resolvedIsTemporary else false,
+                resolvedStreamId = if (session.resolvedCandidateId == candidateId) session.resolvedStreamId else null,
+                resolvedExpiresInSeconds = if (session.resolvedCandidateId == candidateId) session.resolvedExpiresInSeconds else null,
                 transcodeUrls = if (session.resolvedCandidateId == candidateId) session.transcodeUrls else emptyMap(),
             )
+            if (session.selectedCandidate?.candidateId != candidateId) {
+                resetHandoffRefreshState()
+            }
             cachePreparedSession(updatedSession)
             current.copy(
                 phase = DesktopPlayerPhase.RESOLVED,
@@ -442,7 +469,7 @@ class DesktopPlayerController(
         absolutePath: String,
         artworkUrl: String? = null,
     ) {
-        println("TORVE CONTROLLER ┃ playLocalFile title=$title path=${absolutePath.take(160)}")
+        desktopVerboseLog { "TORVE_CONTROLLER playLocalFile path_configured=${absolutePath.isNotBlank()}" }
         val normalizedTitle = title.trim().ifBlank { "Local File" }
         val file = java.io.File(absolutePath)
         if (!file.exists() || !file.isFile) {
@@ -454,6 +481,7 @@ class DesktopPlayerController(
         }
         resolutionJob?.cancel()
         subtitleJob?.cancel()
+        resetHandoffRefreshState()
 
         val request = DesktopPlaybackRequest(
             mediaId = "local:${absolutePath.hashCode().toUInt().toString(16)}",
@@ -502,7 +530,25 @@ class DesktopPlayerController(
         artworkUrl: String? = null,
         sourceSurface: String = "live_tv",
     ) {
-        println("TORVE CONTROLLER ┃ playDirectStream title=$title url=${url.take(80)}")
+        val selectedPath = when (sourceSurface) {
+            "live_tv", "live_tv_catchup", "iptv_vod" -> StreamPlaybackPath.IPTV_DIRECT
+            else -> StreamPlaybackPath.DIRECT_FREE
+        }
+        StreamPathDiagnostics.record(
+            path = selectedPath,
+            telemetry = telemetry,
+            context = StreamPathTelemetryContext(
+                contentType = when (sourceSurface) {
+                    "live_tv", "live_tv_catchup" -> "live_tv"
+                    "iptv_vod" -> "iptv_vod"
+                    else -> "direct"
+                },
+                providerCategory = if (selectedPath == StreamPlaybackPath.IPTV_DIRECT) "iptv" else "direct",
+            ),
+        )
+        desktopVerboseLog {
+            "TORVE_CONTROLLER playDirectStream source_surface=$sourceSurface path=${selectedPath.wireValue}"
+        }
         val normalizedUrl = url.trim().replace(" ", "%20")
         val normalizedTitle = title.trim().ifBlank { "Live Channel" }
         if (normalizedUrl.isBlank()) {
@@ -515,6 +561,7 @@ class DesktopPlayerController(
 
         resolutionJob?.cancel()
         subtitleJob?.cancel()
+        resetHandoffRefreshState()
 
         val request = DesktopPlaybackRequest(
             mediaId = buildString {
@@ -631,6 +678,7 @@ class DesktopPlayerController(
             else -> Unit
         }
 
+        resetHandoffRefreshState()
         val startupTrace = PlaybackStartupTelemetry.begin(currentRequest).also {
             it.mark("play action received", "phase=${_state.value.phase}")
         }
@@ -1014,8 +1062,36 @@ class DesktopPlayerController(
 
     private fun cachePreparedSession(session: DesktopPlaybackSession) {
         synchronized(preparedSessionCache) {
-            preparedSessionCache[session.request.cacheKey()] = session
+            preparedSessionCache[session.request.cacheKey()] = session.withoutTemporaryResolvedUrl()
         }
+    }
+
+    private fun DesktopPlaybackSession.withoutTemporaryResolvedUrl(): DesktopPlaybackSession {
+        if (!resolvedIsTemporary) return this
+        return copy(
+            resolvedCandidateId = null,
+            resolvedUrl = null,
+            resolvedFileName = null,
+            resolvedMimeType = null,
+            resolvedFileSize = null,
+            resolvedIsTemporary = false,
+            resolvedStreamId = null,
+            resolvedExpiresInSeconds = null,
+            transcodeUrls = emptyMap(),
+        )
+    }
+
+    private fun resetHandoffRefreshState() {
+        handoffRefreshJob?.cancel()
+        handoffRefreshJob = null
+        handoffRefreshKey = null
+        handoffRefreshAttempts = 0
+    }
+
+    private fun DesktopPlaybackSession.handoffRefreshKey(): String? {
+        val candidate = selectedCandidate ?: return null
+        val memoryId = candidate.accelerationMemoryId?.takeIf { it.isNotBlank() } ?: return null
+        return "${request.cacheKey()}:${candidate.candidateId}:$memoryId"
     }
 
     private fun loadSubtitlesInBackground(session: DesktopPlaybackSession) {
@@ -1058,6 +1134,7 @@ class DesktopPlayerController(
         fetchPolicy: StreamFetchPolicy,
         startupTrace: PlaybackStartupTrace?,
     ) {
+        resetHandoffRefreshState()
         _state.update {
             it.copy(
                 phase = DesktopPlayerPhase.RESOLVING,
@@ -1269,9 +1346,102 @@ class DesktopPlayerController(
         }
     }
 
+    private fun tryStartExpiredHandoffRefresh(
+        event: DesktopPlaybackEngineEvent.Error,
+    ): Boolean {
+        val session = _state.value.preparedSession ?: return false
+        val refreshKey = session.handoffRefreshKey() ?: return false
+        val attempts = if (handoffRefreshKey == refreshKey) handoffRefreshAttempts else 0
+        if (!shouldAttemptDesktopHandoffRefresh(
+                session = session,
+                code = event.code,
+                message = event.message,
+                recoverable = event.recoverable,
+                attempts = attempts,
+            )
+        ) {
+            return false
+        }
+        if (handoffRefreshJob?.isActive == true) return true
+
+        handoffRefreshKey = refreshKey
+        handoffRefreshAttempts = attempts + 1
+        handoffRefreshJob = scope.launch {
+            refreshExpiredHandoffAndRetry(session)
+        }
+        return true
+    }
+
+    private suspend fun refreshExpiredHandoffAndRetry(
+        session: DesktopPlaybackSession,
+    ) {
+        val resumePositionMs = _state.value.runtimeInfo.playbackPositionSeconds
+            ?.takeIf { it > 0.0 }
+            ?.let { (it * 1000).toLong() }
+        val seed = session.copy(
+            resolvedCandidateId = null,
+            resolvedUrl = null,
+            resolvedFileName = null,
+            resolvedMimeType = null,
+            resolvedFileSize = null,
+            resolvedIsTemporary = false,
+            resolvedStreamId = null,
+            resolvedExpiresInSeconds = null,
+            transcodeUrls = emptyMap(),
+        )
+        _state.update { current ->
+            if (current.currentRequest?.cacheKey() != session.request.cacheKey()) {
+                current
+            } else {
+                current.copy(
+                    phase = DesktopPlayerPhase.RESOLVING,
+                    preparedSession = seed,
+                    engineMessage = desktopExpiredHandoffUserMessage(),
+                    error = null,
+                )
+            }
+        }
+
+        val refreshedSession = resolveSelectedCandidate(
+            session = seed,
+            startupTrace = null,
+            failureMessageOverride = desktopExpiredHandoffFailureMessage(),
+        ) ?: run {
+            onPlaybackEnded()
+            return
+        }
+
+        _state.update { current ->
+            current.copy(
+                phase = DesktopPlayerPhase.OPENING,
+                preparedSession = refreshedSession,
+                lastCommand = DesktopPlayerCommand.PLAY,
+                engineMessage = "Opening refreshed playback link...",
+                error = null,
+            )
+        }
+
+        runCatching {
+            playbackEngine.open(
+                session = refreshedSession,
+                autoPlay = true,
+                startupTrace = null,
+                resumePositionMs = resumePositionMs,
+            )
+        }.onFailure {
+            failRuntime(
+                code = "HANDOFF_REFRESH_FAILED",
+                message = desktopExpiredHandoffFailureMessage(),
+                markSelectedCandidateFailed = true,
+            )
+            onPlaybackEnded()
+        }
+    }
+
     private suspend fun resolveSelectedCandidate(
         session: DesktopPlaybackSession,
         startupTrace: PlaybackStartupTrace?,
+        failureMessageOverride: String? = null,
     ): DesktopPlaybackSession? {
         if (!session.resolvedUrl.isNullOrBlank()) {
             startupTrace?.mark("final media URL ready", "direct")
@@ -1357,7 +1527,9 @@ class DesktopPlayerController(
             startupTrace?.complete("resolution-failed:CANDIDATE_RESOLUTION_FAILED")
             failRuntime(
                 code = "CANDIDATE_RESOLUTION_FAILED",
-                message = it.message ?: "The selected source candidate could not be resolved.",
+                message = failureMessageOverride
+                    ?: it.message
+                    ?: "The selected source candidate could not be resolved.",
                 markSelectedCandidateFailed = true,
             )
             return null
@@ -1394,6 +1566,9 @@ class DesktopPlayerController(
             resolvedFileName = resolvedStream.fileName,
             resolvedMimeType = resolvedStream.mimeType,
             resolvedFileSize = resolvedStream.fileSize,
+            resolvedIsTemporary = resolvedStream.isTemporary,
+            resolvedStreamId = resolvedStream.streamId,
+            resolvedExpiresInSeconds = resolvedStream.expiresInSeconds,
             transcodeUrls = resolvedStream.toDesktopTranscodeUrls(),
             notes = session.notes + "Resolved candidate '${selectedCandidate.addonName} / ${selectedCandidate.quality}' for desktop playback.",
         )
@@ -1560,11 +1735,26 @@ class DesktopPlayerController(
             .trim()
     }
 
+    private fun safePlaybackMessage(code: String, message: String): String {
+        val redacted = DiagnosticsRedactor.redact(message).ifBlank { "Playback failed." }
+        val lower = "$code $redacted".lowercase()
+        return when {
+            "stream_expired" in lower || "invalid_handoff" in lower ->
+                desktopExpiredHandoffFailureMessage()
+            "stream_reference_required" in lower || "stream_reference_not_found" in lower ->
+                "This source is no longer available. Refresh sources or try another one."
+            "stream_handoff_unavailable" in lower ->
+                "This stream is temporarily unavailable. Try again or pick another source."
+            else -> redacted
+        }
+    }
+
     private fun failPreparation(
         session: DesktopPlaybackSession?,
         code: String,
         message: String,
     ) {
+        val safeMessage = safePlaybackMessage(code, message)
         activeStartupTrace = null
         _state.update {
             it.copy(
@@ -1573,7 +1763,7 @@ class DesktopPlayerController(
                 engineMessage = "Desktop playback session could not be prepared.",
                 error = DesktopPlayerError(
                     code = code,
-                    message = message,
+                    message = safeMessage,
                 ),
             )
         }
@@ -1584,22 +1774,24 @@ class DesktopPlayerController(
         message: String,
         markSelectedCandidateFailed: Boolean = false,
     ) {
-        println("TORVE CONTROLLER ┃ failRuntime code=$code message=$message")
+        val safeMessage = safePlaybackMessage(code, message)
+        desktopVerboseLog { "TORVE_CONTROLLER failRuntime code=$code message=$safeMessage" }
         activeStartupTrace = null
         _state.update {
             val selectedCandidateId = it.preparedSession?.selectedCandidate?.candidateId
             it.copy(
                 phase = DesktopPlayerPhase.RUNTIME_ERROR,
+                preparedSession = it.preparedSession?.withoutTemporaryResolvedUrl(),
                 lastCommand = it.lastCommand ?: DesktopPlayerCommand.PLAY,
                 failedCandidateIds = if (markSelectedCandidateFailed && selectedCandidateId != null) {
                     it.failedCandidateIds + selectedCandidateId
                 } else {
                     it.failedCandidateIds
                 },
-                engineMessage = message,
+                engineMessage = safeMessage,
                 error = DesktopPlayerError(
                     code = code,
-                    message = message,
+                    message = safeMessage,
                 ),
             )
         }
@@ -1608,6 +1800,9 @@ class DesktopPlayerController(
     private fun applyEngineEvent(
         event: DesktopPlaybackEngineEvent,
     ) {
+        if (event is DesktopPlaybackEngineEvent.Error && tryStartExpiredHandoffRefresh(event)) {
+            return
+        }
         _state.update { current ->
             when (event) {
                 is DesktopPlaybackEngineEvent.RuntimeProbe -> current.copy(
@@ -1749,17 +1944,19 @@ class DesktopPlayerController(
                 )
 
                 is DesktopPlaybackEngineEvent.Error -> {
-                    println("TORVE CONTROLLER ┃ engine error code=${event.code} message=${event.message}")
+                    val safeMessage = safePlaybackMessage(event.code, event.message)
+                    desktopVerboseLog { "TORVE_CONTROLLER engine error code=${event.code} message=$safeMessage" }
                     current.copy(
                         phase = DesktopPlayerPhase.RUNTIME_ERROR,
+                        preparedSession = current.preparedSession?.withoutTemporaryResolvedUrl(),
                         runtimeInfo = current.runtimeInfo.copy(
                             bufferingPercent = null,
                             requirementText = playbackEngine.runtimeRequirement,
                         ),
-                        engineMessage = event.message,
+                        engineMessage = safeMessage,
                         error = DesktopPlayerError(
                             code = event.code,
-                            message = event.message,
+                            message = safeMessage,
                             recoverable = event.recoverable,
                         ),
                     )

@@ -330,6 +330,8 @@ fun V2App(
     val tvShowsCatalogState by tvShowsCatalogViewModel.state.collectAsState()
     val deviceGovernanceState by deviceGovernanceViewModel.state.collectAsState()
     val homeSectionConfigs by homeViewModel.sectionConfigs.collectAsState()
+    val homeEnabledServiceIds by homeViewModel.enabledServiceIds.collectAsState()
+    val homeProviderLogos by homeViewModel.providerLogos.collectAsState()
 
     // Fetch access-state once per signed-in session so the device-limit overlay
     // can fire when the backend reports `device_cap_reached`.
@@ -972,15 +974,36 @@ fun V2App(
                                     )
                                 } else {
                                     val now = System.currentTimeMillis()
+                                    val liveChannel = channelsState.selectedChannel
+                                        ?.takeIf { it.url == currentLiveStreamUrl }
+                                        ?: (channelsState.categoryChannels + channelsState.channels)
+                                            .firstOrNull { it.channel.url == currentLiveStreamUrl }
+                                            ?.channel
+                                        ?: com.torve.domain.model.Channel(
+                                            name = playerTitle,
+                                            url = currentLiveStreamUrl,
+                                            playlistId = channelsState.selectedPlaylistId.orEmpty(),
+                                        )
+                                    val liveProgrammes = if (channelsState.selectedChannel?.url == currentLiveStreamUrl) {
+                                        channelsState.programmes
+                                    } else {
+                                        emptyList()
+                                    }
+                                    val metadata = com.torve.domain.recording.EpgRecordingMetadataResolver.live(
+                                        channel = liveChannel,
+                                        programmes = liveProgrammes,
+                                        nowMs = now,
+                                    )
                                     recordingsVm.schedule(
                                         playlistId = channelsState.selectedPlaylistId.orEmpty(),
-                                        channelId = currentLiveStreamUrl,
-                                        channelName = playerTitle,
+                                        channelId = liveChannel.url,
+                                        channelName = liveChannel.name,
                                         streamUrl = currentLiveStreamUrl,
                                         programmeTitle = "Live recording — $playerTitle",
-                                        programmeDescription = null,
+                                        programmeDescription = metadata.programmeDescription,
                                         startMs = now,
                                         endMs = now + playerRecordingPrefs.defaultDurationMs,
+                                        metadata = metadata,
                                     )
                                     downloadManager.publishEvent("Recording started: $playerTitle")
                                 }
@@ -1152,6 +1175,12 @@ fun V2App(
                                     val ep = if (isSeries) routeState.selectedEpisodeNumber else null
                                     prepareSourcePicker(item, DesktopPlaybackOriginSurface.FULL_DETAIL, route.controllerKey, sn = sn, ep = ep)
                                 },
+                                onPlayEpisode = { item, season, episode ->
+                                    launchPlayback(item, DesktopPlaybackOriginSurface.FULL_DETAIL, route.controllerKey, sn = season, ep = episode)
+                                },
+                                onChooseEpisodeSource = { item, season, episode ->
+                                    prepareSourcePicker(item, DesktopPlaybackOriginSurface.FULL_DETAIL, route.controllerKey, sn = season, ep = episode)
+                                },
                                 canDownloadMovies = settingsState.movieDownloadPath.isNotBlank(),
                                 canDownloadShows = settingsState.showDownloadPath.isNotBlank(),
                                 onDownloadMovie = { item ->
@@ -1225,6 +1254,7 @@ fun V2App(
                                 viewModel = seeAllViewModel,
                                 metadataRepository = metadataRepository,
                                 onBack = { seeAllRoute = null },
+                                onPlay = { item -> launchPlayback(item) },
                                 onOpenDetail = { item -> openFullDetail(item) },
                                 onOpenPerson = { id -> pushPersonDetail(id) },
                             )
@@ -1248,7 +1278,10 @@ fun V2App(
                                     onOpenDetail = { openFullDetail(it) },
                                     onSeeAll = { req -> seeAllRoute = req },
                                     sectionConfigs = homeSectionConfigs,
+                                    enabledServiceIds = homeEnabledServiceIds,
+                                    providerLogos = homeProviderLogos,
                                     cardStyleFor = cardStyleResolver,
+                                    onOpenPerson = { id -> pushPersonDetail(id) },
                                     // Zero-source empty-state CTAs (Fix B
                                     // follow-up). Both currently route to
                                     // the same place — Settings, where
@@ -1302,6 +1335,7 @@ fun V2App(
                                     onPlay = { launchPlayback(it) },
                                     onOpenDetail = { openFullDetail(it) },
                                     onSeeAll = { req -> seeAllRoute = req },
+                                    upcomingSchedule = homeState.upcomingSchedule,
                                     nzbTvCatalogService = nzbTvCatalogService,
                                     nzbIndexerType = nzb.type,
                                     nzbIndexerUrl = nzb.url,
@@ -1536,7 +1570,11 @@ fun V2App(
                                     pandaState.nzbIndexers.any { it.type != "none" } ||
                                     pandaState.nzbIndexer != "none"
                                 )
-                                println("TORVE ADULT ┃ indexer type=${activeIndexer?.type ?: pandaState.nzbIndexer} url=$indexerUrl keyPrefix=${indexerKey.take(6)}... redacted=$indexerSecretsRedacted")
+                                println(
+                                    "TORVE ADULT | indexer type=${activeIndexer?.type ?: pandaState.nzbIndexer} " +
+                                        "urlConfigured=${indexerUrl.isNotBlank()} keyConfigured=${indexerKey.isNotBlank()} " +
+                                        "redacted=$indexerSecretsRedacted",
+                                )
                                 com.torve.desktop.ui.v2.adult.V2AdultPage(
                                     newznab = remember { com.torve.desktop.adult.NewznabClient() },
                                     resolver = remember(pandaState.downloadClient, pandaState.downloadClientApiKey, pandaState.enableUsenet, nzbdavConfiguredAdult) {
@@ -1805,6 +1843,35 @@ fun V2App(
         // Top-center download status overlay (toast + progress bar)
         Box(Modifier.fillMaxSize().zIndex(7f), contentAlignment = Alignment.TopCenter) {
             com.torve.desktop.ui.v2.components.DownloadStatusOverlay(state = desktopDownloadState)
+        }
+
+        watchlistState.snackbarMessage?.let { message ->
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .padding(top = 72.dp)
+                    .zIndex(7.5f),
+                contentAlignment = Alignment.TopCenter,
+            ) {
+                Surface(
+                    modifier = Modifier.widthIn(min = 280.dp, max = 520.dp),
+                    color = colors.dockSurface,
+                    shape = RoundedCornerShape(12.dp),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, colors.accent.copy(alpha = 0.6f)),
+                    shadowElevation = 6.dp,
+                ) {
+                    Text(
+                        text = message,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = colors.textPrimary,
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                    )
+                }
+            }
+            LaunchedEffect(message) {
+                kotlinx.coroutines.delay(2_500)
+                watchlistViewModel.clearSnackbar()
+            }
         }
 
         // Source picker overlay

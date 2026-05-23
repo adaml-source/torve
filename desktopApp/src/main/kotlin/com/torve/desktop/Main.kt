@@ -307,6 +307,24 @@ fun main() {
     Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
         System.err.println("TORVE UNCAUGHT | thread=${thread.name}")
         throwable.printStackTrace(System.err)
+        val stackTrace = java.io.StringWriter().also { writer ->
+            throwable.printStackTrace(java.io.PrintWriter(writer))
+        }.toString()
+        com.torve.desktop.launch.launchGuardLog(
+            "uncaught_exception",
+            "thread" to thread.name,
+            "type" to throwable::class.qualifiedName,
+            "message" to (throwable.message ?: ""),
+        )
+        stackTrace.lineSequence()
+            .take(80)
+            .forEachIndexed { index, line ->
+                com.torve.desktop.launch.launchGuardLog(
+                    "uncaught_exception_frame",
+                    "index" to index,
+                    "text" to line.take(500),
+                )
+            }
         com.torve.desktop.diagnostics.SentryBootstrap.captureUncaught(thread, throwable)
     }
     val windowState = remember {
@@ -658,6 +676,7 @@ private fun bootstrapDesktop(): BootstrapState {
                 settingsViewModel = settingsViewModel,
                 playbackEngine = playbackEngine,
                 localFirstPlaybackRouter = koin.get<com.torve.desktop.lanlibrary.LocalFirstPlaybackRouter>(),
+                telemetry = koin.get<com.torve.domain.telemetry.TelemetryEmitter>(),
             ),
             libraryDetailController = DesktopSearchController(
                 metadataRepository = metadataRepository,
