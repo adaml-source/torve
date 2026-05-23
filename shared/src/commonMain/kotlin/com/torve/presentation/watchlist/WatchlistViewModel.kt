@@ -13,6 +13,7 @@ import com.torve.domain.model.stableTmdbIdString
 import com.torve.domain.repository.PreferencesRepository
 import com.torve.domain.repository.WatchlistRepository
 import com.torve.domain.repository.WatchlistMutationResult
+import com.torve.platform.torveVerboseLog
 import com.torve.presentation.contentpolicy.ContentPolicyFilter
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -56,21 +57,50 @@ class WatchlistViewModel(
 
     fun loadWatchlist() {
         scope.launch {
-            _state.update { it.copy(isLoading = true) }
+            _state.update { it.copy(isLoading = it.items.isEmpty()) }
             try {
-                // Pull from Trakt first if connected, then load local
-                watchlistRepo.syncFromTrakt()
+                val localItems = applyContentPolicy(watchlistRepo.getAll())
+                if (localItems.isNotEmpty()) {
+                    torveVerboseLog { "watchlist_local_first_hit items=${localItems.size}" }
+                    _state.update {
+                        it.copy(
+                            items = localItems,
+                            watchlistIds = localItems.map { item -> item.mediaId.normalizedWatchlistMediaId() }.toSet(),
+                            isLoading = false,
+                            error = null,
+                        )
+                    }
+                } else {
+                    torveVerboseLog { "watchlist_local_first_empty" }
+                }
+
+                torveVerboseLog { "watchlist_sync_started" }
+                val syncResult = runCatching { watchlistRepo.syncFromTrakt() }
+                syncResult
+                    .onSuccess { torveVerboseLog { "watchlist_sync_completed" } }
+                    .onFailure { torveVerboseLog { "watchlist_sync_failed_showing_cache type=${it::class.simpleName}" } }
+
                 val items = applyContentPolicy(watchlistRepo.getAll())
                 _state.update {
                     it.copy(
                         items = items,
                         watchlistIds = items.map { item -> item.mediaId.normalizedWatchlistMediaId() }.toSet(),
                         isLoading = false,
-                        error = null,
+                        error = if (syncResult.isFailure && localItems.isEmpty()) {
+                            com.torve.presentation.error.UserFacingError.WATCHLIST_FAILED.messageKey
+                        } else {
+                            null
+                        },
                     )
                 }
             } catch (e: Exception) {
-                _state.update { it.copy(isLoading = false, error = com.torve.presentation.error.UserFacingError.WATCHLIST_FAILED.messageKey) }
+                val hasCachedItems = _state.value.items.isNotEmpty()
+                _state.update {
+                    it.copy(
+                        isLoading = false,
+                        error = if (hasCachedItems) null else com.torve.presentation.error.UserFacingError.WATCHLIST_FAILED.messageKey,
+                    )
+                }
             }
         }
     }

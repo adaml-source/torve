@@ -67,6 +67,7 @@ import androidx.compose.ui.zIndex
 import coil3.compose.AsyncImage
 import com.torve.android.catalog.VodBootstrapShelf
 import com.torve.android.catalog.VodBootstrapShelfEntry
+import com.torve.android.tv.TV_PAGE_TOP_GUTTER
 import com.torve.android.tv.TvScreenCache
 import com.torve.android.tv.focus.TvScreenFocusHandle
 import com.torve.android.ui.theme.Amber
@@ -501,7 +502,7 @@ internal fun TvVodLibraryContent(
                 Row(
                     modifier = Modifier
                         .fillMaxSize()
-                        .padding(start = 32.dp, end = 28.dp, top = 4.dp, bottom = 24.dp),
+                        .padding(start = 32.dp, end = 28.dp, top = TV_PAGE_TOP_GUTTER, bottom = 24.dp),
                     horizontalArrangement = Arrangement.spacedBy(if (focusZone == VodFocusZone.CATEGORIES) VodContentGap else 0.dp),
                 ) {
                     if (focusZone == VodFocusZone.CATEGORIES) {

@@ -34,6 +34,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
+import com.torve.android.tv.TV_PAGE_END_GUTTER
 import com.torve.android.ui.components.PreferredRatingPills
 import com.torve.android.ui.theme.Snow
 import com.torve.domain.model.MediaItem
@@ -81,7 +82,7 @@ fun TvHeroOverlay(
         ) { item ->
             Column(
                 modifier = Modifier
-                    .padding(start = 56.dp, end = 40.dp, bottom = 16.dp),
+                    .padding(start = 56.dp, end = TV_PAGE_END_GUTTER, bottom = 16.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 val logoUrl = item?.logoUrl?.takeIf { it.isNotBlank() }

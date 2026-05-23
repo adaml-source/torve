@@ -88,6 +88,8 @@ import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
 import com.torve.android.R
 import com.torve.android.tv.TV_PAGE_CONTENT_GUTTER
+import com.torve.android.tv.TV_ROW_END_GUTTER
+import com.torve.android.tv.TvImagePrefetcher
 import com.torve.android.tv.focus.TvFocusTargetId
 import com.torve.android.tv.focus.rememberRegisteredTvFocusRequester
 import com.torve.android.tv.focus.rememberTvModalFocusRestoreController
@@ -261,6 +263,17 @@ internal fun TvMediaRails(
     val tvPrefs = remember { context.getSharedPreferences("tv_prefs", Context.MODE_PRIVATE) }
     val showTitlesOnCards = tvPrefs.getBoolean("tv_show_poster_titles", true) &&
         browseLayout == TvBrowseLayout.POSTER_ONLY
+
+    LaunchedEffect(rails) {
+        if (rails.isNotEmpty()) {
+            TvImagePrefetcher.prefetchRails(
+                context = context,
+                screenName = screenId,
+                rails = rails,
+                maxItems = 36,
+            )
+        }
+    }
 
     val requesterMap = remember { mutableMapOf<String, FocusRequester>() }
     val rowListStateByKey = remember { mutableMapOf<String, androidx.compose.foundation.lazy.LazyListState>() }
@@ -754,7 +767,7 @@ internal fun TvMediaRails(
                             contentPadding = PaddingValues(
                                 start = railStartPad,
                                 top = if (libraryHeroMode) 26.dp else rowVerticalFocusInset,
-                                end = 32.dp,
+                                end = TV_ROW_END_GUTTER,
                                 bottom = if (libraryHeroMode) 30.dp else rowVerticalFocusInset,
                             ),
                         ) {

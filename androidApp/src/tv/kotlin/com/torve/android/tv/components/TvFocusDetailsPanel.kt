@@ -1,5 +1,6 @@
 package com.torve.android.tv.components
 
+import android.util.Log
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.tween
@@ -73,6 +74,7 @@ import com.torve.domain.model.allowsTmdbRatingProvider
 import com.torve.domain.model.deriveProvidersToRender
 import com.torve.domain.model.hasAnyEnabledDisplayValue
 import com.torve.domain.model.extractTmdbIdOrNull
+import com.torve.domain.model.hasRichExternalRating
 import com.torve.domain.model.withFallbackTmdbScore
 import com.torve.domain.repository.MetadataRepository
 import com.torve.android.ui.components.getRatingValue
@@ -87,6 +89,39 @@ import org.koin.compose.koinInject
 /** App-lifetime enriched item cache — survives all recomposition/navigation.
  *  SnapshotStateMap so Compose observes reads and recomposes when entries are added. */
 private val enrichedItemCache = androidx.compose.runtime.mutableStateMapOf<String, MediaItem>()
+
+internal fun tvBrowsePreviewEnrichedItemKey(item: MediaItem): String =
+    "${item.type}:${item.tmdbId ?: item.id}"
+
+internal fun cacheTvBrowsePreviewEnrichedItem(item: MediaItem) {
+    val key = tvBrowsePreviewEnrichedItemKey(item)
+    val existing = enrichedItemCache[key]
+    enrichedItemCache[key] = existing?.mergeWithRicherPreviewItem(item) ?: item
+}
+
+private fun MediaItem.mergeWithRicherPreviewItem(other: MediaItem): MediaItem =
+    copy(
+        tmdbId = tmdbId ?: other.tmdbId,
+        imdbId = imdbId ?: other.imdbId,
+        overview = overview ?: other.overview,
+        genres = genres.ifEmpty { other.genres },
+        year = year ?: other.year,
+        runtime = runtime ?: other.runtime,
+        ratings = ratings.preferRichRatings(other.ratings),
+        logoUrl = logoUrl ?: other.logoUrl,
+        posterUrl = posterUrl ?: other.posterUrl,
+        backdropUrl = backdropUrl ?: other.backdropUrl,
+        cast = if (cast.isNotEmpty()) cast else other.cast,
+    )
+
+private fun MediaRatings?.preferRichRatings(other: MediaRatings?): MediaRatings? =
+    when {
+        this.hasRichExternalRating() -> this
+        other.hasRichExternalRating() -> other
+        this != null -> this
+        else -> other
+    }
+
 private fun MediaItem.upcomingScheduleDateTime(): String? {
     if (!id.startsWith("trakt-calendar:")) return null
     val raw = releaseDate?.trim()?.takeIf { it.isNotEmpty() }
@@ -284,7 +319,7 @@ fun TvBrowsePreviewPanel(
         label = "browsePreviewBorder",
     )
     val requestedSourceItem = focusedItem
-    val requestedSourceKey = requestedSourceItem?.let { "${it.type}:${it.tmdbId ?: it.id}" }
+    val requestedSourceKey = requestedSourceItem?.let { tvBrowsePreviewEnrichedItemKey(it) }
     var debouncedSourceItem by remember { mutableStateOf(focusedItem) }
 
     LaunchedEffect(requestedSourceKey) {
@@ -297,7 +332,7 @@ fun TvBrowsePreviewPanel(
     }
 
     val sourceItem = debouncedSourceItem
-    val sourceKey = sourceItem?.let { "${it.type}:${it.tmdbId ?: it.id}" }
+    val sourceKey = sourceItem?.let { tvBrowsePreviewEnrichedItemKey(it) }
     val cachedItem = sourceKey?.let { enrichedItemCache[it] }
     val item = if (sourceItem != null && cachedItem != null) {
         sourceItem.copy(
@@ -307,7 +342,7 @@ fun TvBrowsePreviewPanel(
             genres = sourceItem.genres.ifEmpty { cachedItem.genres },
             year = sourceItem.year ?: cachedItem.year,
             runtime = sourceItem.runtime ?: cachedItem.runtime,
-            ratings = sourceItem.ratings ?: cachedItem.ratings,
+            ratings = sourceItem.ratings.preferRichRatings(cachedItem.ratings),
             logoUrl = sourceItem.logoUrl ?: cachedItem.logoUrl,
             posterUrl = sourceItem.posterUrl ?: cachedItem.posterUrl,
             backdropUrl = sourceItem.backdropUrl ?: cachedItem.backdropUrl,
@@ -346,18 +381,24 @@ fun TvBrowsePreviewPanel(
         val detail = withContext(Dispatchers.IO) {
             runCatching { metadataRepo.getDetail(mediaType, tmdbId) }.getOrNull()
         } ?: return@LaunchedEffect
-        enrichedItemCache[key] = base.copy(
+        val merged = base.copy(
             tmdbId = base.tmdbId ?: detail.tmdbId,
             imdbId = base.imdbId ?: detail.imdbId,
             overview = base.overview ?: detail.overview,
             genres = base.genres.ifEmpty { detail.genres },
             year = base.year ?: detail.year,
             runtime = base.runtime ?: detail.runtime,
-            ratings = base.ratings ?: detail.ratings,
+            ratings = base.ratings.preferRichRatings(detail.ratings),
             logoUrl = base.logoUrl ?: detail.logoUrl,
             posterUrl = base.posterUrl ?: detail.posterUrl,
             backdropUrl = base.backdropUrl ?: detail.backdropUrl,
         )
+        if (base.ratings.hasRichExternalRating() && !detail.ratings.hasRichExternalRating()) {
+            Log.d("TvSeeAllRatings", "see_all_preview_preserved_rich_ratings key=$key")
+        } else if (!merged.ratings.hasRichExternalRating()) {
+            Log.d("TvSeeAllRatings", "see_all_preview_tmdb_fallback_only key=$key")
+        }
+        cacheTvBrowsePreviewEnrichedItem(merged)
     }
 
     val imageUrl = item?.backdropUrl?.takeIf { it.isNotBlank() }
@@ -490,7 +531,7 @@ fun TvBrowsePreviewPanel(
             item?.let {
                 PreviewRatingPills(
                     item = it,
-                    ratingPrefs = settingsState.ratingPrefs,
+                    ratingPrefs = settingsState.ratingPrefs.tvExternalCardRatingPrefs(),
                 )
             }
             overview?.let {

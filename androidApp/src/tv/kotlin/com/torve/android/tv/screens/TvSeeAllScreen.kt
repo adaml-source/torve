@@ -47,6 +47,7 @@ import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -73,7 +74,13 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
+import com.torve.android.tv.TV_PAGE_BOTTOM_GUTTER
+import com.torve.android.tv.TV_PAGE_END_GUTTER
+import com.torve.android.tv.TV_PAGE_TOP_GUTTER
+import com.torve.android.tv.TvImagePrefetcher
 import com.torve.android.tv.components.TvBrowsePreviewPanel
+import com.torve.android.tv.components.cacheTvBrowsePreviewEnrichedItem
+import com.torve.android.tv.components.tvExternalCardRatingPrefs
 import com.torve.android.ui.components.PreferredRatingPills
 import com.torve.android.tv.settings.TV_SEE_ALL_POSTER_COLUMN_OPTIONS
 import com.torve.android.tv.settings.rememberTvSeeAllPosterColumnsPreference
@@ -84,10 +91,12 @@ import com.torve.data.metadata.TmdbMappers
 import com.torve.domain.integrations.IntegrationSecretKey
 import com.torve.domain.integrations.IntegrationSecretStore
 import com.torve.domain.model.MediaItem
+import com.torve.domain.model.MediaRatings
 import com.torve.domain.model.PagedResult
 import com.torve.domain.repository.PreferencesRepository
 import com.torve.presentation.settings.SettingsViewModel
 import com.torve.domain.model.RatingDisplayPrefs
+import com.torve.domain.model.hasRichExternalRating
 import com.torve.domain.model.needsExternalRatingEnrichment
 import com.torve.domain.model.withFallbackTmdbScore
 import kotlinx.coroutines.Dispatchers
@@ -149,6 +158,50 @@ private object TvSeeAllCache {
     }
 }
 
+private fun MediaRatings?.preferSeeAllRichRatings(other: MediaRatings?): MediaRatings? =
+    when {
+        this.hasRichExternalRating() -> this
+        other.hasRichExternalRating() -> other
+        this != null -> this
+        else -> other
+    }
+
+private fun MediaItem.mergeSeeAllEnrichedItem(other: MediaItem): MediaItem =
+    copy(
+        tmdbId = tmdbId ?: other.tmdbId,
+        imdbId = imdbId ?: other.imdbId,
+        overview = overview ?: other.overview,
+        genres = genres.ifEmpty { other.genres },
+        genreIds = genreIds.ifEmpty { other.genreIds },
+        studios = studios.ifEmpty { other.studios },
+        rating = rating ?: other.rating,
+        ratings = ratings.preferSeeAllRichRatings(other.ratings),
+        year = year ?: other.year,
+        releaseDate = releaseDate ?: other.releaseDate,
+        posterUrl = posterUrl ?: other.posterUrl,
+        backdropUrl = backdropUrl ?: other.backdropUrl,
+        logoUrl = logoUrl ?: other.logoUrl,
+        runtime = runtime ?: other.runtime,
+        seasons = seasons.ifEmpty { other.seasons },
+        cast = if (cast.isNotEmpty()) cast else other.cast,
+    )
+
+private fun MutableList<MediaItem>.replaceSeeAllItemsByKey(
+    replacements: Map<String, MediaItem>,
+): Boolean {
+    var changed = false
+    for (index in indices) {
+        val current = this[index]
+        val replacement = replacements[current.seeAllStableKey()] ?: continue
+        val merged = current.mergeSeeAllEnrichedItem(replacement)
+        if (merged != current) {
+            this[index] = merged
+            changed = true
+        }
+    }
+    return changed
+}
+
 @Composable
 internal fun TvSeeAllScreen(
     railKey: String,
@@ -169,6 +222,9 @@ internal fun TvSeeAllScreen(
     val secretStore: IntegrationSecretStore = koinInject()
     val settingsViewModel: SettingsViewModel = koinInject()
     val settingsState by settingsViewModel.state.collectAsState()
+    val tvCardRatingPrefs = remember(settingsState.ratingPrefs) {
+        settingsState.ratingPrefs.tvExternalCardRatingPrefs()
+    }
     val isPersonCreditsRail = railKey.startsWith("person_credits_")
     val items = remember { mutableStateListOf<MediaItem>() }
     val filterOptionItems = remember(railKey, mediaType) { mutableStateListOf<MediaItem>() }
@@ -256,6 +312,7 @@ internal fun TvSeeAllScreen(
     }
     var initialFocusHandled by remember(railKey, mediaType) { mutableStateOf(false) }
     var focusedMediaItem by remember { mutableStateOf<MediaItem?>(null) }
+    val enrichedSeeAllItemsByKey = remember(railKey, mediaType) { mutableStateMapOf<String, MediaItem>() }
     var lastFocusedIndex by remember { mutableIntStateOf(-1) }
     val focusRequesters = remember { mutableMapOf<Int, FocusRequester>() }
     var ratingEnrichmentAttemptedKeys by remember(railKey, mediaType) { mutableStateOf<Set<String>>(emptySet()) }
@@ -315,6 +372,26 @@ internal fun TvSeeAllScreen(
                 personPanelInfo = personPanelInfo,
             ),
         )
+    }
+
+    fun recordSeeAllEnrichedItems(enrichedItems: Collection<MediaItem>) {
+        enrichedItems.forEach { item ->
+            val key = item.seeAllStableKey()
+            val merged = enrichedSeeAllItemsByKey[key]?.mergeSeeAllEnrichedItem(item) ?: item
+            enrichedSeeAllItemsByKey[key] = merged
+            cacheTvBrowsePreviewEnrichedItem(merged)
+        }
+    }
+
+    fun updateFocusedItemFromReplacements(replacements: Map<String, MediaItem>) {
+        val focused = focusedMediaItem ?: return
+        val replacement = replacements[focused.seeAllStableKey()] ?: return
+        val merged = focused.mergeSeeAllEnrichedItem(replacement)
+        if (merged != focused) {
+            focusedMediaItem = merged
+            cacheTvBrowsePreviewEnrichedItem(merged)
+            Log.d(TV_SEE_ALL_LOG_TAG, "see_all_focused_item_enriched_update key=${merged.seeAllStableKey()}")
+        }
     }
 
     val shouldLoadMore by remember(loading, currentPage, totalPages, displayedItems.size) {
@@ -425,7 +502,7 @@ internal fun TvSeeAllScreen(
                             genreIds = item.genreIds.ifEmpty { it.genreIds },
                             studios = item.studios.ifEmpty { it.studios },
                             rating = item.rating ?: it.rating,
-                            ratings = item.ratings ?: it.ratings,
+                            ratings = item.ratings.preferSeeAllRichRatings(it.ratings),
                             year = item.year ?: it.year,
                             releaseDate = item.releaseDate ?: it.releaseDate,
                             posterUrl = item.posterUrl ?: it.posterUrl,
@@ -803,6 +880,43 @@ internal fun TvSeeAllScreen(
         loadPage(currentPage + 1)
     }
 
+    LaunchedEffect(loadedItems) {
+        if (loadedItems.isEmpty()) return@LaunchedEffect
+        val hydrated = withContext(Dispatchers.IO) {
+            ratingsEnricher.hydrateListFromCache(loadedItems)
+        }
+        val replacements = loadedItems.zip(hydrated)
+            .mapNotNull { (before, after) ->
+                val merged = before.mergeSeeAllEnrichedItem(after)
+                if (merged != before) before.seeAllStableKey() to merged else null
+            }
+            .toMap()
+        if (replacements.isEmpty()) {
+            Log.d(TV_SEE_ALL_LOG_TAG, "see_all_ratings_cache_hydrate_miss items=${loadedItems.size}")
+            return@LaunchedEffect
+        }
+        Log.d(
+            TV_SEE_ALL_LOG_TAG,
+            "see_all_ratings_cache_hydrate_hit items=${loadedItems.size} hydrated=${replacements.size}",
+        )
+        recordSeeAllEnrichedItems(replacements.values)
+        val changed = items.replaceSeeAllItemsByKey(replacements)
+        updateFocusedItemFromReplacements(replacements)
+        if (changed) persistSeeAllCache()
+    }
+
+    LaunchedEffect(loadedItems, focusedMediaItem?.seeAllStableKey()) {
+        val focused = focusedMediaItem ?: return@LaunchedEffect
+        val replacement = loadedItems.firstOrNull { it.seeAllStableKey() == focused.seeAllStableKey() }
+            ?: return@LaunchedEffect
+        val merged = focused.mergeSeeAllEnrichedItem(replacement)
+        if (merged != focused) {
+            focusedMediaItem = merged
+            cacheTvBrowsePreviewEnrichedItem(merged)
+            Log.d(TV_SEE_ALL_LOG_TAG, "see_all_focused_item_enriched_update key=${merged.seeAllStableKey()}")
+        }
+    }
+
     // Background ratings enrichment — populate SQLite cache + update the visible
     // window in place. TMDB fallback is display-only; it does not make a card
     // "enriched enough", so newly paged/visible TMDB-only cards are still queued.
@@ -817,6 +931,14 @@ internal fun TvSeeAllScreen(
         val end = (start + visibleCount + posterColumns * 2).coerceAtMost(renderedItems.size)
         if (start >= end) return@LaunchedEffect
 
+        TvImagePrefetcher.prefetchMediaItems(
+            context = context,
+            screenName = "tv_see_all",
+            items = renderedItems.subList(start, end),
+            maxImages = 36,
+            includeHeroCandidates = true,
+        )
+
         val snapshot = renderedItems.subList(start, end)
             .filter { it.needsExternalRatingEnrichment() }
             .filterNot { it.seeAllStableKey() in ratingEnrichmentAttemptedKeys }
@@ -825,6 +947,7 @@ internal fun TvSeeAllScreen(
 
         val originalKeys = snapshot.map { it.seeAllStableKey() }.toSet()
         ratingEnrichmentAttemptedKeys = ratingEnrichmentAttemptedKeys + originalKeys
+        Log.d(TV_SEE_ALL_LOG_TAG, "see_all_visible_enrichment_started items=${snapshot.size}")
 
         launch(Dispatchers.IO) {
             val apiKey = runCatching {
@@ -836,15 +959,17 @@ internal fun TvSeeAllScreen(
             if (remainingMs > 0L) delay(remainingMs + 2_000L)
             val enriched = ratingsEnricher.enrichList(snapshot, apiKey)
             val enrichedByOriginalKey = snapshot.zip(enriched).associate { (before, after) ->
-                before.seeAllStableKey() to after
+                before.seeAllStableKey() to before.mergeSeeAllEnrichedItem(after)
             }
             withContext(Dispatchers.Main) {
-                for (index in items.indices) {
-                    val replacement = enrichedByOriginalKey[items[index].seeAllStableKey()]
-                    if (replacement != null) {
-                        items[index] = replacement
-                    }
-                }
+                recordSeeAllEnrichedItems(enrichedByOriginalKey.values)
+                items.replaceSeeAllItemsByKey(enrichedByOriginalKey)
+                updateFocusedItemFromReplacements(enrichedByOriginalKey)
+                persistSeeAllCache()
+                Log.d(
+                    TV_SEE_ALL_LOG_TAG,
+                    "see_all_visible_enrichment_completed items=${enrichedByOriginalKey.size}",
+                )
             }
         }
     }
@@ -867,7 +992,7 @@ internal fun TvSeeAllScreen(
                     genreIds = item.genreIds.ifEmpty { detail.genreIds },
                     studios = item.studios.ifEmpty { detail.studios },
                     rating = item.rating ?: detail.rating,
-                    ratings = item.ratings ?: detail.ratings,
+                    ratings = item.ratings.preferSeeAllRichRatings(detail.ratings),
                     year = item.year ?: detail.year,
                     releaseDate = item.releaseDate ?: detail.releaseDate,
                     posterUrl = item.posterUrl ?: detail.posterUrl,
@@ -877,9 +1002,14 @@ internal fun TvSeeAllScreen(
             }.toMap()
             if (hydrated.isEmpty()) return@launch
             withContext(Dispatchers.Main) {
-                for (index in items.indices) {
-                    hydrated[items[index].seeAllStableKey()]?.let { items[index] = it }
+                val merged = hydrated.mapValues { (key, replacement) ->
+                    items.firstOrNull { it.seeAllStableKey() == key }
+                        ?.mergeSeeAllEnrichedItem(replacement)
+                        ?: replacement
                 }
+                recordSeeAllEnrichedItems(merged.values)
+                items.replaceSeeAllItemsByKey(merged)
+                updateFocusedItemFromReplacements(merged)
                 persistSeeAllCache()
             }
         }
@@ -997,7 +1127,7 @@ internal fun TvSeeAllScreen(
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(start = 14.dp, top = 32.dp, end = 34.dp, bottom = 16.dp),
+                .padding(start = 14.dp, top = TV_PAGE_TOP_GUTTER, end = TV_PAGE_END_GUTTER, bottom = TV_PAGE_BOTTOM_GUTTER),
         ) {
         // Info panel — left side
         if (!isPersonCreditsRail) {
@@ -1264,8 +1394,14 @@ internal fun TvSeeAllScreen(
                                 .fillMaxSize(),
                         )
                     } else {
+                        val rawPreviewItem = focusedMediaItem ?: renderedItems.firstOrNull()
+                        val previewItem = rawPreviewItem?.let { item ->
+                            enrichedSeeAllItemsByKey[item.seeAllStableKey()]
+                                ?.let { item.mergeSeeAllEnrichedItem(it) }
+                                ?: item
+                        }
                         TvBrowsePreviewPanel(
-                            focusedItem = focusedMediaItem ?: renderedItems.firstOrNull(),
+                            focusedItem = previewItem,
                             modifier = Modifier
                                 .width(326.dp)
                                 .fillMaxSize(),
@@ -1277,7 +1413,7 @@ internal fun TvSeeAllScreen(
                         state = gridState,
                         verticalArrangement = Arrangement.spacedBy(14.dp),
                         horizontalArrangement = Arrangement.spacedBy(12.dp),
-                        contentPadding = PaddingValues(top = 0.dp, bottom = 24.dp),
+                        contentPadding = PaddingValues(top = 8.dp, bottom = 24.dp),
                         modifier = Modifier
                             .weight(1f)
                             .fillMaxSize(),
@@ -1310,7 +1446,7 @@ internal fun TvSeeAllScreen(
 
                             SeeAllPosterCard(
                                 item = item,
-                                ratingPrefs = settingsState.ratingPrefs,
+                                ratingPrefs = tvCardRatingPrefs,
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .aspectRatio(2f / 3f)
@@ -1330,7 +1466,9 @@ internal fun TvSeeAllScreen(
                                 onFocused = {
                                     focusRestoreController.markFocused(target)
                                     onContentFocused(requester)
-                                    focusedMediaItem = item
+                                    focusedMediaItem = enrichedSeeAllItemsByKey[item.seeAllStableKey()]
+                                        ?.let { item.mergeSeeAllEnrichedItem(it) }
+                                        ?: item
                                     lastFocusedIndex = index
                                     if (showFilters) {
                                         showFilters = false

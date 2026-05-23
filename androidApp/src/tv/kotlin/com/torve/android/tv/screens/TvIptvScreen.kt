@@ -66,6 +66,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.torve.android.R
+import com.torve.android.tv.TV_PAGE_BOTTOM_GUTTER
 import com.torve.android.tv.TV_PAGE_CONTENT_GUTTER
 import com.torve.android.catalog.LiveBootstrapJson
 import com.torve.android.catalog.LiveBootstrapShelf
@@ -900,7 +901,7 @@ fun TvIptvScreen(
         Row(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(start = TV_PAGE_CONTENT_GUTTER, end = 24.dp, top = 26.dp, bottom = 22.dp),
+                .padding(start = TV_PAGE_CONTENT_GUTTER, end = 24.dp, top = 26.dp, bottom = TV_PAGE_BOTTOM_GUTTER),
             horizontalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             val isGuideMode = focusedZone == FocusZone.EPG_GRID

@@ -62,6 +62,7 @@ import androidx.compose.ui.zIndex
 import coil3.compose.AsyncImage
 import com.torve.android.R
 import com.torve.android.tv.TV_PAGE_CONTENT_GUTTER
+import com.torve.android.tv.TV_PAGE_END_GUTTER
 import com.torve.android.tv.NotificationType
 import com.torve.android.tv.TvScreenCache
 import com.torve.android.tv.TvNotificationQueue
@@ -778,7 +779,7 @@ internal fun TvCatalogRailsScreen(
                         .clipToBounds()
                         .graphicsLayer { alpha = if (searchEntryFocused) 1f else 0f }
                         .then(if (searchEntryFocused) Modifier else Modifier.clearAndSetSemantics { })
-                        .padding(start = TV_PAGE_CONTENT_GUTTER, end = 48.dp),
+                        .padding(start = TV_PAGE_CONTENT_GUTTER, end = TV_PAGE_END_GUTTER),
                 ) {
                     TvCatalogSearchEntry(
                         title = searchTitle,

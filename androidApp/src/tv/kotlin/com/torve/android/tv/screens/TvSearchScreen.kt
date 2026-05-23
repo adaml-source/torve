@@ -1,6 +1,7 @@
 package com.torve.android.tv.screens
 
 import android.content.Context
+import android.util.Log
 import android.view.inputmethod.InputMethodManager
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.animateColorAsState
@@ -82,7 +83,12 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
 import com.torve.android.R
+import com.torve.android.tv.TV_FILTER_ROW_NESTED_END_GUTTER
+import com.torve.android.tv.TV_PAGE_BOTTOM_GUTTER
 import com.torve.android.tv.TV_PAGE_CONTENT_GUTTER
+import com.torve.android.tv.TV_PAGE_TOP_GUTTER
+import com.torve.android.tv.TvImagePrefetcher
+import com.torve.android.tv.TvScreenCache
 import com.torve.android.tv.components.tvExternalCardRatingPrefs
 import com.torve.android.ui.components.PreferredRatingPills
 import com.torve.android.ui.theme.*
@@ -150,28 +156,47 @@ fun TvSearchScreen(
     val prefsRepo: PreferencesRepository = koinInject()
     val secretStore: IntegrationSecretStore = koinInject()
     val settingsState by settingsViewModel.state.collectAsState()
+    val context = LocalContext.current
+    val restoredRouteCache = remember {
+        TvScreenCache.get<TvSearchRouteCacheState>(TV_SEARCH_ROUTE_CACHE_KEY)
+            ?.takeIf { it.isFresh() }
+            ?.also {
+                Log.d(
+                    "TvSearchCache",
+                    "search_cache_restore queryLength=${it.query.length} results=${it.results.size}",
+                )
+            }
+    }
 
-    var query by rememberSaveable { mutableStateOf(initialQuery) }
-    var baseResults by remember { mutableStateOf<List<MediaItem>>(emptyList()) }
-    var results by remember { mutableStateOf<List<MediaItem>>(emptyList()) }
+    var query by rememberSaveable { mutableStateOf(restoredRouteCache?.query ?: initialQuery) }
+    var baseResults by remember { mutableStateOf(restoredRouteCache?.baseResults.orEmpty()) }
+    var results by remember { mutableStateOf(restoredRouteCache?.results.orEmpty()) }
     var loading by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
-    var searchMode by rememberSaveable { mutableStateOf(SearchMode.STANDARD) }
-    var filterType by rememberSaveable { mutableStateOf<String?>(null) } // "movie", "tv", or null (all)
-    var selectedGenreIds by remember { mutableStateOf<Set<Int>>(emptySet()) }
-    var selectedStudioIds by remember { mutableStateOf<Set<Int>>(emptySet()) }
-    var selectedYear by remember { mutableStateOf<Int?>(null) }
-    var selectedMinRating by remember { mutableStateOf<Double?>(null) }
-    var aiResultTitle by remember { mutableStateOf<String?>(null) }
-    var aiFallback by remember { mutableStateOf(false) }
-    var filtersVisible by rememberSaveable { mutableStateOf(true) }
+    var searchMode by rememberSaveable { mutableStateOf(restoredRouteCache?.searchMode ?: SearchMode.STANDARD) }
+    var filterType by rememberSaveable { mutableStateOf<String?>(restoredRouteCache?.filterType) } // "movie", "tv", or null (all)
+    var selectedGenreIds by remember { mutableStateOf(restoredRouteCache?.selectedGenreIds.orEmpty()) }
+    var selectedStudioIds by remember { mutableStateOf(restoredRouteCache?.selectedStudioIds.orEmpty()) }
+    var selectedYear by remember { mutableStateOf(restoredRouteCache?.selectedYear) }
+    var selectedMinRating by remember { mutableStateOf(restoredRouteCache?.selectedMinRating) }
+    var aiResultTitle by remember { mutableStateOf(restoredRouteCache?.aiResultTitle) }
+    var aiFallback by remember { mutableStateOf(restoredRouteCache?.aiFallback ?: false) }
+    var filtersVisible by rememberSaveable { mutableStateOf(restoredRouteCache?.filtersVisible ?: true) }
     var showFilters by rememberSaveable { mutableStateOf(false) }
-    var density by rememberSaveable { mutableStateOf(TvSearchDensity.BALANCED) }
+    var density by rememberSaveable { mutableStateOf(restoredRouteCache?.density ?: TvSearchDensity.BALANCED) }
     var focusResultsAfterClosingFilters by remember { mutableStateOf(false) }
     var focusCompactFiltersAfterHide by remember { mutableStateOf(false) }
     var focusFirstFilterAfterShow by remember { mutableStateOf(false) }
     var restoreAiFocusAfterToggle by remember { mutableStateOf(false) }
-    var selectedResult by remember { mutableStateOf<MediaItem?>(null) }
+    var selectedResultKey by remember { mutableStateOf(restoredRouteCache?.selectedMediaKey) }
+    var selectedResult by remember {
+        mutableStateOf(
+            restoredRouteCache?.selectedMediaKey?.let { key ->
+                restoredRouteCache.results.firstOrNull { it.tvSearchStableKey() == key }
+            } ?: restoredRouteCache?.results?.firstOrNull(),
+        )
+    }
+    var lastLoadedSearchStateKey by remember { mutableStateOf(restoredRouteCache?.loadStateKey) }
     val inputFocusRequester = remember { FocusRequester() }
     val filterToggleRequester = remember { FocusRequester() }
     val advancedFiltersRequester = remember { FocusRequester() }
@@ -185,6 +210,37 @@ fun TvSearchScreen(
     val firstResultRequester = remember { FocusRequester() }
     val densityRequesters = remember {
         TvSearchDensity.entries.associateWith { FocusRequester() }
+    }
+    val activeDensityRequester = densityRequesters.getValue(density)
+    var lastVisibleFilterRequester by remember { mutableStateOf<FocusRequester?>(null) }
+
+    fun requestSearchBodyFocus(): Boolean {
+        val candidates = buildList {
+            if (showFilters) {
+                add(closeFiltersRequester)
+                add(firstFilterRequester)
+            } else if (filtersVisible) {
+                lastVisibleFilterRequester?.let(::add)
+                add(advancedFiltersRequester)
+                add(allTypeRequester)
+                add(filterToggleRequester)
+                add(activeDensityRequester)
+                if (results.isNotEmpty()) add(firstResultRequester)
+            } else {
+                add(filterToggleRequester)
+                add(activeDensityRequester)
+                if (results.isNotEmpty()) add(firstResultRequester)
+            }
+        }.distinct()
+
+        candidates.forEach { requester ->
+            val focused = runCatching { requester.requestFocus() }.isSuccess
+            if (focused) {
+                onContentFocused(requester)
+                return true
+            }
+        }
+        return false
     }
 
     val hasAiKey = settingsState.activeAiApiKey.isNotBlank()
@@ -212,9 +268,11 @@ fun TvSearchScreen(
     }
 
     LaunchedEffect(results) {
-        selectedResult = selectedResult?.let { current ->
-            results.firstOrNull { it.tvSearchStableKey() == current.tvSearchStableKey() }
+        val preferredKey = selectedResultKey ?: selectedResult?.tvSearchStableKey()
+        selectedResult = preferredKey?.let { key ->
+            results.firstOrNull { it.tvSearchStableKey() == key }
         } ?: results.firstOrNull()
+        selectedResultKey = selectedResult?.tvSearchStableKey()
     }
 
     LaunchedEffect(showFilters, focusResultsAfterClosingFilters, results.size) {
@@ -388,6 +446,22 @@ fun TvSearchScreen(
         aiResultTitle = null
         aiFallback = false
         val trimmedQuery = query.trim()
+        val loadStateKey = tvSearchLoadStateKey(
+            query = trimmedQuery,
+            searchMode = SearchMode.STANDARD,
+            filterType = filterType,
+            selectedGenreIds = selectedGenreIds,
+            selectedStudioIds = selectedStudioIds,
+            selectedYear = selectedYear,
+            selectedMinRating = selectedMinRating,
+        )
+        if (lastLoadedSearchStateKey == loadStateKey && (baseResults.isNotEmpty() || results.isNotEmpty())) {
+            Log.d("TvSearchCache", "search_cache_restore loadKey=$loadStateKey results=${results.size}")
+            loading = false
+            error = null
+            return@LaunchedEffect
+        }
+        Log.d("TvSearchCache", "search_cache_miss loadKey=$loadStateKey")
         loading = true
         error = null
         try {
@@ -418,6 +492,7 @@ fun TvSearchScreen(
                 year = selectedYear,
                 minRating = selectedMinRating,
             )
+            lastLoadedSearchStateKey = loadStateKey
         } catch (t: Throwable) {
             baseResults = emptyList()
             results = emptyList()
@@ -431,6 +506,21 @@ fun TvSearchScreen(
     LaunchedEffect(query, searchMode) {
         if (searchMode != SearchMode.AI) return@LaunchedEffect
         aiFallback = false
+        val loadStateKey = tvSearchLoadStateKey(
+            query = query,
+            searchMode = SearchMode.AI,
+            filterType = filterType,
+            selectedGenreIds = selectedGenreIds,
+            selectedStudioIds = selectedStudioIds,
+            selectedYear = selectedYear,
+            selectedMinRating = selectedMinRating,
+        )
+        if (lastLoadedSearchStateKey == loadStateKey && (baseResults.isNotEmpty() || results.isNotEmpty())) {
+            Log.d("TvSearchCache", "search_cache_restore loadKey=$loadStateKey results=${results.size}")
+            loading = false
+            error = null
+            return@LaunchedEffect
+        }
         if (query.length < 2 || !hasAiKey) {
             // AI mode is only a search interpretation mode. Toggling it on
             // without a real query must not remove the browse/results surface,
@@ -440,6 +530,7 @@ fun TvSearchScreen(
             aiResultTitle = null
             return@LaunchedEffect
         }
+        Log.d("TvSearchCache", "search_cache_miss loadKey=$loadStateKey")
         loading = true
         error = null
         aiResultTitle = null
@@ -515,6 +606,7 @@ fun TvSearchScreen(
                     minRating = selectedMinRating,
                 )
             }
+            lastLoadedSearchStateKey = loadStateKey
         } catch (_: Throwable) {
             // Fallback to standard search
             aiFallback = true
@@ -527,6 +619,7 @@ fun TvSearchScreen(
                     year = selectedYear,
                     minRating = selectedMinRating,
                 )
+                lastLoadedSearchStateKey = loadStateKey
             } catch (t: Throwable) {
                 baseResults = emptyList()
                 results = emptyList()
@@ -542,9 +635,65 @@ fun TvSearchScreen(
         (if (selectedYear != null) 1 else 0) +
         (if (selectedMinRating != null) 1 else 0) +
         (if (filterType != null) 1 else 0)
-    val activeDensityRequester = densityRequesters.getValue(density)
     val selectedBackdrop = selectedResult?.backdropUrl?.takeIf { it.isNotBlank() }
         ?: selectedResult?.posterUrl?.takeIf { it.isNotBlank() }
+
+    LaunchedEffect(resultHydrationKey, selectedBackdrop) {
+        if (results.isNotEmpty()) {
+            TvImagePrefetcher.prefetchMediaItems(
+                context = context,
+                screenName = "tv_search",
+                items = results.take(density.columns * 2),
+                maxImages = 32,
+                includeHeroCandidates = true,
+            )
+        }
+    }
+
+    LaunchedEffect(
+        query,
+        searchMode,
+        filterType,
+        selectedGenreIds,
+        selectedStudioIds,
+        selectedYear,
+        selectedMinRating,
+        filtersVisible,
+        density,
+        baseResults,
+        results,
+        selectedResultKey,
+        aiResultTitle,
+        aiFallback,
+        lastLoadedSearchStateKey,
+        loading,
+        error,
+    ) {
+        if (loading || error != null) return@LaunchedEffect
+        if (baseResults.isEmpty() && results.isEmpty()) return@LaunchedEffect
+        TvScreenCache.put(
+            TV_SEARCH_ROUTE_CACHE_KEY,
+            TvSearchRouteCacheState(
+                query = query,
+                searchMode = searchMode,
+                filterType = filterType,
+                selectedGenreIds = selectedGenreIds,
+                selectedStudioIds = selectedStudioIds,
+                selectedYear = selectedYear,
+                selectedMinRating = selectedMinRating,
+                filtersVisible = filtersVisible,
+                density = density,
+                baseResults = baseResults,
+                results = results,
+                selectedMediaKey = selectedResultKey,
+                aiResultTitle = aiResultTitle,
+                aiFallback = aiFallback,
+                loadStateKey = lastLoadedSearchStateKey,
+                storedAtMs = System.currentTimeMillis(),
+            ),
+        )
+        Log.d("TvSearchCache", "search_cache_store queryLength=${query.length} results=${results.size}")
+    }
 
     Box(
         modifier = Modifier
@@ -588,7 +737,12 @@ fun TvSearchScreen(
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(start = TV_PAGE_CONTENT_GUTTER, top = 22.dp, end = 34.dp, bottom = 28.dp),
+                .padding(
+                    start = TV_PAGE_CONTENT_GUTTER,
+                    top = TV_PAGE_TOP_GUTTER,
+                    end = 0.dp,
+                    bottom = TV_PAGE_BOTTOM_GUTTER,
+                ),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             TvSearchHeader(
@@ -605,7 +759,12 @@ fun TvSearchScreen(
                 inputFocusRequester = inputFocusRequester,
                 aiFocusRequester = aiModeRequester,
                 railFocusRequester = railFocusRequester,
-                firstFilterRequester = if (filtersVisible) allTypeRequester else filterToggleRequester,
+                downFocusRequester = when {
+                    showFilters -> closeFiltersRequester
+                    filtersVisible -> lastVisibleFilterRequester ?: advancedFiltersRequester
+                    else -> filterToggleRequester
+                },
+                onMoveDown = ::requestSearchBodyFocus,
                 onContentFocused = onContentFocused,
             )
 
@@ -667,6 +826,7 @@ fun TvSearchScreen(
                 inputFocusRequester = inputFocusRequester,
                 bodyTopRequester = activeDensityRequester,
                 railFocusRequester = railFocusRequester,
+                onFilterFocused = { lastVisibleFilterRequester = it },
                 onContentFocused = onContentFocused,
             )
 
@@ -753,7 +913,7 @@ fun TvSearchScreen(
                             columns = GridCells.Fixed(density.columns),
                             verticalArrangement = Arrangement.spacedBy(18.dp),
                             horizontalArrangement = Arrangement.spacedBy(12.dp),
-                            contentPadding = PaddingValues(top = 4.dp, bottom = 28.dp, start = 2.dp, end = 8.dp),
+                            contentPadding = PaddingValues(top = 4.dp, bottom = 28.dp, start = 2.dp, end = 4.dp),
                             modifier = Modifier.fillMaxSize(),
                         ) {
                             itemsIndexed(
@@ -779,6 +939,7 @@ fun TvSearchScreen(
                                         },
                                     onFocused = {
                                         selectedResult = item
+                                        selectedResultKey = item.tvSearchStableKey()
                                         onContentFocused(activeRequester)
                                     },
                                     onClick = { onMediaClick(item) },
@@ -823,6 +984,7 @@ fun TvSearchScreen(
                     searchMode = SearchMode.STANDARD
                 },
                 onClose = {
+                    lastVisibleFilterRequester = advancedFiltersRequester
                     showFilters = false
                     focusResultsAfterClosingFilters = true
                 },
@@ -1254,7 +1416,8 @@ private fun TvSearchHeader(
     inputFocusRequester: FocusRequester,
     aiFocusRequester: FocusRequester,
     railFocusRequester: FocusRequester,
-    firstFilterRequester: FocusRequester,
+    downFocusRequester: FocusRequester,
+    onMoveDown: () -> Boolean,
     onContentFocused: (FocusRequester) -> Unit,
 ) {
     Row(
@@ -1288,16 +1451,14 @@ private fun TvSearchHeader(
                 value = query,
                 onValueChange = onQueryChange,
                 placeholder = "Search movies, shows, channels",
-                onMoveDown = {
-                    runCatching { firstFilterRequester.requestFocus() }.isSuccess
-                },
+                onMoveDown = onMoveDown,
                 modifier = Modifier
                     .weight(1f)
                     .focusRequester(inputFocusRequester)
                     .focusProperties {
                         left = railFocusRequester
                         right = aiFocusRequester
-                        down = firstFilterRequester
+                        down = downFocusRequester
                     }
                     .onFocusChanged { if (it.isFocused) onContentFocused(inputFocusRequester) },
             )
@@ -1309,13 +1470,39 @@ private fun TvSearchHeader(
                     .focusProperties {
                         left = inputFocusRequester
                         right = aiFocusRequester
-                        down = firstFilterRequester
+                        down = downFocusRequester
                     },
                 onFocused = { onContentFocused(aiFocusRequester) },
+                onMoveDown = onMoveDown,
                 onClick = onToggleAi,
             )
         }
     }
+}
+
+private const val TV_SEARCH_ROUTE_CACHE_KEY = "tv_search_route_cache_v2"
+private const val TV_SEARCH_ROUTE_CACHE_TTL_MS = 30 * 60 * 1000L
+
+private data class TvSearchRouteCacheState(
+    val query: String,
+    val searchMode: SearchMode,
+    val filterType: String?,
+    val selectedGenreIds: Set<Int>,
+    val selectedStudioIds: Set<Int>,
+    val selectedYear: Int?,
+    val selectedMinRating: Double?,
+    val filtersVisible: Boolean,
+    val density: TvSearchDensity,
+    val baseResults: List<MediaItem>,
+    val results: List<MediaItem>,
+    val selectedMediaKey: String?,
+    val aiResultTitle: String?,
+    val aiFallback: Boolean,
+    val loadStateKey: String?,
+    val storedAtMs: Long,
+) {
+    fun isFresh(nowMs: Long = System.currentTimeMillis()): Boolean =
+        nowMs - storedAtMs <= TV_SEARCH_ROUTE_CACHE_TTL_MS
 }
 
 @Composable
@@ -1382,6 +1569,7 @@ private fun TvSearchCompactInput(
             Key.DirectionDown -> {
                 leaveEditMode()
                 onMoveDown()
+                true
             }
 
             Key.DirectionCenter, Key.Enter, Key.NumPadEnter -> {
@@ -1482,6 +1670,7 @@ private fun TvSearchAiToggle(
     enabled: Boolean,
     modifier: Modifier = Modifier,
     onFocused: () -> Unit,
+    onMoveDown: () -> Boolean,
     onClick: () -> Unit,
 ) {
     var focused by remember { mutableStateOf(false) }
@@ -1517,6 +1706,16 @@ private fun TvSearchAiToggle(
             .onFocusChanged {
                 focused = it.isFocused
                 if (it.isFocused) onFocused()
+            }
+            .onPreviewKeyEvent { event ->
+                when {
+                    event.key == Key.DirectionDown && event.type == KeyEventType.KeyDown -> {
+                        onMoveDown()
+                        true
+                    }
+                    event.key == Key.DirectionDown && event.type == KeyEventType.KeyUp -> true
+                    else -> false
+                }
             }
             .clickable(
                 enabled = enabled,
@@ -1579,6 +1778,7 @@ private fun TvSearchRefinementArea(
     inputFocusRequester: FocusRequester,
     bodyTopRequester: FocusRequester,
     railFocusRequester: FocusRequester,
+    onFilterFocused: (FocusRequester) -> Unit,
     onContentFocused: (FocusRequester) -> Unit,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -1597,17 +1797,20 @@ private fun TvSearchRefinementArea(
                             left = railFocusRequester
                             up = inputFocusRequester
                             down = bodyTopRequester
-                        },
-                    onFocused = { onContentFocused(filterToggleRequester) },
-                    onClick = onToggleFilterVisibility,
-                )
+                    },
+                onFocused = {
+                    onFilterFocused(filterToggleRequester)
+                    onContentFocused(filterToggleRequester)
+                },
+                onClick = onToggleFilterVisibility,
+            )
             }
             return@Column
         }
         LazyRow(
             horizontalArrangement = Arrangement.spacedBy(9.dp),
             verticalAlignment = Alignment.CenterVertically,
-            contentPadding = PaddingValues(end = 18.dp),
+            contentPadding = PaddingValues(end = TV_FILTER_ROW_NESTED_END_GUTTER),
             modifier = Modifier.fillMaxWidth(),
         ) {
             item("all") {
@@ -1622,7 +1825,10 @@ private fun TvSearchRefinementArea(
                         up = inputFocusRequester
                         down = bodyTopRequester
                     },
-                onFocused = { onContentFocused(allTypeRequester) },
+                onFocused = {
+                    onFilterFocused(allTypeRequester)
+                    onContentFocused(allTypeRequester)
+                },
                 onClick = { onFilterTypeChange(null) },
             )
             }
@@ -1638,7 +1844,10 @@ private fun TvSearchRefinementArea(
                         up = inputFocusRequester
                         down = bodyTopRequester
                     },
-                onFocused = { onContentFocused(movieTypeRequester) },
+                onFocused = {
+                    onFilterFocused(movieTypeRequester)
+                    onContentFocused(movieTypeRequester)
+                },
                 onClick = { onFilterTypeChange("movie") },
             )
             }
@@ -1653,7 +1862,10 @@ private fun TvSearchRefinementArea(
                         up = inputFocusRequester
                         down = bodyTopRequester
                     },
-                onFocused = { onContentFocused(tvTypeRequester) },
+                onFocused = {
+                    onFilterFocused(tvTypeRequester)
+                    onContentFocused(tvTypeRequester)
+                },
                 onClick = { onFilterTypeChange("tv") },
             )
             }
@@ -1693,7 +1905,10 @@ private fun TvSearchRefinementArea(
                             up = inputFocusRequester
                             down = bodyTopRequester
                         },
-                    onFocused = { onContentFocused(requester) },
+                    onFocused = {
+                        onFilterFocused(requester)
+                        onContentFocused(requester)
+                    },
                     onClick = { onQuickDiscovery(key) },
                 )
             }
@@ -1713,7 +1928,10 @@ private fun TvSearchRefinementArea(
                             up = inputFocusRequester
                             down = bodyTopRequester
                         },
-                    onFocused = { onContentFocused(advancedFiltersRequester) },
+                    onFocused = {
+                        onFilterFocused(advancedFiltersRequester)
+                        onContentFocused(advancedFiltersRequester)
+                    },
                     onClick = onToggleAdvancedFilters,
                 )
             }
@@ -1727,7 +1945,10 @@ private fun TvSearchRefinementArea(
                             up = inputFocusRequester
                             down = bodyTopRequester
                         },
-                    onFocused = { onContentFocused(filterToggleRequester) },
+                    onFocused = {
+                        onFilterFocused(filterToggleRequester)
+                        onContentFocused(filterToggleRequester)
+                    },
                     onClick = onToggleFilterVisibility,
                 )
             }
@@ -2913,6 +3134,24 @@ private fun MediaItem.tvSearchStableKey(): String {
         else -> "${type.name}:title:${title.tvSearchNormalizeTitle()}:${year ?: 0}"
     }
 }
+
+private fun tvSearchLoadStateKey(
+    query: String,
+    searchMode: SearchMode,
+    filterType: String?,
+    selectedGenreIds: Set<Int>,
+    selectedStudioIds: Set<Int>,
+    selectedYear: Int?,
+    selectedMinRating: Double?,
+): String = listOf(
+    "mode=${searchMode.name}",
+    "query=${query.trim().lowercase()}",
+    "type=${filterType ?: "all"}",
+    "genres=${selectedGenreIds.sorted().joinToString(",")}",
+    "studios=${selectedStudioIds.sorted().joinToString(",")}",
+    "year=${selectedYear ?: "-"}",
+    "rating=${selectedMinRating ?: "-"}",
+).joinToString("|")
 
 private fun List<MediaItem>.needsTvSearchRatingEnrichment(): Boolean =
     any { item -> item.needsExternalRatingEnrichment() }

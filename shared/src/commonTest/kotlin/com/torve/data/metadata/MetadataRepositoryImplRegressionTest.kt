@@ -9,9 +9,12 @@ import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
 import io.ktor.serialization.kotlinx.json.json
+import kotlinx.coroutines.async
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
 import kotlin.test.Test
+import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 
@@ -69,6 +72,67 @@ class MetadataRepositoryImplRegressionTest {
         assertTrue(shelves.any { it.id == "popular-movies" })
     }
 
+    @Test
+    fun repeatedIdenticalMetadataRequestUsesMemoryCache() = runTest {
+        var requests = 0
+        val repo = MetadataRepositoryImpl(
+            api = TmdbApiClient(
+                HttpClient(
+                    MockEngine {
+                        requests++
+                        respond(
+                            content = movieResponse("Cached Movie"),
+                            status = HttpStatusCode.OK,
+                            headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                        )
+                    },
+                ) {
+                    install(ContentNegotiation) {
+                        json(jsonConfig())
+                    }
+                },
+                resolvedHostProvider = { listOf("127.0.0.1") },
+            ),
+        )
+
+        repo.getTrending("movie", page = 1)
+        repo.getTrending("movie", page = 1)
+
+        assertEquals(1, requests)
+    }
+
+    @Test
+    fun concurrentIdenticalMetadataRequestsJoinInFlightFetch() = runTest {
+        var requests = 0
+        val repo = MetadataRepositoryImpl(
+            api = TmdbApiClient(
+                HttpClient(
+                    MockEngine {
+                        requests++
+                        delay(50)
+                        respond(
+                            content = movieResponse("Coalesced Movie"),
+                            status = HttpStatusCode.OK,
+                            headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                        )
+                    },
+                ) {
+                    install(ContentNegotiation) {
+                        json(jsonConfig())
+                    }
+                },
+                resolvedHostProvider = { listOf("127.0.0.1") },
+            ),
+        )
+
+        val first = async { repo.getTrending("movie", page = 1) }
+        val second = async { repo.getTrending("movie", page = 1) }
+        first.await()
+        second.await()
+
+        assertEquals(1, requests)
+    }
+
     private fun httpClientWithRoutes(
         successRoutes: Boolean,
         failingPaths: Set<String> = emptySet(),
@@ -114,15 +178,17 @@ class MetadataRepositoryImplRegressionTest {
         ) {
             install(ContentNegotiation) {
                 json(
-                    Json {
-                        ignoreUnknownKeys = true
-                        isLenient = true
-                        coerceInputValues = true
-                        explicitNulls = false
-                    },
+                    jsonConfig(),
                 )
             }
         }
+    }
+
+    private fun jsonConfig(): Json = Json {
+        ignoreUnknownKeys = true
+        isLenient = true
+        coerceInputValues = true
+        explicitNulls = false
     }
 
     private fun movieResponse(title: String): String {

@@ -55,7 +55,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import com.torve.android.tv.TV_FILTER_ROW_NESTED_END_GUTTER
+import com.torve.android.tv.TV_PAGE_BOTTOM_GUTTER
 import com.torve.android.tv.TV_PAGE_CONTENT_GUTTER
+import com.torve.android.tv.TV_PAGE_TOP_GUTTER
 import com.torve.android.catalog.SportsBootstrapJson
 import com.torve.android.catalog.SportsBootstrapPayload
 import com.torve.android.catalog.sportsBootstrapKey
@@ -384,7 +387,12 @@ fun TvSportsScreen(
                     radius = 1550f,
                 ),
             )
-            .padding(start = TV_PAGE_CONTENT_GUTTER, top = 22.dp, end = 40.dp, bottom = 22.dp),
+            .padding(
+                start = TV_PAGE_CONTENT_GUTTER,
+                top = TV_PAGE_TOP_GUTTER,
+                end = 0.dp,
+                bottom = TV_PAGE_BOTTOM_GUTTER,
+            ),
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
         Text(
@@ -456,7 +464,7 @@ fun TvSportsScreen(
             LazyRow(
                 state = chipListState,
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
-                contentPadding = PaddingValues(end = 48.dp),
+                contentPadding = PaddingValues(end = TV_FILTER_ROW_NESTED_END_GUTTER),
                 modifier = Modifier.fillMaxWidth(),
             ) {
             item(key = "bucket_all") {

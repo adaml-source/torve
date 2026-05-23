@@ -12,8 +12,12 @@ import com.torve.domain.model.ShelfType
 import com.torve.domain.model.dedupeByStableKey
 import com.torve.domain.repository.MetadataRepository
 import com.torve.platform.torveVerboseLog
+import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.supervisorScope
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.datetime.Clock
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.toLocalDateTime
@@ -29,6 +33,9 @@ private fun List<MediaItem>.filterUpcomingMovieReleases(today: String = todayIso
 
 private const val HOME_RAIL_PREFETCH_PAGES = 2
 private const val HOME_UPCOMING_PREFETCH_PAGES = 5
+private const val METADATA_LIST_TTL_MS = 30 * 60 * 1000L
+private const val METADATA_DETAIL_TTL_MS = 12 * 60 * 60 * 1000L
+private const val METADATA_CACHE_MAX_ENTRIES = 320
 
 class HomeShelvesUnavailableException(
     val failedSegments: List<String>,
@@ -46,10 +53,81 @@ class MetadataRepositoryImpl(
     private val api: TmdbApiClient,
 ) : MetadataRepository {
     private val providerLogosBackendBaseUrl: String = "" // Set your backend base URL when available.
+    private val metadataCacheMutex = Mutex()
+    private val metadataCache = LinkedHashMap<String, MetadataCacheEntry>()
+    private val metadataInFlight = mutableMapOf<String, Deferred<Any?>>()
+
+    private data class MetadataCacheEntry(
+        val value: Any?,
+        val storedAtMs: Long,
+    )
+
+    private fun metadataCacheKey(endpoint: String, vararg parts: Any?): String =
+        buildString {
+            append(endpoint)
+            parts.forEach { part ->
+                append('|')
+                append(part?.toString()?.replace("|", "%7C") ?: "-")
+            }
+        }
+
+    @Suppress("UNCHECKED_CAST")
+    private suspend fun <T> cachedMetadata(
+        key: String,
+        ttlMs: Long,
+        fetch: suspend () -> T,
+    ): T = coroutineScope {
+        val now = Clock.System.now().toEpochMilliseconds()
+        metadataCacheMutex.withLock {
+            metadataCache[key]?.takeIf { now - it.storedAtMs <= ttlMs }?.let { entry ->
+                torveVerboseLog { "metadata_cache_hit key=$key" }
+                return@coroutineScope entry.value as T
+            }
+        }
+
+        var created = false
+        val deferred = metadataCacheMutex.withLock {
+            metadataInFlight[key]?.also {
+                torveVerboseLog { "metadata_inflight_join key=$key" }
+            } ?: async {
+                torveVerboseLog { "metadata_cache_miss key=$key" }
+                torveVerboseLog { "metadata_network_fetch key=$key" }
+                fetch() as Any?
+            }.also {
+                metadataInFlight[key] = it
+                created = true
+            }
+        }
+
+        try {
+            val value = deferred.await()
+            if (created) {
+                metadataCacheMutex.withLock {
+                    metadataCache[key] = MetadataCacheEntry(value, Clock.System.now().toEpochMilliseconds())
+                    while (metadataCache.size > METADATA_CACHE_MAX_ENTRIES) {
+                        val evictedKey = metadataCache.keys.firstOrNull() ?: break
+                        metadataCache.remove(evictedKey)
+                        torveVerboseLog { "metadata_cache_eviction key=$evictedKey" }
+                    }
+                    metadataInFlight.remove(key)
+                }
+            }
+            value as T
+        } catch (t: Throwable) {
+            if (created) {
+                metadataCacheMutex.withLock {
+                    metadataInFlight.remove(key)
+                }
+            }
+            throw t
+        }
+    }
 
     override suspend fun getTrending(type: String, page: Int): List<MediaItem> {
+        val cacheKey = metadataCacheKey("getTrending", type, page)
+        return cachedMetadata(cacheKey, METADATA_LIST_TTL_MS) {
         torveVerboseLog { "CONTENT_REPO fetch_start source=trending type=$type page=$page" }
-        return try {
+        try {
             val items = if (type == "tv") {
                 api.getTrendingTv(page, requestCategory = "catalog.trending.$type.page_$page").results.map { TmdbMappers.tvToMediaItem(it) }
             } else {
@@ -65,11 +143,14 @@ class MetadataRepositoryImpl(
             }
             throw e
         }
+        }
     }
 
     override suspend fun getPopular(type: String, page: Int): List<MediaItem> {
+        val cacheKey = metadataCacheKey("getPopular", type, page)
+        return cachedMetadata(cacheKey, METADATA_LIST_TTL_MS) {
         torveVerboseLog { "CONTENT_REPO fetch_start source=popular type=$type page=$page" }
-        return try {
+        try {
             val items = if (type == "tv") {
                 api.getPopularTv(page, requestCategory = "catalog.popular.$type.page_$page").results.map { TmdbMappers.tvToMediaItem(it) }
             } else {
@@ -85,11 +166,14 @@ class MetadataRepositoryImpl(
             }
             throw e
         }
+        }
     }
 
     override suspend fun getTopRated(type: String, page: Int): List<MediaItem> {
+        val cacheKey = metadataCacheKey("getTopRated", type, page)
+        return cachedMetadata(cacheKey, METADATA_LIST_TTL_MS) {
         torveVerboseLog { "CONTENT_REPO fetch_start source=top_rated type=$type page=$page" }
-        return try {
+        try {
             val items = if (type == "tv") {
                 api.discoverTv(
                     page = page,
@@ -115,27 +199,40 @@ class MetadataRepositoryImpl(
             }
             throw e
         }
+        }
     }
 
     override suspend fun getUpcoming(page: Int): List<MediaItem> {
-        return api.getUpcoming(page, requestCategory = "catalog.upcoming.movie.page_$page")
+        val cacheKey = metadataCacheKey("getUpcoming", page)
+        return cachedMetadata(cacheKey, METADATA_LIST_TTL_MS) {
+        api.getUpcoming(page, requestCategory = "catalog.upcoming.movie.page_$page")
             .results
             .map { TmdbMappers.movieToMediaItem(it) }
             .filterUpcomingMovieReleases()
+        }
     }
 
     override suspend fun getNowPlaying(page: Int): List<MediaItem> {
-        return api.getNowPlaying(page, requestCategory = "catalog.now_playing.movie.page_$page").results.map { TmdbMappers.movieToMediaItem(it) }
+        val cacheKey = metadataCacheKey("getNowPlaying", page)
+        return cachedMetadata(cacheKey, METADATA_LIST_TTL_MS) {
+            api.getNowPlaying(page, requestCategory = "catalog.now_playing.movie.page_$page").results.map { TmdbMappers.movieToMediaItem(it) }
+        }
     }
 
     override suspend fun getAiringToday(page: Int): List<MediaItem> {
-        return api.getAiringToday(page, requestCategory = "catalog.airing_today.tv.page_$page").results.map { TmdbMappers.tvToMediaItem(it) }
+        val cacheKey = metadataCacheKey("getAiringToday", page)
+        return cachedMetadata(cacheKey, METADATA_LIST_TTL_MS) {
+            api.getAiringToday(page, requestCategory = "catalog.airing_today.tv.page_$page").results.map { TmdbMappers.tvToMediaItem(it) }
+        }
     }
 
     override suspend fun searchMulti(query: String, page: Int): List<MediaItem> {
-        return api.searchMulti(query, page).results
+        val cacheKey = metadataCacheKey("searchMulti", query.trim().lowercase(), page)
+        return cachedMetadata(cacheKey, METADATA_LIST_TTL_MS) {
+        api.searchMulti(query, page).results
             .filter { it.mediaType == "movie" || it.mediaType == "tv" }
             .map { TmdbMappers.multiToMediaItem(it) }
+        }
     }
 
     override suspend fun findByImdbId(imdbId: String, preferredType: String?): MediaItem? {
@@ -159,44 +256,61 @@ class MetadataRepositoryImpl(
     }
 
     override suspend fun getDetail(type: String, id: Int): MediaItem {
-        return if (type == "movie") {
+        val cacheKey = metadataCacheKey("getDetail", type, id)
+        return cachedMetadata(cacheKey, METADATA_DETAIL_TTL_MS) {
+        if (type == "movie") {
             TmdbMappers.movieToMediaItem(api.getMovieDetail(id))
         } else {
             TmdbMappers.tvToMediaItem(api.getTvDetail(id))
         }
+        }
     }
 
     override suspend fun getSimilar(type: String, id: Int, page: Int): List<MediaItem> {
-        return if (type == "tv") {
+        val cacheKey = metadataCacheKey("getSimilar", type, id, page)
+        return cachedMetadata(cacheKey, METADATA_LIST_TTL_MS) {
+        if (type == "tv") {
             api.getSimilarTv(id, page).results.map { TmdbMappers.tvToMediaItem(it) }
         } else {
             api.getSimilar(type, id, page).results.map { TmdbMappers.movieToMediaItem(it) }
         }
+        }
     }
 
     override suspend fun getRecommendations(type: String, id: Int, page: Int): List<MediaItem> {
-        return if (type == "tv") {
+        val cacheKey = metadataCacheKey("getRecommendations", type, id, page)
+        return cachedMetadata(cacheKey, METADATA_LIST_TTL_MS) {
+        if (type == "tv") {
             api.getRecommendationsTv(id, page).results.map { TmdbMappers.tvToMediaItem(it) }
         } else {
             api.getRecommendations(type, id, page).results.map { TmdbMappers.movieToMediaItem(it) }
         }
+        }
     }
 
     override suspend fun getPersonCredits(personId: Int): List<MediaItem> {
+        val cacheKey = metadataCacheKey("getPersonCredits", personId)
+        return cachedMetadata(cacheKey, METADATA_DETAIL_TTL_MS) {
         val credits = api.getPersonCredits(personId)
         val castItems = credits.cast.map { TmdbMappers.personCreditToMediaItem(it) }
         val crewItems = credits.crew.map { TmdbMappers.personCrewCreditToMediaItem(it) }
-        return (castItems + crewItems)
+        (castItems + crewItems)
             .distinctBy { it.tmdbId }
             .sortedByDescending { it.popularity ?: 0.0 }
+        }
     }
 
     override suspend fun getPersonDetail(personId: Int): TmdbPerson {
-        return api.getPersonDetail(personId)
+        val cacheKey = metadataCacheKey("getPersonDetail", personId)
+        return cachedMetadata(cacheKey, METADATA_DETAIL_TTL_MS) {
+            api.getPersonDetail(personId)
+        }
     }
 
     override suspend fun getPersonImageUrls(personId: Int): List<String> {
-        return api.getImages("person", personId)
+        val cacheKey = metadataCacheKey("getPersonImageUrls", personId)
+        return cachedMetadata(cacheKey, METADATA_DETAIL_TTL_MS) {
+        api.getImages("person", personId)
             .profiles
             .sortedWith(
                 compareByDescending<TmdbImageItem> { it.voteAverage * (it.voteCount.coerceAtLeast(1)) }
@@ -204,9 +318,12 @@ class MetadataRepositoryImpl(
             )
             .mapNotNull { image -> TmdbMappers.profileUrl(image.filePath, size = "w342") }
             .distinct()
+        }
     }
 
     override suspend fun getMediaImageUrls(type: String, id: Int): List<String> {
+        val cacheKey = metadataCacheKey("getMediaImageUrls", type, id)
+        return cachedMetadata(cacheKey, METADATA_DETAIL_TTL_MS) {
         val images = api.getImages(type, id)
         val backdrops = images.backdrops
             .sortedWith(
@@ -220,12 +337,15 @@ class MetadataRepositoryImpl(
                     .thenByDescending { it.width * it.height },
             )
             .mapNotNull { image -> TmdbMappers.posterUrl(image.filePath, size = "w500") }
-        return (backdrops + posters).distinct()
+        (backdrops + posters).distinct()
+        }
     }
 
     override suspend fun getSeasonDetail(tvId: Int, seasonNumber: Int): Season {
+        val cacheKey = metadataCacheKey("getSeasonDetail", tvId, seasonNumber)
+        return cachedMetadata(cacheKey, METADATA_DETAIL_TTL_MS) {
         val detail = api.getTvSeasonDetail(tvId, seasonNumber)
-        return Season(
+        Season(
             seasonNumber = detail.seasonNumber,
             episodeCount = detail.episodes.size,
             name = detail.name,
@@ -243,11 +363,14 @@ class MetadataRepositoryImpl(
                 )
             },
         )
+        }
     }
 
     override suspend fun getTrendingPaged(type: String, page: Int): PagedResult {
+        val cacheKey = metadataCacheKey("getTrendingPaged", type, page)
+        return cachedMetadata(cacheKey, METADATA_LIST_TTL_MS) {
         torveVerboseLog { "CONTENT_REPO fetch_start source=trending_paged type=$type page=$page" }
-        return try {
+        try {
             val result = if (type == "tv") {
                 val resp = api.getTrendingTv(page, requestCategory = "catalog.trending_paged.$type.page_$page")
                 PagedResult(
@@ -275,11 +398,14 @@ class MetadataRepositoryImpl(
             }
             throw e
         }
+        }
     }
 
     override suspend fun getPopularPaged(type: String, page: Int): PagedResult {
+        val cacheKey = metadataCacheKey("getPopularPaged", type, page)
+        return cachedMetadata(cacheKey, METADATA_LIST_TTL_MS) {
         torveVerboseLog { "CONTENT_REPO fetch_start source=popular_paged type=$type page=$page" }
-        return try {
+        try {
             val result = if (type == "tv") {
                 val resp = api.getPopularTv(page, requestCategory = "catalog.popular_paged.$type.page_$page")
                 PagedResult(
@@ -307,11 +433,14 @@ class MetadataRepositoryImpl(
             }
             throw e
         }
+        }
     }
 
     override suspend fun getTopRatedPaged(type: String, page: Int): PagedResult {
+        val cacheKey = metadataCacheKey("getTopRatedPaged", type, page)
+        return cachedMetadata(cacheKey, METADATA_LIST_TTL_MS) {
         torveVerboseLog { "CONTENT_REPO fetch_start source=top_rated_paged type=$type page=$page" }
-        return try {
+        try {
             val result = if (type == "tv") {
                 val resp = api.discoverTv(
                     page = page,
@@ -349,6 +478,7 @@ class MetadataRepositoryImpl(
             }
             throw e
         }
+        }
     }
 
     override suspend fun discover(
@@ -373,7 +503,31 @@ class MetadataRepositoryImpl(
         watchRegion: String?,
         withKeywords: String?,
     ): PagedResult {
-        return if (type == "tv") {
+        val cacheKey = metadataCacheKey(
+            "discover",
+            type,
+            page,
+            sortBy,
+            withGenres,
+            minRating,
+            year,
+            yearTo,
+            runtimeGte,
+            runtimeLte,
+            originCountries,
+            originalLanguage,
+            certification,
+            certificationGte,
+            certificationLte,
+            certificationCountry,
+            withCast,
+            withCrew,
+            withWatchProviders,
+            watchRegion,
+            withKeywords,
+        )
+        return cachedMetadata(cacheKey, METADATA_LIST_TTL_MS) {
+        if (type == "tv") {
             val resp = api.discoverTv(
                 page,
                 sortBy,
@@ -428,13 +582,19 @@ class MetadataRepositoryImpl(
                 totalResults = resp.totalResults,
             )
         }
+        }
     }
 
     override suspend fun searchKeywords(query: String): List<TmdbKeyword> {
-        return api.searchKeywords(query).results
+        val cacheKey = metadataCacheKey("searchKeywords", query.trim().lowercase())
+        return cachedMetadata(cacheKey, METADATA_LIST_TTL_MS) {
+            api.searchKeywords(query).results
+        }
     }
 
     override suspend fun searchMultiPaged(query: String, page: Int, type: String?): PagedResult {
+        val cacheKey = metadataCacheKey("searchMultiPaged", query.trim().lowercase(), page, type)
+        return cachedMetadata(cacheKey, METADATA_LIST_TTL_MS) {
         val resp = api.searchMulti(query, page)
         val items = resp.results
             .filter { it.mediaType == "movie" || it.mediaType == "tv" }
@@ -448,46 +608,63 @@ class MetadataRepositoryImpl(
                 } else results
             }
             .map { TmdbMappers.multiToMediaItem(it) }
-        return PagedResult(
+        PagedResult(
             items = items,
             page = resp.page,
             totalPages = resp.totalPages,
             totalResults = resp.totalResults,
         )
+        }
     }
 
     override suspend fun getPopularPeople(page: Int): List<PersonSummary> {
-        return api.getPopularPeople(page).results.map { TmdbMappers.personSummaryToDomain(it) }
+        val cacheKey = metadataCacheKey("getPopularPeople", page)
+        return cachedMetadata(cacheKey, METADATA_LIST_TTL_MS) {
+            api.getPopularPeople(page).results.map { TmdbMappers.personSummaryToDomain(it) }
+        }
     }
 
     override suspend fun searchPerson(query: String, page: Int): List<PersonSummary> {
-        return api.searchPerson(query, page).results.map { TmdbMappers.personSummaryToDomain(it) }
+        val cacheKey = metadataCacheKey("searchPerson", query.trim().lowercase(), page)
+        return cachedMetadata(cacheKey, METADATA_LIST_TTL_MS) {
+            api.searchPerson(query, page).results.map { TmdbMappers.personSummaryToDomain(it) }
+        }
     }
 
     override suspend fun getWatchProviderLogos(type: String, region: String): Map<Int, String> {
+        val cacheKey = metadataCacheKey("getWatchProviderLogos", type, region)
+        return cachedMetadata(cacheKey, METADATA_DETAIL_TTL_MS) {
         if (providerLogosBackendBaseUrl.isNotBlank()) {
             try {
-                return api.getWatchProviderLogosFromBackend(providerLogosBackendBaseUrl, type, region)
+                return@cachedMetadata api.getWatchProviderLogosFromBackend(providerLogosBackendBaseUrl, type, region)
             } catch (_: Exception) { /* fallback */ }
         }
         val response = api.getWatchProviders(type, region)
-        return response.results.mapNotNull { provider ->
+        response.results.mapNotNull { provider ->
             provider.logoPath?.let { path ->
                 provider.providerId to "${TmdbApiClient.IMAGE_BASE}/original$path"
             }
         }.toMap()
+        }
     }
 
     override suspend fun getLogoUrl(type: String, tmdbId: Int): String? {
-        return try {
+        val cacheKey = metadataCacheKey("getLogoUrl", type, tmdbId)
+        return cachedMetadata(cacheKey, METADATA_DETAIL_TTL_MS) {
+        try {
             val images = api.getImages(type, tmdbId)
             TmdbMappers.bestLogoPath(images)?.let { TmdbMappers.logoUrl(it) }
         } catch (_: Exception) {
             null
         }
+        }
     }
 
-    override suspend fun getHomeShelves(): List<CatalogShelf> = supervisorScope {
+    override suspend fun getHomeShelves(): List<CatalogShelf> = cachedMetadata(
+        key = metadataCacheKey("getHomeShelves"),
+        ttlMs = METADATA_LIST_TTL_MS,
+    ) {
+        supervisorScope {
         torveVerboseLog { "CONTENT_REPO fetch_start source=home_shelves" }
         suspend fun <T> homeRequest(label: String, block: suspend () -> T): Result<T> {
             return try {
@@ -666,5 +843,6 @@ class MetadataRepositoryImpl(
             "CONTENT_REPO fetch_success source=home_shelves shelves=${shelves.size}"
         }
         shelves
+        }
     }
 }

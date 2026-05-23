@@ -42,6 +42,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.torve.android.R
 import com.torve.android.tv.TV_PAGE_CONTENT_GUTTER
+import com.torve.android.tv.TV_PAGE_END_GUTTER
+import com.torve.android.tv.TV_PAGE_TOP_GUTTER
 import com.torve.android.tv.components.TvContentRail
 import com.torve.android.tv.components.TvMediaContextMenuAction
 import com.torve.android.tv.components.TvMediaRails
@@ -217,7 +219,12 @@ internal fun TvLibraryScreen(
         LazyRow(
             modifier = modifier,
             horizontalArrangement = Arrangement.spacedBy(12.dp),
-            contentPadding = PaddingValues(start = TV_PAGE_CONTENT_GUTTER, end = 12.dp, top = 14.dp, bottom = 8.dp),
+            contentPadding = PaddingValues(
+                start = TV_PAGE_CONTENT_GUTTER,
+                end = TV_PAGE_END_GUTTER,
+                top = TV_PAGE_TOP_GUTTER,
+                bottom = 8.dp,
+            ),
         ) {
             itemsIndexed(
                 items = tabLabels,
