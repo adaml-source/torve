@@ -1,6 +1,7 @@
 package com.torve.data.account
 
 import com.torve.data.auth.AuthClient
+import com.torve.data.auth.AuthUser
 import com.torve.domain.model.MediaFavorite
 import com.torve.domain.model.MediaItem
 import com.torve.domain.model.canonicalMediaKey
@@ -22,56 +23,61 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 
 class MediaFavoritesRepositoryImpl(
     private val authClient: AuthClient,
-    private val api: MediaFavoritesApi,
+    private val api: MediaFavoritesRemoteDataSource,
     private val localSettingsRepository: DeviceLocalSettingsRepository,
     private val json: Json,
+    private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
+    private val eventsEnabled: Boolean = true,
 ) : MediaFavoritesRepository {
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val _state = MutableStateFlow(MediaFavoritesState())
     override val state: StateFlow<MediaFavoritesState> = _state.asStateFlow()
 
     private var eventsJob: Job? = null
     private var eventsUserId: String? = null
     private var activeUserId: String? = null
+    private val sessionMutex = Mutex()
     private val pendingAdds = LinkedHashMap<String, MediaFavorite>()
     private val pendingRemoves = LinkedHashSet<String>()
 
     init {
         scope.launch {
-            authClient.authUserFlow.collectLatest { user ->
-                val userId = user?.id?.takeIf { it.isNotBlank() }
-                if (userId == null) {
-                    activeUserId = null
-                    clearPending()
-                    stopEventsLoop()
-                    _state.value = MediaFavoritesState()
-                } else {
-                    if (activeUserId != userId) {
-                        activeUserId = userId
-                        clearPending()
-                        stopEventsLoop()
-                        _state.value = MediaFavoritesState()
-                    }
-                    hydrateFromCache(userId)
-                    refreshInternal(userId)
-                    ensureEventsLoop(userId)
-                }
-            }
+            authClient.authUserFlow.collectLatest(::handleAuthUser)
         }
         scope.launch {
-            val userId = authClient.getCurrentUser()?.id?.takeIf { it.isNotBlank() }
-            if (userId != null) {
-                activeUserId = userId
-                hydrateFromCache(userId)
-                refreshInternal(userId)
-                ensureEventsLoop(userId)
+            handleAuthUser(authClient.getCurrentUser())
+        }
+    }
+
+    private suspend fun handleAuthUser(user: AuthUser?) {
+        val userId = user?.id?.takeIf { it.isNotBlank() }
+            ?: authClient.getCurrentUser()?.id?.takeIf { it.isNotBlank() }
+        sessionMutex.withLock {
+            if (userId == null) {
+                activeUserId = null
+                clearPending()
+                stopEventsLoop()
+                _state.value = MediaFavoritesState()
+                return
             }
+            if (activeUserId == userId) {
+                ensureEventsLoop(userId)
+                return
+            }
+            activeUserId = userId
+            clearPending()
+            stopEventsLoop()
+            _state.value = MediaFavoritesState()
+            hydrateFromCache(userId)
+            refreshInternal(userId)
+            ensureEventsLoop(userId)
         }
     }
 
@@ -223,6 +229,7 @@ class MediaFavoritesRepositoryImpl(
     }
 
     private fun ensureEventsLoop(userId: String) {
+        if (!eventsEnabled) return
         if (eventsJob?.isActive == true && eventsUserId == userId) return
         stopEventsLoop()
         eventsUserId = userId

@@ -38,16 +38,33 @@ import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonPrimitive
 
+interface MediaFavoritesRemoteDataSource {
+    suspend fun listFavorites(accessToken: String): MediaFavoritesListDto
+
+    suspend fun upsertFavorite(
+        accessToken: String,
+        favorite: MediaFavorite,
+        sourceDeviceId: String?,
+    ): MediaFavoriteMutationResultDto
+
+    suspend fun deleteFavorite(accessToken: String, mediaKey: String): MediaFavoriteDeleteDto
+
+    suspend fun collectFavoriteInvalidations(
+        accessToken: String,
+        onInvalidated: suspend () -> Unit,
+    )
+}
+
 class MediaFavoritesApi(
     private val httpClient: HttpClient,
     private val baseUrlProvider: () -> String,
     private val channelProvider: ContentChannelProvider? = null,
     private val installationIdProvider: () -> String? = { null },
     private val json: Json = Json { ignoreUnknownKeys = true },
-) {
+) : MediaFavoritesRemoteDataSource {
     private fun baseUrl() = baseUrlProvider().trimEnd('/')
 
-    suspend fun listFavorites(accessToken: String): MediaFavoritesListDto {
+    override suspend fun listFavorites(accessToken: String): MediaFavoritesListDto {
         val response = httpClient.get("${baseUrl()}/me/media-favorites") {
             bearerAuth(accessToken)
             appendBackendHeaders()
@@ -58,7 +75,7 @@ class MediaFavoritesApi(
         return response.body()
     }
 
-    suspend fun upsertFavorite(
+    override suspend fun upsertFavorite(
         accessToken: String,
         favorite: MediaFavorite,
         sourceDeviceId: String?,
@@ -75,7 +92,7 @@ class MediaFavoritesApi(
         return decodeMutationResult(response.bodyAsText(), favorite)
     }
 
-    suspend fun deleteFavorite(accessToken: String, mediaKey: String): MediaFavoriteDeleteDto {
+    override suspend fun deleteFavorite(accessToken: String, mediaKey: String): MediaFavoriteDeleteDto {
         val response = httpClient.delete("${baseUrl()}/me/media-favorites/${mediaKey.encodeURLPathPart()}") {
             bearerAuth(accessToken)
             appendBackendHeaders()
@@ -86,7 +103,7 @@ class MediaFavoritesApi(
         return response.body()
     }
 
-    suspend fun collectFavoriteInvalidations(
+    override suspend fun collectFavoriteInvalidations(
         accessToken: String,
         onInvalidated: suspend () -> Unit,
     ) {
