@@ -49,6 +49,7 @@ import com.torve.desktop.ui.detail.sourceTrustBadges
 import com.torve.desktop.ui.theme.TorveDesktopThemeTokens
 import com.torve.data.addon.containsKnownTorrentProviderMarker
 import com.torve.data.addon.containsUsenetMarker
+import com.torve.presentation.detail.StreamFilterUiText
 
 enum class DesktopDockVisualState {
     HIDDEN,
@@ -109,6 +110,7 @@ fun DesktopSourcePickerOverlay(
     val radii = TorveDesktopThemeTokens.radii
     val session = playerState.preparedSession
     val selectedCandidateId = session?.selectedCandidate?.candidateId
+    val hasPremium = com.torve.desktop.premium.rememberHasPremium()
 
     Box(
         modifier = Modifier
@@ -187,7 +189,13 @@ fun DesktopSourcePickerOverlay(
                     }
 
                     else -> {
-                        playerState.error?.let { error ->
+                        playerState.error
+                            ?.takeUnless {
+                                it.code == "ALL_STREAMS_FILTERED" &&
+                                    session.streamCandidates.isEmpty() &&
+                                    hasPremium
+                            }
+                            ?.let { error ->
                             TorveBanner(
                                 title = "Playback recovery",
                                 description = error.message,
@@ -195,27 +203,52 @@ fun DesktopSourcePickerOverlay(
                             )
                         }
 
-                        DesktopSourcePickerHeader(session = session)
+                        if (session.streamCandidates.isEmpty()) {
+                            val allHiddenMessage = StreamFilterUiText.allHiddenMessage(
+                                visibleCount = 0,
+                                hiddenCount = session.filterHiddenCount,
+                            ).takeIf { hasPremium }
+                            TorveBanner(
+                                title = allHiddenMessage ?: "No sources ready",
+                                description = if (allHiddenMessage != null) {
+                                    StreamFilterUiText.ADJUST_REGEX_HINT
+                                } else {
+                                    "No playable source candidates were returned for this request."
+                                },
+                                tone = if (allHiddenMessage != null) TorveBannerTone.Warning else TorveBannerTone.Info,
+                            )
+                        } else {
+                            DesktopSourcePickerHeader(session = session)
+                            StreamFilterUiText.hiddenCountMessage(
+                                hiddenCount = session.filterHiddenCount,
+                                premiumFeedbackEnabled = hasPremium,
+                            )?.let { message ->
+                                TorveBanner(
+                                    title = message,
+                                    description = "Regex Patterns hid matching streams before this list was shown.",
+                                    tone = TorveBannerTone.Info,
+                                )
+                            }
 
-                        // Two-axis filter: provider TYPE (Debrid /
-                        // Torrent / Usenet / Direct) and specific
-                        // addon. Most users care about type ("only
-                        // show debrid-cached") which is why that's the
-                        // top row.
-                        val typeOf: (DesktopPlaybackSourceCandidate) -> SourceProviderType = { c ->
-                            classifyCandidate(c)
-                        }
-                        val typeCounts = session.streamCandidates
-                            .groupingBy(typeOf)
-                            .eachCount()
-                        val addonNames = session.streamCandidates
-                            .map { it.addonName }
-                            .filter { it.isNotBlank() }
-                            .groupingBy { it }
-                            .eachCount()
-                            .entries
-                            .sortedByDescending { it.value }
-                            .map { it.key }
+                            // Two-axis filter: provider TYPE (Debrid /
+                            // Torrent / Usenet / Direct) and specific
+                            // addon. Most users care about type ("only
+                            // show debrid-cached") which is why that's the
+                            // top row.
+                            val typeOf: (DesktopPlaybackSourceCandidate) -> SourceProviderType = { c ->
+                                classifyCandidate(c)
+                            }
+                            val typeCounts = session.streamCandidates
+                                .groupingBy(typeOf)
+                                .eachCount()
+                            val addonNames = session.streamCandidates
+                                .map { it.addonName }
+                                .filter { it.isNotBlank() }
+                                .groupingBy { it }
+                                .eachCount()
+                                .entries
+                                .sortedByDescending { it.value }
+                                .map { it.key }
 
                         var selectedType: SourceProviderType? by remember(session.streamCandidates) {
                             mutableStateOf(null)
@@ -288,17 +321,18 @@ fun DesktopSourcePickerOverlay(
                             )
                         }
 
-                        visibleCandidates.forEach { candidate ->
-                            DesktopSourceCandidateCard(
-                                candidate = candidate,
-                                session = session,
-                                selected = selectedCandidateId == candidate.candidateId,
-                                failedPreviously = playerState.failedCandidateIds.contains(candidate.candidateId),
-                                intent = intent,
-                                onSelect = { onSelectCandidate(candidate.candidateId) },
-                                onPlay = { onPlayCandidate(candidate.candidateId) },
-                                onDownload = onDownloadCandidate?.let { { it(candidate.candidateId) } },
-                            )
+                            visibleCandidates.forEach { candidate ->
+                                DesktopSourceCandidateCard(
+                                    candidate = candidate,
+                                    session = session,
+                                    selected = selectedCandidateId == candidate.candidateId,
+                                    failedPreviously = playerState.failedCandidateIds.contains(candidate.candidateId),
+                                    intent = intent,
+                                    onSelect = { onSelectCandidate(candidate.candidateId) },
+                                    onPlay = { onPlayCandidate(candidate.candidateId) },
+                                    onDownload = onDownloadCandidate?.let { { it(candidate.candidateId) } },
+                                )
+                            }
                         }
                     }
                 }

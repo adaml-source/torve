@@ -4,14 +4,17 @@ import androidx.compose.animation.core.animateFloatAsState
 import com.torve.desktop.ui.l10n.ds
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.foundation.border
 import androidx.compose.foundation.HorizontalScrollbar
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.focusable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.hoverable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsHoveredAsState
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -33,6 +36,7 @@ import androidx.compose.foundation.rememberScrollbarAdapter
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.ChevronLeft
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material3.Icon
@@ -48,6 +52,8 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -57,6 +63,10 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.zIndex
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -85,6 +95,86 @@ import java.net.URL
 import kotlin.math.absoluteValue
 
 // ── Image loading (reuses global LRU cache) ──────────────────────
+
+@Composable
+fun V2FloatingBackButton(
+    onBack: () -> Unit,
+    modifier: Modifier = Modifier,
+    contentDescription: String = "Back",
+    size: Dp = 46.dp,
+) {
+    val colors = TorveDesktopThemeTokens.colors
+    val interaction = remember { MutableInteractionSource() }
+    val hovered by interaction.collectIsHoveredAsState()
+    val pressed by interaction.collectIsPressedAsState()
+    val focused = remember { androidx.compose.runtime.mutableStateOf(false) }
+    val active = hovered || focused.value
+    val scale by animateFloatAsState(
+        targetValue = when {
+            pressed -> 0.97f
+            active -> 1.045f
+            else -> 1f
+        },
+        label = "v2FloatingBackScale",
+    )
+    val border by animateColorAsState(
+        targetValue = when {
+            focused.value -> colors.accent.copy(alpha = 0.78f)
+            hovered -> colors.accent.copy(alpha = 0.56f)
+            else -> Color.White.copy(alpha = 0.15f)
+        },
+        label = "v2FloatingBackBorder",
+    )
+    val glassAlpha by animateFloatAsState(
+        targetValue = if (active) 0.76f else 0.58f,
+        label = "v2FloatingBackGlass",
+    )
+
+    Box(
+        modifier = modifier
+            .size(size)
+            .graphicsLayer {
+                scaleX = scale
+                scaleY = scale
+            }
+            .shadow(if (active) 22.dp else 12.dp, CircleShape)
+            .clip(CircleShape)
+            .background(
+                Brush.verticalGradient(
+                    listOf(
+                        Color.White.copy(alpha = if (active) 0.14f else 0.08f),
+                        Color(0xFF101827).copy(alpha = glassAlpha),
+                        Color(0xFF030711).copy(alpha = (glassAlpha + 0.08f).coerceAtMost(0.84f)),
+                    ),
+                ),
+            )
+            .border(1.dp, border, CircleShape)
+            .hoverable(interaction)
+            .onFocusChanged { focused.value = it.isFocused }
+            .focusable(interactionSource = interaction)
+            .semantics(mergeDescendants = true) {
+                this.contentDescription = contentDescription
+                role = Role.Button
+            }
+            .clickable(interactionSource = interaction, indication = null, onClick = onBack),
+        contentAlignment = Alignment.Center,
+    ) {
+        Box(
+            Modifier
+                .align(Alignment.TopCenter)
+                .padding(top = 7.dp)
+                .width(16.dp)
+                .height(1.dp)
+                .background(Color.White.copy(alpha = if (active) 0.32f else 0.18f)),
+        )
+        Icon(
+            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+            contentDescription = null,
+            tint = Color.White.copy(alpha = 0.93f),
+            modifier = Modifier.size(20.dp),
+        )
+    }
+}
 
 @Composable
 fun rememberCachedBitmap(url: String?): ImageBitmap? {

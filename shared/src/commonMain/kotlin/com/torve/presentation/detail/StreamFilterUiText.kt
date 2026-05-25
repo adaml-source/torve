@@ -3,6 +3,7 @@ package com.torve.presentation.detail
 object StreamFilterUiText {
     const val ALL_HIDDEN_MESSAGE = "All streams were hidden by your filters."
     const val ADJUST_REGEX_HINT = "Adjust Regex Patterns in Settings to see more results."
+    const val MANAGE_FILTERS_ON_MOBILE_OR_DESKTOP_HINT = "Manage filters on mobile or desktop."
 
     fun hiddenCountMessage(hiddenCount: Int): String? {
         if (hiddenCount <= 0) return null

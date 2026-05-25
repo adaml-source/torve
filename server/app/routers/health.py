@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Response, status
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
@@ -15,13 +15,15 @@ def root() -> dict:
 
 
 @router.get("/health")
-def health(db: Session = Depends(get_db)) -> dict:
+def health(response: Response, db: Session = Depends(get_db)) -> dict:
     db_ok = False
     try:
         db.execute(text("SELECT 1"))
         db_ok = True
     except Exception:
         pass
+    if not db_ok:
+        response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
 
     return {
         "status": "ok" if db_ok else "degraded",

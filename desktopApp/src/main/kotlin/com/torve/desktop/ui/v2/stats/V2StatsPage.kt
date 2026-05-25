@@ -30,11 +30,11 @@ import com.torve.desktop.ui.components.TorveBadge
 import com.torve.desktop.ui.components.TorveBadgeTone
 import com.torve.desktop.ui.components.TorveBanner
 import com.torve.desktop.ui.components.TorveBannerTone
-import com.torve.desktop.ui.components.TorveGhostButton
 import com.torve.desktop.ui.components.TorvePageHeader
 import com.torve.desktop.ui.components.TorveSectionCard
 import com.torve.desktop.ui.l10n.ds
 import com.torve.desktop.ui.theme.TorveDesktopThemeTokens
+import com.torve.desktop.ui.v2.components.V2FloatingBackButton
 import com.torve.presentation.stats.StatsViewModel
 
 @Composable
@@ -58,7 +58,7 @@ fun V2StatsPage(
             title = ds("Stats"),
             subtitle = ds("Your watching at a glance."),
             trailing = {
-                TorveGhostButton(text = ds("Back"), onClick = onBack)
+                V2FloatingBackButton(onBack = onBack, contentDescription = ds("Back"))
             },
         )
 

@@ -11,15 +11,18 @@ This works across uvicorn workers without adding Redis or other dependencies.
 import asyncio
 import json
 import logging
+import time
 import threading
 import uuid
 from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from urllib.parse import urlsplit
 
 import psycopg2
 
 from app.config import settings
+from app.observability import redact_secret_string
 
 _log = logging.getLogger(__name__)
 
@@ -98,10 +101,13 @@ class EventBus:
         # Caught by Backend CI 2026-05-03 (the listener spammed errors
         # in every test setup).
         dsn = _psycopg_dsn()
+        backoff_seconds = 2.0
+        next_connection_log_at = 0.0
         while not self._stop_event.is_set():
             conn = None
             try:
                 conn = psycopg2.connect(dsn)
+                backoff_seconds = 2.0
                 conn.set_isolation_level(psycopg2.extensions.ISOLATION_LEVEL_AUTOCOMMIT)
                 cur = conn.cursor()
                 cur.execute(f"LISTEN {_PG_CHANNEL};")
@@ -121,10 +127,24 @@ class EventBus:
                         except Exception:
                             _log.exception("Failed to parse pg notification: %s", notify.payload)
 
+            except psycopg2.OperationalError as exc:
+                if not self._stop_event.is_set():
+                    now = time.monotonic()
+                    if now >= next_connection_log_at:
+                        _log.warning(
+                            "pg listener unavailable for %s; reconnecting in %.0fs: %s",
+                            _psycopg_target_label(),
+                            backoff_seconds,
+                            redact_secret_string(str(exc)).strip(),
+                        )
+                        next_connection_log_at = now + 60.0
+                    self._stop_event.wait(backoff_seconds)
+                    backoff_seconds = min(backoff_seconds * 2.0, 30.0)
             except Exception:
                 if not self._stop_event.is_set():
                     _log.exception("pg listener error, reconnecting in 2s")
-                    self._stop_event.wait(2.0)
+                    self._stop_event.wait(backoff_seconds)
+                    backoff_seconds = min(backoff_seconds * 2.0, 30.0)
             finally:
                 if conn:
                     try:
@@ -178,6 +198,13 @@ class EventBus:
             payload = event.to_notify_payload()
             cur.execute(f"NOTIFY {_PG_CHANNEL}, %s", (payload,))
             _log.info("Emitted %s via pg NOTIFY for user %s", event.event_type, event.user_id)
+        except psycopg2.OperationalError as exc:
+            _log.warning(
+                "Failed to emit pg NOTIFY for %s; database unavailable for %s: %s",
+                event.event_type,
+                _psycopg_target_label(),
+                redact_secret_string(str(exc)).strip(),
+            )
         except Exception:
             _log.exception("Failed to emit pg NOTIFY for %s", event.event_type)
         finally:
@@ -191,6 +218,17 @@ class EventBus:
 # Global singleton — each worker starts its own listener
 def _psycopg_dsn() -> str:
     return settings.DATABASE_URL.replace("postgresql+psycopg2://", "postgresql://", 1)
+
+
+def _psycopg_target_label() -> str:
+    try:
+        parsed = urlsplit(_psycopg_dsn())
+        host = parsed.hostname or "unknown-host"
+        port = parsed.port or 5432
+        db = parsed.path.lstrip("/") or "unknown-db"
+        return f"{host}:{port}/{db}"
+    except Exception:
+        return "configured database"
 
 
 event_bus = EventBus()

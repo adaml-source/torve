@@ -47,8 +47,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
-import com.torve.desktop.ui.components.TorveGhostButton
 import com.torve.desktop.ui.theme.TorveDesktopThemeTokens
+import com.torve.desktop.ui.v2.components.V2FloatingBackButton
 import com.torve.desktop.ui.v2.components.V2PosterCard
 import com.torve.desktop.ui.v2.components.V2Shelf
 import com.torve.desktop.ui.v2.components.rememberCachedBitmap
@@ -82,7 +82,7 @@ fun V2PersonPage(
             Box(Modifier.fillMaxSize().background(colors.shellBackground), contentAlignment = Alignment.Center) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Text(error, style = MaterialTheme.typography.bodyLarge, color = colors.error)
-                    TorveGhostButton(text = ds("Back"), onClick = onBack)
+                    V2FloatingBackButton(onBack = onBack, contentDescription = ds("Back"))
                 }
             }
             return@Box
@@ -107,7 +107,7 @@ fun V2PersonPage(
 
             Box(Modifier.fillMaxSize()) {
                 Box(Modifier.align(Alignment.TopStart).zIndex(2f).padding(start = 72.dp, top = 18.dp)) {
-                    TorveGhostButton(text = ds("Back"), onClick = onBack)
+                    V2FloatingBackButton(onBack = onBack, contentDescription = ds("Back"))
                 }
 
                 // Full-bleed backdrop pinned behind everything

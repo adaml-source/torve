@@ -29,6 +29,7 @@ import com.torve.platform.TorveRuntimeDebug
 import com.torve.presentation.detail.episodeKey
 import com.torve.presentation.player.TraktScrobbler
 import com.torve.presentation.settings.SettingsViewModel
+import com.torve.presentation.detail.StreamFilterUiText
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -164,6 +165,8 @@ data class DesktopPlaybackSession(
     val transcodeUrls: Map<String, String> = emptyMap(),
     val requestHeaders: Map<String, String> = emptyMap(),
     val subtitleCandidates: List<DesktopPlaybackSubtitleCandidate> = emptyList(),
+    val filterHiddenCount: Int = 0,
+    val streamRulesCacheKey: String = "",
     val notes: List<String> = emptyList(),
     val isMediaLevelOnly: Boolean = false,
 )
@@ -1059,6 +1062,18 @@ class DesktopPlayerController(
 
     private fun cachedSessionFor(request: DesktopPlaybackRequest): DesktopPlaybackSession? =
         synchronized(preparedSessionCache) { preparedSessionCache[request.cacheKey()] }
+            ?.takeIf { it.streamRulesCacheKey == currentStreamRulesCacheKey() }
+
+    private fun currentStreamRulesCacheKey(): String {
+        if (!com.torve.desktop.premium.DesktopPremiumStateHolder.isPremium()) return "free"
+        val state = settingsViewModel.state.value
+        return buildString {
+            append("premium|regex=")
+            append(state.regexPatterns.joinToString(";") { "${it.label}:${it.pattern}:${it.enabled}" })
+            append("|groups=")
+            append(state.streamGroups.joinToString(";") { "${it.name}:${it.matchPattern}:${it.priority}:${it.enabled}" })
+        }
+    }
 
     private fun cachePreparedSession(session: DesktopPlaybackSession) {
         synchronized(preparedSessionCache) {
@@ -1158,6 +1173,7 @@ class DesktopPlayerController(
                     mediaItem = resolvedMedia,
                     episodeContext = episodeContext,
                     provider = settingsViewModel.getDebridProvider(),
+                    streamRulesCacheKey = currentStreamRulesCacheKey(),
                     notes = buildList {
                         if (request.mediaType == MediaType.SERIES && episodeContext == null) {
                             add("Series request is still media-level only. No concrete episode target could be derived yet.")
@@ -1194,9 +1210,11 @@ class DesktopPlayerController(
                 val provider = settingsViewModel.getDebridProvider()
                 val preferences = settingsViewModel.buildStreamPreferences()
                 val debridAccounts = settingsViewModel.getDebridAccounts()
-                val initialCandidates = streamRepository.fetchStreams(
+                val initialFetch = streamRepository.fetchStreamsWithFeedback(
                     type = resolvedMedia.type,
                     imdbId = resolvedImdbId,
+                    contentId = resolvedMedia.tmdbId?.let { "tmdb:$it" },
+                    title = resolvedMedia.title,
                     season = episodeContext?.seasonNumber,
                     episode = episodeContext?.episodeNumber,
                     addons = addons,
@@ -1204,10 +1222,12 @@ class DesktopPlayerController(
                     preferences = preferences,
                     fetchPolicy = fetchPolicy,
                 )
-                val streamCandidates = if (initialCandidates.isEmpty() && fetchPolicy == StreamFetchPolicy.PLAYBACK_STARTUP) {
-                    streamRepository.fetchStreams(
+                val finalFetch = if (initialFetch.streams.isEmpty() && fetchPolicy == StreamFetchPolicy.PLAYBACK_STARTUP) {
+                    streamRepository.fetchStreamsWithFeedback(
                         type = resolvedMedia.type,
                         imdbId = resolvedImdbId,
+                        contentId = resolvedMedia.tmdbId?.let { "tmdb:$it" },
+                        title = resolvedMedia.title,
                         season = episodeContext?.seasonNumber,
                         episode = episodeContext?.episodeNumber,
                         addons = addons,
@@ -1216,16 +1236,23 @@ class DesktopPlayerController(
                         fetchPolicy = StreamFetchPolicy.FULL,
                     )
                 } else {
-                    initialCandidates
+                    initialFetch
                 }
+                val streamCandidates = finalFetch.streams
+                val filterHiddenCount = finalFetch.filterFeedback.hiddenCount
 
                 if (streamCandidates.isEmpty()) {
+                    val allHiddenMessage = StreamFilterUiText.allHiddenMessage(
+                        visibleCount = streamCandidates.size,
+                        hiddenCount = filterHiddenCount,
+                    )
                     throw SessionPreparationException(
                         session = sessionSeed.copy(
+                            filterHiddenCount = filterHiddenCount,
                             notes = sessionSeed.notes + "Stream aggregation returned zero candidates.",
                         ),
-                        code = "NO_STREAMS_FOUND",
-                        message = "No playable source candidates were returned for this request.",
+                        code = if (allHiddenMessage != null) "ALL_STREAMS_FILTERED" else "NO_STREAMS_FOUND",
+                        message = allHiddenMessage ?: "No playable source candidates were returned for this request.",
                     )
                 }
 
@@ -1238,6 +1265,7 @@ class DesktopPlayerController(
                     streamCandidates = desktopCandidates,
                     recommendedCandidateId = recommendedCandidate.candidateId,
                     selectedCandidate = recommendedCandidate,
+                    filterHiddenCount = filterHiddenCount,
                     requestHeaders = emptyMap(),
                     subtitleCandidates = emptyList(),
                     notes = buildList {

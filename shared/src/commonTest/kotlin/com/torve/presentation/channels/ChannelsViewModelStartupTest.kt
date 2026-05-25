@@ -40,7 +40,7 @@ class ChannelsViewModelStartupTest {
     }
 
     @Test
-    fun startup_with_persisted_catalog_restores_local_channels_before_refresh() = runTest(dispatcher) {
+    fun startup_with_persisted_catalog_restores_local_channels_without_startup_refresh() = runTest(dispatcher) {
         val channel = sampleChannel("playlist-1", "News One", tvgId = "news.one")
         val repo = FakeChannelRepository(
             playlists = listOf(samplePlaylist("playlist-1")),
@@ -60,15 +60,15 @@ class ChannelsViewModelStartupTest {
 
         assertEquals("playlist-1", viewModel.state.value.selectedPlaylistId)
         assertEquals(1, viewModel.state.value.categoryChannels.size)
-        assertEquals("News One HD", viewModel.state.value.categoryChannels.first().channel.name)
+        assertEquals("News One", viewModel.state.value.categoryChannels.first().channel.name)
         assertEquals("News", viewModel.state.value.selectedGroup)
         assertEquals(stableChannelId(channel), stableChannelId(viewModel.state.value.selectedChannel!!))
         assertEquals(0, repo.refreshCalls)
-        assertEquals(1, repo.catalogRefreshCalls)
+        assertEquals(0, repo.catalogRefreshCalls)
     }
 
     @Test
-    fun startup_with_failed_background_refresh_keeps_last_known_good_catalog() = runTest(dispatcher) {
+    fun startup_with_persisted_catalog_keeps_last_known_good_catalog_without_startup_refresh() = runTest(dispatcher) {
         val localChannel = sampleChannel("playlist-1", "Sports One", tvgId = "sports.one")
         val repo = FakeChannelRepository(
             playlists = listOf(samplePlaylist("playlist-1")),
@@ -87,7 +87,7 @@ class ChannelsViewModelStartupTest {
         assertEquals("Sports One", viewModel.state.value.categoryChannels.first().channel.name)
         assertFalse(viewModel.state.value.isLoadingChannels)
         assertEquals(0, repo.refreshCalls)
-        assertEquals(1, repo.catalogRefreshCalls)
+        assertEquals(0, repo.catalogRefreshCalls)
     }
 
     @Test

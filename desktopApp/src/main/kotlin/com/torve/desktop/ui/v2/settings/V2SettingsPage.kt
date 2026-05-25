@@ -96,6 +96,8 @@ import com.torve.domain.model.RatingDisplayPrefs
 import com.torve.domain.model.RatingPillPosition
 import com.torve.domain.model.RatingSource
 import com.torve.domain.model.PlaylistType
+import com.torve.domain.model.RegexPattern
+import com.torve.domain.model.StreamGroup
 import com.torve.domain.model.StreamQuality
 import com.torve.domain.model.channelIdentityCandidates
 import com.torve.domain.model.stableChannelId
@@ -109,6 +111,7 @@ import com.torve.presentation.settings.SettingsUiState
 import com.torve.presentation.settings.SettingsViewModel
 import com.torve.presentation.settings.ThemeMode
 import com.torve.presentation.subscription.accessPresentation
+import com.torve.domain.streams.StreamRulePatternValidator
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -1891,6 +1894,296 @@ private fun AddonsSection(
             }
         }
     }
+}
+
+private val desktopRegexPresets = listOf(
+    "Hide CAM/TS" to "(?i)\\b(HDCAM|CAM|TS|TELESYNC)\\b",
+    "Hide samples" to "(?i)\\b(sample|trailer|promo|teaser)\\b",
+    "Hide low quality" to "(?i)\\b(480p|360p)\\b",
+)
+
+private val desktopStreamGroupPresets = listOf(
+    Triple("4K DV Atmos", "(?i)\\b(2160p|4K|DV|Dolby Vision|Atmos)\\b", 0),
+    Triple("1080p WEB-DL", "(?i)\\b(1080p|WEB-?DL)\\b", 10),
+    Triple("Cached debrid", "(?i)\\b(cached|debrid|cloud)\\b", 0),
+)
+
+@Composable
+private fun DesktopStreamRulesSection(
+    settingsState: SettingsUiState,
+    settingsViewModel: SettingsViewModel,
+) {
+    val hasPremium = com.torve.desktop.premium.rememberHasPremium()
+    val colors = TorveDesktopThemeTokens.colors
+    Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+        TorveSectionCard(
+            title = ds("Regex Patterns"),
+            supportingText = ds("Premium stream filters hide matching source titles before the picker is shown."),
+            trailing = {
+                TorveBadge(
+                    text = "${settingsState.regexPatterns.count { it.enabled }} active",
+                    tone = if (settingsState.regexPatterns.any { it.enabled }) TorveBadgeTone.Accent else TorveBadgeTone.Neutral,
+                )
+            },
+        ) {
+            if (!hasPremium) {
+                com.torve.desktop.premium.PremiumLockedSection(
+                    title = ds("Premium required for runtime stream filters"),
+                    description = ds("Regex Patterns sync with your account, but only premium accounts apply them to stream results."),
+                    onUpgrade = { com.torve.desktop.premium.startDesktopStripeCheckout() },
+                )
+            }
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                desktopRegexPresets.forEach { (label, pattern) ->
+                    val exists = settingsState.regexPatterns.any { it.pattern == pattern }
+                    TorveFilterChip(
+                        text = if (exists) "$label added" else label,
+                        selected = exists,
+                        onClick = {
+                            if (!exists && hasPremium) settingsViewModel.addRegexPattern(label, pattern)
+                        },
+                    )
+                }
+                TorveSecondaryButton(
+                    text = ds("Add rule"),
+                    onClick = { settingsViewModel.addRegexPattern() },
+                    enabled = hasPremium,
+                )
+            }
+            if (settingsState.regexPatterns.isEmpty()) {
+                TorvePlaceholderState(
+                    title = ds("No regex patterns"),
+                    description = ds("Add a rule to hide matching stream titles such as CAM releases or samples."),
+                )
+            } else {
+                settingsState.regexPatterns.forEachIndexed { index, pattern ->
+                    DesktopRegexPatternRow(
+                        pattern = pattern,
+                        enabled = hasPremium,
+                        onUpdate = { settingsViewModel.updateRegexPattern(index, it) },
+                        onToggle = { settingsViewModel.toggleRegexPattern(index) },
+                        onDelete = { settingsViewModel.removeRegexPattern(index) },
+                    )
+                }
+            }
+            Text(
+                text = ds("Matching uses visible stream metadata only. URLs, hashes, tokens, memory IDs, and provider payloads are never shown here."),
+                style = MaterialTheme.typography.bodySmall,
+                color = colors.textSecondary,
+            )
+        }
+
+        TorveSectionCard(
+            title = ds("Stream Groups"),
+            supportingText = ds("Premium stream groups prioritize matching sources inside existing ranking buckets; they do not hide streams."),
+            trailing = {
+                TorveBadge(
+                    text = "${settingsState.streamGroups.count { it.enabled }} active",
+                    tone = if (settingsState.streamGroups.any { it.enabled }) TorveBadgeTone.Accent else TorveBadgeTone.Neutral,
+                )
+            },
+        ) {
+            if (!hasPremium) {
+                com.torve.desktop.premium.PremiumLockedSection(
+                    title = ds("Premium required for grouped stream ordering"),
+                    description = ds("Stream Groups sync with your account, but only premium accounts apply them to stream ordering."),
+                    onUpgrade = { com.torve.desktop.premium.startDesktopStripeCheckout() },
+                )
+            }
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                desktopStreamGroupPresets.forEach { (name, pattern, priority) ->
+                    val exists = settingsState.streamGroups.any { it.name == name && it.matchPattern == pattern }
+                    TorveFilterChip(
+                        text = if (exists) "$name added" else name,
+                        selected = exists,
+                        onClick = {
+                            if (!exists && hasPremium) settingsViewModel.addStreamGroup(name, pattern, priority)
+                        },
+                    )
+                }
+                TorveSecondaryButton(
+                    text = ds("Add group"),
+                    onClick = { settingsViewModel.addStreamGroup() },
+                    enabled = hasPremium,
+                )
+                TorveGhostButton(
+                    text = ds("Reset defaults"),
+                    onClick = settingsViewModel::resetStreamGroups,
+                    enabled = hasPremium,
+                )
+            }
+            if (settingsState.streamGroups.isEmpty()) {
+                TorvePlaceholderState(
+                    title = ds("No stream groups"),
+                    description = ds("Add groups to prefer releases like 4K DV Atmos while preserving Torve's primary stream ranking."),
+                )
+            } else {
+                settingsState.streamGroups
+                    .mapIndexed { index, group -> index to group }
+                    .sortedWith(compareBy<Pair<Int, StreamGroup>> { it.second.priority }.thenBy { it.first })
+                    .forEach { (index, group) ->
+                        DesktopStreamGroupRow(
+                            group = group,
+                            enabled = hasPremium,
+                            onUpdate = { settingsViewModel.updateStreamGroup(index, it) },
+                            onToggle = { settingsViewModel.toggleStreamGroup(index) },
+                            onDelete = { settingsViewModel.removeStreamGroup(index) },
+                        )
+                    }
+            }
+        }
+    }
+}
+
+@Composable
+private fun DesktopRegexPatternRow(
+    pattern: RegexPattern,
+    enabled: Boolean,
+    onUpdate: (RegexPattern) -> Unit,
+    onToggle: () -> Unit,
+    onDelete: () -> Unit,
+) {
+    val canEnable = StreamRulePatternValidator.canEnable(pattern.pattern)
+    val validationMessage = desktopRegexValidationMessage(pattern.pattern)
+    RuleRowSurface {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            TorveTextField(
+                value = pattern.label,
+                onValueChange = { onUpdate(pattern.copy(label = it)) },
+                label = ds("Label"),
+                modifier = Modifier.weight(1f),
+                enabled = enabled,
+                placeholder = ds("No CAM releases"),
+            )
+            Switch(
+                checked = pattern.enabled && canEnable,
+                onCheckedChange = { onToggle() },
+                enabled = enabled && canEnable,
+            )
+            TorveGhostButton(
+                text = ds("Delete"),
+                onClick = onDelete,
+                enabled = enabled,
+            )
+        }
+        TorveTextField(
+            value = pattern.pattern,
+            onValueChange = { onUpdate(pattern.copy(pattern = it)) },
+            label = ds("Regex"),
+            modifier = Modifier.fillMaxWidth(),
+            enabled = enabled,
+            placeholder = "(?i)\\b(HDCAM|CAM|TS)\\b",
+        )
+        validationMessage?.let { message ->
+            Text(
+                text = message,
+                style = MaterialTheme.typography.bodySmall,
+                color = TorveDesktopThemeTokens.colors.error,
+            )
+        }
+    }
+}
+
+@Composable
+private fun DesktopStreamGroupRow(
+    group: StreamGroup,
+    enabled: Boolean,
+    onUpdate: (StreamGroup) -> Unit,
+    onToggle: () -> Unit,
+    onDelete: () -> Unit,
+) {
+    val canEnable = StreamRulePatternValidator.canEnable(group.matchPattern)
+    val validationMessage = desktopGroupValidationMessage(group.matchPattern)
+    RuleRowSurface {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            TorveTextField(
+                value = group.name,
+                onValueChange = { onUpdate(group.copy(name = it)) },
+                label = ds("Name"),
+                modifier = Modifier.weight(1f),
+                enabled = enabled,
+                placeholder = ds("4K DV Atmos"),
+            )
+            TorveTextField(
+                value = group.priority.toString(),
+                onValueChange = { raw ->
+                    onUpdate(group.copy(priority = raw.filter(Char::isDigit).toIntOrNull() ?: 99))
+                },
+                label = ds("Priority"),
+                modifier = Modifier.width(110.dp),
+                enabled = enabled,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+            )
+            Switch(
+                checked = group.enabled && canEnable,
+                onCheckedChange = { onToggle() },
+                enabled = enabled && canEnable,
+            )
+            TorveGhostButton(
+                text = ds("Delete"),
+                onClick = onDelete,
+                enabled = enabled,
+            )
+        }
+        TorveTextField(
+            value = group.matchPattern,
+            onValueChange = { onUpdate(group.copy(matchPattern = it)) },
+            label = ds("Match regex"),
+            modifier = Modifier.fillMaxWidth(),
+            enabled = enabled,
+            placeholder = "(?i)\\b(2160p|DV|Atmos)\\b",
+        )
+        validationMessage?.let { message ->
+            Text(
+                text = message,
+                style = MaterialTheme.typography.bodySmall,
+                color = TorveDesktopThemeTokens.colors.error,
+            )
+        }
+    }
+}
+
+@Composable
+private fun RuleRowSurface(
+    content: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit,
+) {
+    val colors = TorveDesktopThemeTokens.colors
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        color = colors.cardSurface,
+        shape = RoundedCornerShape(10.dp),
+        border = BorderStroke(1.dp, colors.borderSubtle),
+    ) {
+        Column(
+            modifier = Modifier.padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+            content = content,
+        )
+    }
+}
+
+private fun desktopRegexValidationMessage(pattern: String): String? = when {
+    pattern.isBlank() -> "Enter a regex pattern before enabling."
+    else -> StreamRulePatternValidator.regexErrorMessage(pattern)
+}
+
+private fun desktopGroupValidationMessage(pattern: String): String? = when {
+    pattern.isBlank() -> "Enter a group regex before enabling."
+    else -> StreamRulePatternValidator.groupErrorMessage(pattern)
 }
 
 @Composable
@@ -4127,6 +4420,11 @@ private fun SourcesSection(
             }
         }
     }
+
+    DesktopStreamRulesSection(
+        settingsState = settingsState,
+        settingsViewModel = settingsViewModel,
+    )
 
     // State hoisted out of the transfer card below so health rows can
     // route their "Transfer from another device" action into the same

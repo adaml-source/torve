@@ -38,6 +38,7 @@ import com.torve.desktop.ui.components.TorvePlaceholderState
 import com.torve.desktop.ui.components.TorveSectionCard
 import com.torve.desktop.ui.l10n.ds
 import com.torve.desktop.ui.theme.TorveDesktopThemeTokens
+import com.torve.desktop.ui.v2.components.V2FloatingBackButton
 import com.torve.presentation.device.DeviceGovernanceViewModel
 
 @Composable
@@ -68,7 +69,7 @@ fun V2ManageDevicesScreen(
                         text = state.deviceUsageText,
                         tone = if (state.effectiveCapReached) TorveBadgeTone.Warning else TorveBadgeTone.Accent,
                     )
-                    TorveGhostButton(text = ds("Back"), onClick = onBack)
+                    V2FloatingBackButton(onBack = onBack, contentDescription = ds("Back"))
                 }
             },
         )

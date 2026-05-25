@@ -108,6 +108,34 @@ fun CalendarScreen(
             .background(MaterialTheme.colorScheme.background),
     ) {
         when {
+            state.requiresTraktReconnect -> {
+                Column(
+                    modifier = Modifier
+                        .align(Alignment.Center)
+                        .padding(horizontal = 32.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    Icon(
+                        Icons.Rounded.CalendarMonth,
+                        contentDescription = null,
+                        modifier = Modifier.size(64.dp),
+                        tint = Torve.colors.textHint,
+                    )
+                    Spacer(Modifier.height(16.dp))
+                    Text(
+                        text = stringResource(R.string.calendar_reconnect_trakt),
+                        style = MaterialTheme.typography.titleMedium,
+                        color = Torve.colors.textPrimary,
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        text = stringResource(R.string.calendar_reconnect_trakt_desc),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = Torve.colors.textSecondary,
+                    )
+                }
+            }
+
             !state.traktConnected -> {
                 Column(
                     modifier = Modifier

@@ -6,6 +6,7 @@ import com.torve.data.account.AccountSettingsApi
 import com.torve.data.account.AccountSettingsRepository
 import com.torve.data.account.AccountSettingsRepositoryImpl
 import com.torve.data.account.MediaFavoritesApi
+import com.torve.data.account.MediaFavoritesRemoteDataSource
 import com.torve.data.account.MediaFavoritesRepositoryImpl
 import com.torve.data.acceleration.AccelerationApi
 import com.torve.data.acceleration.AccelerationInventorySyncService
@@ -335,7 +336,7 @@ val sharedModule = module {
         )
     }
     single<AccountSettingsRepository> { AccountSettingsRepositoryImpl(get(), get(), get(), get()) }
-    single {
+    single<MediaFavoritesRemoteDataSource> {
         MediaFavoritesApi(
             get(),
             baseUrlProvider = { com.torve.data.auth.AuthClient.DEFAULT_BASE_URL },
@@ -916,7 +917,13 @@ val sharedModule = module {
             epgCorrectionViewModel = get(),
         )
     }
-    factory { CalendarViewModel(get(), get(), get()) }
+    factory {
+        CalendarViewModel(
+            traktApi = get(),
+            tokenStore = get(),
+            prefsRepo = get(),
+        )
+    }
     factory { DownloadViewModel(get(), contentPolicyRepository = get(), contentPolicyFilter = ContentPolicyFilter()) }
     factory { DownloadCatalogueViewModel(get(), get(), get(), get(), contentPolicyRepository = get(), contentPolicyFilter = ContentPolicyFilter()) }
     factoryOf(::ProfileViewModel)

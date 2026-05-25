@@ -11,6 +11,7 @@ from app.config import settings
 from app.database import SessionLocal
 from app.bootstrap import bootstrap_reviewer_account
 from app.events import event_bus
+from app.observability import sentry_before_send
 from app.routers import acceleration, account, account_settings, addons, admin_billing, admin_promo, admin_users, auth, checkout, content_policy, devices, health, health_integrations, integrations, media_favorites, meta, nzbdav as nzbdav_router, paddle_webhook, pairing_code, pairing_signin, pairings, playlists, purchase_verify, rebate, releases, sse, stripe_billing, transfer, watch_state, web_session, web_proxy
 
 _log = logging.getLogger(__name__)
@@ -50,6 +51,7 @@ def _init_sentry_if_configured() -> None:
         # the outgoing event payload.
         send_default_pii=False,
         max_breadcrumbs=50,
+        before_send=sentry_before_send,
     )
     print(
         f"Sentry initialised env={settings.SENTRY_ENVIRONMENT or settings.APP_ENV}",

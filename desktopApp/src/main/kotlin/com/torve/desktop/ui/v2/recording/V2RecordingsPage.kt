@@ -59,6 +59,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.torve.desktop.ui.l10n.ds
 import com.torve.desktop.ui.theme.TorveDesktopThemeTokens
+import com.torve.desktop.ui.v2.components.V2FloatingBackButton
 import com.torve.desktop.ui.v2.live.LiveTvChannelLogo
 import com.torve.desktop.ui.v2.live.LiveTvGlassButton
 import com.torve.desktop.ui.v2.live.LiveTvGlassPanel
@@ -195,7 +196,7 @@ private fun RecordingsHeader(onBack: () -> Unit) {
                 style = MaterialTheme.typography.bodyMedium,
             )
         }
-        LiveTvGlassButton(text = ds("Back"), onClick = onBack)
+        V2FloatingBackButton(onBack = onBack, contentDescription = ds("Back"))
     }
 }
 

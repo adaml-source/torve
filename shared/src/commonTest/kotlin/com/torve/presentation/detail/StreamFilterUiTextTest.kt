@@ -42,6 +42,17 @@ class StreamFilterUiTextTest {
     }
 
     @Test
+    fun tvManagementHintUsesSafeStaticCopy() {
+        assertEquals(
+            "Manage filters on mobile or desktop.",
+            StreamFilterUiText.MANAGE_FILTERS_ON_MOBILE_OR_DESKTOP_HINT,
+        )
+        assertFalse(StreamFilterUiText.MANAGE_FILTERS_ON_MOBILE_OR_DESKTOP_HINT.contains("https://"))
+        assertFalse(StreamFilterUiText.MANAGE_FILTERS_ON_MOBILE_OR_DESKTOP_HINT.contains("token", ignoreCase = true))
+        assertFalse(StreamFilterUiText.MANAGE_FILTERS_ON_MOBILE_OR_DESKTOP_HINT.contains("regex", ignoreCase = true))
+    }
+
+    @Test
     fun allHiddenEmptyStateIsNotShownWhenNoFiltersHidStreams() {
         assertNull(StreamFilterUiText.allHiddenMessage(visibleCount = 0, hiddenCount = 0))
         assertNull(StreamFilterUiText.allHiddenHint(visibleCount = 0, hiddenCount = 0))

@@ -26,7 +26,6 @@ import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.rememberScrollbarAdapter
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -54,6 +53,7 @@ import com.torve.desktop.ui.components.TorveFilterChip
 import com.torve.desktop.ui.components.TorvePrimaryButton
 import com.torve.desktop.ui.components.TorveTextField
 import com.torve.desktop.ui.theme.TorveDesktopThemeTokens
+import com.torve.desktop.ui.v2.components.V2FloatingBackButton
 import com.torve.desktop.ui.v2.components.V2PosterCard
 import com.torve.domain.model.MediaItem
 import com.torve.domain.model.hasValueFor
@@ -199,9 +199,7 @@ fun V2NzbSeeAllPage(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            IconButton(onClick = onBack) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = colors.textPrimary)
-            }
+            V2FloatingBackButton(onBack = onBack, contentDescription = ds("Back"))
             Text(
                 text = ds("Latest on Usenet"),
                 style = MaterialTheme.typography.headlineSmall,

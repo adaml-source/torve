@@ -567,6 +567,8 @@
     <string name="calendar_no_episodes">No Upcoming Episodes</string>
     <string name="calendar_no_episodes_desc">Add TV shows to your Trakt watchlist to see new episodes here.</string>
     <string name="calendar_connect_trakt_desc">Link your Trakt account in Settings to see upcoming episodes from your watchlist.</string>
+    <string name="calendar_reconnect_trakt">Reconnect Trakt to see your calendar</string>
+    <string name="calendar_reconnect_trakt_desc">Your Trakt session expired or was revoked. Reconnect Trakt in Settings to load upcoming episodes.</string>
     <string name="calendar_error">Error</string>
     <string name="calendar_connect_trakt">Connect Trakt to see your calendar</string>
     <string name="calendar_upcoming_count">%1$d upcoming episodes</string>

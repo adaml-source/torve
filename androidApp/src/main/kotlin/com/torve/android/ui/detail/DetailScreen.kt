@@ -71,6 +71,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.stringResource
 import com.torve.android.R
+import com.torve.android.device.DeviceFormFactor
 import com.torve.android.premium.AccessTier
 import com.torve.android.premium.PremiumAccess
 import com.torve.android.premium.PremiumFeature
@@ -199,6 +200,7 @@ fun DetailScreen(
     // Tracks whether the current stream resolution is for download (not playback)
     var pendingEpisodeDownload by remember { mutableStateOf<Pair<Int, Int>?>(null) }
     val context = LocalContext.current
+    val isTvDevice = remember(context) { DeviceFormFactor.isTv(context) }
 
     fun openSourcePickerOrProvider(season: Int? = null, episode: Int? = null) {
         val item = state.mediaItem ?: return
@@ -793,8 +795,17 @@ fun DetailScreen(
                                 hint = state.streamsErrorHint,
                                 premiumFeedbackEnabled = runtimeFilterFeedbackEnabled,
                             )?.let { hint ->
+                                val visibleHint = if (
+                                    isTvDevice &&
+                                    state.streamsError == StreamFilterUiText.ALL_HIDDEN_MESSAGE &&
+                                    hint == StreamFilterUiText.ADJUST_REGEX_HINT
+                                ) {
+                                    StreamFilterUiText.MANAGE_FILTERS_ON_MOBILE_OR_DESKTOP_HINT
+                                } else {
+                                    hint
+                                }
                                 Text(
-                                    text = hint,
+                                    text = visibleHint,
                                     style = MaterialTheme.typography.bodySmall,
                                     color = Silver,
                                     modifier = Modifier.padding(top = 4.dp),

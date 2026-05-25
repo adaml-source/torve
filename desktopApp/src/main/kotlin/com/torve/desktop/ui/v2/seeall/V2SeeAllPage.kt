@@ -37,7 +37,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -76,6 +75,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.torve.desktop.ui.theme.TorveDesktopThemeTokens
 import com.torve.desktop.ui.v2.components.DesktopRatingPills
+import com.torve.desktop.ui.v2.components.V2FloatingBackButton
 import com.torve.desktop.ui.v2.components.V2PosterCard
 import com.torve.desktop.ui.v2.components.rememberCachedBitmap
 import com.torve.desktop.ui.v2.discovery.BrandFilterUiModel
@@ -505,19 +505,7 @@ fun V2SeeAllPage(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(14.dp),
             ) {
-                Surface(
-                    modifier = Modifier.clickable(
-                        interactionSource = remember { MutableInteractionSource() },
-                        indication = null,
-                        onClick = onBack,
-                    ),
-                    color = colors.fieldSurface.copy(alpha = 0.45f),
-                    shape = CircleShape,
-                ) {
-                    Box(Modifier.padding(8.dp), contentAlignment = Alignment.Center) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = colors.textPrimary)
-                    }
-                }
+                V2FloatingBackButton(onBack = onBack, contentDescription = ds("Back"))
                 Text(
                     state.title.ifBlank { request.title },
                     style = MaterialTheme.typography.headlineMedium,
