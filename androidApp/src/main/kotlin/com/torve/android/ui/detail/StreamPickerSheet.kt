@@ -56,6 +56,7 @@ import com.torve.data.addon.isTorrentOrDebridStream
 import com.torve.data.addon.isUsenetStream
 import com.torve.data.usenet.model.UsenetCandidateStates
 import com.torve.domain.model.StartupCandidate
+import com.torve.presentation.detail.StreamFilterUiText
 
 private enum class StreamSourceFilter { ALL, TORRENT, USENET }
 
@@ -74,6 +75,7 @@ fun StreamPickerSheet(
     isResolving: Boolean,
     isLoadingMoreSources: Boolean = false,
     playbackStartupStatus: com.torve.presentation.detail.PlaybackStartupStatus? = null,
+    hiddenByFiltersCount: Int = 0,
     onStreamSelected: (ParsedStream) -> Unit,
     /**
      * Sidecar Usenet-row state keyed by backend candidate id. The sheet
@@ -182,6 +184,22 @@ fun StreamPickerSheet(
                 isLoadingMoreSources = isLoadingMoreSources,
                 modifier = Modifier.padding(bottom = 12.dp),
             )
+            StreamFilterUiText.hiddenCountMessage(hiddenByFiltersCount)?.let { message ->
+                Surface(
+                    color = Amber.copy(alpha = 0.12f),
+                    contentColor = Amber,
+                    shape = RoundedCornerShape(8.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 12.dp),
+                ) {
+                    Text(
+                        text = message,
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                    )
+                }
+            }
 
             if (isResolving) {
                 Box(

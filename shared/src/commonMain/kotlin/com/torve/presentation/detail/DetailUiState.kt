@@ -72,6 +72,8 @@ data class DetailUiState(
     val isLoadingStreams: Boolean = false,
     val isLoadingMoreSources: Boolean = false,
     val streamsError: String? = null,
+    val streamsErrorHint: String? = null,
+    val streamFilterHiddenCount: Int = 0,
     val playbackStartupStatus: PlaybackStartupStatus = PlaybackStartupStatus(),
     // Resolved playback URL
     val resolvedStream: ResolvedStream? = null,

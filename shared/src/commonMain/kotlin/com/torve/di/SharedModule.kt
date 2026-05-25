@@ -300,7 +300,18 @@ val sharedModule = module {
     single { StreamAggregator(get(), get(), get()) }
 
     // Stream Repository
-    single<StreamRepository> { StreamRepositoryImpl(get(), get(), get(), get(), get(), get()) }
+    single<StreamRepository> {
+        StreamRepositoryImpl(
+            debridClient = get(),
+            streamAggregator = get(),
+            database = get(),
+            accelerationApi = get(),
+            httpClient = get(),
+            telemetry = get(),
+            preferencesRepository = get(),
+            subscriptionRepository = get(),
+        )
+    }
     single { AccelerationInventorySyncService(get(), get(), get()) }
 
     // User ID provider for DB scoping. Uses a lazy AuthClient lookup so it can be

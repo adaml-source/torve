@@ -14,6 +14,7 @@ import com.torve.domain.model.InventoryMatchesSnapshot
 import com.torve.domain.model.KnownHashAvailabilitySnapshot
 import com.torve.domain.model.RecentSuccessfulSourcesSnapshot
 import com.torve.domain.model.StartupCandidatesSnapshot
+import com.torve.domain.streams.StreamRuntimeFilterFeedback
 
 /**
  * Result of a [StreamRepository.probeStreamReadiness] call. For addon-hosted
@@ -30,6 +31,11 @@ sealed class StreamReadiness {
     /** Anything else — real failure. The caller should surface [reason] and move on. */
     data class Failed(val reason: String) : StreamReadiness()
 }
+
+data class StreamFetchResult(
+    val streams: List<ParsedStream>,
+    val filterFeedback: StreamRuntimeFilterFeedback = StreamRuntimeFilterFeedback(),
+)
 
 interface StreamRepository {
     /**
@@ -49,6 +55,32 @@ interface StreamRepository {
         preferences: StreamPreferences = StreamPreferences(),
         fetchPolicy: StreamFetchPolicy = StreamFetchPolicy.FULL,
     ): List<ParsedStream>
+
+    suspend fun fetchStreamsWithFeedback(
+        type: MediaType,
+        imdbId: String,
+        contentId: String? = null,
+        title: String? = null,
+        season: Int? = null,
+        episode: Int? = null,
+        addons: List<InstalledAddon> = emptyList(),
+        debridAccounts: Map<DebridServiceType, String> = emptyMap(),
+        preferences: StreamPreferences = StreamPreferences(),
+        fetchPolicy: StreamFetchPolicy = StreamFetchPolicy.FULL,
+    ): StreamFetchResult = StreamFetchResult(
+        streams = fetchStreams(
+            type = type,
+            imdbId = imdbId,
+            contentId = contentId,
+            title = title,
+            season = season,
+            episode = episode,
+            addons = addons,
+            debridAccounts = debridAccounts,
+            preferences = preferences,
+            fetchPolicy = fetchPolicy,
+        ),
+    )
 
     /**
      * Resolve a stream to a playable URL.

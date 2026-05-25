@@ -1,6 +1,8 @@
 package com.torve.presentation.subscription
 
 import com.torve.domain.model.SubscriptionTier
+import com.torve.domain.subscription.PremiumEntitlementRecord
+import com.torve.domain.subscription.resolvePremiumEntitlement
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse

@@ -1,4 +1,4 @@
-package com.torve.presentation.subscription
+package com.torve.domain.subscription
 
 import com.torve.domain.model.SubscriptionTier
 import kotlinx.datetime.Instant

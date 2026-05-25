@@ -41,6 +41,8 @@ import com.torve.domain.repository.PreferencesRepository
 import com.torve.domain.repository.WatchHistoryRepository
 import com.torve.domain.repository.WatchProgressRepository
 import com.torve.domain.repository.WatchlistRepository
+import com.torve.domain.streams.StreamFilterPreferenceKeys
+import com.torve.domain.streams.StreamRulePatternValidator
 import com.torve.domain.sync.SyncRepository
 import com.torve.platform.NetworkMonitor
 import com.torve.platform.recommendedMaxQuality
@@ -153,8 +155,8 @@ class SettingsViewModel(
         const val KEY_SPORTS_DOWNLOAD_PATH = "sports_download_path"
         const val KEY_DOWNLOAD_SCAN_FOLDERS = "download_scan_folders"
         const val KEY_LAST_SYNC_TIME = "last_sync_time"
-        const val KEY_REGEX_PATTERNS = "regex_patterns"
-        const val KEY_STREAM_GROUPS = "stream_groups"
+        const val KEY_REGEX_PATTERNS = StreamFilterPreferenceKeys.REGEX_PATTERNS
+        const val KEY_STREAM_GROUPS = StreamFilterPreferenceKeys.STREAM_GROUPS
         const val KEY_DEDUPE_RESULTS = "dedupe_results"
         // Recording preferences. See RecordingPreferences for the typed
         // wrapper. Stored as plain strings so they survive serialization.
@@ -441,12 +443,20 @@ class SettingsViewModel(
                 try { HdrMode.valueOf(it) } catch (_: Exception) { null }
             } ?: HdrMode.AUTO
 
-            val regexPatterns = prefsRepo.getString(KEY_REGEX_PATTERNS)?.let {
+            val loadedRegexPatterns = prefsRepo.getString(KEY_REGEX_PATTERNS)?.let {
                 try { jsonParser.decodeFromString<List<RegexPattern>>(it) } catch (_: Exception) { emptyList() }
             } ?: emptyList()
-            val streamGroups = prefsRepo.getString(KEY_STREAM_GROUPS)?.let {
+            val regexPatterns = loadedRegexPatterns.map(StreamRulePatternValidator::sanitize)
+            if (regexPatterns != loadedRegexPatterns) {
+                prefsRepo.setString(KEY_REGEX_PATTERNS, jsonParser.encodeToString(regexPatterns))
+            }
+            val loadedStreamGroups = prefsRepo.getString(KEY_STREAM_GROUPS)?.let {
                 try { jsonParser.decodeFromString<List<StreamGroup>>(it) } catch (_: Exception) { DEFAULT_STREAM_GROUPS }
             } ?: DEFAULT_STREAM_GROUPS
+            val streamGroups = loadedStreamGroups.map(StreamRulePatternValidator::sanitize)
+            if (streamGroups != loadedStreamGroups) {
+                prefsRepo.setString(KEY_STREAM_GROUPS, jsonParser.encodeToString(streamGroups))
+            }
             val dedupeResults = prefsRepo.getString(KEY_DEDUPE_RESULTS)?.toBooleanStrictOrNull() ?: true
 
             // All integration secrets: secure store is the ONLY source of truth.
@@ -2192,13 +2202,15 @@ class SettingsViewModel(
     // -------------------------------------------------------------------------
 
     fun addRegexPattern(label: String = "", pattern: String = "") {
-        val updated = _state.value.regexPatterns + RegexPattern(label, pattern)
+        val updated = _state.value.regexPatterns + StreamRulePatternValidator.sanitize(RegexPattern(label, pattern))
         _state.update { it.copy(regexPatterns = updated) }
         saveRegexPatterns(updated)
     }
 
     fun updateRegexPattern(index: Int, pattern: RegexPattern) {
-        val updated = _state.value.regexPatterns.toMutableList().also { it[index] = pattern }
+        val updated = _state.value.regexPatterns.toMutableList().also {
+            it[index] = StreamRulePatternValidator.sanitize(pattern)
+        }
         _state.update { it.copy(regexPatterns = updated) }
         saveRegexPatterns(updated)
     }
@@ -2217,6 +2229,10 @@ class SettingsViewModel(
 
     fun toggleRegexPattern(index: Int) {
         val current = _state.value.regexPatterns[index]
+        if (!StreamRulePatternValidator.canEnable(current.pattern)) {
+            updateRegexPattern(index, current.copy(enabled = false))
+            return
+        }
         updateRegexPattern(index, current.copy(enabled = !current.enabled))
     }
 
@@ -2231,13 +2247,17 @@ class SettingsViewModel(
     // -------------------------------------------------------------------------
 
     fun addStreamGroup(name: String = "", matchPattern: String = "", priority: Int = 99) {
-        val updated = _state.value.streamGroups + StreamGroup(name, matchPattern, priority)
+        val updated = _state.value.streamGroups + StreamRulePatternValidator.sanitize(
+            StreamGroup(name, matchPattern, priority),
+        )
         _state.update { it.copy(streamGroups = updated) }
         saveStreamGroups(updated)
     }
 
     fun updateStreamGroup(index: Int, group: StreamGroup) {
-        val updated = _state.value.streamGroups.toMutableList().also { it[index] = group }
+        val updated = _state.value.streamGroups.toMutableList().also {
+            it[index] = StreamRulePatternValidator.sanitize(group)
+        }
         _state.update { it.copy(streamGroups = updated) }
         saveStreamGroups(updated)
     }
@@ -2250,6 +2270,10 @@ class SettingsViewModel(
 
     fun toggleStreamGroup(index: Int) {
         val current = _state.value.streamGroups[index]
+        if (!StreamRulePatternValidator.canEnable(current.matchPattern)) {
+            updateStreamGroup(index, current.copy(enabled = false))
+            return
+        }
         updateStreamGroup(index, current.copy(enabled = !current.enabled))
     }
 

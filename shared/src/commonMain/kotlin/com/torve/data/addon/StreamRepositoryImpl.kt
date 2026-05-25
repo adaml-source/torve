@@ -40,8 +40,13 @@ import com.torve.domain.model.StreamFetchPolicy
 import com.torve.domain.model.StreamPreferences
 import com.torve.domain.model.apiValue
 import com.torve.domain.diagnostics.DiagnosticsRedactor
+import com.torve.domain.repository.StreamFetchResult
 import com.torve.domain.repository.StreamReadiness
 import com.torve.domain.repository.StreamRepository
+import com.torve.domain.repository.PreferencesRepository
+import com.torve.domain.repository.SubscriptionRepository
+import com.torve.domain.streams.ParsedStreamRuntimeFilter
+import com.torve.domain.streams.StreamRuntimeFilterFeedback
 import com.torve.domain.telemetry.StreamPathDiagnostics
 import com.torve.domain.telemetry.StreamPathTelemetryContext
 import com.torve.domain.telemetry.StreamPlaybackPath
@@ -58,6 +63,19 @@ private data class AddonNotReadyErrorBody(
     @SerialName("retry_after") val retryAfter: Int? = null,
 )
 
+internal fun interface StreamAggregationSource {
+    suspend fun resolveStreams(
+        addons: List<InstalledAddon>,
+        type: MediaType,
+        imdbId: String,
+        season: Int?,
+        episode: Int?,
+        debridAccounts: Map<DebridServiceType, String>,
+        preferences: StreamPreferences,
+        fetchPolicy: StreamFetchPolicy,
+    ): List<ParsedStream>
+}
+
 class StreamRepositoryImpl(
     private val debridClient: DebridClient,
     private val streamAggregator: StreamAggregator,
@@ -65,7 +83,36 @@ class StreamRepositoryImpl(
     private val accelerationApi: AccelerationApi,
     private val httpClient: HttpClient,
     private val telemetry: TelemetryEmitter,
+    preferencesRepository: PreferencesRepository? = null,
+    subscriptionRepository: SubscriptionRepository? = null,
 ) : StreamRepository {
+    private var streamAggregationSourceOverride: StreamAggregationSource? = null
+
+    internal constructor(
+        debridClient: DebridClient,
+        streamAggregationSource: StreamAggregationSource,
+        database: TorveDatabase,
+        accelerationApi: AccelerationApi,
+        httpClient: HttpClient,
+        telemetry: TelemetryEmitter,
+        preferencesRepository: PreferencesRepository? = null,
+        subscriptionRepository: SubscriptionRepository? = null,
+    ) : this(
+        debridClient = debridClient,
+        streamAggregator = StreamAggregator(
+            addonClient = StremioAddonClient(httpClient, Json { ignoreUnknownKeys = true }),
+            debridClient = debridClient,
+            scorer = StreamScorer(),
+        ),
+        database = database,
+        accelerationApi = accelerationApi,
+        httpClient = httpClient,
+        telemetry = telemetry,
+        preferencesRepository = preferencesRepository,
+        subscriptionRepository = subscriptionRepository,
+    ) {
+        streamAggregationSourceOverride = streamAggregationSource
+    }
 
     // Dedicated parser so we can decode the 504 body without bringing in the
     // shared Json instance (which may be configured for strict mode).
@@ -128,6 +175,10 @@ class StreamRepositoryImpl(
     private val startupCache = mutableMapOf<String, PrefetchedStreamBatch>()
     private val lastRequestByStreamKey = linkedMapOf<String, StreamRequestKey>()
     private val warmupRegistry = ContentWarmupRegistry()
+    private val streamRuntimeFilter = ParsedStreamRuntimeFilter(
+        preferencesRepository = preferencesRepository,
+        subscriptionRepository = subscriptionRepository,
+    )
 
     override suspend fun fetchStreams(
         type: MediaType,
@@ -140,7 +191,31 @@ class StreamRepositoryImpl(
         debridAccounts: Map<DebridServiceType, String>,
         preferences: StreamPreferences,
         fetchPolicy: StreamFetchPolicy,
-    ): List<ParsedStream> {
+    ): List<ParsedStream> = fetchStreamsWithFeedback(
+        type = type,
+        imdbId = imdbId,
+        contentId = contentId,
+        title = title,
+        season = season,
+        episode = episode,
+        addons = addons,
+        debridAccounts = debridAccounts,
+        preferences = preferences,
+        fetchPolicy = fetchPolicy,
+    ).streams
+
+    override suspend fun fetchStreamsWithFeedback(
+        type: MediaType,
+        imdbId: String,
+        contentId: String?,
+        title: String?,
+        season: Int?,
+        episode: Int?,
+        addons: List<InstalledAddon>,
+        debridAccounts: Map<DebridServiceType, String>,
+        preferences: StreamPreferences,
+        fetchPolicy: StreamFetchPolicy,
+    ): StreamFetchResult {
         val request = StreamRequestKey(
             type = type,
             imdbId = imdbId,
@@ -158,7 +233,16 @@ class StreamRepositoryImpl(
         }
 
         val baseStreams = cached ?: run {
-            val localStreams = streamAggregator.resolveStreams(
+            val localStreams = streamAggregationSourceOverride?.resolveStreams(
+                addons = addons,
+                type = type,
+                imdbId = imdbId,
+                season = season,
+                episode = episode,
+                debridAccounts = debridAccounts,
+                preferences = preferences,
+                fetchPolicy = fetchPolicy,
+            ) ?: streamAggregator.resolveStreams(
                 addons = addons,
                 type = type,
                 imdbId = imdbId,
@@ -202,7 +286,29 @@ class StreamRepositoryImpl(
         }
 
         rememberStreamRequest(request, baseStreams)
-        return applyResolveMemory(request, baseStreams)
+        val memoryAdjustedStreams = applyResolveMemory(request, baseStreams)
+        return applyRuntimeStreamFilters(memoryAdjustedStreams)
+    }
+
+    private suspend fun applyRuntimeStreamFilters(streams: List<ParsedStream>): StreamFetchResult {
+        val result = streamRuntimeFilter.apply(streams)
+        val feedback = StreamRuntimeFilterFeedback(
+            hiddenCount = result.filterResult.excludedCount,
+        )
+        if (
+            TorveRuntimeDebug.verboseLoggingEnabled &&
+            (result.filterResult.excludedCount > 0 || result.filterResult.invalidPatterns.isNotEmpty())
+        ) {
+            repositoryDebugLog {
+                "STREAM_FILTERS applied excluded=${result.filterResult.excludedCount} " +
+                    "invalid=${result.filterResult.invalidPatterns.joinToString("|")} " +
+                    "groups=${result.filterResult.groupMatches.keys.joinToString("|")}"
+            }
+        }
+        return StreamFetchResult(
+            streams = result.streams,
+            filterFeedback = feedback,
+        )
     }
 
     /**

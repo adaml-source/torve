@@ -1,5 +1,7 @@
 package com.torve.data.subscription
 
+import com.torve.domain.model.Subscription
+import com.torve.domain.model.SubscriptionTier
 import com.torve.domain.repository.BackendPremiumResult
 import com.torve.presentation.subscription.resolveSubscriptionEntitlementUiDecision
 import kotlin.test.Test
@@ -52,6 +54,116 @@ class SubscriptionEntitlementHardeningTest {
                 currentPrincipal = "user_a",
                 snapshot = snapshot,
                 nowMs = 1_000L + 60_000L,
+            ),
+        )
+    }
+
+    @Test
+    fun locallyVerifiedPremiumAccessRequiresActiveUnexpiredPremiumRow() {
+        val now = 10_000L
+        val snapshot = VerifiedPremiumSnapshot(
+            principal = "user_a",
+            verifiedAtMs = now - 1_000L,
+        )
+        val subscription = premiumSubscription(expiresAt = now + 60_000L)
+
+        assertTrue(
+            isLocallyVerifiedPremiumAccessActive(
+                currentPrincipal = "user_a",
+                snapshot = snapshot,
+                activeSubscription = subscription,
+                nowMs = now,
+            ),
+        )
+    }
+
+    @Test
+    fun expiredLocalSubscriptionBlocksLocallyVerifiedPremiumAccess() {
+        val now = 10_000L
+        val snapshot = VerifiedPremiumSnapshot(
+            principal = "user_a",
+            verifiedAtMs = now - 1_000L,
+        )
+        val subscription = premiumSubscription(expiresAt = now - 1L)
+
+        assertFalse(
+            isLocallyVerifiedPremiumAccessActive(
+                currentPrincipal = "user_a",
+                snapshot = snapshot,
+                activeSubscription = subscription,
+                nowMs = now,
+            ),
+        )
+    }
+
+    @Test
+    fun staleVerifiedSnapshotWithExpiredLocalActiveRowReturnsFalse() {
+        val now = 10_000L
+        val snapshot = VerifiedPremiumSnapshot(
+            principal = "user_a",
+            verifiedAtMs = now - 1_000L,
+            hasPremiumEntitlement = true,
+            isDeviceActivated = true,
+        )
+        val expiredActiveRow = premiumSubscription(expiresAt = now)
+
+        assertFalse(
+            isLocallyVerifiedPremiumAccessActive(
+                currentPrincipal = "user_a",
+                snapshot = snapshot,
+                activeSubscription = expiredActiveRow,
+                nowMs = now,
+            ),
+        )
+    }
+
+    @Test
+    fun wrongPrincipalBlocksLocallyVerifiedPremiumAccess() {
+        val now = 10_000L
+        val snapshot = VerifiedPremiumSnapshot(
+            principal = "user_a",
+            verifiedAtMs = now - 1_000L,
+        )
+
+        assertFalse(
+            isLocallyVerifiedPremiumAccessActive(
+                currentPrincipal = "user_b",
+                snapshot = snapshot,
+                activeSubscription = premiumSubscription(expiresAt = now + 60_000L),
+                nowMs = now,
+            ),
+        )
+    }
+
+    @Test
+    fun clearedLocalEntitlementBlocksLocallyVerifiedPremiumAccess() {
+        assertFalse(
+            isLocallyVerifiedPremiumAccessActive(
+                currentPrincipal = "user_a",
+                snapshot = null,
+                activeSubscription = premiumSubscription(expiresAt = null),
+                nowMs = 10_000L,
+            ),
+        )
+    }
+
+    @Test
+    fun locallyStoredDeviceDeactivationBlocksPremiumAccess() {
+        val now = 10_000L
+        val snapshot = VerifiedPremiumSnapshot(
+            principal = "user_a",
+            verifiedAtMs = now - 1_000L,
+            hasPremiumEntitlement = true,
+            isDeviceActivated = false,
+            deviceBlockReason = "device_cap_reached",
+        )
+
+        assertFalse(
+            isLocallyVerifiedPremiumAccessActive(
+                currentPrincipal = "user_a",
+                snapshot = snapshot,
+                activeSubscription = premiumSubscription(expiresAt = now + 60_000L),
+                nowMs = now,
             ),
         )
     }
@@ -144,4 +256,14 @@ class SubscriptionEntitlementHardeningTest {
         assertTrue(loggedIn.isPro)
         assertTrue(loggedIn.hasEntitlement)
     }
+
+    private fun premiumSubscription(expiresAt: Long?): Subscription = Subscription(
+        id = "sub-1",
+        tier = SubscriptionTier.MONTHLY,
+        purchaseToken = "backend_entitlement",
+        expiresAt = expiresAt,
+        isActive = true,
+        platform = "backend",
+        purchasedAt = 1L,
+    )
 }

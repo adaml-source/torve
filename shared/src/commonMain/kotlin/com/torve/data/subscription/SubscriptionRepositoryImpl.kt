@@ -15,10 +15,11 @@ import com.torve.domain.model.SubscriptionTier
 import com.torve.domain.repository.BackendPremiumResult
 import com.torve.domain.repository.DeviceLocalSettingsRepository
 import com.torve.domain.repository.SubscriptionRepository
+import com.torve.domain.subscription.PremiumEntitlementRecord
+import com.torve.domain.subscription.ResolvedPremiumEntitlement
+import com.torve.domain.subscription.resolvePremiumEntitlement
 import com.torve.platform.torveVerboseLog
 import kotlinx.datetime.Clock
-import com.torve.presentation.subscription.PremiumEntitlementRecord
-import com.torve.presentation.subscription.resolvePremiumEntitlement
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -49,6 +50,33 @@ internal fun isVerifiedOfflinePremiumAccessActive(
     if (cached.principal != currentPrincipal) return false
     if (!cached.hasPremiumEntitlement || !cached.isDeviceActivated) return false
     return nowMs - cached.verifiedAtMs <= OFFLINE_PREMIUM_GRACE_MS
+}
+
+internal fun isLocalPremiumSubscriptionActive(
+    subscription: Subscription?,
+    nowMs: Long,
+): Boolean {
+    val active = subscription ?: return false
+    if (!active.isPro) return false
+    val expiresAt = active.expiresAt
+    return expiresAt == null || expiresAt > nowMs
+}
+
+internal fun isLocallyVerifiedPremiumAccessActive(
+    currentPrincipal: String?,
+    snapshot: VerifiedPremiumSnapshot?,
+    activeSubscription: Subscription?,
+    nowMs: Long,
+): Boolean {
+    val principal = currentPrincipal?.takeIf { it.isNotBlank() } ?: return false
+    return isVerifiedOfflinePremiumAccessActive(
+        currentPrincipal = principal,
+        snapshot = snapshot,
+        nowMs = nowMs,
+    ) && isLocalPremiumSubscriptionActive(
+        subscription = activeSubscription,
+        nowMs = nowMs,
+    )
 }
 
 class SubscriptionRepositoryImpl(
@@ -98,6 +126,11 @@ class SubscriptionRepositoryImpl(
 
     override suspend fun hasAccess(feature: PremiumFeature): Boolean {
         return isPro()
+    }
+
+    override suspend fun hasLocallyVerifiedPremiumAccess(): Boolean {
+        if (!authClient.isLoggedIn()) return false
+        return hasVerifiedOfflinePremiumAccess()
     }
 
     override suspend fun activateSubscription(tier: SubscriptionTier, purchaseToken: String) {
@@ -240,7 +273,7 @@ class SubscriptionRepositoryImpl(
         }
     }
 
-    private suspend fun persistResolvedTier(resolved: com.torve.presentation.subscription.ResolvedPremiumEntitlement) {
+    private suspend fun persistResolvedTier(resolved: ResolvedPremiumEntitlement) {
         if (!resolved.hasEntitlement) {
             persistFreeTier()
             return
@@ -320,10 +353,10 @@ class SubscriptionRepositoryImpl(
     }
 
     private suspend fun hasVerifiedOfflinePremiumAccess(nowMs: Long = Clock.System.now().toEpochMilliseconds()): Boolean {
-        val currentPrincipal = currentEntitlementPrincipal() ?: return false
-        return isVerifiedOfflinePremiumAccessActive(
-            currentPrincipal = currentPrincipal,
+        return isLocallyVerifiedPremiumAccessActive(
+            currentPrincipal = currentEntitlementPrincipal(),
             snapshot = readVerifiedPremiumSnapshot(),
+            activeSubscription = getActiveSubscription(),
             nowMs = nowMs,
         )
     }

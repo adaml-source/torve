@@ -34,6 +34,7 @@ interface SubscriptionRepository {
     suspend fun getActiveSubscription(): Subscription?
     suspend fun isPro(): Boolean
     suspend fun hasAccess(feature: PremiumFeature): Boolean
+    suspend fun hasLocallyVerifiedPremiumAccess(): Boolean = isPro()
     /**
      * Legacy local activation hook.
      * Must not be treated as backend-authoritative entitlement on its own.

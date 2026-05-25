@@ -15,6 +15,9 @@ import com.torve.domain.model.SubscriptionTier
 import com.torve.domain.repository.BackendPremiumResult
 import com.torve.domain.repository.PreferencesRepository
 import com.torve.domain.repository.SubscriptionRepository
+import com.torve.domain.subscription.PremiumEntitlementRecord
+import com.torve.domain.subscription.ResolvedPremiumEntitlement
+import com.torve.domain.subscription.resolvePremiumEntitlement
 import io.ktor.client.plugins.ClientRequestException
 import io.ktor.client.plugins.ResponseException
 import io.ktor.client.plugins.ServerResponseException

@@ -281,7 +281,24 @@ class DetailViewModel(
         currentId = id
         scope.launch {
             detailDiagLog("loadDetail enter type=$type id=$id")
-            _state.update { it.copy(isLoading = true, error = null) }
+            _state.update {
+                it.copy(
+                    isLoading = true,
+                    error = null,
+                    streams = emptyList(),
+                    startupCandidates = emptyList(),
+                    isLoadingStreams = false,
+                    isLoadingMoreSources = false,
+                    streamsError = null,
+                    streamsErrorHint = null,
+                    streamFilterHiddenCount = 0,
+                    showStreamPicker = false,
+                    autoPlayStream = null,
+                    autoPlayMessage = null,
+                    autoPlayFailed = false,
+                    fallbackAttempt = 0,
+                )
+            }
             try {
                 val rawItem = ratingsEnricher.hydrateFromCache(metadataRepo.getDetail(type, id))
                 val policy = currentPolicy()
@@ -790,7 +807,13 @@ class DetailViewModel(
         val item = _state.value.mediaItem ?: return
         val imdbId = item.imdbId
         if (imdbId == null) {
-            _state.update { it.copy(streamsError = "No IMDB ID — cannot fetch streams for this title") }
+            _state.update {
+                it.copy(
+                    streamsError = "No IMDB ID — cannot fetch streams for this title",
+                    streamsErrorHint = null,
+                    streamFilterHiddenCount = 0,
+                )
+            }
             return
         }
 
@@ -800,6 +823,8 @@ class DetailViewModel(
                     isLoadingStreams = true,
                     isLoadingMoreSources = false,
                     streamsError = null,
+                    streamsErrorHint = null,
+                    streamFilterHiddenCount = 0,
                     streams = emptyList(),
                     startupCandidates = emptyList(),
                     streamContextSeason = season,
@@ -838,8 +863,8 @@ class DetailViewModel(
                         candidates = emptyList(),
                     ),
                 )
-                val startupStreams = runCatching {
-                    streamRepo.fetchStreams(
+                val startupFetch = runCatching {
+                    streamRepo.fetchStreamsWithFeedback(
                         type = item.type,
                         imdbId = imdbId,
                         contentId = item.tmdbId?.let { "tmdb:$it" },
@@ -851,7 +876,10 @@ class DetailViewModel(
                         preferences = preferences,
                         fetchPolicy = StreamFetchPolicy.PLAYBACK_STARTUP,
                     )
-                }.getOrDefault(emptyList())
+                }
+                val startupResult = startupFetch.getOrNull()
+                val startupStreams = startupResult?.streams.orEmpty()
+                val startupFilterHiddenCount = startupResult?.filterFeedback?.hiddenCount ?: 0
                 val startupPresentation = prioritizeStreamsForPresentation(
                     streams = startupStreams,
                     preferences = preferences,
@@ -863,6 +891,7 @@ class DetailViewModel(
                             streams = startupPresentation.ordered,
                             startupCandidates = startupSnapshot.candidates,
                             isLoadingStreams = false,
+                            streamFilterHiddenCount = startupFilterHiddenCount,
                             showStreamPicker = forceManualPick || !preferences.autoPlayEnabled,
                             playbackStartupStatus = DetailPlaybackStartupOrchestrator.reduce(
                                 it.playbackStartupStatus,
@@ -918,7 +947,7 @@ class DetailViewModel(
                     )
                 }
 
-                val fullStreams = streamRepo.fetchStreams(
+                val fullFetch = streamRepo.fetchStreamsWithFeedback(
                     type = item.type,
                     imdbId = imdbId,
                     contentId = item.tmdbId?.let { "tmdb:$it" },
@@ -930,6 +959,8 @@ class DetailViewModel(
                     preferences = preferences,
                     fetchPolicy = StreamFetchPolicy.FULL,
                 )
+                val fullStreams = fullFetch.streams
+                val fullFilterHiddenCount = fullFetch.filterFeedback.hiddenCount
                 val fullPresentation = prioritizeStreamsForPresentation(
                     streams = fullStreams,
                     preferences = preferences,
@@ -946,6 +977,9 @@ class DetailViewModel(
                         startupCandidates = startupSnapshot.candidates,
                         isLoadingStreams = false,
                         isLoadingMoreSources = false,
+                        streamsError = null,
+                        streamsErrorHint = null,
+                        streamFilterHiddenCount = fullFilterHiddenCount,
                         playbackStartupStatus = DetailPlaybackStartupOrchestrator.reduce(
                             it.playbackStartupStatus,
                             PlaybackStartupEvent.FullResultsAvailable(mergedPresentation.ordered.size),
@@ -954,7 +988,19 @@ class DetailViewModel(
                 }
 
                 if (mergedPresentation.ordered.isEmpty()) {
-                    _state.update { it.copy(streamsError = "No streams found") }
+                    val filteredMessage = StreamFilterUiText.allHiddenMessage(
+                        visibleCount = mergedPresentation.ordered.size,
+                        hiddenCount = fullFilterHiddenCount,
+                    )
+                    _state.update {
+                        it.copy(
+                            streamsError = filteredMessage ?: "No streams found",
+                            streamsErrorHint = StreamFilterUiText.allHiddenHint(
+                                visibleCount = mergedPresentation.ordered.size,
+                                hiddenCount = fullFilterHiddenCount,
+                            ),
+                        )
+                    }
                     return@launch
                 }
 
@@ -1049,6 +1095,8 @@ class DetailViewModel(
                         isLoadingStreams = false,
                         isLoadingMoreSources = false,
                         streamsError = com.torve.presentation.error.UserFacingError.STREAMS_LOAD_FAILED.messageKey,
+                        streamsErrorHint = null,
+                        streamFilterHiddenCount = 0,
                     )
                 }
             } finally {
@@ -1622,7 +1670,7 @@ class DetailViewModel(
         }
 
         try {
-            println("TORVE_AUTORESOLVE: attempt=$attemptIndex hash=${stream.infoHash?.let { "${it.take(6)}...${it.takeLast(4)}" }} provider=$provider keyLen=${apiKey.length}")
+            println("TORVE_AUTORESOLVE: attempt=$attemptIndex hasHash=${stream.infoHash != null} provider=$provider keyLen=${apiKey.length}")
             val resolved = withTimeoutOrNull(90_000L) {
                 streamRepo.resolveStream(stream, provider, apiKey)
             }
@@ -2000,7 +2048,7 @@ class DetailViewModel(
                     preparing = null,
                 )
             }
-            println("TORVE_RESOLVE: Starting resolve hash=${stream.infoHash?.let { "${it.take(6)}...${it.takeLast(4)}" }} hasUrl=${stream.directUrl != null} provider=$provider keyLen=${apiKey.length}")
+            println("TORVE_RESOLVE: Starting resolve hasHash=${stream.infoHash != null} hasUrl=${stream.directUrl != null} provider=$provider keyLen=${apiKey.length}")
             try {
                 val resolved = withTimeoutOrNull(90_000L) {
                     streamRepo.resolveStream(stream, provider, apiKey)
@@ -2019,7 +2067,7 @@ class DetailViewModel(
                 }
                 dispatchResolved(stream, provider, apiKey, resolved)
             } catch (e: Exception) {
-                println("TORVE_RESOLVE: Exception ${e::class.simpleName}: ${e.message}")
+                println("TORVE_RESOLVE: Exception ${e::class.simpleName}")
                 streamRepo.reportPlaybackOutcome(stream, provider, success = false)
                 if (e is DebridSourceBlockedException || e is DebridNoCachedStreamException) {
                     removeFailedStreamCandidate(stream)
@@ -2155,7 +2203,7 @@ class DetailViewModel(
                     throw cancelled
                 } catch (e: Exception) {
                     com.torve.domain.repository.StreamReadiness.Failed(
-                        "${e::class.simpleName}: ${e.message ?: "probe failed"}",
+                        com.torve.presentation.error.UserFacingError.STREAM_RESOLVE_FAILED.messageKey,
                     )
                 }
                 when (result) {

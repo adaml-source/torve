@@ -129,6 +129,7 @@ import com.torve.domain.repository.MediaFavoritesRepository
 import com.torve.platform.NetworkMonitor
 import com.torve.platform.NetworkType
 import com.torve.presentation.detail.DetailViewModel
+import com.torve.presentation.detail.StreamFilterUiText
 import com.torve.presentation.download.DownloadViewModel
 import com.torve.presentation.lanlibrary.LanLibraryConsumer
 import com.torve.presentation.lanlibrary.PendingLanPlaybackHandoff
@@ -174,6 +175,7 @@ fun DetailScreen(
     val coroutineScope = rememberCoroutineScope()
     val state by viewModel.state.collectAsState()
     val settingsState by settingsViewModel.state.collectAsState()
+    val runtimeFilterFeedbackEnabled = accessTier != AccessTier.FREE
     val watchlistState by watchlistViewModel.state.collectAsState()
     val favoritesState by mediaFavoritesRepository.state.collectAsState()
     val addonState by addonViewModel.state.collectAsState()
@@ -781,8 +783,22 @@ fun DetailScreen(
                             )
 
                             // Errors
-                            state.streamsError?.let { error ->
-                                ErrorMessage(error, Modifier.padding(top = 8.dp))
+                            StreamFilterUiText.visibleErrorMessage(
+                                error = state.streamsError,
+                                premiumFeedbackEnabled = runtimeFilterFeedbackEnabled,
+                            )?.let { visibleError ->
+                                ErrorMessage(visibleError, Modifier.padding(top = 8.dp))
+                            }
+                            StreamFilterUiText.visibleHint(
+                                hint = state.streamsErrorHint,
+                                premiumFeedbackEnabled = runtimeFilterFeedbackEnabled,
+                            )?.let { hint ->
+                                Text(
+                                    text = hint,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = Silver,
+                                    modifier = Modifier.padding(top = 4.dp),
+                                )
                             }
                             // Timeout branch from the preparing loop falls
                             // through to this resolveError row with the
@@ -1072,6 +1088,7 @@ fun DetailScreen(
                         isResolving = state.isResolving,
                         isLoadingMoreSources = state.isLoadingMoreSources,
                         playbackStartupStatus = state.playbackStartupStatus,
+                        hiddenByFiltersCount = if (runtimeFilterFeedbackEnabled) state.streamFilterHiddenCount else 0,
                         onStreamSelected = { stream ->
                             // Usenet rows go through the NzbDAV resolver; every
                             // other provenance falls through to the existing

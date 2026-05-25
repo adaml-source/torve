@@ -56,6 +56,7 @@ import com.torve.android.ui.theme.Silver
 import com.torve.android.ui.theme.Snow
 import com.torve.android.ui.theme.Steel
 import com.torve.domain.model.RegexPattern
+import com.torve.domain.streams.StreamRulePatternValidator
 import com.torve.presentation.settings.SettingsViewModel
 import org.koin.compose.koinInject
 
@@ -177,6 +178,8 @@ private fun RegexPatternRow(
 ) {
     var editLabel by remember(pattern) { mutableStateOf(pattern.label) }
     var editPattern by remember(pattern) { mutableStateOf(pattern.pattern) }
+    val patternError = StreamRulePatternValidator.regexErrorMessage(editPattern)
+    val canEnablePattern = StreamRulePatternValidator.canEnable(editPattern)
 
     Column(
         Modifier
@@ -203,8 +206,9 @@ private fun RegexPatternRow(
             )
             Spacer(Modifier.width(8.dp))
             Switch(
-                checked = pattern.enabled,
+                checked = pattern.enabled && canEnablePattern,
                 onCheckedChange = { onToggle() },
+                enabled = canEnablePattern,
                 colors = SwitchDefaults.colors(
                     checkedThumbColor = Amber,
                     checkedTrackColor = AmberSubtle,
@@ -226,11 +230,17 @@ private fun RegexPatternRow(
             placeholder = { Text(stringResource(R.string.regex_pattern_hint), style = MaterialTheme.typography.bodySmall) },
             modifier = Modifier.fillMaxWidth(),
             singleLine = true,
+            isError = patternError != null,
+            supportingText = patternError?.let { message ->
+                { Text(message, color = Ruby, style = MaterialTheme.typography.labelSmall) }
+            },
             textStyle = MaterialTheme.typography.bodySmall.copy(color = Snow),
             shape = RoundedCornerShape(8.dp),
             colors = OutlinedTextFieldDefaults.colors(
                 focusedBorderColor = Amber,
                 unfocusedBorderColor = Steel.copy(alpha = 0.3f),
+                errorBorderColor = Ruby,
+                errorCursorColor = Ruby,
                 cursorColor = Amber,
             ),
         )
