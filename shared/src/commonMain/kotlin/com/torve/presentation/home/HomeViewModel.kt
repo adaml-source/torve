@@ -46,7 +46,11 @@ import com.torve.data.mdblist.RatingsEnricher
 import com.torve.data.network.homeContentLoadErrorMessage
 import com.torve.data.network.sanitizeNetworkDiagnosticText
 import com.torve.data.trakt.TraktCalendarEpisode
+import com.torve.data.trakt.TraktNetworkException
+import com.torve.data.trakt.TraktRateLimitedException
+import com.torve.data.trakt.TraktServerException
 import com.torve.data.trakt.api.TraktAuthorizedApi
+import com.torve.data.trakt.api.TraktAuthorizationRequiredException
 import com.torve.domain.model.ContentAccessContext
 import com.torve.domain.model.ContentPolicyState
 import com.torve.domain.model.ContentSourceType
@@ -121,10 +125,15 @@ class HomeViewModel(
         val recentHistory: List<com.torve.domain.model.WatchHistoryEntry>,
         val hiddenGems: List<MediaItem>,
         val recentlyWatched: List<MediaItem>,
-        val upcomingSchedule: List<MediaItem>,
+        val upcomingSchedule: UpcomingScheduleLoadResult,
         val popularPeople: List<PersonSummary>,
         val addonShelves: List<CatalogShelf>,
         val mdbListShelves: List<CatalogShelf>,
+    )
+
+    private data class UpcomingScheduleLoadResult(
+        val items: List<MediaItem>,
+        val status: UpcomingScheduleStatus,
     )
 
     @Serializable
@@ -238,6 +247,7 @@ class HomeViewModel(
                             continueWatchingRatings = emptyMap(),
                             recommendedItems = emptyList(),
                             upcomingSchedule = emptyList(),
+                            upcomingScheduleStatus = UpcomingScheduleStatus.LOADING,
                             watchlistShelf = null,
                             watchlistItems = emptyList(),
                             customShelves = emptyMap(),
@@ -573,6 +583,11 @@ class HomeViewModel(
             heroItem = snapshot.heroItem ?: snapshot.shelves.firstOrNull()?.items?.firstOrNull(),
             continueWatching = snapshot.continueWatching,
             upcomingSchedule = snapshot.upcomingSchedule,
+            upcomingScheduleStatus = if (snapshot.upcomingSchedule.isNotEmpty()) {
+                UpcomingScheduleStatus.STALE
+            } else {
+                UpcomingScheduleStatus.LOADING
+            },
             continueWatchingRatings = buildRatingsLookup(
                 hydratedContinueWatching +
                     snapshot.shelves.flatMap { it.items } +
@@ -750,7 +765,7 @@ class HomeViewModel(
                         }
                     }
                     val upcomingScheduleDeferred = async {
-                        loadUpcomingScheduleItems()
+                        loadUpcomingSchedule()
                     }
                     val popularPeopleDeferred = async {
                         try {
@@ -834,7 +849,8 @@ class HomeViewModel(
                 val recentHistory = loadInputs.recentHistory
                 val hiddenGems = loadInputs.hiddenGems
                 val recentlyWatched = loadInputs.recentlyWatched
-                val upcomingSchedule = loadInputs.upcomingSchedule
+                val upcomingScheduleResult = loadInputs.upcomingSchedule
+                val upcomingSchedule = upcomingScheduleResult.items
                 val popularPeople = loadInputs.popularPeople
                 val popularActors = popularPeople.filter { it.knownForDepartment == "Acting" }.take(20)
                 val directorDepartments = setOf("Directing", "Production", "Writing")
@@ -1195,6 +1211,10 @@ class HomeViewModel(
                     val hydratedUpcomingSchedule = hydrateItemsFromCache(withinDedupedUpcomingSchedule)
                         .mergeScheduleVisualsFrom(_state.value.upcomingSchedule)
                     val hydratedWatchlistShelf = policyFilteredWatchlistShelf?.copy(items = hydratedWatchlistItems)
+                    val effectiveUpcomingStatus = effectiveUpcomingScheduleStatus(
+                        originalStatus = upcomingScheduleResult.status,
+                        visibleItems = hydratedUpcomingSchedule,
+                    )
                     val hydratedByw = hydrateShelvesFromCache(finalByw)
                     val hydratedHiddenGems = hydrateShelfFromCache(finalHiddenGems)
                     val hydratedRecents = hydrateItemsFromCache(withinDedupedRecents)
@@ -1224,6 +1244,7 @@ class HomeViewModel(
                             continueWatchingRatings = continueWatchingRatings,
                             recommendedItems = hydratedRecommendations,
                             upcomingSchedule = hydratedUpcomingSchedule,
+                            upcomingScheduleStatus = effectiveUpcomingStatus,
                             watchlistShelf = hydratedWatchlistShelf,
                             watchlistItems = hydratedWatchlistItems,
                             becauseYouWatched = hydratedByw,
@@ -1249,6 +1270,10 @@ class HomeViewModel(
                     val hydratedUpcomingSchedule = hydrateItemsFromCache(policyFilteredUpcomingSchedule)
                         .mergeScheduleVisualsFrom(_state.value.upcomingSchedule)
                     val hydratedWatchlistShelf = policyFilteredWatchlistShelf?.copy(items = hydratedWatchlistItems)
+                    val effectiveUpcomingStatus = effectiveUpcomingScheduleStatus(
+                        originalStatus = upcomingScheduleResult.status,
+                        visibleItems = hydratedUpcomingSchedule,
+                    )
                     val hydratedByw = hydrateShelvesFromCache(policyFilteredByw)
                     val hydratedHiddenGems = hydrateShelfFromCache(policyFilteredHiddenGems)
                     val hydratedRecents = hydrateItemsFromCache(policyFilteredRecents)
@@ -1277,6 +1302,7 @@ class HomeViewModel(
                             continueWatchingRatings = continueWatchingRatings,
                             recommendedItems = hydratedRecommendations,
                             upcomingSchedule = hydratedUpcomingSchedule,
+                            upcomingScheduleStatus = effectiveUpcomingStatus,
                             watchlistShelf = hydratedWatchlistShelf,
                             watchlistItems = hydratedWatchlistItems,
                             becauseYouWatched = hydratedByw,
@@ -1380,6 +1406,10 @@ class HomeViewModel(
         scheduleUpcomingScheduleRefresh("manual_refresh", force = true)
     }
 
+    fun refreshUpcomingSchedule() {
+        scheduleUpcomingScheduleRefresh("explicit_upcoming_refresh", force = true)
+    }
+
     private suspend fun shouldDedupe(): Boolean {
         return prefsRepo.getString(SettingsViewModel.KEY_DEDUPE_RESULTS)?.toBooleanStrictOrNull() ?: true
     }
@@ -1410,7 +1440,8 @@ class HomeViewModel(
             lastTraktScheduleRefreshAtMs = now
             torveVerboseLog { "HOME_TAB upcoming_schedule_refresh reason=$reason connected=true" }
 
-            val schedule = loadUpcomingScheduleItems()
+            val scheduleResult = loadUpcomingSchedule()
+            val schedule = scheduleResult.items
             val filteredSchedule = contentPolicyFilter.filterItems(
                 policy = currentPolicy(),
                 context = ContentAccessContext.HISTORY_DERIVED,
@@ -1419,10 +1450,15 @@ class HomeViewModel(
             ).items
             val hydratedSchedule = hydrateItemsFromCache(filteredSchedule)
                 .mergeScheduleVisualsFrom(existingSchedule)
+            val effectiveStatus = effectiveUpcomingScheduleStatus(
+                originalStatus = scheduleResult.status,
+                visibleItems = hydratedSchedule,
+            )
 
             _state.update { state ->
                 state.copy(
                     upcomingSchedule = hydratedSchedule,
+                    upcomingScheduleStatus = effectiveStatus,
                     continueWatchingRatings = state.continueWatchingRatings.mergeRatingsFor(hydratedSchedule),
                 )
             }
@@ -1430,13 +1466,58 @@ class HomeViewModel(
         }
     }
 
-    private suspend fun loadUpcomingScheduleItems(): List<MediaItem> {
-        val episodes = try {
-            traktApi?.getCalendar(days = 33).orEmpty()
-        } catch (_: Exception) {
-            emptyList()
+    private suspend fun loadUpcomingSchedule(): UpcomingScheduleLoadResult {
+        val api = traktApi ?: return UpcomingScheduleLoadResult(
+            items = emptyList(),
+            status = UpcomingScheduleStatus.DISCONNECTED,
+        )
+        val connected = runCatching { api.hasConnection() }.getOrDefault(false)
+        if (!connected) {
+            return UpcomingScheduleLoadResult(
+                items = emptyList(),
+                status = UpcomingScheduleStatus.DISCONNECTED,
+            )
         }
-        if (episodes.isEmpty()) return emptyList()
+        val result = try {
+            api.getCalendarCached(days = 33)
+        } catch (_: TraktAuthorizationRequiredException) {
+            return UpcomingScheduleLoadResult(
+                items = emptyList(),
+                status = UpcomingScheduleStatus.DISCONNECTED,
+            )
+        } catch (_: TraktRateLimitedException) {
+            return UpcomingScheduleLoadResult(
+                items = emptyList(),
+                status = UpcomingScheduleStatus.RATE_LIMITED,
+            )
+        } catch (_: TraktNetworkException) {
+            return UpcomingScheduleLoadResult(
+                items = emptyList(),
+                status = UpcomingScheduleStatus.ERROR,
+            )
+        } catch (_: TraktServerException) {
+            return UpcomingScheduleLoadResult(
+                items = emptyList(),
+                status = UpcomingScheduleStatus.ERROR,
+            )
+        } catch (_: Exception) {
+            return UpcomingScheduleLoadResult(
+                items = emptyList(),
+                status = UpcomingScheduleStatus.ERROR,
+            )
+        }
+        val episodes = result.episodes
+        if (episodes.isEmpty()) {
+            return UpcomingScheduleLoadResult(
+                items = emptyList(),
+                status = resolveUpcomingScheduleStatus(
+                    connected = true,
+                    itemCount = 0,
+                    isStale = result.isStale,
+                    isRateLimited = result.refreshError is TraktRateLimitedException,
+                ),
+            )
+        }
 
         val distinctEpisodes = episodes
             .sortedBy { it.firstAired }
@@ -1445,7 +1526,16 @@ class HomeViewModel(
             }
             .take(24)
 
-        return distinctEpisodes.map { episode -> episode.toUpcomingScheduleItem() }
+        val items = distinctEpisodes.map { episode -> episode.toUpcomingScheduleItem() }
+        return UpcomingScheduleLoadResult(
+            items = items,
+            status = resolveUpcomingScheduleStatus(
+                connected = true,
+                itemCount = items.size,
+                isStale = result.isStale,
+                isRateLimited = result.refreshError is TraktRateLimitedException,
+            ),
+        )
     }
 
     private fun TraktCalendarEpisode.toUpcomingScheduleItem(): MediaItem {
@@ -2052,6 +2142,16 @@ class HomeViewModel(
             addonShelves.isNotEmpty() ||
             mdbListShelves.isNotEmpty()
     }
+
+    private fun effectiveUpcomingScheduleStatus(
+        originalStatus: UpcomingScheduleStatus,
+        visibleItems: List<MediaItem>,
+    ): UpcomingScheduleStatus =
+        if (originalStatus == UpcomingScheduleStatus.HAS_DATA && visibleItems.isEmpty()) {
+            UpcomingScheduleStatus.EMPTY_CONNECTED
+        } else {
+            originalStatus
+        }
 
     private fun MediaType.toMetadataType(): String = when (this) {
         MediaType.MOVIE -> "movie"

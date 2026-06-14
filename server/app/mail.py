@@ -2,6 +2,7 @@
 Transactional email via Resend (https://resend.com).
 Uses httpx to avoid adding the full resend SDK as a dependency.
 """
+import html as _html
 import logging
 
 import httpx
@@ -13,7 +14,7 @@ _log = logging.getLogger(__name__)
 _RESEND_API_URL = "https://api.resend.com/emails"
 
 
-def send_email(*, to: str, subject: str, html: str, text: str) -> bool:
+def send_email(*, to: str, subject: str, html: str, text: str, reply_to: str | None = None) -> bool:
     """Send a single transactional email. Returns True on success."""
     if not settings.RESEND_API_KEY:
         _log.warning("RESEND_API_KEY not set — skipping email to %s", to)
@@ -26,6 +27,8 @@ def send_email(*, to: str, subject: str, html: str, text: str) -> bool:
         "html": html,
         "text": text,
     }
+    if reply_to:
+        payload["reply_to"] = [reply_to]
 
     try:
         resp = httpx.post(
@@ -219,4 +222,37 @@ def send_welcome_email(*, to: str) -> bool:
             button_url=app_url,
             footer="Need help? Reply to this email or contact support@torve.app.",
         ),
+    )
+
+
+def send_support_bug_report_email(
+    *,
+    to: str,
+    reply_to: str,
+    subject: str,
+    report_text: str,
+) -> bool:
+    """Forward an in-app bug report to support.
+
+    The client already redacts its diagnostics bundle, and the support
+    endpoint redacts again before calling this helper. This function only
+    renders the resulting plain text into an email-safe envelope.
+    """
+    escaped = _html.escape(report_text)
+    html = f"""\
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="utf-8"></head>
+<body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; color: #111;">
+  <h1 style="font-size: 18px;">Torve bug report</h1>
+  <p style="font-size: 13px; color: #555;">Submitted from the in-app support flow.</p>
+  <pre style="white-space: pre-wrap; word-break: break-word; background: #f5f5f5; border-radius: 8px; padding: 16px; font-size: 12px; line-height: 1.45;">{escaped}</pre>
+</body>
+</html>"""
+    return send_email(
+        to=to,
+        reply_to=reply_to,
+        subject=subject,
+        html=html,
+        text=report_text,
     )

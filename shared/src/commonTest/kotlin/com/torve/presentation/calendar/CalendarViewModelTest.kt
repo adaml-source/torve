@@ -1,7 +1,12 @@
 package com.torve.presentation.calendar
 
 import com.torve.data.trakt.TraktCalendarEpisode
+import com.torve.data.trakt.TraktNetworkException
+import com.torve.data.trakt.TraktRateLimitedException
+import com.torve.data.trakt.TraktRequestBucket
+import com.torve.data.trakt.TraktServerException
 import com.torve.data.trakt.api.TraktAuthorizationRequiredException
+import com.torve.data.trakt.api.TraktCalendarResult
 import com.torve.domain.repository.PreferencesRepository
 import com.torve.presentation.error.UserFacingError
 import kotlinx.coroutines.CompletableDeferred
@@ -69,7 +74,7 @@ class CalendarViewModelTest {
 
     @Test
     fun retry_shows_loading_state_before_reattempt_completes() = runTest(dispatcher) {
-        val retryResult = CompletableDeferred<List<TraktCalendarEpisode>>()
+        val retryResult = CompletableDeferred<TraktCalendarResult>()
         val dataSource = FakeCalendarDataSource().apply {
             enqueueFailure(IllegalStateException("temporary failure"))
             enqueueDeferred(retryResult)
@@ -83,7 +88,7 @@ class CalendarViewModelTest {
         assertTrue(viewModel.state.value.isLoading)
         assertNull(viewModel.state.value.error)
 
-        retryResult.complete(listOf(sampleEpisode()))
+        retryResult.complete(TraktCalendarResult(listOf(sampleEpisode()), isStale = false))
         advanceUntilIdle()
 
         assertFalse(viewModel.state.value.isLoading)
@@ -156,6 +161,81 @@ class CalendarViewModelTest {
         assertFalse(viewModel.state.value.error.orEmpty().contains("secret_access_token"))
     }
 
+    @Test
+    fun rate_limit_stale_calendar_result_renders_rate_limit_warning() = runTest(dispatcher) {
+        val episode = sampleEpisode(showTitle = "Cached Show")
+        val dataSource = FakeCalendarDataSource().apply {
+            enqueueResult(
+                TraktCalendarResult(
+                    listOf(episode),
+                    isStale = true,
+                    refreshError = TraktRateLimitedException(60, TraktRequestBucket.AUTHENTICATED_GET),
+                ),
+            )
+        }
+        val viewModel = newViewModel(dataSource)
+
+        advanceUntilIdle()
+
+        assertEquals(listOf(episode), viewModel.state.value.episodes)
+        assertEquals(CalendarStaleReason.RATE_LIMITED, viewModel.state.value.refreshWarning)
+        assertNull(viewModel.state.value.error)
+    }
+
+    @Test
+    fun network_stale_calendar_result_renders_network_warning() = runTest(dispatcher) {
+        val episode = sampleEpisode(showTitle = "Cached Show")
+        val dataSource = FakeCalendarDataSource().apply {
+            enqueueResult(
+                TraktCalendarResult(
+                    listOf(episode),
+                    isStale = true,
+                    refreshError = TraktNetworkException(),
+                ),
+            )
+        }
+        val viewModel = newViewModel(dataSource)
+
+        advanceUntilIdle()
+
+        assertEquals(CalendarStaleReason.NETWORK, viewModel.state.value.refreshWarning)
+        assertNull(viewModel.state.value.error)
+    }
+
+    @Test
+    fun server_stale_calendar_result_renders_server_warning() = runTest(dispatcher) {
+        val episode = sampleEpisode(showTitle = "Cached Show")
+        val dataSource = FakeCalendarDataSource().apply {
+            enqueueResult(
+                TraktCalendarResult(
+                    listOf(episode),
+                    isStale = true,
+                    refreshError = TraktServerException(503),
+                ),
+            )
+        }
+        val viewModel = newViewModel(dataSource)
+
+        advanceUntilIdle()
+
+        assertEquals(CalendarStaleReason.SERVER, viewModel.state.value.refreshWarning)
+        assertNull(viewModel.state.value.error)
+    }
+
+    @Test
+    fun unknown_stale_calendar_result_renders_generic_warning() = runTest(dispatcher) {
+        val episode = sampleEpisode(showTitle = "Cached Show")
+        val dataSource = FakeCalendarDataSource().apply {
+            enqueueResult(TraktCalendarResult(listOf(episode), isStale = true))
+        }
+        val viewModel = newViewModel(dataSource)
+
+        advanceUntilIdle()
+
+        assertEquals(CalendarStaleReason.UNKNOWN, viewModel.state.value.refreshWarning)
+        assertNull(viewModel.state.value.error)
+    }
+
     private fun newViewModel(
         dataSource: FakeCalendarDataSource,
         diagnosticsEvents: MutableList<CalendarDiagnosticsEvent> = mutableListOf(),
@@ -181,26 +261,30 @@ class CalendarViewModelTest {
 private class FakeCalendarDataSource(
     var token: String? = "token",
 ) : CalendarDataSource {
-    private val responses = mutableListOf<suspend () -> List<TraktCalendarEpisode>>()
+    private val responses = mutableListOf<suspend () -> TraktCalendarResult>()
     val requestedDays = mutableListOf<Int>()
     var calendarCalls = 0
         private set
 
     fun enqueueSuccess(episodes: List<TraktCalendarEpisode>) {
-        responses += { episodes }
+        enqueueResult(TraktCalendarResult(episodes, isStale = false))
+    }
+
+    fun enqueueResult(result: TraktCalendarResult) {
+        responses += { result }
     }
 
     fun enqueueFailure(error: Exception) {
         responses += { throw error }
     }
 
-    fun enqueueDeferred(deferred: CompletableDeferred<List<TraktCalendarEpisode>>) {
+    fun enqueueDeferred(deferred: CompletableDeferred<TraktCalendarResult>) {
         responses += { deferred.await() }
     }
 
     override suspend fun accessToken(): String? = token
 
-    override suspend fun getCalendar(days: Int): List<TraktCalendarEpisode> {
+    override suspend fun getCalendar(days: Int): TraktCalendarResult {
         calendarCalls++
         requestedDays += days
         return responses.removeAt(0).invoke()

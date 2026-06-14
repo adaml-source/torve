@@ -13,9 +13,33 @@ class PandaSetupViewModelTest {
     // ── Step navigation ──
 
     @Test
-    fun initialStepIsProvider() {
+    fun initialStepIsSetupType() {
         val state = PandaSetupUiState()
-        assertEquals(PandaSetupStep.PROVIDER, state.currentStep)
+        assertEquals(PandaSetupStep.SETUP_TYPE, state.currentStep)
+        assertEquals(null, state.setupMode)
+    }
+
+    @Test
+    fun debridSetupProgressUsesFullWizard() {
+        val state = PandaSetupUiState(
+            setupMode = PandaSetupMode.DEBRID,
+            currentStep = PandaSetupStep.AUTH,
+        )
+
+        assertEquals(2, state.progressStepNumber())
+        assertEquals(6, state.progressStepCount())
+    }
+
+    @Test
+    fun usenetOnlyProgressSkipsDebridSteps() {
+        val state = PandaSetupUiState(
+            setupMode = PandaSetupMode.USENET_ONLY,
+            selectedProvider = PandaProvider("none", "Use Usenet only (skip debrid)", emptyList()),
+            currentStep = PandaSetupStep.USENET,
+        )
+
+        assertEquals(2, state.progressStepNumber())
+        assertEquals(4, state.progressStepCount())
     }
 
     @Test
@@ -227,6 +251,22 @@ class PandaSetupViewModelTest {
     }
 
     // ── Save state ──
+
+    @Test
+    fun usenetOnlyPayloadIgnoresStoredDebridKeys() {
+        val state = PandaSetupUiState(
+            setupMode = PandaSetupMode.USENET_ONLY,
+            selectedProvider = PandaProvider("none", "Use Usenet only (skip debrid)", emptyList()),
+            debridApiKeys = mapOf(
+                "realdebrid" to "rd-key",
+                "torbox" to "tb-key",
+            ),
+        )
+
+        assertTrue(pandaDebridConnectionsForPayload(state).isEmpty())
+        assertEquals("none", primaryPandaDebridConnection(state).provider)
+        assertEquals("", primaryPandaDebridConnection(state).apiKey)
+    }
 
     @Test
     fun addonInstalledAfterSave() {

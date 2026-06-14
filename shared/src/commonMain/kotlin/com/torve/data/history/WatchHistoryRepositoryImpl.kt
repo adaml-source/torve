@@ -7,6 +7,8 @@ import com.torve.data.simkl.SimklClient
 import com.torve.data.simkl.SimklIds
 import com.torve.data.simkl.SimklSyncBody
 import com.torve.data.simkl.SimklSyncItem
+import com.torve.data.stats.WatchSessionMediaIdentity
+import com.torve.data.stats.WatchSessionRecorder
 import com.torve.data.trakt.TraktHistoryBody
 import com.torve.data.trakt.TraktHistoryEpisodeEntry
 import com.torve.data.trakt.TraktHistorySeasonEntry
@@ -22,6 +24,7 @@ import com.torve.domain.model.WatchHistoryEntry
 import com.torve.domain.model.extractImdbIdOrNull
 import com.torve.domain.model.extractTmdbIdOrNull
 import com.torve.domain.repository.WatchHistoryRepository
+import com.torve.domain.stats.WatchSessionSource
 import kotlinx.datetime.Instant
 
 class WatchHistoryRepositoryImpl(
@@ -32,6 +35,7 @@ class WatchHistoryRepositoryImpl(
     private val simklClient: SimklClient,
     private val integrationSecretStore: IntegrationSecretStore,
     private val userIdProvider: UserIdProvider,
+    private val watchSessionRecorder: WatchSessionRecorder? = null,
 ) : WatchHistoryRepository {
     private val queries get() = database.torveQueries
 
@@ -157,10 +161,11 @@ class WatchHistoryRepositoryImpl(
             val localIds = queries.getAllHistory(userId = userId).executeAsList()
                 .map { it.id }
                 .toSet()
+            val episodeRuntimeCache = mutableMapOf<Pair<Int, Int>, Map<Int, Long>>()
 
             for (item in historyItems) {
                 val traktId = "trakt_${item.id}"
-                if (traktId in localIds) continue
+                val alreadyImported = traktId in localIds
 
                 val isMovie = item.type == "movie"
                 val media = if (isMovie) item.movie else item.show
@@ -175,34 +180,69 @@ class WatchHistoryRepositoryImpl(
                     continue
                 }
 
-                // Fetch poster from TMDB
+                // Fetch lightweight display identity from TMDB. Movie runtime
+                // is available here and can be counted as estimated import time.
                 var posterUrl: String? = null
                 var backdropUrl: String? = null
+                var runtimeMs: Long? = null
+                var imdbId: String? = ids.imdb
                 try {
                     if (isMovie) {
                         val detail = tmdbClient.getMovieDetail(tmdbId)
                         posterUrl = TmdbMappers.posterUrl(detail.posterPath)
                         backdropUrl = TmdbMappers.backdropUrl(detail.backdropPath)
+                        runtimeMs = detail.runtime?.takeIf { it > 0 }?.toLong()?.times(60_000L)
+                        imdbId = detail.imdbId ?: imdbId
                     } else {
                         val detail = tmdbClient.getTvDetail(tmdbId)
                         posterUrl = TmdbMappers.posterUrl(detail.posterPath)
                         backdropUrl = TmdbMappers.backdropUrl(detail.backdropPath)
+                        imdbId = item.episode?.ids?.imdb ?: detail.externalIds?.imdbId ?: imdbId
+                        runtimeMs = resolveEpisodeRuntimeMs(
+                            tmdbId = tmdbId,
+                            seasonNumber = item.episode?.season,
+                            episodeNumber = item.episode?.number,
+                            showFallbackRuntimes = detail.episodeRunTime,
+                            cache = episodeRuntimeCache,
+                        )
                     }
                 } catch (_: Exception) { /* non-critical */ }
 
-                queries.insertHistory(
-                    user_id = userId,
-                    id = traktId,
-                    media_id = mediaId,
-                    media_type = mediaType,
-                    title = if (isMovie) media.title else (item.episode?.title ?: media.title),
-                    poster_url = posterUrl,
-                    backdrop_url = backdropUrl,
-                    watched_at = watchedAt,
-                    duration_watched_ms = 0,
-                    season_number = item.episode?.season?.toLong(),
-                    episode_number = item.episode?.number?.toLong(),
-                    show_title = if (!isMovie) media.title else null,
+                val title = if (isMovie) media.title else (item.episode?.title ?: media.title)
+                if (!alreadyImported) {
+                    queries.insertHistory(
+                        user_id = userId,
+                        id = traktId,
+                        media_id = mediaId,
+                        media_type = mediaType,
+                        title = title,
+                        poster_url = posterUrl,
+                        backdrop_url = backdropUrl,
+                        watched_at = watchedAt,
+                        duration_watched_ms = 0,
+                        season_number = item.episode?.season?.toLong(),
+                        episode_number = item.episode?.number?.toLong(),
+                        show_title = if (!isMovie) media.title else null,
+                    )
+                }
+                watchSessionRecorder?.recordImportedCompleted(
+                    identity = WatchSessionMediaIdentity(
+                        mediaId = mediaId,
+                        mediaType = if (isMovie) MediaType.MOVIE else MediaType.SERIES,
+                        title = title,
+                        showId = if (!isMovie) mediaId else null,
+                        showTitle = if (!isMovie) media.title else null,
+                        seasonNumber = item.episode?.season,
+                        episodeNumber = item.episode?.number,
+                        posterUrl = posterUrl,
+                        backdropUrl = backdropUrl,
+                        tmdbId = tmdbId,
+                        imdbId = imdbId,
+                    ),
+                    source = WatchSessionSource.TRAKT,
+                    eventAt = watchedAt,
+                    importDiscriminator = item.id.takeIf { it > 0L }?.toString() ?: watchedAt.toString(),
+                    runtimeMs = runtimeMs,
                 )
             }
         } catch (_: Exception) {
@@ -237,5 +277,34 @@ class WatchHistoryRepositoryImpl(
                 tmdbClient.getTvDetail(tmdbId).externalIds?.imdbId
             }
         }.getOrNull()
+    }
+
+    private suspend fun resolveEpisodeRuntimeMs(
+        tmdbId: Int,
+        seasonNumber: Int?,
+        episodeNumber: Int?,
+        showFallbackRuntimes: List<Int>,
+        cache: MutableMap<Pair<Int, Int>, Map<Int, Long>>,
+    ): Long? {
+        val season = seasonNumber?.takeIf { it > 0 }
+        val episode = episodeNumber?.takeIf { it > 0 }
+        if (season != null && episode != null) {
+            val seasonRuntimeByEpisode = cache.getOrPut(tmdbId to season) {
+                runCatching {
+                    tmdbClient.getTvSeasonDetail(tmdbId, season)
+                        .episodes
+                        .mapNotNull { ep ->
+                            val runtime = ep.runtime?.takeIf { it > 0 } ?: return@mapNotNull null
+                            ep.episodeNumber to runtime.toLong().times(60_000L)
+                        }
+                        .toMap()
+                }.getOrDefault(emptyMap())
+            }
+            seasonRuntimeByEpisode[episode]?.let { return it }
+        }
+        return showFallbackRuntimes
+            .firstOrNull { it > 0 }
+            ?.toLong()
+            ?.times(60_000L)
     }
 }

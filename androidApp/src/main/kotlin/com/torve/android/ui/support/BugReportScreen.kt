@@ -50,6 +50,8 @@ import com.torve.android.ui.theme.Obsidian
 import com.torve.android.ui.theme.Silver
 import com.torve.android.ui.theme.Snow
 import com.torve.android.ui.theme.Torve
+import com.torve.data.support.SupportApi
+import com.torve.data.support.SupportBugReportSubmitResult
 import com.torve.presentation.providerhealth.ProviderHealthCoordinator
 import com.torve.presentation.settings.SettingsViewModel
 import com.torve.presentation.transfer.TransferDiagnosticsCollector
@@ -63,6 +65,7 @@ fun BugReportScreen(
     settingsViewModel: SettingsViewModel = koinInject(),
     providerHealthCoordinator: ProviderHealthCoordinator = koinInject(),
     transferDiagnosticsCollector: TransferDiagnosticsCollector = koinInject(),
+    supportApi: SupportApi = koinInject(),
 ) {
     val settingsState by settingsViewModel.state.collectAsState()
     val providerEntries by providerHealthCoordinator.entries.collectAsState()
@@ -81,6 +84,8 @@ fun BugReportScreen(
     var description by remember { mutableStateOf("") }
     var pastedLogs by remember { mutableStateOf("") }
     var includeDiagnostics by remember { mutableStateOf(true) }
+    var submitStatus by remember { mutableStateOf<String?>(null) }
+    var isSubmitting by remember { mutableStateOf(false) }
 
     fun buildAndSend(send: (String) -> Unit) {
         scope.launch {
@@ -101,6 +106,27 @@ fun BugReportScreen(
         }
     }
 
+    fun buildAndSubmit() {
+        buildAndSend { report ->
+            scope.launch {
+                isSubmitting = true
+                submitStatus = null
+                submitStatus = when (val result = supportApi.submitBugReport(
+                    issueType = issueType,
+                    report = report,
+                    platform = androidBugReportPlatformLabel(),
+                    appVersion = androidBugReportAppVersion(context),
+                )) {
+                    is SupportBugReportSubmitResult.Sent ->
+                        context.getString(R.string.bug_report_sent, result.reportId)
+                    is SupportBugReportSubmitResult.Error ->
+                        result.message.ifBlank { context.getString(R.string.bug_report_send_failed) }
+                }
+                isSubmitting = false
+            }
+        }
+    }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -117,7 +143,7 @@ fun BugReportScreen(
             fontWeight = FontWeight.Bold,
         )
         Text(
-            text = stringResource(R.string.bug_report_subtitle, TORVE_SUPPORT_EMAIL),
+            text = stringResource(R.string.bug_report_subtitle),
             style = MaterialTheme.typography.bodyMedium,
             color = Torve.colors.textSecondary,
             modifier = Modifier.padding(top = 4.dp),
@@ -216,11 +242,18 @@ fun BugReportScreen(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             Button(
-                onClick = { buildAndSend { emailBugReport(context, it) } },
+                onClick = { buildAndSubmit() },
                 modifier = Modifier.weight(1f),
+                enabled = !isSubmitting,
                 colors = ButtonDefaults.buttonColors(containerColor = Amber, contentColor = Obsidian),
             ) {
-                Text(stringResource(R.string.bug_report_send_email))
+                Text(
+                    if (isSubmitting) {
+                        stringResource(R.string.bug_report_sending)
+                    } else {
+                        stringResource(R.string.bug_report_send_support)
+                    },
+                )
             }
             OutlinedButton(
                 onClick = { buildAndSend { copyBugReport(context, it) } },
@@ -235,6 +268,14 @@ fun BugReportScreen(
             modifier = Modifier.fillMaxWidth(),
         ) {
             Text(stringResource(R.string.bug_report_share))
+        }
+        submitStatus?.let {
+            Spacer(Modifier.height(8.dp))
+            Text(
+                text = it,
+                color = Torve.colors.textSecondary,
+                style = MaterialTheme.typography.bodySmall,
+            )
         }
     }
 }

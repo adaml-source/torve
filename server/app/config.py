@@ -20,6 +20,7 @@ class Settings(BaseSettings):
     MAX_DEVICES_PER_ACCOUNT: int = 5
     RESEND_API_KEY: str = ""
     MAIL_FROM: str = "noreply@torve.app"
+    SUPPORT_EMAIL: str = "support@torve.app"
     APP_PUBLIC_WEB_URL: str = "https://www.torve.app"
     APP_PUBLIC_API_URL: str = "https://api.torve.app"
 

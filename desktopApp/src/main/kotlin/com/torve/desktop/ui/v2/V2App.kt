@@ -615,7 +615,11 @@ fun V2App(
 
     fun popDetailStack() {
         if (detailStack.isNotEmpty()) {
-            detailStack = detailStack.dropLast(1)
+            val nextStack = detailStack.dropLast(1)
+            detailStack = nextStack
+            (nextStack.lastOrNull() as? V2DetailStackEntry.Detail)?.route?.let { route ->
+                detailControllerFor(route.controllerKey).selectResult(route.item)
+            }
         }
     }
 

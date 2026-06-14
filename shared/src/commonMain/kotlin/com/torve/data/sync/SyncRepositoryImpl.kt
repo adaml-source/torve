@@ -1,6 +1,7 @@
 package com.torve.data.sync
 
 import com.torve.data.auth.UserIdProvider
+import com.torve.data.channels.playlistIdentityFor
 import com.torve.db.TorveDatabase
 import com.torve.domain.model.CardOrientation
 import com.torve.domain.model.CardSizePreset
@@ -331,18 +332,24 @@ class SyncRepositoryImpl(
         }
         // Channel playlists: insert if URL not already present (match by URL for m3u, by server+username for xtream)
         val existingPlaylists = queries.getAllPlaylists(userId = uid()).executeAsList()
-        val existingUrls = existingPlaylists.map { it.url }.toSet()
-        val existingXtream = existingPlaylists
-            .filter { (it.type ?: "m3u") == "xtream" }
-            .map { "${it.server}|${it.username}" }
-            .toSet()
-        for (pl in payload.channelPlaylists) {
-            val isXtream = pl.type == "xtream"
-            val isDuplicate = if (isXtream && pl.server != null) {
-                "${pl.server}|${pl.username}" in existingXtream
-            } else {
-                pl.url in existingUrls
+        val existingPlaylistIdentities = existingPlaylists
+            .mapNotNull { row ->
+                playlistIdentityFor(
+                    type = row.type,
+                    url = row.url,
+                    server = row.server,
+                    username = row.username,
+                )
             }
+            .toMutableSet()
+        for (pl in payload.channelPlaylists) {
+            val identity = playlistIdentityFor(
+                type = pl.type,
+                url = pl.url,
+                server = pl.server,
+                username = pl.username,
+            )
+            val isDuplicate = identity != null && identity in existingPlaylistIdentities
             if (isDuplicate) {
                 conflicts++
                 continue
@@ -360,6 +367,7 @@ class SyncRepositoryImpl(
                 username = pl.username,
                 password = pl.password,
             )
+            identity?.let(existingPlaylistIdentities::add)
             playlistsImported++
         }
 

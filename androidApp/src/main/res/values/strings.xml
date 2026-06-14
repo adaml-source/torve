@@ -208,6 +208,8 @@
     <string name="settings_account">Account</string>
     <string name="settings_account_coming_soon">Cloud sync in development</string>
     <string name="settings_account_desc">Once available, you\'ll be able to create an account to sync your settings, watchlist, watch progress, and card style presets across all your devices. No action needed — this feature will be enabled automatically in a future update.</string>
+    <string name="settings_refresh_all">Refresh all</string>
+    <string name="settings_refresh_all_started">Refreshing account, devices, channels, and content in the background.</string>
 
     <string name="settings_about">About</string>
 
@@ -569,6 +571,11 @@
     <string name="calendar_connect_trakt_desc">Link your Trakt account in Settings to see upcoming episodes from your watchlist.</string>
     <string name="calendar_reconnect_trakt">Reconnect Trakt to see your calendar</string>
     <string name="calendar_reconnect_trakt_desc">Your Trakt session expired or was revoked. Reconnect Trakt in Settings to load upcoming episodes.</string>
+    <string name="calendar_stale_warning">Showing the last saved calendar while Trakt is unavailable.</string>
+    <string name="calendar_stale_rate_limited">Showing saved calendar because Trakt is rate limiting requests.</string>
+    <string name="calendar_stale_network">Showing saved calendar because Trakt could not be reached.</string>
+    <string name="calendar_stale_server">Showing saved calendar because Trakt is temporarily unavailable.</string>
+    <string name="calendar_stale_unknown">Showing saved calendar because it could not be refreshed.</string>
     <string name="calendar_error">Error</string>
     <string name="calendar_connect_trakt">Connect Trakt to see your calendar</string>
     <string name="calendar_upcoming_count">%1$d upcoming episodes</string>
@@ -680,6 +687,13 @@
     <string name="regex_added">Added: %1$s</string>
     <string name="regex_label_hint">Label</string>
     <string name="regex_pattern_hint">Regex pattern</string>
+    <string name="regex_import_json">Import JSON</string>
+    <string name="regex_export_json">Export JSON</string>
+    <string name="regex_imported">Imported %1$d regex pattern(s).</string>
+    <string name="regex_imported_disabled">Imported %1$d regex pattern(s). %2$d disabled because the regex was blank or invalid.</string>
+    <string name="regex_import_failed">Could not import regex JSON.</string>
+    <string name="regex_export_failed">Could not export regex JSON.</string>
+    <string name="regex_exported">Regex JSON exported.</string>
 
     <!-- Home Layout Screen -->
     <string name="home_layout_title">Home Layout</string>
@@ -743,9 +757,17 @@
 
     <!-- Panda Native Setup -->
     <string name="panda_setup_title">Set up Panda</string>
-    <string name="panda_setup_provider_title">Choose your provider</string>
+    <string name="panda_setup_type_title">Choose setup type</string>
+    <string name="panda_setup_type_desc">Start with debrid cloud streaming or skip straight to Usenet configuration.</string>
+    <string name="panda_setup_type_debrid_title">Debrid</string>
+    <string name="panda_setup_type_debrid_subtitle">Use Real-Debrid, AllDebrid, Premiumize, TorBox, or another supported Panda debrid service.</string>
+    <string name="panda_setup_type_usenet_title">Usenet only</string>
+    <string name="panda_setup_type_usenet_subtitle">Skip debrid and configure Usenet, indexers, and a download client.</string>
+    <string name="panda_setup_provider_title">Choose debrid provider</string>
     <string name="panda_setup_provider_desc">Select the debrid service you want to use with Panda.</string>
     <string name="panda_setup_auth_title">Connect %1$s</string>
+    <string name="panda_setup_auth_choose_title">Connect debrid provider</string>
+    <string name="panda_setup_auth_inline_hint">Choose a provider, then connect it directly below the selected row.</string>
     <string name="panda_setup_auth_oauth">Sign in with browser</string>
     <string name="panda_setup_auth_apikey">Enter API key</string>
     <string name="panda_setup_auth_enter_key">Paste your API key</string>
@@ -992,6 +1014,13 @@
     <string name="stream_groups_desc">Organize and prioritize stream sources. Streams matching a group pattern are sorted together by priority (lower = higher).</string>
     <string name="stream_groups_name_hint">Group name</string>
     <string name="stream_groups_regex_hint">Match regex</string>
+    <string name="stream_groups_import_json">Import JSON</string>
+    <string name="stream_groups_export_json">Export JSON</string>
+    <string name="stream_groups_imported">Imported %1$d stream group(s).</string>
+    <string name="stream_groups_imported_disabled">Imported %1$d stream group(s). %2$d disabled because the regex was blank or invalid.</string>
+    <string name="stream_groups_import_failed">Could not import stream group JSON.</string>
+    <string name="stream_groups_export_failed">Could not export stream group JSON.</string>
+    <string name="stream_groups_exported">Stream group JSON exported.</string>
 
     <!-- Downloaded Show Detail -->
     <string name="download_show_not_found">Show not found</string>
@@ -1597,10 +1626,19 @@
     <string name="settings_report_issue">Report Issue</string>
     <string name="settings_export_diagnostics">Export diagnostics</string>
     <string name="bug_report_title">Report a problem</string>
-    <string name="bug_report_subtitle">Send a redacted report to %1$s. Pasted logs are scrubbed before sending.</string>
-    <string name="bug_report_tv_subtitle">Generate a redacted report for %1$s. Use email, share, or copy from this TV.</string>
+    <string name="bug_report_subtitle">Send a redacted report directly to Torve support. Pasted logs are scrubbed before sending.</string>
+    <string name="bug_report_tv_subtitle">Send a redacted report directly to Torve support. No email or share app is required.</string>
     <string name="bug_report_tv_settings_subtitle">Create a redacted diagnostics report for support</string>
     <string name="bug_report_issue_type">Issue type</string>
+    <string name="bug_report_type_crash">Crash</string>
+    <string name="bug_report_type_lag_freezing">Lag / freezing</string>
+    <string name="bug_report_type_focus_navigation">Stuck focus / remote navigation</string>
+    <string name="bug_report_type_playback_problem">Playback problem</string>
+    <string name="bug_report_type_broken_link">Broken link / source failed</string>
+    <string name="bug_report_type_integration_problem">Integration problem</string>
+    <string name="bug_report_type_addon_problem">Addon problem</string>
+    <string name="bug_report_type_iptv_problem">IPTV problem</string>
+    <string name="bug_report_type_account_access">Account / premium access problem</string>
     <string name="bug_report_type_playback">Playback</string>
     <string name="bug_report_type_live_tv">Live TV / EPG</string>
     <string name="bug_report_type_vod">Movies / TV Shows</string>
@@ -1614,8 +1652,16 @@
     <string name="bug_report_logs_hint">Optional logcat, error text, or screenshots notes. Secrets are redacted.</string>
     <string name="bug_report_attach_diagnostics">Attach diagnostics</string>
     <string name="bug_report_attach_diagnostics_desc">Includes app/device/provider status, never saved credentials.</string>
+    <string name="bug_report_privacy_note">Diagnostic reports include device/app status and recent Torve logs. Secrets, tokens, passwords, stream URLs, payment data, and account credentials are redacted.</string>
     <string name="bug_report_send_email">Email support</string>
-    <string name="bug_report_send_email_desc">Open an email to support@torve.app with the report filled in.</string>
+    <string name="bug_report_send_email_desc">Open an email to Torve support with the report filled in.</string>
+    <string name="bug_report_send_support">Send to Torve support</string>
+    <string name="bug_report_send_support_tv_desc">Uploads the redacted report from this signed-in TV. No email app required.</string>
+    <string name="bug_report_send_full_diagnostics">Send full diagnostic report</string>
+    <string name="bug_report_sending">Sending report...</string>
+    <string name="bug_report_sent">Report sent. Reference: %1$s</string>
+    <string name="bug_report_saved_for_retry">A previous diagnostic report is saved locally. Try sending again.</string>
+    <string name="bug_report_send_failed">Could not send report right now. Copy the report and try again later.</string>
     <string name="bug_report_share">Share report</string>
     <string name="bug_report_share_desc">Use another app if no email client is installed.</string>
     <string name="bug_report_copy_report">Copy report</string>

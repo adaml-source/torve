@@ -15,6 +15,7 @@ data class HomeUiState(
     val continueWatchingRatings: Map<String, MediaRatings> = emptyMap(),
     val recommendedItems: List<ScoredMediaItem> = emptyList(),
     val upcomingSchedule: List<MediaItem> = emptyList(),
+    val upcomingScheduleStatus: UpcomingScheduleStatus = UpcomingScheduleStatus.LOADING,
     val watchlistShelf: CatalogShelf? = null,
     val watchlistItems: List<MediaItem> = emptyList(),
     val becauseYouWatched: List<CatalogShelf> = emptyList(),
@@ -32,3 +33,28 @@ data class HomeUiState(
     val searchResults: List<MediaItem> = emptyList(),
     val isSearching: Boolean = false,
 )
+
+enum class UpcomingScheduleStatus {
+    LOADING,
+    HAS_DATA,
+    EMPTY_CONNECTED,
+    DISCONNECTED,
+    STALE,
+    RATE_LIMITED,
+    ERROR,
+}
+
+internal fun resolveUpcomingScheduleStatus(
+    connected: Boolean,
+    itemCount: Int,
+    isStale: Boolean = false,
+    isRateLimited: Boolean = false,
+    isError: Boolean = false,
+): UpcomingScheduleStatus = when {
+    !connected -> UpcomingScheduleStatus.DISCONNECTED
+    isRateLimited -> UpcomingScheduleStatus.RATE_LIMITED
+    isStale -> UpcomingScheduleStatus.STALE
+    isError -> UpcomingScheduleStatus.ERROR
+    itemCount > 0 -> UpcomingScheduleStatus.HAS_DATA
+    else -> UpcomingScheduleStatus.EMPTY_CONNECTED
+}

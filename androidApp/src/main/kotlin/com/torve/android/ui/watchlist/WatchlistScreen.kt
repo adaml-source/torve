@@ -135,8 +135,12 @@ fun WatchlistScreen(
             ratingsEnricher.enrichList(baseItems, apiKey)
         }
     }
-    val favoriteItems = remember(favoritesState.items) {
-        favoritesState.items.map { it.toMediaItem() }
+    var enrichedFavorites by remember { mutableStateOf<List<MediaItem>>(emptyList()) }
+    LaunchedEffect(favoritesState.items, settingsState.mdblistApiKey) {
+        val baseItems = favoritesState.items.map { it.toMediaItem() }
+        enrichedFavorites = withContext(Dispatchers.Default) {
+            ratingsEnricher.enrichList(baseItems, settingsState.mdblistApiKey)
+        }
     }
 
     val defaultCardStyle = resolveCardStyle(
@@ -200,7 +204,7 @@ fun WatchlistScreen(
                 emptyDescription = stringResource(R.string.watchlist_empty_desc),
             )
             1 -> WatchlistTab(
-                items = favoriteItems,
+                items = enrichedFavorites,
                 isLoading = favoritesState.isLoading,
                 onMediaClick = onMediaClick,
                 emptyTitle = "No favorites yet",

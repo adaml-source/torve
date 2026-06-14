@@ -235,6 +235,7 @@ fun TvDetailsScreen(
     }
     var didAutoPlay by rememberSaveable(type, id) { mutableStateOf(false) }
     var pendingDownloadAction by remember { mutableStateOf<DownloadAction>(DownloadAction.None) }
+    var resolvingEpisodeTarget by remember(type, id) { mutableStateOf<Pair<Int, Int>?>(null) }
     var showWatchlistPicker by remember { mutableStateOf(false) }
     // Source picker (Prompt 11C). Non-null while the sheet is open;
     // selection routes either directly to the player (LocalFile/LAN)
@@ -319,15 +320,6 @@ fun TvDetailsScreen(
         }
     }
 
-    // Also re-request when watchProgress or watchedEpisodes update — covers the case
-    // where the key changes but the postDelayed already fired.
-    LaunchedEffect(state.watchProgress, state.watchedEpisodes) {
-        if (state.mediaItem != null) {
-            kotlinx.coroutines.delay(300)
-            runCatching { playFocusRequester.requestFocus() }
-        }
-    }
-
     // Surface stream errors as visible notifications
     LaunchedEffect(state.streamsError) {
         state.streamsError?.let { error ->
@@ -341,7 +333,14 @@ fun TvDetailsScreen(
         state.resolveError?.let { error ->
             TvNotificationQueue.clear(TV_USENET_PREPARING_NOTIFICATION_TAG)
             TvNotificationQueue.clear(TV_STREAM_RESOLVING_NOTIFICATION_TAG)
+            resolvingEpisodeTarget = null
             TvNotificationQueue.post(resolveTvDetailMessage(context, error), NotificationType.ERROR)
+        }
+    }
+
+    LaunchedEffect(state.isLoadingStreams, state.isResolving, state.showStreamPicker, state.resolvedStream) {
+        if (!state.isLoadingStreams && !state.isResolving || state.showStreamPicker || state.resolvedStream != null) {
+            resolvingEpisodeTarget = null
         }
     }
 
@@ -1072,6 +1071,7 @@ fun TvDetailsScreen(
                             detailViewModel.loadSeasonDetail(tvId, seasonNumber)
                         },
                         onEpisodeSelected = { season, episode ->
+                            resolvingEpisodeTarget = season to episode
                             coroutineScope.launch {
                                 val picker = buildDetailPickerState(
                                     item = item,
@@ -1089,6 +1089,7 @@ fun TvDetailsScreen(
                                 if (!hasNonProvider) {
                                     detailViewModel.fetchStreams(season = season, episode = episode)
                                 } else {
+                                    resolvingEpisodeTarget = null
                                     sourcePickerSeason = season
                                     sourcePickerEpisode = episode
                                     sourcePickerState = picker
@@ -1111,7 +1112,16 @@ fun TvDetailsScreen(
                         },
                         onFirstContentRequester = onFirstContentRequester,
                         onContentFocused = onContentFocused,
-                        autoFocusFirstSeason = focusEpisodes && episodesFocusHandled,
+                        autoFocusFirstSeason = false,
+                        resolvingEpisode = resolvingEpisodeTarget
+                            ?: if ((state.isLoadingStreams || state.isResolving) &&
+                                state.streamContextSeason != null &&
+                                state.streamContextEpisode != null
+                            ) {
+                                state.streamContextSeason!! to state.streamContextEpisode!!
+                            } else {
+                                null
+                            },
                     )
                 }
             }
@@ -1644,36 +1654,6 @@ fun TvDetailsScreen(
     // Download toast now rendered by TvNotificationQueue in TvRoot
 
     } // end LazyColumn
-
-    if (showSeriesCompactHeader && mediaItem != null) {
-        Box(
-            modifier = Modifier
-                .align(Alignment.TopCenter)
-                .fillMaxWidth()
-                .height(164.dp)
-                .zIndex(17f)
-                .background(
-                    Brush.verticalGradient(
-                        colors = listOf(
-                            Obsidian.copy(alpha = 0.99f),
-                            Obsidian.copy(alpha = 0.98f),
-                            Obsidian.copy(alpha = 0.90f),
-                            Obsidian.copy(alpha = 0.62f),
-                            Color.Transparent,
-                        ),
-                    ),
-                ),
-        )
-        TvSeriesCompactHeader(
-            item = mediaItem,
-            selectedSeason = state.selectedSeason,
-            selectedEpisodeLabel = state.nextEpisode?.label,
-            modifier = Modifier
-                .align(Alignment.TopCenter)
-                .zIndex(18f)
-                .padding(start = 16.dp, top = 10.dp, end = 16.dp),
-        )
-    }
 
     // Preparing overlay â€" rendered inside the Box but outside the
     // LazyColumn so it always layers above the detail surface, blocking

@@ -10,6 +10,7 @@ import com.torve.data.kodi.KodiHost
 import com.torve.data.simkl.SimklClient
 import com.torve.data.trakt.TraktClient
 import com.torve.data.trakt.TraktTokens
+import com.torve.data.trakt.api.TraktAuthorizedApi
 import com.torve.data.trakt.auth.TraktTokenStore
 import com.torve.data.trakt.repo.TraktSyncRepository
 import com.torve.db.TorveDatabase
@@ -42,6 +43,8 @@ import com.torve.domain.repository.WatchHistoryRepository
 import com.torve.domain.repository.WatchProgressRepository
 import com.torve.domain.repository.WatchlistRepository
 import com.torve.domain.streams.StreamFilterPreferenceKeys
+import com.torve.domain.streams.StreamRulesImportResult
+import com.torve.domain.streams.StreamRulesJson
 import com.torve.domain.streams.StreamRulePatternValidator
 import com.torve.domain.sync.SyncRepository
 import com.torve.platform.NetworkMonitor
@@ -76,6 +79,7 @@ class SettingsViewModel(
     private val syncRepo: SyncRepository,
     private val networkMonitor: NetworkMonitor,
     private val traktTokenStore: TraktTokenStore,
+    private val traktAuthorizedApi: TraktAuthorizedApi,
     private val traktSyncRepo: TraktSyncRepository,
     private val watchlistRepo: WatchlistRepository,
     private val watchHistoryRepo: WatchHistoryRepository,
@@ -95,6 +99,8 @@ class SettingsViewModel(
     private var debridPollJob: Job? = null
     private var traktPollJob: Job? = null
     private var rdStartupRefreshDone = false
+    private var simklValidationRunning = false
+    private var simklLastValidatedAt = 0L
 
     /**
      * Callback to push an integration credential to the backend.
@@ -611,6 +617,9 @@ class SettingsViewModel(
             if (traktAccessToken.isNotBlank()) {
                 ensureTraktSessionReady(syncOnSuccess = true)
             }
+            if (simklAccessToken.isNotBlank()) {
+                ensureSimklSessionReady()
+            }
         }
     }
 
@@ -842,6 +851,7 @@ class SettingsViewModel(
                 delay(interval * 1000L)
                 when (val result = traktClient.pollDeviceToken(code.deviceCode)) {
                     is com.torve.data.trakt.TraktPollResult.Success -> {
+                        traktAuthorizedApi.resetForAccountChange()
                         traktTokenStore.write(result.tokens)
                         prefsRepo.remove(KEY_TRAKT_ACCESS_TOKEN)
                         prefsRepo.remove(KEY_TRAKT_REFRESH_TOKEN)
@@ -922,6 +932,7 @@ class SettingsViewModel(
     private var traktValidationRunning = false
     private var traktLastValidatedAt = 0L
     private val TRAKT_VALIDATION_COOLDOWN_MS = 30_000L
+    private val SIMKL_VALIDATION_COOLDOWN_MS = 30_000L
 
     private suspend fun verifyTraktConnection() {
         ensureTraktSessionReady(syncOnSuccess = false)
@@ -1164,11 +1175,13 @@ class SettingsViewModel(
         traktPollJob?.cancel()
         val token = _state.value.traktAccessToken
         scope.launch {
-            if (token.isNotBlank()) traktClient.revokeToken(token)
+            if (token.isNotBlank()) runCatching { traktClient.revokeToken(token) }
             traktTokenStore.clear()
+            traktAuthorizedApi.resetForAccountChange()
             prefsRepo.remove(KEY_TRAKT_ACCESS_TOKEN)
             prefsRepo.remove(KEY_TRAKT_REFRESH_TOKEN)
             clearTraktCache()
+            settingsRefreshNotifier.notifyRefresh(Clock.System.now().toEpochMilliseconds())
         }
         _state.update {
             it.copy(
@@ -1178,6 +1191,8 @@ class SettingsViewModel(
                 traktUser = null,
                 traktDeviceCode = null,
                 isPollingTrakt = false,
+                traktError = null,
+                traktApiStatus = "Not connected",
             )
         }
     }
@@ -1271,6 +1286,12 @@ class SettingsViewModel(
         runCatching { watchlistRepo.clear() }
         runCatching { watchProgressRepo.clearAllProgress() }
         runCatching { watchHistoryRepo.clearAll() }
+        runCatching {
+            database.torveQueries.deleteWatchSessionsForUserAndSource(
+                userId = userIdProvider.currentUserId(),
+                source = "TRAKT",
+            )
+        }
         runCatching { traktSyncRepo.clearLocalData() }
         prefsRepo.remove(KEY_TRAKT_LAST_SYNC_TIME)
         _state.update { it.copy(traktLastSyncTime = null) }
@@ -1755,10 +1776,7 @@ class SettingsViewModel(
                         )
                     }
                     // Verify by fetching user
-                    try {
-                        val user = simklClient.getUser(tokens.accessToken)
-                        _state.update { it.copy(simklUser = user) }
-                    } catch (_: Exception) { }
+                    ensureSimklSessionReady()
                     return@launch
                 }
             }
@@ -1766,10 +1784,71 @@ class SettingsViewModel(
         }
     }
 
+    private suspend fun ensureSimklSessionReady(): Boolean {
+        val now = Clock.System.now().toEpochMilliseconds()
+        if (simklValidationRunning) {
+            torveVerboseLog { "[SimklInit] Validation skipped (already running)" }
+            return _state.value.simklUser != null
+        }
+        if (now - simklLastValidatedAt < SIMKL_VALIDATION_COOLDOWN_MS && _state.value.simklUser != null) {
+            torveVerboseLog { "[SimklInit] Validation skipped (cooldown active, already validated)" }
+            return true
+        }
+        simklValidationRunning = true
+        try {
+            val token = _state.value.simklAccessToken.takeIf { it.isNotBlank() }
+                ?: integrationSecretStore.get(IntegrationSecretKey.SIMKL_ACCESS_TOKEN).orEmpty()
+            if (token.isBlank()) {
+                _state.update {
+                    it.copy(
+                        simklAccessToken = "",
+                        simklConnected = false,
+                        simklUser = null,
+                        simklError = null,
+                    )
+                }
+                return false
+            }
+            val user = simklClient.getUser(token)
+            simklLastValidatedAt = now
+            _state.update {
+                it.copy(
+                    simklAccessToken = token,
+                    simklConnected = true,
+                    simklUser = user,
+                    simklError = null,
+                )
+            }
+            torveVerboseLog { "[SimklInit] Validation success" }
+            return true
+        } catch (e: Exception) {
+            _state.update {
+                it.copy(
+                    simklConnected = it.simklAccessToken.isNotBlank(),
+                    simklUser = null,
+                    simklError = com.torve.presentation.error.UserFacingError.INTEGRATION_CONNECT_FAILED.defaultMessage(),
+                )
+            }
+            torveVerboseLog { "[SimklInit] Validation failed: ${e::class.simpleName} ${DiagnosticsRedactor.redact(e.message)}" }
+            return false
+        } finally {
+            simklValidationRunning = false
+        }
+    }
+
+    fun checkSimklConnection() {
+        scope.launch {
+            _state.update { it.copy(simklLoading = true, simklError = null) }
+            ensureSimklSessionReady()
+            _state.update { it.copy(simklLoading = false) }
+        }
+    }
+
     fun disconnectSimkl() {
         scope.launch {
             integrationSecretStore.remove(IntegrationSecretKey.SIMKL_ACCESS_TOKEN)
             prefsRepo.remove(KEY_SIMKL_ACCESS_TOKEN)
+            settingsRefreshNotifier.notifyRefresh(Clock.System.now().toEpochMilliseconds())
         }
         _state.update {
             it.copy(
@@ -1778,6 +1857,7 @@ class SettingsViewModel(
                 simklUser = null,
                 simklDeviceCode = null,
                 isPollingSimkl = false,
+                simklError = null,
             )
         }
     }
@@ -2242,6 +2322,17 @@ class SettingsViewModel(
         }
     }
 
+    fun exportRegexPatternsJson(): String =
+        StreamRulesJson.exportRegexPatterns(_state.value.regexPatterns)
+
+    fun importRegexPatternsJson(jsonStr: String): StreamRulesImportResult<RegexPattern> {
+        val result = StreamRulesJson.importRegexPatterns(jsonStr)
+        val updated = mergeRegexPatterns(_state.value.regexPatterns, result.items)
+        _state.update { it.copy(regexPatterns = updated) }
+        saveRegexPatterns(updated)
+        return result
+    }
+
     // -------------------------------------------------------------------------
     // Stream Groups
     // -------------------------------------------------------------------------
@@ -2286,6 +2377,55 @@ class SettingsViewModel(
         scope.launch {
             prefsRepo.setString(KEY_STREAM_GROUPS, jsonParser.encodeToString(groups))
         }
+    }
+
+    fun exportStreamGroupsJson(): String =
+        StreamRulesJson.exportStreamGroups(_state.value.streamGroups)
+
+    fun importStreamGroupsJson(jsonStr: String): StreamRulesImportResult<StreamGroup> {
+        val result = StreamRulesJson.importStreamGroups(jsonStr)
+        val updated = mergeStreamGroups(_state.value.streamGroups, result.items)
+        _state.update { it.copy(streamGroups = updated) }
+        saveStreamGroups(updated)
+        return result
+    }
+
+    private fun mergeRegexPatterns(
+        existing: List<RegexPattern>,
+        incoming: List<RegexPattern>,
+    ): List<RegexPattern> {
+        val merged = linkedMapOf<String, RegexPattern>()
+        existing.forEachIndexed { index, pattern ->
+            merged[regexPatternMergeKey(pattern, index)] = pattern
+        }
+        incoming.forEachIndexed { index, pattern ->
+            merged[regexPatternMergeKey(pattern, index + existing.size)] = pattern
+        }
+        return merged.values.toList()
+    }
+
+    private fun regexPatternMergeKey(pattern: RegexPattern, index: Int): String {
+        val normalized = pattern.pattern.trim()
+        return if (normalized.isNotEmpty()) normalized else "blank:${pattern.label}:$index"
+    }
+
+    private fun mergeStreamGroups(
+        existing: List<StreamGroup>,
+        incoming: List<StreamGroup>,
+    ): List<StreamGroup> {
+        val merged = linkedMapOf<String, StreamGroup>()
+        existing.forEachIndexed { index, group ->
+            merged[streamGroupMergeKey(group, index)] = group
+        }
+        incoming.forEachIndexed { index, group ->
+            merged[streamGroupMergeKey(group, index + existing.size)] = group
+        }
+        return merged.values.toList()
+    }
+
+    private fun streamGroupMergeKey(group: StreamGroup, index: Int): String {
+        val normalized = group.matchPattern.trim()
+        return if (normalized.isNotEmpty()) normalized else "blank:${group.name}:$index"
     }
 
     private suspend fun loadCardStylePresets(

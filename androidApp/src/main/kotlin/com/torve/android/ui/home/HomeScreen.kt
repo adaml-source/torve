@@ -99,6 +99,7 @@ import com.torve.domain.model.MediaType
 import com.torve.domain.model.allowsTmdbRatingProvider
 import com.torve.domain.model.ShelfType
 import com.torve.domain.model.WatchProgress
+import com.torve.domain.model.extractTmdbIdOrNull
 import com.torve.domain.model.matchesSection
 import com.torve.domain.model.resolveCardStyle
 import com.torve.domain.model.resolvedWidthDp
@@ -360,10 +361,20 @@ fun HomeScreen(
                                         androidx.compose.runtime.CompositionLocalProvider(
                                             LocalCardStyle provides sectionStyle,
                                         ) {
+                                            val title = config.customTitle ?: stringResource(R.string.home_continue_watching)
                                             SectionHeader(
-                                                title = config.customTitle ?: stringResource(R.string.home_continue_watching),
+                                                title = title,
                                                 action = stringResource(R.string.home_see_all),
-                                                onActionClick = { onSeeAllClick("continue_watching") },
+                                                onActionClick = {
+                                                    if (mediaType == "all") {
+                                                        onSeeAllClick("continue_watching")
+                                                    } else {
+                                                        val key = "continue_watching_$mediaType"
+                                                        SeeAllViewModel.pendingItems[key] =
+                                                            title to filteredContinueWatching.map { it.toSeeAllMediaItem() }
+                                                        onSeeAllClick("shelf:$key")
+                                                    }
+                                                },
                                             )
                                             LazyRow(
                                                 contentPadding = PaddingValues(horizontal = 16.dp),
@@ -429,10 +440,19 @@ fun HomeScreen(
                                     androidx.compose.runtime.CompositionLocalProvider(
                                         LocalCardStyle provides sectionStyle,
                                     ) {
+                                        val title = config.customTitle ?: "My Watchlist"
                                         SectionHeader(
-                                            title = config.customTitle ?: "My Watchlist",
+                                            title = title,
                                             action = stringResource(R.string.home_see_all),
-                                            onActionClick = { onSeeAllClick("watchlist") },
+                                            onActionClick = {
+                                                if (mediaType == "all") {
+                                                    onSeeAllClick("watchlist")
+                                                } else {
+                                                    val key = "watchlist_$mediaType"
+                                                    SeeAllViewModel.pendingItems[key] = title to filteredWatchlist
+                                                    onSeeAllClick("shelf:$key")
+                                                }
+                                            },
                                         )
                                         if (filteredWatchlist.isNotEmpty()) {
                                             LazyRow(
@@ -468,7 +488,12 @@ fun HomeScreen(
                                             SectionHeader(
                                                 title = config.customTitle ?: "Watchlist — Movies",
                                                 action = stringResource(R.string.home_see_all),
-                                                onActionClick = { onSeeAllClick("watchlist") },
+                                                onActionClick = {
+                                                    val key = "watchlist_movies"
+                                                    SeeAllViewModel.pendingItems[key] =
+                                                        (config.customTitle ?: "Watchlist - Movies") to watchlistMovies
+                                                    onSeeAllClick("shelf:$key")
+                                                },
                                             )
                                             LazyRow(
                                                 contentPadding = PaddingValues(horizontal = 16.dp),
@@ -498,7 +523,12 @@ fun HomeScreen(
                                             SectionHeader(
                                                 title = config.customTitle ?: "Watchlist — TV Shows",
                                                 action = stringResource(R.string.home_see_all),
-                                                onActionClick = { onSeeAllClick("watchlist") },
+                                                onActionClick = {
+                                                    val key = "watchlist_tv"
+                                                    SeeAllViewModel.pendingItems[key] =
+                                                        (config.customTitle ?: "Watchlist - TV Shows") to watchlistTv
+                                                    onSeeAllClick("shelf:$key")
+                                                },
                                             )
                                             LazyRow(
                                                 contentPadding = PaddingValues(horizontal = 16.dp),
@@ -529,7 +559,13 @@ fun HomeScreen(
                                             SectionHeader(
                                                 title = config.customTitle ?: stringResource(R.string.home_recommended),
                                                 action = stringResource(R.string.home_see_all),
-                                                onActionClick = { onSeeAllClick("recommended") },
+                                                onActionClick = {
+                                                    val title = config.customTitle ?: "Recommended"
+                                                    val key = "recommended_$mediaType"
+                                                    SeeAllViewModel.pendingItems[key] =
+                                                        title to filteredRecommendations.map { it.item }
+                                                    onSeeAllClick("shelf:$key")
+                                                },
                                             )
                                             LazyRow(
                                                 contentPadding = PaddingValues(horizontal = 16.dp),
@@ -1425,6 +1461,20 @@ private fun HomeSearchBar(
 
 // Skeleton Loader — Full screen loading placeholder
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+private fun WatchProgress.toSeeAllMediaItem(): MediaItem =
+    MediaItem(
+        id = mediaId,
+        tmdbId = mediaId.extractTmdbIdOrNull(),
+        type = mediaType,
+        title = if (mediaType == MediaType.SERIES) {
+            showTitle?.takeIf { it.isNotBlank() } ?: title
+        } else {
+            title
+        },
+        posterUrl = posterUrl,
+        backdropUrl = backdropUrl,
+    )
 
 @Composable
 private fun HomeSkeletonLoader() {

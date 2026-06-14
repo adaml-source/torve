@@ -393,9 +393,15 @@ fun IntegrationsScreen(
             title = "SIMKL",
             description = stringResource(R.string.integrations_simkl_desc),
         ) {
+            val simklUser = state.simklUser
+            val simklStatus = when {
+                simklUser != null -> stringResource(R.string.integrations_status_connected) + " (${simklUser.username})"
+                state.simklConnected -> "Token found - reconnect if this does not recover"
+                else -> stringResource(R.string.integrations_status_not_connected)
+            }
             Text(
-                if (state.simklConnected) stringResource(R.string.integrations_status_connected) + (state.simklUser?.username?.let { " ($it)" } ?: "") else stringResource(R.string.integrations_status_not_connected),
-                color = if (state.simklConnected) Snow else Silver,
+                simklStatus,
+                color = if (state.simklUser != null) Snow else Silver,
                 style = MaterialTheme.typography.bodySmall,
             )
             state.simklDeviceCode?.let { code ->

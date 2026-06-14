@@ -47,6 +47,7 @@ import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyShortcut
 import androidx.compose.ui.window.MenuBar
 import androidx.compose.ui.window.Window
+import androidx.compose.ui.window.WindowPlacement
 import androidx.compose.ui.window.WindowState
 import androidx.compose.ui.window.application
 import com.torve.data.auth.AuthClient
@@ -241,8 +242,11 @@ internal val globalReminderStore: com.torve.desktop.reminders.EpgReminderStore b
     com.torve.desktop.reminders.EpgReminderStore(rootDir = com.torve.desktop.platform.desktopDataDir())
 }
 
-private val loginFullscreenPreview: Boolean =
-    System.getProperty("torve.desktop.loginFullscreenPreview", "true").toBoolean()
+// Normal desktop launches should behave like normal desktop windows.
+// Fullscreen launch remains opt-in for kiosk/smoke-test scenarios.
+private val launchFullscreen: Boolean =
+    System.getProperty("torve.desktop.launchFullscreen")?.toBooleanStrictOrNull()
+        ?: System.getProperty("torve.desktop.loginFullscreenPreview", "false").toBoolean()
 
 fun main() {
     // Splash BEFORE application { ... } starts composing. The Compose
@@ -329,9 +333,8 @@ fun main() {
     }
     val windowState = remember {
         com.torve.desktop.platform.DesktopWindowStateStore.restore().also { restored ->
-            if (loginFullscreenPreview) {
-                restored.placement = androidx.compose.ui.window.WindowPlacement.Fullscreen
-                restored.size = androidx.compose.ui.unit.DpSize(1920.dp, 1080.dp)
+            if (launchFullscreen) {
+                restored.placement = WindowPlacement.Fullscreen
             }
         }
     }
@@ -362,7 +365,7 @@ fun main() {
         trayHolder.value = tray
         globalTray = tray
         onDispose {
-            if (!loginFullscreenPreview) {
+            if (windowState.placement != WindowPlacement.Fullscreen) {
                 runCatching { com.torve.desktop.platform.DesktopWindowStateStore.save(windowState) }
             }
             tray.release()
@@ -384,7 +387,8 @@ fun main() {
         },
         title = "${releaseInfo.appName} ${releaseInfo.versionLabel}",
         state = windowState,
-        undecorated = loginFullscreenPreview,
+        undecorated = false,
+        resizable = windowState.placement != WindowPlacement.Fullscreen,
         visible = windowVisible,
     ) {
         // Paint the JFrame's native background dark BEFORE Compose's
@@ -399,6 +403,10 @@ fun main() {
             if (window.background != darkBg) {
                 window.background = darkBg
                 window.contentPane.background = darkBg
+            }
+            val shouldBeResizable = windowState.placement != WindowPlacement.Fullscreen
+            if (window.isResizable != shouldBeResizable) {
+                window.isResizable = shouldBeResizable
             }
         }
 
@@ -492,10 +500,10 @@ fun main() {
         // on macOS automatically. Keyboard accelerators MUST be declared
         // per-item via `shortcut = KeyShortcut(...)`. They are NOT inferred
         // from menu structure.
-        if (!loginFullscreenPreview) {
-            val runtime = (bootstrapState as? BootstrapState.Ready)?.runtime
-            val playPauseShortcut = if (isMac) KeyShortcut(Key.Spacebar) else primaryAccel(Key.K)
-            MenuBar {
+        val runtime = (bootstrapState as? BootstrapState.Ready)?.runtime
+        val playPauseShortcut = if (isMac) KeyShortcut(Key.Spacebar) else primaryAccel(Key.K)
+        val isFullscreen = windowState.placement == WindowPlacement.Fullscreen
+        MenuBar {
             Menu("File") {
                 Item("Check for Updates...", onClick = {
                     @OptIn(DelicateCoroutinesApi::class)
@@ -529,10 +537,14 @@ fun main() {
             Menu("Window") {
                 Item("Hide to Tray", shortcut = nonMacAccel(Key.W), onClick = { windowVisible = false })
                 Item("Maximize", shortcut = nonMacAccel(Key.M), onClick = {
-                    windowState.placement = androidx.compose.ui.window.WindowPlacement.Maximized
+                    windowState.placement = WindowPlacement.Maximized
                 })
-                Item("Fullscreen", shortcut = fullscreenAccel(), onClick = {
-                    windowState.placement = androidx.compose.ui.window.WindowPlacement.Fullscreen
+                Item(if (isFullscreen) "Exit Fullscreen" else "Fullscreen", shortcut = fullscreenAccel(), onClick = {
+                    windowState.placement = if (isFullscreen) {
+                        WindowPlacement.Floating
+                    } else {
+                        WindowPlacement.Fullscreen
+                    }
                 })
             }
             Menu("Help") {
@@ -541,7 +553,6 @@ fun main() {
                         java.awt.Desktop.getDesktop().browse(java.net.URI("https://torve.app"))
                     }
                 })
-            }
             }
         }
 

@@ -118,7 +118,6 @@ import org.koin.compose.koinInject
 private const val TV_SEE_ALL_INITIAL_TARGET_COUNT = 100
 private const val TV_SEE_ALL_FILTER_METADATA_LIMIT = 30
 private const val TV_SEE_ALL_FILTER_RESULT_TARGET_COUNT = 60
-private const val TV_SEE_ALL_FILTER_LOOKAHEAD_PAGES = 2
 private const val TV_SEE_ALL_FILTER_GENRE_LIMIT = 8
 private const val TV_SEE_ALL_FILTER_STUDIO_LIMIT = 5
 private const val TV_SEE_ALL_FILTER_YEAR_LIMIT = 5
@@ -255,8 +254,9 @@ internal fun TvSeeAllScreen(
         selectedStudioIds.isNotEmpty() ||
         selectedYear != null ||
         selectedMinRating != null
-    val isSortedAwayFromDefault = selectedSortKey != defaultSortKey
-    val usesActiveDiscoveryQuery = hasActiveFilters || isSortedAwayFromDefault
+    // See All is a scoped expansion of the rail that opened it. Sort/filter
+    // must transform the loaded rail source only; it must not switch to a
+    // broader discovery query to "refill" results.
     val filterSourceItems = filterOptionItems.toList().ifEmpty { loadedItems }
     val filterMediaType = remember(railKey, mediaType) {
         mediaType.takeIf { it == "movie" || it == "tv" }
@@ -354,14 +354,13 @@ internal fun TvSeeAllScreen(
     })
 
     fun rememberBaseFilterOptions() {
-        if (!usesActiveDiscoveryQuery && !isPersonCreditsRail) {
+        if (!isPersonCreditsRail) {
             filterOptionItems.clear()
             filterOptionItems.addAll(items)
         }
     }
 
     fun persistSeeAllCache() {
-        if (usesActiveDiscoveryQuery) return
         rememberBaseFilterOptions()
         TvSeeAllCache.put(
             cacheKey,
@@ -413,49 +412,6 @@ internal fun TvSeeAllScreen(
                 else -> "movie"
             }
 
-    fun baseGenreIdsForRail(): Set<Int> =
-        railKey.takeIf { it.startsWith("genre_") }
-            ?.substringAfterLast("_")
-            ?.toIntOrNull()
-            ?.let { setOf(it) }
-            ?: emptySet()
-
-    fun providerFilterForRail(): Pair<String?, String?> {
-        if (!railKey.startsWith("provider_")) return null to null
-        val parts = railKey.split("_")
-        return parts.getOrNull(2) to "US"
-    }
-
-    suspend fun fallbackDiscoveryPage(page: Int, reason: String): PagedResult {
-        val queryType = queryMediaType()
-        val sortBy = discoverSortByForSeeAll(
-            mediaType = queryType,
-            railKey = railKey,
-            sortKey = selectedSortKey,
-        )
-        Log.w(TV_SEE_ALL_LOG_TAG, "fallback discover rail=$railKey mediaType=$queryType page=$page reason=$reason")
-        return runCatching {
-            metadataRepo.discover(
-                type = queryType,
-                page = page,
-                sortBy = sortBy,
-                withGenres = baseGenreIdsForRail().takeIf { it.isNotEmpty() }?.joinToString(","),
-            )
-        }.getOrElse { error ->
-            val pending = SeeAllViewModel.pendingItems[railKey]?.second.orEmpty()
-            Log.w(
-                TV_SEE_ALL_LOG_TAG,
-                "fallback pending rail=$railKey mediaType=$queryType page=$page pending=${pending.size} error=${error::class.simpleName}",
-            )
-            PagedResult(
-                items = pending,
-                page = 1,
-                totalPages = 1,
-                totalResults = pending.size,
-            )
-        }
-    }
-
     suspend fun fetchRailPage(page: Int): PagedResult {
         val queryType = queryMediaType()
         val result = runCatching {
@@ -472,133 +428,37 @@ internal fun TvSeeAllScreen(
                     val genreId = railKey.substringAfterLast("_")
                     metadataRepo.discover(type = queryType, page = page, withGenres = genreId)
                 }
-                railKey == "recommended" -> metadataRepo.getPopularPaged(queryType, page)
-                else -> metadataRepo.getPopularPaged(queryType, page)
+                railKey == "recommended" -> {
+                    val pending = SeeAllViewModel.pendingItems[railKey]?.second.orEmpty()
+                    PagedResult(
+                        items = pending,
+                        page = 1,
+                        totalPages = 1,
+                        totalResults = pending.size,
+                    )
+                }
+                else -> {
+                    val pending = SeeAllViewModel.pendingItems[railKey]?.second.orEmpty()
+                    PagedResult(
+                        items = pending,
+                        page = 1,
+                        totalPages = 1,
+                        totalResults = pending.size,
+                    )
+                }
             }
         }.getOrElse { error ->
-            fallbackDiscoveryPage(page, error::class.simpleName ?: "fetch_failed")
-        }
-        return if (result.items.isNotEmpty()) {
-            result
-        } else {
-            fallbackDiscoveryPage(page, "empty_${railKey}")
-        }
-    }
-
-    suspend fun hydrateForActiveFilters(pageItems: List<MediaItem>): List<MediaItem> {
-        val needsDetail = selectedStudioIds.isNotEmpty() ||
-            pageItems.any { it.tmdbId != null && (it.genres.isEmpty() || it.studios.isEmpty()) }
-        if (!needsDetail) return ratingsEnricher.hydrateListFromCache(pageItems)
-        return coroutineScope {
-            pageItems.map { item ->
-                async {
-                    val tmdbId = item.tmdbId ?: return@async ratingsEnricher.hydrateFromCache(item)
-                    val type = if (item.type == MediaType.SERIES) "tv" else "movie"
-                    val detail = runCatching { metadataRepo.getDetail(type, tmdbId) }.getOrNull()
-                    val hydrated = detail?.let {
-                        item.copy(
-                            imdbId = item.imdbId ?: it.imdbId,
-                            genres = item.genres.ifEmpty { it.genres },
-                            genreIds = item.genreIds.ifEmpty { it.genreIds },
-                            studios = item.studios.ifEmpty { it.studios },
-                            rating = item.rating ?: it.rating,
-                            ratings = item.ratings.preferSeeAllRichRatings(it.ratings),
-                            year = item.year ?: it.year,
-                            releaseDate = item.releaseDate ?: it.releaseDate,
-                            posterUrl = item.posterUrl ?: it.posterUrl,
-                            backdropUrl = item.backdropUrl ?: it.backdropUrl,
-                            logoUrl = item.logoUrl ?: it.logoUrl,
-                        )
-                    } ?: item
-                    ratingsEnricher.hydrateFromCache(hydrated)
-                }
-            }.map { it.await() }
-        }
-    }
-
-    suspend fun loadActiveDiscoveryPage(page: Int, replace: Boolean) {
-        if (loading || page > totalPages) return
-        loading = true
-        try {
-            val queryType = queryMediaType()
-            val genreIds = (baseGenreIdsForRail() + selectedGenreIds)
-                .takeIf { it.isNotEmpty() }
-                ?.joinToString(",")
-            val (providerId, providerRegion) = providerFilterForRail()
-            val sortBy = discoverSortByForSeeAll(
-                mediaType = queryType,
-                railKey = railKey,
-                sortKey = selectedSortKey,
+            Log.w(
+                TV_SEE_ALL_LOG_TAG,
+                "source scoped page failed rail=$railKey mediaType=$queryType page=$page error=${error::class.simpleName}",
             )
-            val minRating = selectedMinRating?.toFloat()
-                ?: if (railKey == "hidden_gems") 7.5f else null
-            val accumulated = mutableListOf<MediaItem>()
-            var nextPage = page
-            var latestTotalPages = totalPages
-            var fetchedPages = 0
-            val maxPages = when {
-                !replace -> 1
-                selectedStudioIds.isNotEmpty() -> TV_SEE_ALL_FILTER_LOOKAHEAD_PAGES + 4
-                else -> TV_SEE_ALL_FILTER_LOOKAHEAD_PAGES
-            }
-
-            while (
-                nextPage <= latestTotalPages &&
-                fetchedPages < maxPages &&
-                (accumulated.size < TV_SEE_ALL_FILTER_RESULT_TARGET_COUNT || !replace)
-            ) {
-                val result = metadataRepo.discover(
-                    type = queryType,
-                    page = nextPage,
-                    sortBy = sortBy,
-                    withGenres = genreIds,
-                    minRating = minRating,
-                    year = selectedYear,
-                    yearTo = selectedYear,
-                    withWatchProviders = providerId,
-                    watchRegion = providerRegion,
-                )
-                latestTotalPages = result.totalPages
-                val hydrated = hydrateForActiveFilters(result.items)
-                accumulated += hydrated.filterSeeAllItems(
-                    genreIds = selectedGenreIds,
-                    studioIds = selectedStudioIds,
-                    year = selectedYear,
-                    minRating = selectedMinRating,
-                )
-                nextPage++
-                fetchedPages++
-                if (!replace) break
-            }
-
-            val existingKeys = if (replace) mutableSetOf() else items.mapTo(mutableSetOf()) { it.seeAllStableKey() }
-            val distinctItems = accumulated.filter { existingKeys.add(it.seeAllStableKey()) }
-            if (replace) {
-                items.clear()
-                focusRequesters.clear()
-                lastFocusedIndex = -1
-            }
-            items.addAll(distinctItems)
-            currentPage = (nextPage - 1).coerceAtLeast(page)
-            totalPages = latestTotalPages
-        } catch (_: Throwable) {
-            if (replace) {
-                items.clear()
-                totalPages = page
-                currentPage = page
-            }
-        } finally {
-            loading = false
-            initialLoad = false
+            PagedResult(items = emptyList(), page = page, totalPages = page, totalResults = 0)
         }
+        return result
     }
 
     suspend fun loadPage(page: Int, replace: Boolean = false) {
         if (loading || page > totalPages) return
-        if (usesActiveDiscoveryQuery && !isPersonCreditsRail && !railKey.startsWith("continue_watching")) {
-            loadActiveDiscoveryPage(page = page, replace = replace)
-            return
-        }
         loading = true
         try {
             SeeAllViewModel.pendingItems[railKey]
@@ -835,35 +695,11 @@ internal fun TvSeeAllScreen(
         }
     }
 
-    LaunchedEffect(filterSignature, selectedSortKey) {
+    LaunchedEffect(filterSignature) {
         if (initialLoad) return@LaunchedEffect
-        gridState.scrollToItem(0)
-        focusRequesters.clear()
-        lastFocusedIndex = -1
-        if (usesActiveDiscoveryQuery) {
-            totalPages = Int.MAX_VALUE
-            currentPage = 0
-            loadPage(page = 1, replace = true)
-        } else {
-            val cached = TvSeeAllCache.get(cacheKey)
-            if (cached != null && cached.items.isNotEmpty()) {
-                items.clear()
-                items.addAll(cached.items)
-                filterOptionItems.clear()
-                filterOptionItems.addAll(cached.items)
-                currentPage = cached.currentPage
-                totalPages = cached.totalPages
-            } else {
-                items.clear()
-                filterOptionItems.clear()
-                currentPage = 0
-                totalPages = Int.MAX_VALUE
-                while (items.size < TV_SEE_ALL_INITIAL_TARGET_COUNT && currentPage < totalPages) {
-                    loadPage(currentPage + 1)
-                    if (totalPages == 1) break
-                }
-            }
-        }
+        // Keep focus and scroll stable. displayedItems is derived from the
+        // scoped source list, so no reload or global discovery fallback is
+        // needed when sort/filter state changes.
     }
 
     LaunchedEffect(shouldLoadMore) {
@@ -872,8 +708,8 @@ internal fun TvSeeAllScreen(
         }
     }
 
-    LaunchedEffect(usesActiveDiscoveryQuery, renderedItems.size, currentPage, totalPages, filterBackfillAttempts) {
-        if (!usesActiveDiscoveryQuery || loading || currentPage >= totalPages) return@LaunchedEffect
+    LaunchedEffect(hasActiveFilters, renderedItems.size, currentPage, totalPages, filterBackfillAttempts) {
+        if (!hasActiveFilters || loading || currentPage >= totalPages) return@LaunchedEffect
         if (renderedItems.size >= TV_SEE_ALL_FILTER_RESULT_TARGET_COUNT) return@LaunchedEffect
         if (filterBackfillAttempts >= 3) return@LaunchedEffect
         filterBackfillAttempts++
@@ -1694,26 +1530,6 @@ private fun defaultSortKeyForRail(
         sortOptions.firstOrNull()?.key ?: TvSeeAllSortKey.DEFAULT
     }
 
-private fun discoverSortByForSeeAll(
-    mediaType: String,
-    railKey: String,
-    sortKey: TvSeeAllSortKey,
-): String {
-    val releaseDate = if (mediaType == "tv") "first_air_date" else "primary_release_date"
-    return when (sortKey) {
-        TvSeeAllSortKey.RATING_DESC -> "vote_average.desc"
-        TvSeeAllSortKey.NEWEST_RELEASE -> "$releaseDate.desc"
-        TvSeeAllSortKey.OLDEST_RELEASE -> "$releaseDate.asc"
-        TvSeeAllSortKey.TITLE_ASC,
-        TvSeeAllSortKey.TITLE_DESC -> "popularity.desc"
-        TvSeeAllSortKey.DEFAULT -> when {
-            railKey.startsWith("top_rated_") || railKey == "top-rated" || railKey == "hidden_gems" -> "vote_average.desc"
-            railKey == "upcoming" -> "$releaseDate.asc"
-            else -> "popularity.desc"
-        }
-    }
-}
-
 private fun shouldUsePendingItemsForTvSeeAll(railKey: String): Boolean =
     when {
         railKey.startsWith("trending_") -> false
@@ -1731,7 +1547,6 @@ private fun shouldUsePendingItemsForTvSeeAll(railKey: String): Boolean =
             "top-rated",
             "upcoming",
             "hidden_gems",
-            "recommended",
         ) -> false
         else -> true
     }

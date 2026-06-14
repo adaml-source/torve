@@ -1237,8 +1237,8 @@
     <string name="settings_diagnostics">Tanılama</string>
     <string name="settings_report_issue">Sorun Bildir</string>
     <string name="bug_report_title">Sorun bildir</string>
-    <string name="bug_report_subtitle">%1$s adresine düzeltilmiş bir rapor gönder. Yapıştırılan loglar gönderilmeden önce temizlenir.</string>
-    <string name="bug_report_tv_subtitle">%1$s için düzeltilmiş bir rapor oluştur. Bu TV\'de e-posta, paylaş veya kopyala seçeneklerini kullan.</string>
+    <string name="bug_report_subtitle">Send a redacted report directly to Torve support. Pasted logs are scrubbed before sending.</string>
+    <string name="bug_report_tv_subtitle">Send a redacted report directly to Torve support. No email or share app is required.</string>
     <string name="bug_report_tv_settings_subtitle">Destek için düzeltilmiş tanılama raporu oluştur</string>
     <string name="bug_report_issue_type">Sorun türü</string>
     <string name="bug_report_type_playback">Oynatma</string>

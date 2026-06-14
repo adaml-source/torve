@@ -68,6 +68,7 @@ data class TmdbTv(
     val status: String? = null,
     val networks: List<TmdbCompany> = emptyList(),
     @SerialName("production_companies") val productionCompanies: List<TmdbCompany> = emptyList(),
+    @SerialName("episode_run_time") val episodeRunTime: List<Int> = emptyList(),
     val credits: TmdbCredits? = null,
     val videos: TmdbVideos? = null,
     val seasons: List<TmdbSeason>? = null,

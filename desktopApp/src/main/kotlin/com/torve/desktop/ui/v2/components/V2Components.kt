@@ -353,8 +353,10 @@ fun DesktopRatingPills(
     prefs: RatingDisplayPrefs = LocalRatingDisplayPrefs.current,
     includeTorve: Boolean = false,
     showBackground: Boolean = true,
+    visualScale: Float = 1f,
 ) {
     if (ratings == null) return
+    val scale = visualScale.coerceIn(0.85f, 1.8f)
     val enabledProviders = if (includeTorve) prefs.enabledProviders else prefs.enabledProviders.filter { it != RatingSource.TORVE }
     val providers = deriveProvidersToRender(
         enabledProviders = enabledProviders,
@@ -382,24 +384,24 @@ fun DesktopRatingPills(
     // 4.dp/1.dp padding, monospace-leaning label so digits align across
     // pills. Icon stays at 11dp so the pill height matches the source
     // icons crisply rather than dwarfing them.
-    Row(modifier, horizontalArrangement = Arrangement.spacedBy(3.dp), verticalAlignment = Alignment.CenterVertically) {
+    Row(modifier, horizontalArrangement = Arrangement.spacedBy((3f * scale).dp), verticalAlignment = Alignment.CenterVertically) {
         pills.forEach { (source, value, color) ->
             val iconPath = ratingIconPath(source, ratings)
             if (showBackground) {
-                Surface(color = Color(0x99000000), shape = RoundedCornerShape(6.dp)) {
+                Surface(color = Color(0x99000000), shape = RoundedCornerShape((6f * scale).dp)) {
                     Row(
-                        Modifier.padding(horizontal = 4.dp, vertical = 1.dp),
+                        Modifier.padding(horizontal = (4f * scale).dp, vertical = (1.5f * scale).dp),
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(2.dp),
+                        horizontalArrangement = Arrangement.spacedBy((2f * scale).dp),
                     ) {
                         if (iconPath != null) {
-                            Image(painter = painterResource(iconPath), contentDescription = source.displayName, modifier = Modifier.size(11.dp))
+                            Image(painter = painterResource(iconPath), contentDescription = source.displayName, modifier = Modifier.size((11f * scale).dp))
                         } else {
                             Text(source.iconChar, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = color)
                         }
                         Text(
                             text = value,
-                            style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp, letterSpacing = 0.sp),
+                            style = MaterialTheme.typography.labelSmall.copy(fontSize = (10f * scale).sp, letterSpacing = 0.sp),
                             fontWeight = FontWeight.Medium,
                             color = Color(0xFFE8E8EC),
                         )
@@ -408,16 +410,16 @@ fun DesktopRatingPills(
             } else {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(2.dp),
+                    horizontalArrangement = Arrangement.spacedBy((2f * scale).dp),
                 ) {
                     if (iconPath != null) {
-                        Image(painter = painterResource(iconPath), contentDescription = source.displayName, modifier = Modifier.size(11.dp))
+                        Image(painter = painterResource(iconPath), contentDescription = source.displayName, modifier = Modifier.size((11f * scale).dp))
                     } else {
                         Text(source.iconChar, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = color)
                     }
                     Text(
                         text = value,
-                        style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp, letterSpacing = 0.sp),
+                        style = MaterialTheme.typography.labelSmall.copy(fontSize = (10f * scale).sp, letterSpacing = 0.sp),
                         fontWeight = FontWeight.Medium,
                         color = Color(0xFFB8B8C2),
                     )

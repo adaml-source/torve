@@ -5,6 +5,7 @@ enum class IntegrationSecretKey {
     TRAKT_ACCESS_TOKEN,
     TRAKT_REFRESH_TOKEN,
     TRAKT_CLIENT_SECRET,
+    TRAKT_CONNECTION_SCOPE,
     DEBRID_API_KEY,              // legacy single-key (migration only)
     DEBRID_API_KEY_REAL_DEBRID,
     DEBRID_API_KEY_ALL_DEBRID,

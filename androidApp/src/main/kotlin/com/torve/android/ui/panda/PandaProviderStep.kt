@@ -44,8 +44,127 @@ import com.torve.android.ui.theme.Ruby
 import com.torve.android.ui.theme.Silver
 import com.torve.android.ui.theme.Snow
 import com.torve.android.ui.theme.Steel
+import com.torve.presentation.panda.PandaSetupMode
 import com.torve.presentation.panda.PandaSetupUiState
 import com.torve.presentation.panda.PandaSetupViewModel
+
+@Composable
+fun PandaSetupTypeStep(
+    state: PandaSetupUiState,
+    viewModel: PandaSetupViewModel,
+    entryFocusRequester: FocusRequester? = null,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState()),
+    ) {
+        Text(
+            stringResource(R.string.panda_setup_type_title),
+            style = MaterialTheme.typography.headlineSmall,
+            fontWeight = FontWeight.Bold,
+            color = Snow,
+        )
+        Spacer(Modifier.height(8.dp))
+        Text(
+            stringResource(R.string.panda_setup_type_desc),
+            style = MaterialTheme.typography.bodyMedium,
+            color = Snow,
+        )
+        Spacer(Modifier.height(20.dp))
+
+        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            SetupTypeCard(
+                title = stringResource(R.string.panda_setup_type_debrid_title),
+                subtitle = stringResource(R.string.panda_setup_type_debrid_subtitle),
+                badge = "D",
+                selected = state.setupMode == PandaSetupMode.DEBRID,
+                entryFocusRequester = entryFocusRequester,
+                onClick = { viewModel.selectSetupMode(PandaSetupMode.DEBRID) },
+            )
+            SetupTypeCard(
+                title = stringResource(R.string.panda_setup_type_usenet_title),
+                subtitle = stringResource(R.string.panda_setup_type_usenet_subtitle),
+                badge = "U",
+                selected = state.setupMode == PandaSetupMode.USENET_ONLY,
+                onClick = { viewModel.selectSetupMode(PandaSetupMode.USENET_ONLY) },
+            )
+        }
+    }
+}
+
+@Composable
+private fun SetupTypeCard(
+    title: String,
+    subtitle: String,
+    badge: String,
+    selected: Boolean,
+    entryFocusRequester: FocusRequester? = null,
+    onClick: () -> Unit,
+) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val isFocused by interactionSource.collectIsFocusedAsState()
+    val borderColor: Color = when {
+        isFocused -> Amber
+        selected -> Amber.copy(alpha = 0.6f)
+        else -> Color.Transparent
+    }
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .then(entryFocusRequester?.let { Modifier.focusRequester(it) } ?: Modifier)
+            .clip(RoundedCornerShape(12.dp))
+            .background(if (selected) Amber.copy(alpha = 0.15f) else Gunmetal)
+            .border(if (isFocused) 3.dp else 2.dp, borderColor, RoundedCornerShape(12.dp))
+            .clickable(
+                interactionSource = interactionSource,
+                indication = null,
+                onClick = onClick,
+            )
+            .padding(16.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            modifier = Modifier
+                .size(40.dp)
+                .clip(CircleShape)
+                .background(Amber.copy(alpha = 0.15f)),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                badge,
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.Bold,
+                color = Snow,
+            )
+        }
+
+        Spacer(Modifier.width(14.dp))
+
+        Column(Modifier.weight(1f)) {
+            Text(
+                title,
+                style = MaterialTheme.typography.bodyLarge,
+                fontWeight = FontWeight.Medium,
+                color = Snow,
+            )
+            Text(
+                subtitle,
+                style = MaterialTheme.typography.bodySmall,
+                color = Snow,
+            )
+        }
+
+        if (selected) {
+            Box(
+                modifier = Modifier
+                    .size(10.dp)
+                    .clip(CircleShape)
+                    .background(Amber),
+            )
+        }
+    }
+}
 
 @Composable
 fun PandaProviderStep(
@@ -89,7 +208,7 @@ fun PandaProviderStep(
             }
         } else {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                state.providers.forEachIndexed { index, provider ->
+                state.providers.filter { it.id != "none" }.forEachIndexed { index, provider ->
                     val isSelected = state.selectedProvider?.id == provider.id
                     // Track focus via the InteractionSource so the
                     // card draws an Amber border whenever the D-pad
@@ -155,24 +274,16 @@ fun PandaProviderStep(
 
                         Column(Modifier.weight(1f)) {
                             Text(
-                                if (provider.id == "none") {
-                                    stringResource(R.string.panda_provider_usenet_only_title)
-                                } else {
-                                    provider.name
-                                },
+                                provider.name,
                                 style = MaterialTheme.typography.bodyLarge,
                                 fontWeight = FontWeight.Medium,
                                 color = Snow,
                             )
-                            val subtitle = if (provider.id == "none") {
-                                stringResource(R.string.panda_provider_usenet_only_subtitle)
-                            } else {
-                                provider.authMethods.joinToString(" / ") { method ->
-                                    when (method) {
-                                        "oauth" -> "Browser sign-in"
-                                        "apikey" -> "API key"
-                                        else -> method
-                                    }
+                            val subtitle = provider.authMethods.joinToString(" / ") { method ->
+                                when (method) {
+                                    "oauth" -> "Browser sign-in"
+                                    "apikey" -> "API key"
+                                    else -> method
                                 }
                             }
                             if (subtitle.isNotBlank()) {

@@ -1,9 +1,6 @@
 package com.torve.presentation.stats
 
-import com.torve.domain.model.MediaType
-import com.torve.domain.model.extractTmdbIdOrNull
-import com.torve.domain.repository.MetadataRepository
-import com.torve.domain.repository.WatchHistoryRepository
+import com.torve.domain.stats.WatchStatsRepository
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -13,18 +10,18 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.datetime.Clock
-import kotlinx.datetime.Instant
-import kotlinx.datetime.TimeZone
-import kotlinx.datetime.toLocalDateTime
 
+/**
+ * Compatibility stats view model used by the existing mobile stats page and TV
+ * Settings > About card. It now reads the watch-session source instead of the
+ * misleading legacy watch_history.durationWatchedMs field.
+ */
 class StatsViewModel(
-    private val watchHistoryRepo: WatchHistoryRepository,
-    private val metadataRepo: MetadataRepository,
+    private val watchStatsRepository: WatchStatsRepository,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private val _state = MutableStateFlow(StatsUiState())
     val state: StateFlow<StatsUiState> = _state.asStateFlow()
-    private val genreCacheByMediaKey = mutableMapOf<String, List<String>>()
 
     init {
         loadStats()
@@ -33,116 +30,49 @@ class StatsViewModel(
     fun loadStats() {
         scope.launch {
             _state.update { it.copy(isLoading = true, error = null) }
-            try {
-                val history = watchHistoryRepo.getAll()
-
-                val movies = history.count { it.mediaType.equals(MediaType.MOVIE.name, ignoreCase = true) }
-                val episodes = history.count {
-                    it.mediaType.equals(MediaType.SERIES.name, ignoreCase = true) || it.mediaType.equals("tv", ignoreCase = true)
-                }
-                val totalMinutes = history.sumOf { it.durationWatchedMs } / 60_000
-
-                // Week / month watch time
+            runCatching {
+                val summary = watchStatsRepository.getAggregation()
+                val sessions = watchStatsRepository.getSessions()
                 val now = Clock.System.now().toEpochMilliseconds()
                 val weekAgo = now - 7 * 24 * 3600 * 1000L
                 val monthAgo = now - 30 * 24 * 3600 * 1000L
-                val thisWeekMinutes = history
-                    .filter { it.watchedAt >= weekAgo }
-                    .sumOf { it.durationWatchedMs } / 60_000
-                val thisMonthMinutes = history
-                    .filter { it.watchedAt >= monthAgo }
-                    .sumOf { it.durationWatchedMs } / 60_000
-
-                // Longest consecutive-day streak
-                val longestStreak = computeLongestStreak(history.map { it.watchedAt })
-
-                // Top genres from watched items (resolved from TMDB details and cached in-memory)
-                val topGenres = computeTopGenres(history)
-
-                // Watches per day of week
-                val tz = TimeZone.currentSystemDefault()
-                val activityByDay = history
-                    .map { Instant.fromEpochMilliseconds(it.watchedAt).toLocalDateTime(tz).dayOfWeek.name }
-                    .groupingBy { it.lowercase().replaceFirstChar { c -> c.uppercase() } }
-                    .eachCount()
+                val thisWeekMinutes = sessions
+                    .filter { it.startedAt >= weekAgo }
+                    .sumOf { it.countedWatchMsForLegacyUi() } / 60_000
+                val thisMonthMinutes = sessions
+                    .filter { it.startedAt >= monthAgo }
+                    .sumOf { it.countedWatchMsForLegacyUi() } / 60_000
 
                 _state.update {
                     it.copy(
                         isLoading = false,
-                        totalMovies = movies,
-                        totalEpisodes = episodes,
-                        totalMinutes = totalMinutes,
+                        totalMovies = summary.completedMovies,
+                        totalEpisodes = summary.completedEpisodes,
+                        totalMinutes = summary.totalWatchMs / 60_000,
                         thisWeekMinutes = thisWeekMinutes,
                         thisMonthMinutes = thisMonthMinutes,
-                        longestStreak = longestStreak,
-                        topGenres = topGenres,
-                        activityByDay = activityByDay,
+                        longestStreak = 0,
+                        topGenres = emptyList(),
+                        activityByDay = emptyMap(),
+                        error = null,
                     )
                 }
-            } catch (e: Exception) {
-                _state.update { it.copy(isLoading = false, error = com.torve.presentation.error.UserFacingError.STATS_LOAD_FAILED.messageKey) }
+            }.onFailure {
+                _state.update {
+                    it.copy(
+                        isLoading = false,
+                        error = com.torve.presentation.error.UserFacingError.STATS_LOAD_FAILED.messageKey,
+                    )
+                }
             }
         }
     }
 
-    private suspend fun computeTopGenres(history: List<com.torve.domain.model.WatchHistoryEntry>): List<GenreStat> {
-        if (history.isEmpty()) return emptyList()
-
-        val counts = mutableMapOf<String, Int>()
-        for (entry in history) {
-            val tmdbId = entry.mediaId.extractTmdbIdOrNull() ?: continue
-            val type = entry.mediaType.toMetadataType() ?: continue
-            val key = "$type:$tmdbId"
-
-            val genres = genreCacheByMediaKey[key] ?: run {
-                val resolved = runCatching {
-                    metadataRepo.getDetail(type, tmdbId)
-                        .genres
-                        .map { it.name.trim() }
-                        .filter { it.isNotEmpty() }
-                }.getOrDefault(emptyList())
-                genreCacheByMediaKey[key] = resolved
-                resolved
-            }
-
-            genres.forEach { genre ->
-                counts[genre] = (counts[genre] ?: 0) + 1
-            }
+    private fun com.torve.domain.stats.WatchSession.countedWatchMsForLegacyUi(): Long {
+        return if (runtimeConfidence == com.torve.domain.stats.RuntimeConfidence.UNKNOWN) {
+            0L
+        } else {
+            countedWatchMs.coerceAtLeast(0L)
         }
-
-        return counts
-            .entries
-            .sortedByDescending { it.value }
-            .take(5)
-            .map { GenreStat(name = it.key, count = it.value) }
-    }
-
-    private fun String.toMetadataType(): String? = when (lowercase()) {
-        "movie" -> "movie"
-        "tv", "series" -> "tv"
-        else -> null
-    }
-
-    private fun computeLongestStreak(timestamps: List<Long>): Int {
-        if (timestamps.isEmpty()) return 0
-        val tz = TimeZone.currentSystemDefault()
-        val days = timestamps
-            .map { Instant.fromEpochMilliseconds(it).toLocalDateTime(tz).date }
-            .distinct()
-            .sorted()
-        if (days.isEmpty()) return 0
-
-        var longest = 1
-        var current = 1
-        for (i in 1 until days.size) {
-            val diff = days[i].toEpochDays() - days[i - 1].toEpochDays()
-            if (diff == 1) {
-                current++
-                if (current > longest) longest = current
-            } else {
-                current = 1
-            }
-        }
-        return longest
     }
 }

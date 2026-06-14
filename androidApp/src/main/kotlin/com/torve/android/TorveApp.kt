@@ -4,6 +4,7 @@ import android.app.Application
 import com.torve.android.billing.BillingManager
 import com.torve.android.catalog.CatalogWarmupWorker
 import com.torve.android.di.androidAppModule
+import com.torve.android.diagnostics.AndroidDiagnosticsRecorder
 import com.torve.android.di.storeBillingModule
 import com.torve.android.download.DownloadWorker
 import com.torve.android.epg.EpgWarmupWorker
@@ -41,6 +42,7 @@ class TorveApp : Application() {
 
         // Firebase Crashlytics — disabled in debug, unavailable on Amazon builds.
         configureCrashlytics()
+        AndroidDiagnosticsRecorder.init(this)
         setupUncaughtExceptionHandler()
 
         // Init ANR diagnostics (debug only — no-op in release)
@@ -151,6 +153,7 @@ class TorveApp : Application() {
                 clazz.getMethod("recordException", Throwable::class.java)
                     .invoke(instance, throwable)
             } catch (_: Throwable) { }
+            runCatching { AndroidDiagnosticsRecorder.persistCrash(this, thread, throwable) }
             android.util.Log.e("Torve", "Uncaught exception on ${thread.name}", throwable)
             defaultHandler?.uncaughtException(thread, throwable)
         }

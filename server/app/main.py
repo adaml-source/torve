@@ -12,7 +12,7 @@ from app.database import SessionLocal
 from app.bootstrap import bootstrap_reviewer_account
 from app.events import event_bus
 from app.observability import sentry_before_send
-from app.routers import acceleration, account, account_settings, addons, admin_billing, admin_promo, admin_users, auth, checkout, content_policy, devices, health, health_integrations, integrations, media_favorites, meta, nzbdav as nzbdav_router, paddle_webhook, pairing_code, pairing_signin, pairings, playlists, purchase_verify, rebate, releases, sse, stripe_billing, transfer, watch_state, web_session, web_proxy
+from app.routers import acceleration, account, account_settings, addons, admin_billing, admin_promo, admin_users, auth, checkout, content_policy, devices, health, health_integrations, integrations, media_favorites, meta, nzbdav as nzbdav_router, paddle_webhook, pairing_code, pairing_signin, pairings, playlists, purchase_verify, rebate, releases, sse, stripe_billing, support, transfer, watch_state, web_session, web_proxy
 
 _log = logging.getLogger(__name__)
 
@@ -170,4 +170,5 @@ app.include_router(nzbdav_router.resolver_router)
 app.include_router(health_integrations.router)
 app.include_router(watch_state.router)
 app.include_router(transfer.router)
+app.include_router(support.router)
 app.include_router(releases.router)

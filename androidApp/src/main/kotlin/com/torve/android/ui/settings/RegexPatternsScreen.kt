@@ -1,5 +1,7 @@
 package com.torve.android.ui.settings
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -25,6 +27,7 @@ import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Switch
@@ -80,6 +83,46 @@ fun RegexPatternsScreen(
 ) {
     val state by viewModel.state.collectAsState()
     val context = LocalContext.current
+    var pendingExportJson by remember { mutableStateOf<String?>(null) }
+    val importLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument(),
+    ) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        try {
+            val jsonText = context.contentResolver.openInputStream(uri)
+                ?.bufferedReader()
+                ?.use { it.readText() }
+                ?: return@rememberLauncherForActivityResult
+            val result = viewModel.importRegexPatternsJson(jsonText)
+            val message = if (result.disabledOnImport > 0) {
+                context.getString(
+                    R.string.regex_imported_disabled,
+                    result.items.size,
+                    result.disabledOnImport,
+                )
+            } else {
+                context.getString(R.string.regex_imported, result.items.size)
+            }
+            Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
+        } catch (_: Exception) {
+            Toast.makeText(context, context.getString(R.string.regex_import_failed), Toast.LENGTH_SHORT).show()
+        }
+    }
+    val exportLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("application/json"),
+    ) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        try {
+            val jsonText = pendingExportJson ?: viewModel.exportRegexPatternsJson()
+            context.contentResolver.openOutputStream(uri)?.use { output ->
+                output.write(jsonText.toByteArray())
+            }
+            pendingExportJson = null
+            Toast.makeText(context, context.getString(R.string.regex_exported), Toast.LENGTH_SHORT).show()
+        } catch (_: Exception) {
+            Toast.makeText(context, context.getString(R.string.regex_export_failed), Toast.LENGTH_SHORT).show()
+        }
+    }
 
     Column(
         Modifier
@@ -119,6 +162,29 @@ fun RegexPatternsScreen(
             color = Steel,
             modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp),
         )
+
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp, vertical = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            OutlinedButton(
+                onClick = { importLauncher.launch(arrayOf("application/json", "text/*", "*/*")) },
+                modifier = Modifier.weight(1f),
+            ) {
+                Text(stringResource(R.string.regex_import_json), color = Amber)
+            }
+            OutlinedButton(
+                onClick = {
+                    pendingExportJson = viewModel.exportRegexPatternsJson()
+                    exportLauncher.launch("torve_regex_patterns.json")
+                },
+                modifier = Modifier.weight(1f),
+            ) {
+                Text(stringResource(R.string.regex_export_json), color = Amber)
+            }
+        }
 
         Text(
             stringResource(R.string.regex_quick_add),

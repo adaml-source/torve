@@ -78,4 +78,54 @@ class HomeViewModelTest {
         assertEquals(HomeSection.WATCHLIST, visible[1].section)
         assertEquals(HomeSection.POPULAR_MOVIES, visible[2].section)
     }
+
+    @Test
+    fun upcoming_status_maps_connected_empty_to_true_empty_state() {
+        val status = resolveUpcomingScheduleStatus(
+            connected = true,
+            itemCount = 0,
+        )
+
+        assertEquals(UpcomingScheduleStatus.EMPTY_CONNECTED, status)
+    }
+
+    @Test
+    fun upcoming_status_maps_disconnected_to_reconnect_state() {
+        val status = resolveUpcomingScheduleStatus(
+            connected = false,
+            itemCount = 0,
+        )
+
+        assertEquals(UpcomingScheduleStatus.DISCONNECTED, status)
+    }
+
+    @Test
+    fun upcoming_status_preserves_stale_and_rate_limited_states() {
+        assertEquals(
+            UpcomingScheduleStatus.STALE,
+            resolveUpcomingScheduleStatus(
+                connected = true,
+                itemCount = 3,
+                isStale = true,
+            ),
+        )
+        assertEquals(
+            UpcomingScheduleStatus.RATE_LIMITED,
+            resolveUpcomingScheduleStatus(
+                connected = true,
+                itemCount = 0,
+                isRateLimited = true,
+            ),
+        )
+    }
+
+    @Test
+    fun upcoming_status_maps_connected_data_to_content_state() {
+        val status = resolveUpcomingScheduleStatus(
+            connected = true,
+            itemCount = 2,
+        )
+
+        assertEquals(UpcomingScheduleStatus.HAS_DATA, status)
+    }
 }

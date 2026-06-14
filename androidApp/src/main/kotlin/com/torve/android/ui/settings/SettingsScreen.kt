@@ -51,6 +51,7 @@ import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.MenuAnchorType
 import androidx.compose.material3.OutlinedButton
@@ -83,9 +84,11 @@ import androidx.compose.ui.unit.dp
 import androidx.appcompat.app.AppCompatDelegate
 import androidx.core.os.LocaleListCompat
 import com.torve.android.R
+import com.torve.android.background.BackgroundWork
 import com.torve.android.premium.AccessTier
 import com.torve.android.premium.PremiumAccess
 import com.torve.android.premium.PremiumFeature
+import com.torve.android.session.PostSignInRefresh
 import com.torve.android.util.findActivity
 import com.torve.domain.model.StreamQuality
 import com.torve.data.auth.AuthClient
@@ -108,6 +111,10 @@ import com.torve.android.ui.transfer.RestoreSetupRecoveryCard
 import com.torve.data.account.AccountSettingsRepository
 import com.torve.android.sync.SyncCoordinator
 import com.torve.presentation.addon.AddonViewModel
+import com.torve.presentation.beta.BetaProgramCopy
+import com.torve.presentation.beta.BetaProgramViewModel
+import com.torve.presentation.beta.shouldShowBetaProgramSettingsEntry
+import com.torve.presentation.beta.toSettingsCardState
 import com.torve.presentation.channels.ChannelsViewModel
 import com.torve.presentation.settings.AppLanguage
 import com.torve.presentation.settings.SettingsViewModel
@@ -115,7 +122,12 @@ import com.torve.presentation.settings.ThemeMode
 import com.torve.presentation.session.AccountSessionCoordinator
 import com.torve.presentation.subscription.SubscriptionViewModel
 import com.torve.presentation.subscription.accessPresentation
+import androidx.work.WorkInfo
+import androidx.work.WorkManager
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import org.koin.compose.koinInject
 import java.util.Locale
 import java.time.Instant
@@ -157,17 +169,21 @@ fun SettingsScreen(
     onStartSetupClick: () -> Unit = {},
     onSetupPandaClick: () -> Unit = {},
     onStatusRepairClick: () -> Unit = {},
+    onBetaProgramClick: () -> Unit = {},
     viewModel: SettingsViewModel = koinInject(),
     syncCoordinator: SyncCoordinator = koinInject(),
     authClient: AuthClient = koinInject(),
     accountSettingsRepository: AccountSettingsRepository = koinInject(),
     accountSessionCoordinator: AccountSessionCoordinator = koinInject(),
+    channelsViewModel: ChannelsViewModel = koinInject(),
     subscriptionViewModel: SubscriptionViewModel = koinInject(),
+    betaProgramViewModel: BetaProgramViewModel = koinInject(),
 ) {
     val state by viewModel.state.collectAsState()
     val syncState by syncCoordinator.state.collectAsState()
     val accountSettingsState by accountSettingsRepository.state.collectAsState()
     val subscriptionState by subscriptionViewModel.state.collectAsState()
+    val betaProgramState by betaProgramViewModel.state.collectAsState()
     val subscriptionAccess = remember(
         subscriptionState.subscription,
         subscriptionState.isPro,
@@ -207,7 +223,8 @@ fun SettingsScreen(
     val customLayoutLocked = isLocked(PremiumFeature.SYNC_CUSTOM_LAYOUTS)
     val backupLocked = isLocked(PremiumFeature.CLOUD_BACKUP_RESTORE)
     val canOpenManageDevices = subscriptionState.hasEntitlement || !deviceLinkingLocked
-    val activity = LocalContext.current.findActivity()
+    val settingsContext = LocalContext.current
+    val activity = settingsContext.findActivity()
     // Observe the authoritative auth user flow — reacts immediately to
     // login, logout, and verification status changes without manual refresh.
     val authUser by authClient.authUserFlow.collectAsState()
@@ -235,9 +252,77 @@ fun SettingsScreen(
         if (BuildConfig.HAS_BILLING) {
             subscriptionViewModel.refreshAccess()
         }
+        betaProgramViewModel.onOpenBetaProgram()
     }
 
     val scope = rememberCoroutineScope()
+    var refreshAllQueued by remember { mutableStateOf(false) }
+    var refreshAllRunId by remember { mutableIntStateOf(0) }
+    var refreshAllStatus by remember { mutableStateOf<RefreshAllUiStatus?>(null) }
+    val refreshAllStartedText = stringResource(R.string.settings_refresh_all_started)
+    LaunchedEffect(refreshAllRunId) {
+        if (refreshAllRunId == 0) return@LaunchedEffect
+        val workManager = WorkManager.getInstance(settingsContext.applicationContext)
+        val observedWorkIds = mutableSetOf<String>()
+        var sawActiveWork = false
+        repeat(180) {
+            val workInfos = withContext(Dispatchers.IO) {
+                workManager.getWorkInfosByTag(BackgroundWork.TAG_HEAVY_PRELOAD).get()
+            }
+            val active = workInfos
+                .filter {
+                    it.state == WorkInfo.State.ENQUEUED ||
+                        it.state == WorkInfo.State.RUNNING ||
+                        it.state == WorkInfo.State.BLOCKED
+                }
+                .onEach { observedWorkIds += it.id.toString() }
+            val current = active.maxByOrNull {
+                it.progress.getFloat(BackgroundWork.KEY_PROGRESS, -1f)
+            }
+            if (current != null) {
+                sawActiveWork = true
+                refreshAllStatus = RefreshAllUiStatus(
+                    label = current.progress.getString(BackgroundWork.KEY_LABEL)
+                        ?: refreshAllStartedText,
+                    progress = current.progress
+                        .getFloat(BackgroundWork.KEY_PROGRESS, 0f)
+                        .coerceIn(0f, 1f),
+                    complete = false,
+                    failed = false,
+                )
+            } else if (sawActiveWork) {
+                val terminal = workInfos.filter { it.id.toString() in observedWorkIds && it.state.isFinished }
+                val failed = terminal.any { it.state == WorkInfo.State.FAILED }
+                refreshAllStatus = RefreshAllUiStatus(
+                    label = if (failed) {
+                        "Refresh did not finish. Check the connection and try again."
+                    } else {
+                        "Refresh finished. Reopen affected tabs if they were already visible."
+                    },
+                    progress = 1f,
+                    complete = !failed,
+                    failed = failed,
+                )
+                if (!failed) {
+                    viewModel.refreshSettings()
+                    channelsViewModel.loadPlaylists(recoverEmptyCatalog = true)
+                    channelsViewModel.loadFavorites()
+                }
+                delay(4_000L)
+                refreshAllQueued = false
+                refreshAllStatus = null
+                return@LaunchedEffect
+            } else {
+                refreshAllStatus = RefreshAllUiStatus(
+                    label = refreshAllStartedText,
+                    progress = 0f,
+                    complete = false,
+                    failed = false,
+                )
+            }
+            delay(500L)
+        }
+    }
     val premiumStatusLabel = subscriptionAccess.accessStatusLabel
     NeedsVerificationToastEffect(
         message = subscriptionState.verificationEmailMessage,
@@ -338,6 +423,87 @@ fun SettingsScreen(
                 }
             }
             Spacer(Modifier.height(12.dp))
+        }
+
+        val hasExistingPremiumAccess = subscriptionState.hasEntitlement || subscriptionState.isPro
+        val showBetaProgramCard = shouldShowBetaProgramSettingsEntry(
+            state = betaProgramState,
+            hasPremiumAccess = hasExistingPremiumAccess,
+        )
+        if (showBetaProgramCard) {
+        val betaCard = betaProgramState.run {
+            com.torve.domain.beta.BetaProgramStatus(
+                signedIn = isSignedIn,
+                applicationStatus = applicationStatus,
+                betaAccess = com.torve.domain.beta.BetaAccessState(
+                    active = betaAccessActive,
+                    expiresAt = betaAccessExpiresAt,
+                    status = betaGrantStatus,
+                ),
+                daysRemaining = daysRemaining,
+                eligibility = com.torve.domain.beta.BetaEligibilityState(
+                    canApply = canApply,
+                    blockedReason = blockedReason,
+                    isEmailVerificationRequired = isEmailVerificationRequired,
+                ),
+                signupCloseAt = signupCloseAt,
+                freeAccessEndAt = freeAccessEndAt,
+                discordInviteUrl = discordInviteUrl,
+            ).toSettingsCardState()
+        }
+        val betaSubtitle = when {
+            hasExistingPremiumAccess &&
+                betaProgramState.isSignedIn &&
+                !betaProgramState.isEmailVerificationRequired &&
+                !betaProgramState.betaAccessActive &&
+                betaProgramState.blockedReason != com.torve.domain.beta.BetaBlockedReason.BETA_SIGNUP_CLOSED &&
+                betaProgramState.blockedReason != com.torve.domain.beta.BetaBlockedReason.BETA_ACCESS_ENDED ->
+                BetaProgramCopy.PREMIUM_TESTER_APPLICATION
+            else -> betaCard.subtitle
+        }
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable(onClick = onBetaProgramClick),
+            colors = CardDefaults.cardColors(containerColor = Charcoal),
+        ) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = betaCard.title,
+                        style = MaterialTheme.typography.titleMedium,
+                        color = Snow,
+                        fontWeight = FontWeight.Bold,
+                    )
+                    betaCard.badge?.let {
+                        Text(
+                            text = it,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = Amber,
+                        )
+                    }
+                }
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    text = betaSubtitle,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Torve.colors.textSecondary,
+                )
+                Spacer(Modifier.height(10.dp))
+                OutlinedButton(
+                    onClick = onBetaProgramClick,
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Amber),
+                ) {
+                    ButtonLabel("Open Beta Program")
+                }
+            }
+        }
+        Spacer(Modifier.height(12.dp))
         }
 
         // Account & Sync card (top of settings)
@@ -644,6 +810,43 @@ fun SettingsScreen(
                     ) {
                         ButtonLabel(stringResource(R.string.premium_refresh_access))
                     }
+                }
+            }
+            if (subscriptionState.isLoggedIn) {
+                Spacer(Modifier.height(8.dp))
+                OutlinedButton(
+                    onClick = {
+                        refreshAllQueued = true
+                        refreshAllStatus = RefreshAllUiStatus(
+                            label = "Syncing account data...",
+                            progress = 0f,
+                            complete = false,
+                            failed = false,
+                        )
+                        scope.launch {
+                            runCatching {
+                                accountSessionCoordinator.refreshAccountDataAfterCredentialTransfer(
+                                    initialMessage = "Refreshing account data...",
+                                )
+                            }
+                            viewModel.refreshSettings()
+                            subscriptionViewModel.refreshAccess()
+                            syncCoordinator.refreshDevices()
+                            channelsViewModel.loadPlaylists(recoverEmptyCatalog = true)
+                            channelsViewModel.loadFavorites()
+                            PostSignInRefresh.enqueueFullRefreshAfterCredentialImport(settingsContext)
+                            refreshAllRunId += 1
+                        }
+                    },
+                    enabled = !refreshAllQueued,
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Amber),
+                ) {
+                    ButtonLabel(stringResource(R.string.settings_refresh_all))
+                }
+                if (refreshAllQueued) {
+                    Spacer(Modifier.height(6.dp))
+                    RefreshAllStatusView(refreshAllStatus)
                 }
             }
         }
@@ -1893,6 +2096,46 @@ private fun formatSettingsAccessDate(epochMs: Long): String {
             .atZone(ZoneId.systemDefault())
             .toLocalDate(),
     )
+}
+
+private data class RefreshAllUiStatus(
+    val label: String,
+    val progress: Float,
+    val complete: Boolean,
+    val failed: Boolean,
+)
+
+@Composable
+private fun RefreshAllStatusView(status: RefreshAllUiStatus?) {
+    val current = status ?: RefreshAllUiStatus(
+        label = stringResource(R.string.settings_refresh_all_started),
+        progress = 0f,
+        complete = false,
+        failed = false,
+    )
+    val textColor = when {
+        current.failed -> Ruby
+        current.complete -> Emerald
+        else -> Silver
+    }
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        LinearProgressIndicator(
+            progress = { current.progress.coerceIn(0f, 1f) },
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(3.dp),
+            color = if (current.failed) Ruby else Amber,
+            trackColor = Snow.copy(alpha = 0.14f),
+        )
+        Text(
+            text = current.label,
+            style = MaterialTheme.typography.bodySmall,
+            color = textColor,
+        )
+    }
 }
 
 private fun subscriptionMarketplaceLabel(value: String?): String? {

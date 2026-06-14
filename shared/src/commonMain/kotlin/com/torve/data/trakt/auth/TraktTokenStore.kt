@@ -48,6 +48,7 @@ class TraktTokenStore(
         secretStore.remove(IntegrationSecretKey.TRAKT_TOKENS)
         secretStore.remove(IntegrationSecretKey.TRAKT_ACCESS_TOKEN)
         secretStore.remove(IntegrationSecretKey.TRAKT_REFRESH_TOKEN)
+        secretStore.remove(IntegrationSecretKey.TRAKT_CONNECTION_SCOPE)
     }
 
     suspend fun accessToken(): String? = read()?.accessToken?.takeIf { it.isNotBlank() }
@@ -58,7 +59,7 @@ class TraktTokenStore(
             ?: return null
         val refreshToken = secretStore.get(IntegrationSecretKey.TRAKT_REFRESH_TOKEN)
             ?.takeIf { it.isNotBlank() }
-            ?: return null
+            .orEmpty()
         return TraktTokens(
             accessToken = accessToken,
             refreshToken = refreshToken,

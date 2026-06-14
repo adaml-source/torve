@@ -3,6 +3,11 @@ package com.torve.presentation.calendar
 import com.torve.data.trakt.TraktCalendarEpisode
 import com.torve.data.trakt.api.TraktAuthorizedApi
 import com.torve.data.trakt.api.TraktAuthorizationRequiredException
+import com.torve.data.trakt.api.TraktCalendarResult
+import com.torve.data.trakt.TraktDecodeException
+import com.torve.data.trakt.TraktNetworkException
+import com.torve.data.trakt.TraktRateLimitedException
+import com.torve.data.trakt.TraktServerException
 import com.torve.data.trakt.auth.TraktTokenStore
 import com.torve.domain.repository.PreferencesRepository
 import kotlinx.coroutines.CoroutineScope
@@ -80,6 +85,7 @@ class CalendarViewModel internal constructor(
                     requiresTraktReconnect = false,
                     error = null,
                     isLoading = false,
+                    refreshWarning = null,
                     episodeNotificationsEnabled = connected && notificationsEnabled,
                 )
             }
@@ -92,7 +98,8 @@ class CalendarViewModel internal constructor(
     private suspend fun loadCalendar(source: CalendarLoadSource) {
         _state.update { it.copy(isLoading = true, error = null, requiresTraktReconnect = false) }
         try {
-            val episodes = dataSource.getCalendar(days = CALENDAR_LOOKAHEAD_DAYS)
+            val result = dataSource.getCalendar(days = CALENDAR_LOOKAHEAD_DAYS)
+            val episodes = result.episodes
             val grouped = groupEpisodesByDate(episodes)
             _state.update {
                 it.copy(
@@ -102,6 +109,11 @@ class CalendarViewModel internal constructor(
                     error = null,
                     traktConnected = true,
                     requiresTraktReconnect = false,
+                    refreshWarning = if (result.isStale) {
+                        staleReasonFor(result.refreshError)
+                    } else {
+                        null
+                    },
                 )
             }
         } catch (e: Exception) {
@@ -127,6 +139,7 @@ class CalendarViewModel internal constructor(
                         isLoading = false,
                         error = mapped.messageKey,
                         requiresTraktReconnect = false,
+                        refreshWarning = null,
                     )
                 }
             }
@@ -137,6 +150,10 @@ class CalendarViewModel internal constructor(
         val message = error.message.orEmpty().lowercase()
         return when {
             error is TraktAuthorizationRequiredException -> CalendarMappedError.RECONNECT_REQUIRED
+            error is TraktRateLimitedException -> CalendarMappedError.RATE_LIMITED
+            error is TraktNetworkException -> CalendarMappedError.NETWORK
+            error is TraktServerException -> CalendarMappedError.DATA_UNAVAILABLE
+            error is TraktDecodeException -> CalendarMappedError.DATA_UNAVAILABLE
             "401" in message || "unauthorized" in message || "authentication required" in message ||
                 "invalid_grant" in message || "revoked" in message -> CalendarMappedError.RECONNECT_REQUIRED
             "429" in message || "rate-limiting" in message || "rate limiting" in message ||
@@ -149,6 +166,14 @@ class CalendarViewModel internal constructor(
             else -> CalendarMappedError.DATA_UNAVAILABLE
         }
     }
+
+    private fun staleReasonFor(error: Throwable?): CalendarStaleReason =
+        when (error) {
+            is TraktRateLimitedException -> CalendarStaleReason.RATE_LIMITED
+            is TraktNetworkException -> CalendarStaleReason.NETWORK
+            is TraktServerException -> CalendarStaleReason.SERVER
+            else -> CalendarStaleReason.UNKNOWN
+        }
 
     private fun extractHttpStatus(error: Throwable): Int? {
         val message = error.message.orEmpty()
@@ -202,7 +227,7 @@ class CalendarViewModel internal constructor(
 
 internal interface CalendarDataSource {
     suspend fun accessToken(): String?
-    suspend fun getCalendar(days: Int): List<TraktCalendarEpisode>
+    suspend fun getCalendar(days: Int): TraktCalendarResult
 }
 
 private class TraktCalendarDataSource(
@@ -210,7 +235,7 @@ private class TraktCalendarDataSource(
     private val tokenStore: TraktTokenStore,
 ) : CalendarDataSource {
     override suspend fun accessToken(): String? = tokenStore.accessToken()
-    override suspend fun getCalendar(days: Int): List<TraktCalendarEpisode> = traktApi.getCalendar(days)
+    override suspend fun getCalendar(days: Int): TraktCalendarResult = traktApi.getCalendarCached(days)
 }
 
 internal data class CalendarDiagnosticsEvent(

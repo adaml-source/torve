@@ -61,9 +61,12 @@ import com.torve.desktop.ui.components.TorveSectionCard
 import com.torve.desktop.ui.components.TorveTextField
 import com.torve.desktop.ui.l10n.ds
 import com.torve.desktop.ui.theme.TorveDesktopThemeTokens
+import com.torve.presentation.panda.PandaSetupMode
 import com.torve.presentation.panda.PandaSetupStep
 import com.torve.presentation.panda.PandaSetupUiState
 import com.torve.presentation.panda.PandaSetupViewModel
+import com.torve.presentation.panda.progressStepCount
+import com.torve.presentation.panda.progressStepNumber
 import java.awt.Desktop
 import java.net.URI
 
@@ -81,8 +84,8 @@ fun DesktopPandaSetupScreen(
         // surfaced via review step - no-op here
     }
 
-    val stepIndex = PandaSetupStep.entries.indexOf(state.currentStep)
-    val totalSteps = PandaSetupStep.entries.size
+    val stepNumber = state.progressStepNumber()
+    val totalSteps = state.progressStepCount()
 
     Column(
         modifier = Modifier
@@ -108,7 +111,7 @@ fun DesktopPandaSetupScreen(
                     subtitle = if (state.isEditMode) {
                         ds("Reconfiguring existing Panda setup")
                     } else {
-                        ds("Pick a cloud provider, connect it, and Panda installs itself as a Torve add-on.")
+                        ds("Choose Debrid or Usenet only, then Panda installs itself as a Torve add-on.")
                     },
                 )
             }
@@ -116,7 +119,7 @@ fun DesktopPandaSetupScreen(
         }
 
         LinearProgressIndicator(
-            progress = { (stepIndex + 1).toFloat() / totalSteps },
+            progress = { stepNumber.toFloat() / totalSteps },
             modifier = Modifier.fillMaxWidth(),
         )
 
@@ -127,6 +130,7 @@ fun DesktopPandaSetupScreen(
         // the X-Panda-Config-Id header - see PandaApiClient.
 
         when (state.currentStep) {
+            PandaSetupStep.SETUP_TYPE -> SetupTypeStep(state, viewModel)
             PandaSetupStep.PROVIDER -> ProviderStep(state, viewModel)
             PandaSetupStep.AUTH -> AuthStep(state, viewModel)
             PandaSetupStep.SOURCES -> SourcesStep(state, viewModel)
@@ -144,14 +148,15 @@ fun DesktopPandaSetupScreen(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            if (state.currentStep == PandaSetupStep.PROVIDER) {
+            if (state.currentStep == PandaSetupStep.SETUP_TYPE) {
                 TorveGhostButton(text = ds("Close"), onClick = onBack)
             } else {
                 TorveGhostButton(text = ds("Back"), onClick = { viewModel.previousStep() })
             }
 
             val canAdvance = when (state.currentStep) {
-                PandaSetupStep.PROVIDER -> state.selectedProvider != null
+                PandaSetupStep.SETUP_TYPE,
+                PandaSetupStep.PROVIDER -> false
                 PandaSetupStep.AUTH -> state.authConnected
                 PandaSetupStep.SOURCES, PandaSetupStep.USENET, PandaSetupStep.QUALITY -> true
                 PandaSetupStep.REVIEW -> false
@@ -164,10 +169,85 @@ fun DesktopPandaSetupScreen(
 }
 
 @Composable
+private fun SetupTypeStep(state: PandaSetupUiState, viewModel: PandaSetupViewModel) {
+    TorveSectionCard(
+        title = ds("Choose setup type"),
+        supportingText = ds("Start with debrid cloud streaming or skip straight to Usenet configuration."),
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            SetupTypeRow(
+                title = ds("Debrid"),
+                subtitle = ds("Use Real-Debrid, AllDebrid, Premiumize, TorBox, or another supported Panda debrid service."),
+                badge = "D",
+                selected = state.setupMode == PandaSetupMode.DEBRID,
+                onClick = { viewModel.selectSetupMode(PandaSetupMode.DEBRID) },
+            )
+            SetupTypeRow(
+                title = ds("Usenet only"),
+                subtitle = ds("Skip debrid and configure Usenet, indexers, and a download client."),
+                badge = "U",
+                selected = state.setupMode == PandaSetupMode.USENET_ONLY,
+                onClick = { viewModel.selectSetupMode(PandaSetupMode.USENET_ONLY) },
+            )
+        }
+    }
+}
+
+@Composable
+private fun SetupTypeRow(
+    title: String,
+    subtitle: String,
+    badge: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+) {
+    val colors = TorveDesktopThemeTokens.colors
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(if (selected) colors.accentContainer else colors.fieldSurface)
+            .clickable(onClick = onClick)
+            .padding(16.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            modifier = Modifier
+                .size(40.dp)
+                .clip(CircleShape)
+                .background(colors.accentContainer),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                badge,
+                fontWeight = FontWeight.Bold,
+                color = colors.accent,
+            )
+        }
+        Spacer(Modifier.width(14.dp))
+        Column(Modifier.weight(1f)) {
+            Text(
+                title,
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Text(
+                subtitle,
+                style = MaterialTheme.typography.bodySmall,
+                color = colors.textMuted,
+            )
+        }
+        if (selected) {
+            TorveBadge(ds("Selected"), tone = TorveBadgeTone.Success)
+        }
+    }
+}
+
+@Composable
 private fun ProviderStep(state: PandaSetupUiState, viewModel: PandaSetupViewModel) {
     TorveSectionCard(
-        title = ds("Choose a cloud provider"),
-        supportingText = ds("Panda will route streams through your debrid service."),
+        title = ds("Choose debrid provider"),
+        supportingText = ds("Panda will route streams through your selected debrid service."),
     ) {
         if (state.providersLoading) {
             Box(Modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) {
@@ -181,7 +261,7 @@ private fun ProviderStep(state: PandaSetupUiState, viewModel: PandaSetupViewMode
             }
         } else {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                state.providers.forEach { provider ->
+                state.providers.filter { it.id != "none" }.forEach { provider ->
                     val selected = state.selectedProvider?.id == provider.id
                     val colors = TorveDesktopThemeTokens.colors
                     Row(
@@ -215,15 +295,11 @@ private fun ProviderStep(state: PandaSetupUiState, viewModel: PandaSetupViewMode
                             )
                             val browserSignInLabel = ds("Browser sign-in")
                             val apiKeyLabel = ds("API key")
-                            val subtitle = if (provider.id == "none") {
-                                ds("No debrid - configure Usenet on the next steps")
-                            } else {
-                                provider.authMethods.joinToString(" / ") { method ->
-                                    when (method) {
-                                        "oauth" -> browserSignInLabel
-                                        "apikey" -> apiKeyLabel
-                                        else -> method
-                                    }
+                            val subtitle = provider.authMethods.joinToString(" / ") { method ->
+                                when (method) {
+                                    "oauth" -> browserSignInLabel
+                                    "apikey" -> apiKeyLabel
+                                    else -> method
                                 }
                             }
                             if (subtitle.isNotBlank()) {

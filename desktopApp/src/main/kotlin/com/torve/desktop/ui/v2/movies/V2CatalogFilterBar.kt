@@ -75,7 +75,7 @@ fun V2CatalogFilterBar(
 ) {
     val state by catalogViewModel.state.collectAsState()
     val colors = TorveDesktopThemeTokens.colors
-    var filtersVisible by remember { mutableStateOf(true) }
+    var filtersVisible by remember { mutableStateOf(false) }
     var aiNotConfiguredNotice by remember { mutableStateOf(false) }
     val currentSort = state.filter.sortBy
 
@@ -323,6 +323,7 @@ fun V2CatalogFilterBar(
             },
             filtersExpanded = filtersVisible,
             onFiltersClick = { filtersVisible = !filtersVisible },
+            activeFilterCount = activeCount,
             canReset = activeCount > 0 || searchActive || aiMode,
             onResetClick = {
                 catalogViewModel.clearFilters()

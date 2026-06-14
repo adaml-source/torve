@@ -1,9 +1,11 @@
 package com.torve.desktop.ui.v2.home
 
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
@@ -41,6 +43,7 @@ import com.torve.desktop.ui.theme.TorveDesktopThemeTokens
 import com.torve.desktop.ui.v2.components.V2PosterCard
 import com.torve.desktop.ui.v2.components.V2Shelf
 import com.torve.desktop.ui.v2.components.rememberCachedBitmap
+import com.torve.desktop.ui.v2.discovery.resolveBrandLogoUrl
 import com.torve.desktop.ui.v2.movies.DESKTOP_WATCH_PROVIDERS
 import com.torve.desktop.ui.v2.seeall.SeeAllRequest
 import androidx.compose.foundation.rememberScrollbarAdapter
@@ -387,18 +390,16 @@ fun V2HomePage(
                     if (enabledServiceIds.isNotEmpty() && isSectionVisible(HomeSection.STREAMING_SERVICES)) {
                         val services = DESKTOP_WATCH_PROVIDERS.filter { it.id in enabledServiceIds }
                         if (services.isNotEmpty()) {
-                            val serviceStyle = cardStyleForOrDefault(HomeSection.STREAMING_SERVICES)
                             val serviceWidth = widthFor(HomeSection.STREAMING_SERVICES).coerceAtLeast(132.dp)
                             V2Shelf(
                                 titleFor(HomeSection.STREAMING_SERVICES, "Streaming Services"),
                                 modifier = Modifier.padding(start = 72.dp),
                             ) {
                                 services.forEach { provider ->
-                                    V2PosterCard(
-                                        provider.label,
-                                        providerLogos[provider.id],
-                                        Modifier.width(serviceWidth),
-                                        cardStyle = serviceStyle,
+                                    StreamingServiceLogoTile(
+                                        label = provider.label,
+                                        logoUrl = providerLogos[provider.id],
+                                        modifier = Modifier.width(serviceWidth),
                                     )
                                 }
                             }
@@ -467,6 +468,87 @@ private fun CardStyle.couchFirstHomeStyle(): CardStyle =
             cornerRadiusDp = appearance.cornerRadiusDp.coerceAtLeast(14),
         ),
     )
+
+@Composable
+private fun StreamingServiceLogoTile(
+    label: String,
+    logoUrl: String?,
+    modifier: Modifier = Modifier,
+) {
+    val colors = TorveDesktopThemeTokens.colors
+    val resolvedLogoUrl = remember(logoUrl, label) { resolveDesktopProviderLogoUrl(label, logoUrl) }
+    val logo = rememberCachedBitmap(resolvedLogoUrl)
+    Column(
+        modifier = modifier,
+        verticalArrangement = Arrangement.spacedBy(7.dp),
+    ) {
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth()
+                .aspectRatio(1.58f),
+            color = Color(0xFF07101C).copy(alpha = 0.88f),
+            shape = RoundedCornerShape(16.dp),
+            border = BorderStroke(1.dp, Color.White.copy(alpha = 0.12f)),
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(
+                        Brush.verticalGradient(
+                            listOf(
+                                Color.White.copy(alpha = 0.07f),
+                                Color.Transparent,
+                                Color.Black.copy(alpha = 0.12f),
+                            ),
+                        ),
+                    )
+                    .padding(horizontal = 18.dp, vertical = 16.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                if (logo != null) {
+                    Image(
+                        bitmap = logo,
+                        contentDescription = "$label logo",
+                        modifier = Modifier.fillMaxSize(),
+                        contentScale = ContentScale.Fit,
+                    )
+                } else {
+                    Text(
+                        text = label,
+                        color = colors.textPrimary,
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+        }
+        Text(
+            text = label,
+            color = colors.textPrimary.copy(alpha = 0.92f),
+            style = MaterialTheme.typography.labelMedium,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+private fun resolveDesktopProviderLogoUrl(label: String, logoUrl: String?): String? {
+    val resolved = resolveBrandLogoUrl(
+        absoluteLogoUrl = logoUrl,
+        tmdbLogoPath = logoUrl,
+        size = "w300",
+    )
+    if (resolved == null && !logoUrl.isNullOrBlank() && isDesktopDebugLoggingEnabled()) {
+        println("[TorveDesktop] Provider logo source could not be resolved for $label")
+    }
+    return resolved
+}
+
+private fun isDesktopDebugLoggingEnabled(): Boolean =
+    System.getProperty("torve.desktop.debug")?.toBooleanStrictOrNull() == true
 
 internal data class WatchlistHeatBadge(
     val label: String,

@@ -1229,8 +1229,8 @@
     <string name="settings_diagnostics">Diagnose</string>
     <string name="settings_report_issue">Problem melden</string>
     <string name="bug_report_title">Problem melden</string>
-    <string name="bug_report_subtitle">Sende einen bereinigten Bericht an %1$s. Eingefügte Logs werden vor dem Senden bereinigt.</string>
-    <string name="bug_report_tv_subtitle">Erstelle einen bereinigten Bericht für %1$s. Nutze E-Mail, Teilen oder Kopieren auf diesem TV.</string>
+    <string name="bug_report_subtitle">Send a redacted report directly to Torve support. Pasted logs are scrubbed before sending.</string>
+    <string name="bug_report_tv_subtitle">Send a redacted report directly to Torve support. No email or share app is required.</string>
     <string name="bug_report_tv_settings_subtitle">Bereinigten Diagnosebericht für den Support erstellen</string>
     <string name="bug_report_issue_type">Problemtyp</string>
     <string name="bug_report_type_playback">Wiedergabe</string>

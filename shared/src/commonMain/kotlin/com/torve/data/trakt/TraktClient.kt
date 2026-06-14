@@ -1,17 +1,22 @@
 package com.torve.data.trakt
 
+import com.torve.data.trakt.api.TraktAuthorizationRequiredException
 import io.ktor.client.HttpClient
-import io.ktor.client.call.body
 import io.ktor.client.request.get
 import io.ktor.client.request.header
 import io.ktor.client.request.parameter
 import io.ktor.client.request.post
 import io.ktor.client.request.setBody
-import io.ktor.client.statement.HttpResponse
 import io.ktor.client.statement.bodyAsText
 import io.ktor.http.ContentType
 import io.ktor.http.contentType
-import io.ktor.http.isSuccess
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Deferred
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.datetime.Clock
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.toLocalDateTime
@@ -21,6 +26,9 @@ import kotlinx.serialization.json.Json
 class TraktClient(
     private val httpClient: HttpClient,
     private val json: Json,
+    private val rateLimiter: TraktRateLimiter = TraktRateLimiter(),
+    private val diagnostics: TraktDiagnosticsLogger = TraktDiagnosticsLogger.Stdout,
+    private val authScopeProvider: TraktAuthScopeProvider = InMemoryTraktAuthScopeProvider(),
 ) {
     companion object {
         const val TRAKT_BASE = "https://api.trakt.tv"
@@ -33,6 +41,7 @@ class TraktClient(
         // and also keeps us out of Cloudflare's "no-UA = bot" filter
         // (which surfaces as 429 / Cloudflare error 1015).
         private const val USER_AGENT = "Torve/1.0 (+https://torve.app)"
+        private const val PUBLIC_AUTH_SCOPE = "public"
     }
 
     var clientId: String = DEFAULT_PUBLIC_CLIENT_ID
@@ -40,9 +49,21 @@ class TraktClient(
     var clientSecret: String = DEFAULT_PUBLIC_CLIENT_SECRET
         private set
 
+    private val requestScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private val inFlightGetMutex = Mutex()
+    private val inFlightGets = mutableMapOf<String, Deferred<TraktRawResponse>>()
+
     fun setCredentials(clientId: String, clientSecret: String) {
         this.clientId = clientId.ifBlank { DEFAULT_PUBLIC_CLIENT_ID }
         this.clientSecret = clientSecret.ifBlank { DEFAULT_PUBLIC_CLIENT_SECRET }
+    }
+
+    suspend fun resetRequestControlForAccountChange() {
+        inFlightGetMutex.withLock {
+            inFlightGets.clear()
+        }
+        rateLimiter.resetForAccountChange()
+        authScopeProvider.resetForAccountChange()
     }
 
     private fun traktHeaders(accessToken: String? = null): Map<String, String> {
@@ -70,12 +91,13 @@ class TraktClient(
 
     suspend fun getMoviePublicRating(imdbId: String): TraktPublicRating? {
         return try {
-            val response = httpClient.get("$TRAKT_BASE/movies/$imdbId") {
-                traktHeaders().forEach { (k, v) -> header(k, v) }
-                parameter("extended", "full")
-            }
-            if (!response.status.isSuccess()) return null
-            response.body<TraktPublicRating>()
+            val response = getRaw(
+                path = "/movies/$imdbId",
+                accessToken = null,
+                query = listOf("extended" to "full"),
+            )
+            if (response.status !in 200..299) return null
+            decodeTraktBody<TraktPublicRating>(response)
         } catch (_: Exception) {
             null
         }
@@ -83,12 +105,13 @@ class TraktClient(
 
     suspend fun getShowPublicRating(imdbId: String): TraktPublicRating? {
         return try {
-            val response = httpClient.get("$TRAKT_BASE/shows/$imdbId") {
-                traktHeaders().forEach { (k, v) -> header(k, v) }
-                parameter("extended", "full")
-            }
-            if (!response.status.isSuccess()) return null
-            response.body<TraktPublicRating>()
+            val response = getRaw(
+                path = "/shows/$imdbId",
+                accessToken = null,
+                query = listOf("extended" to "full"),
+            )
+            if (response.status !in 200..299) return null
+            decodeTraktBody<TraktPublicRating>(response)
         } catch (_: Exception) {
             null
         }
@@ -102,20 +125,16 @@ class TraktClient(
         if (clientId.isBlank()) {
             throw Exception("Trakt Client ID not configured. Set it in Settings.")
         }
-        val response: HttpResponse = httpClient.post("$TRAKT_BASE/oauth/device/code") {
-            contentType(ContentType.Application.Json)
-            traktHeaders().forEach { (k, v) -> header(k, v) }
-            setBody(
-                json.encodeToString(
-                    kotlinx.serialization.serializer<Map<String, String>>(),
-                    mapOf("client_id" to clientId),
-                ),
-            )
-        }
-        if (!response.status.isSuccess()) {
-            throw Exception(traktErrorMessage(response))
-        }
-        val resp: TraktDeviceCodeResponse = response.body()
+        val response = postRaw(
+            path = "/oauth/device/code",
+            accessToken = null,
+            bodyText = json.encodeToString(
+                kotlinx.serialization.serializer<Map<String, String>>(),
+                mapOf("client_id" to clientId),
+            ),
+            bucket = TraktRequestBucket.OAUTH_REFRESH,
+        )
+        val resp: TraktDeviceCodeResponse = decodeTraktBody(response, TraktRequestBucket.OAUTH_REFRESH)
         if (resp.userCode.isBlank() || resp.verificationUrl.isBlank()) {
             throw Exception("Trakt returned empty device code fields.")
         }
@@ -130,28 +149,27 @@ class TraktClient(
 
     suspend fun pollDeviceToken(deviceCode: String): TraktPollResult {
         return try {
-            val response: HttpResponse = httpClient.post("$TRAKT_BASE/oauth/device/token") {
-                contentType(ContentType.Application.Json)
-                traktHeaders().forEach { (k, v) -> header(k, v) }
-                setBody(
-                    json.encodeToString(
-                        kotlinx.serialization.serializer<Map<String, String>>(),
-                        mapOf(
-                            "code" to deviceCode,
-                            "client_id" to clientId,
-                            "client_secret" to clientSecret,
-                        ),
+            val response = postRaw(
+                path = "/oauth/device/token",
+                accessToken = null,
+                bodyText = json.encodeToString(
+                    kotlinx.serialization.serializer<Map<String, String>>(),
+                    mapOf(
+                        "code" to deviceCode,
+                        "client_id" to clientId,
+                        "client_secret" to clientSecret,
                     ),
-                )
-            }
-            when (response.status.value) {
+                ),
+                bucket = TraktRequestBucket.OAUTH_REFRESH,
+            )
+            when (response.status) {
                 200 -> {
                     // Parse defensively: if the JSON shape drifts or the
                     // serializer can't decode for any reason, prefer a typed
                     // Error with a short preview of the body instead of
                     // throwing out to the generic catch (which loses context).
                     try {
-                        val resp: TraktTokenResponse = decodeTraktBody(response)
+                        val resp: TraktTokenResponse = decodeTraktBody(response, TraktRequestBucket.OAUTH_REFRESH)
                         if (resp.accessToken.isBlank() || resp.refreshToken.isBlank()) {
                             TraktPollResult.Error("Trakt returned an invalid token response.")
                         } else {
@@ -173,13 +191,21 @@ class TraktClient(
                 404, 410 -> TraktPollResult.Expired
                 409 -> TraktPollResult.AlreadyUsed
                 418 -> TraktPollResult.Denied
-                429 -> TraktPollResult.SlowDown
+                429 -> {
+                    rateLimiter.markRateLimited(
+                        TraktRequestBucket.OAUTH_REFRESH,
+                        response.headers["Retry-After"],
+                    )
+                    TraktPollResult.SlowDown
+                }
                 // 5xx is retryable — Trakt sometimes blips mid-flight.
-                in 500..599 -> TraktPollResult.TransientError("Server error ${response.status.value}")
+                in 500..599 -> TraktPollResult.TransientError("Server error ${response.status}")
                 else -> {
-                    TraktPollResult.Error("Trakt authentication failed with HTTP ${response.status.value}.")
+                    TraktPollResult.Error("Trakt authentication failed with HTTP ${response.status}.")
                 }
             }
+        } catch (e: TraktRateLimitedException) {
+            TraktPollResult.SlowDown
         } catch (e: Exception) {
             // Network-layer failures (DNS, connect, timeout) are transient
             // by nature during a 10-minute device-auth window — the network
@@ -190,22 +216,22 @@ class TraktClient(
     }
 
     suspend fun refreshToken(refreshToken: String): TraktTokens {
-        val response = httpClient.post("$TRAKT_BASE/oauth/token") {
-            contentType(ContentType.Application.Json)
-            setBody(
-                json.encodeToString(
-                    kotlinx.serialization.serializer<Map<String, String>>(),
-                    mapOf(
-                        "refresh_token" to refreshToken,
-                        "client_id" to clientId,
-                        "client_secret" to clientSecret,
-                        "redirect_uri" to "urn:ietf:wg:oauth:2.0:oob",
-                        "grant_type" to "refresh_token",
-                    ),
+        val response = postRaw(
+            path = "/oauth/token",
+            accessToken = null,
+            bodyText = json.encodeToString(
+                kotlinx.serialization.serializer<Map<String, String>>(),
+                mapOf(
+                    "refresh_token" to refreshToken,
+                    "client_id" to clientId,
+                    "client_secret" to clientSecret,
+                    "redirect_uri" to "urn:ietf:wg:oauth:2.0:oob",
+                    "grant_type" to "refresh_token",
                 ),
-            )
-        }
-        val resp: TraktTokenResponse = decodeTraktBody(response)
+            ),
+            bucket = TraktRequestBucket.OAUTH_REFRESH,
+        )
+        val resp: TraktTokenResponse = decodeTraktBody(response, TraktRequestBucket.OAUTH_REFRESH)
         return TraktTokens(
             accessToken = resp.accessToken,
             refreshToken = resp.refreshToken,
@@ -219,10 +245,11 @@ class TraktClient(
     // -------------------------------------------------------------------------
 
     suspend fun getUser(accessToken: String): TraktUser {
-        val response = httpClient.get("$TRAKT_BASE/users/me") {
-            traktHeaders(accessToken).forEach { (k, v) -> header(k, v) }
-            parameter("extended", "full")
-        }
+        val response = getRaw(
+            path = "/users/me",
+            accessToken = accessToken,
+            query = listOf("extended" to "full"),
+        )
         val resp: TraktUserResponse = decodeTraktBody(response)
         return TraktUser(
             username = resp.username,
@@ -235,19 +262,19 @@ class TraktClient(
 
     suspend fun revokeToken(accessToken: String) {
         try {
-            httpClient.post("$TRAKT_BASE/oauth/revoke") {
-                contentType(ContentType.Application.Json)
-                setBody(
-                    json.encodeToString(
-                        kotlinx.serialization.serializer<Map<String, String>>(),
-                        mapOf(
-                            "token" to accessToken,
-                            "client_id" to clientId,
-                            "client_secret" to clientSecret,
-                        ),
+            postRaw(
+                path = "/oauth/revoke",
+                accessToken = null,
+                bodyText = json.encodeToString(
+                    kotlinx.serialization.serializer<Map<String, String>>(),
+                    mapOf(
+                        "token" to accessToken,
+                        "client_id" to clientId,
+                        "client_secret" to clientSecret,
                     ),
-                )
-            }
+                ),
+                bucket = TraktRequestBucket.OAUTH_REFRESH,
+            )
         } catch (_: Exception) {
             // Best-effort revocation
         }
@@ -258,17 +285,15 @@ class TraktClient(
     // -------------------------------------------------------------------------
 
     suspend fun syncWatched(accessToken: String, mediaType: String): String {
-        return httpClient.get("$TRAKT_BASE/sync/watched/$mediaType") {
-            traktHeaders(accessToken).forEach { (k, v) -> header(k, v) }
-        }.bodyAsText()
+        return getRaw(
+            path = "/sync/watched/$mediaType",
+            accessToken = accessToken,
+        ).also { ensureSuccess(it) }.body
     }
 
     suspend fun addToHistory(accessToken: String, body: TraktHistoryBody) {
-        httpClient.post("$TRAKT_BASE/sync/history") {
-            contentType(ContentType.Application.Json)
-            traktHeaders(accessToken).forEach { (k, v) -> header(k, v) }
-            setBody(body)
-        }
+        postRaw("/sync/history", accessToken, body = body)
+            .also { ensureSuccess(it, TraktRequestBucket.AUTHENTICATED_MUTATION) }
     }
 
     // -------------------------------------------------------------------------
@@ -276,9 +301,7 @@ class TraktClient(
     // -------------------------------------------------------------------------
 
     suspend fun getStats(accessToken: String): TraktStats {
-        val response = httpClient.get("$TRAKT_BASE/users/me/stats") {
-            traktHeaders(accessToken).forEach { (k, v) -> header(k, v) }
-        }
+        val response = getRaw("/users/me/stats", accessToken)
         val resp: TraktStatsResponse = decodeTraktBody(response)
         return TraktStats(
             moviesWatched = resp.movies?.watched ?: 0,
@@ -289,11 +312,8 @@ class TraktClient(
     }
 
     suspend fun removeFromHistory(accessToken: String, body: TraktRemoveHistoryBody) {
-        httpClient.post("$TRAKT_BASE/sync/history/remove") {
-            contentType(ContentType.Application.Json)
-            traktHeaders(accessToken).forEach { (k, v) -> header(k, v) }
-            setBody(body)
-        }
+        postRaw("/sync/history/remove", accessToken, body = body)
+            .also { ensureSuccess(it, TraktRequestBucket.AUTHENTICATED_MUTATION) }
     }
 
     // -------------------------------------------------------------------------
@@ -301,32 +321,18 @@ class TraktClient(
     // -------------------------------------------------------------------------
 
     suspend fun getWatchlist(accessToken: String): List<TraktWatchlistItemResponse> {
-        val response = httpClient.get("$TRAKT_BASE/sync/watchlist") {
-            traktHeaders(accessToken).forEach { (k, v) -> header(k, v) }
-        }
+        val response = getRaw("/sync/watchlist", accessToken)
         return decodeTraktBody(response)
     }
 
     suspend fun addToWatchlist(accessToken: String, body: TraktWatchlistBody) {
-        val response = httpClient.post("$TRAKT_BASE/sync/watchlist") {
-            contentType(ContentType.Application.Json)
-            traktHeaders(accessToken).forEach { (k, v) -> header(k, v) }
-            setBody(body)
-        }
-        if (!response.status.isSuccess()) {
-            throw Exception(traktErrorMessage(response))
-        }
+        postRaw("/sync/watchlist", accessToken, body = body)
+            .also { ensureSuccess(it, TraktRequestBucket.AUTHENTICATED_MUTATION) }
     }
 
     suspend fun removeFromWatchlist(accessToken: String, body: TraktWatchlistBody) {
-        val response = httpClient.post("$TRAKT_BASE/sync/watchlist/remove") {
-            contentType(ContentType.Application.Json)
-            traktHeaders(accessToken).forEach { (k, v) -> header(k, v) }
-            setBody(body)
-        }
-        if (!response.status.isSuccess()) {
-            throw Exception(traktErrorMessage(response))
-        }
+        postRaw("/sync/watchlist/remove", accessToken, body = body)
+            .also { ensureSuccess(it, TraktRequestBucket.AUTHENTICATED_MUTATION) }
     }
 
     // -------------------------------------------------------------------------
@@ -334,28 +340,22 @@ class TraktClient(
     // -------------------------------------------------------------------------
 
     suspend fun getRatings(accessToken: String, limit: Int = 100): List<TraktRatingResponse> {
-        val response = httpClient.get("$TRAKT_BASE/sync/ratings") {
-            traktHeaders(accessToken).forEach { (k, v) -> header(k, v) }
-            parameter("page", 1)
-            parameter("limit", limit)
-        }
+        val response = getRaw(
+            path = "/sync/ratings",
+            accessToken = accessToken,
+            query = listOf("page" to "1", "limit" to limit.toString()),
+        )
         return decodeTraktBody(response)
     }
 
     suspend fun addRatings(accessToken: String, body: TraktRatingsBody) {
-        httpClient.post("$TRAKT_BASE/sync/ratings") {
-            contentType(ContentType.Application.Json)
-            traktHeaders(accessToken).forEach { (k, v) -> header(k, v) }
-            setBody(body)
-        }
+        postRaw("/sync/ratings", accessToken, body = body)
+            .also { ensureSuccess(it, TraktRequestBucket.AUTHENTICATED_MUTATION) }
     }
 
     suspend fun removeRatings(accessToken: String, body: TraktRatingsBody) {
-        httpClient.post("$TRAKT_BASE/sync/ratings/remove") {
-            contentType(ContentType.Application.Json)
-            traktHeaders(accessToken).forEach { (k, v) -> header(k, v) }
-            setBody(body)
-        }
+        postRaw("/sync/ratings/remove", accessToken, body = body)
+            .also { ensureSuccess(it, TraktRequestBucket.AUTHENTICATED_MUTATION) }
     }
 
     // -------------------------------------------------------------------------
@@ -363,11 +363,11 @@ class TraktClient(
     // -------------------------------------------------------------------------
 
     suspend fun getHistory(accessToken: String, limit: Int = 50): List<TraktHistoryResponse> {
-        val response = httpClient.get("$TRAKT_BASE/sync/history") {
-            traktHeaders(accessToken).forEach { (k, v) -> header(k, v) }
-            parameter("page", 1)
-            parameter("limit", limit)
-        }
+        val response = getRaw(
+            path = "/sync/history",
+            accessToken = accessToken,
+            query = listOf("page" to "1", "limit" to limit.toString()),
+        )
         return decodeTraktBody(response)
     }
 
@@ -376,9 +376,7 @@ class TraktClient(
     // -------------------------------------------------------------------------
 
     suspend fun getPlaybackProgress(accessToken: String): List<TraktPlaybackResponse> {
-        val response = httpClient.get("$TRAKT_BASE/sync/playback") {
-            traktHeaders(accessToken).forEach { (k, v) -> header(k, v) }
-        }
+        val response = getRaw("/sync/playback", accessToken)
         return decodeTraktBody(response)
     }
 
@@ -388,9 +386,7 @@ class TraktClient(
 
     suspend fun getCalendar(accessToken: String, days: Int = 7): List<TraktCalendarEpisode> {
         val today = Clock.System.now().toLocalDateTime(TimeZone.currentSystemDefault()).date
-        val response = httpClient.get("$TRAKT_BASE/calendars/my/shows/$today/$days") {
-            traktHeaders(accessToken).forEach { (k, v) -> header(k, v) }
-        }
+        val response = getRaw("/calendars/my/shows/$today/$days", accessToken)
         val resp: List<TraktCalendarResponse> = decodeTraktBody(response)
         return resp.mapNotNull { item ->
             val ep = item.episode ?: return@mapNotNull null
@@ -411,83 +407,131 @@ class TraktClient(
     // -------------------------------------------------------------------------
 
     suspend fun scrobbleStart(accessToken: String, body: TraktScrobbleBody) {
-        httpClient.post("$TRAKT_BASE/scrobble/start") {
-            contentType(ContentType.Application.Json)
-            traktHeaders(accessToken).forEach { (k, v) -> header(k, v) }
-            setBody(body)
-        }
+        postRaw("/scrobble/start", accessToken, body = body)
+            .also { ensureSuccess(it, TraktRequestBucket.AUTHENTICATED_MUTATION) }
     }
 
     suspend fun scrobblePause(accessToken: String, body: TraktScrobbleBody) {
-        httpClient.post("$TRAKT_BASE/scrobble/pause") {
-            contentType(ContentType.Application.Json)
-            traktHeaders(accessToken).forEach { (k, v) -> header(k, v) }
-            setBody(body)
-        }
+        postRaw("/scrobble/pause", accessToken, body = body)
+            .also { ensureSuccess(it, TraktRequestBucket.AUTHENTICATED_MUTATION) }
     }
 
     suspend fun scrobbleStop(accessToken: String, body: TraktScrobbleBody) {
-        httpClient.post("$TRAKT_BASE/scrobble/stop") {
-            contentType(ContentType.Application.Json)
-            traktHeaders(accessToken).forEach { (k, v) -> header(k, v) }
-            setBody(body)
-        }
+        postRaw("/scrobble/stop", accessToken, body = body)
+            .also { ensureSuccess(it, TraktRequestBucket.AUTHENTICATED_MUTATION) }
     }
 
-    // -------------------------------------------------------------------------
-    // Error message formatting
-    // -------------------------------------------------------------------------
-
-    /**
-     * Translate a non-success Trakt response into a message the user
-     * can act on. The previous "Trakt API error 429: error code: 1015"
-     * surface confused operators because:
-     *   - 1015 is Cloudflare's IP-rate-limit code, not a Trakt account
-     *     issue. Telling the user to "fix" Trakt sends them down the
-     *     wrong rabbit hole.
-     *   - The Retry-After header (Cloudflare returns this on 429)
-     *     was being thrown away.
-     *
-     * Now we read Retry-After when present and surface "Trakt is
-     * temporarily rate-limiting this network. Try again in N
-     * seconds." for 429s, and other recognisable shapes for the
-     * common Trakt error codes.
-     */
-    private suspend fun traktErrorMessage(response: HttpResponse): String {
-        val status = response.status.value
-        val retryAfter = response.headers["Retry-After"]?.toIntOrNull()
-        val cfRay = response.headers["cf-ray"]
-        val isCloudflareEdge = response.headers["Server"]?.contains("cloudflare", ignoreCase = true) == true
-        return when {
-            status == 429 -> {
-                val waitText = retryAfter?.let { "Try again in $it seconds." }
-                    ?: "Try again in a minute or two."
-                if (isCloudflareEdge) {
-                    "Trakt is rate-limiting this network at its edge (HTTP 429" +
-                        cfRay?.let { ", CF-Ray $it" }.orEmpty() +
-                        "). $waitText If it keeps happening, try a different network (mobile hotspot / VPN) " +
-                        "to confirm whether your IP got flagged or your account did."
-                } else {
-                    "Trakt is rate-limiting your account (HTTP 429). $waitText"
-                }
-            }
-            status == 401 -> "Trakt authentication required (HTTP 401). Reconnect Trakt in Settings."
-            status == 403 -> "Trakt refused this request (HTTP 403). Your client ID may be invalid."
-            status in 500..599 -> "Trakt is having a server problem (HTTP $status). Try again shortly."
-            else -> "Trakt request failed (HTTP $status)."
+    private suspend fun getRaw(
+        path: String,
+        accessToken: String?,
+        query: List<Pair<String, String>> = emptyList(),
+    ): TraktRawResponse {
+        val bucket = if (accessToken == null) {
+            TraktRequestBucket.UNAUTHENTICATED_GET
+        } else {
+            TraktRequestBucket.AUTHENTICATED_GET
         }
-    }
-
-    private suspend inline fun <reified T> decodeTraktBody(response: HttpResponse): T {
-        if (!response.status.isSuccess()) {
-            throw Exception(traktErrorMessage(response))
+        val authScope = if (accessToken == null) {
+            PUBLIC_AUTH_SCOPE
+        } else {
+            authScopeProvider.currentAuthenticatedScope()
         }
-        val body = response.bodyAsText()
-        return runCatching { json.decodeFromString<T>(body) }
-            .getOrElse { error ->
-                throw Exception(
-                    "Trakt response could not be decoded: ${error.message ?: error::class.simpleName}",
+        val key = traktRequestCoalescingKey("GET", authScope, path, query)
+        val winner = inFlightGetMutex.withLock {
+            inFlightGets[key]?.also {
+                diagnostics.log(
+                    "requests.coalesced",
+                    mapOf(
+                        "method" to "GET",
+                        "endpoint_key" to endpointLogKey(path, query),
+                    ),
                 )
+            } ?: requestScope.async {
+                try {
+                    rateLimiter.run(bucket) {
+                        try {
+                            val response = httpClient.get("$TRAKT_BASE$path") {
+                                traktHeaders(accessToken).forEach { (k, v) -> header(k, v) }
+                                query.forEach { (k, v) -> parameter(k, v) }
+                            }
+                            TraktRawResponse(
+                                status = response.status.value,
+                                headers = response.headers.entries().associate { it.key to it.value.joinToString(",") },
+                                body = response.bodyAsText(),
+                            )
+                        } catch (e: Exception) {
+                            if (e is TraktException || e is TraktAuthorizationRequiredException) throw e
+                            throw TraktNetworkException(e)
+                        }
+                    }
+                } finally {
+                    inFlightGetMutex.withLock { inFlightGets.remove(key) }
+                }
+            }.also { inFlightGets[key] = it }
+        }
+        return winner.await()
+    }
+
+    private suspend fun postRaw(
+        path: String,
+        accessToken: String?,
+        body: Any? = null,
+        bodyText: String? = null,
+        bucket: TraktRequestBucket = TraktRequestBucket.AUTHENTICATED_MUTATION,
+    ): TraktRawResponse {
+        return rateLimiter.run(bucket) {
+            try {
+                val response = httpClient.post("$TRAKT_BASE$path") {
+                    contentType(ContentType.Application.Json)
+                    traktHeaders(accessToken).forEach { (k, v) -> header(k, v) }
+                    when {
+                        bodyText != null -> setBody(bodyText)
+                        body != null -> setBody(body)
+                    }
+                }
+                TraktRawResponse(
+                    status = response.status.value,
+                    headers = response.headers.entries().associate { it.key to it.value.joinToString(",") },
+                    body = response.bodyAsText(),
+                )
+            } catch (e: Exception) {
+                if (e is TraktException || e is TraktAuthorizationRequiredException) throw e
+                throw TraktNetworkException(e)
             }
+        }
+    }
+
+    private suspend fun ensureSuccess(
+        response: TraktRawResponse,
+        bucket: TraktRequestBucket = TraktRequestBucket.AUTHENTICATED_GET,
+    ) {
+        if (response.status in 200..299) return
+        throw traktFailure(response, bucket)
+    }
+
+    private suspend inline fun <reified T> decodeTraktBody(
+        response: TraktRawResponse,
+        bucket: TraktRequestBucket = TraktRequestBucket.AUTHENTICATED_GET,
+    ): T {
+        ensureSuccess(response, bucket)
+        return runCatching { json.decodeFromString<T>(response.body) }
+            .getOrElse { error -> throw TraktDecodeException(error) }
+    }
+
+    private suspend fun traktFailure(
+        response: TraktRawResponse,
+        bucket: TraktRequestBucket,
+    ): Exception {
+        return when (response.status) {
+            401 -> TraktAuthorizationRequiredException()
+            429 -> rateLimiter.markRateLimited(bucket, response.headers["Retry-After"])
+            in 500..599 -> TraktServerException(response.status)
+            else -> TraktUnknownException(response.status)
+        }
+    }
+
+    private fun endpointLogKey(path: String, query: List<Pair<String, String>>): String {
+        val queryKey = query.sortedBy { it.first }.joinToString("&") { "${it.first}=<value>" }
+        return if (queryKey.isBlank()) path else "$path?$queryKey"
     }
 }

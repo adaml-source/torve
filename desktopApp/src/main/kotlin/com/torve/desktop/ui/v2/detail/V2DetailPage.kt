@@ -4,6 +4,7 @@ import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
 import com.torve.desktop.ui.l10n.ds
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.HorizontalScrollbar
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.VerticalScrollbar
 import androidx.compose.foundation.background
@@ -33,6 +34,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -50,6 +52,8 @@ import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.BookmarkBorder
 import androidx.compose.material.icons.filled.Business
 import androidx.compose.material.icons.filled.CalendarToday
+import androidx.compose.material.icons.filled.ChevronLeft
+import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
@@ -71,6 +75,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -102,11 +107,14 @@ import com.torve.desktop.ui.components.TorveSecondaryButton
 import com.torve.desktop.ui.components.TorveDropdownScaffold
 import com.torve.desktop.ui.theme.TorveDesktopThemeTokens
 import com.torve.desktop.ui.v2.components.DesktopRatingPills
+import com.torve.desktop.ui.v2.components.LocalRatingDisplayPrefs
 import com.torve.desktop.ui.v2.components.V2PosterCard
 import com.torve.desktop.ui.v2.components.V2Shelf
 import com.torve.desktop.ui.v2.components.rememberCachedBitmap
 import com.torve.domain.model.Episode
 import com.torve.domain.model.MediaItem
+import com.torve.domain.model.RatingDisplayPrefs
+import com.torve.domain.model.RatingSource
 import com.torve.domain.model.MediaType
 import com.torve.domain.model.Season
 import com.torve.domain.model.favoriteMediaKey
@@ -116,6 +124,7 @@ import com.torve.presentation.watchlist.isMutatingMedia
 import com.torve.presentation.watchlist.WatchlistUiState
 import java.awt.Desktop
 import java.net.URI
+import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 
 // Brand colors for rating providers
@@ -683,10 +692,8 @@ internal fun movieBackdropUrl(item: MediaItem): String? {
 }
 
 internal fun movieDetailsInfoRows(item: MediaItem): List<MovieDetailInfoRowModel> = buildList {
-    item.status?.takeIf { it.isNotBlank() }?.let { add(MovieDetailInfoRowModel("Status", it)) }
     item.releaseDate?.takeIf { it.isNotBlank() }?.let { add(MovieDetailInfoRowModel("Release Date", it)) }
     item.runtime?.takeIf { it > 0 }?.let { add(MovieDetailInfoRowModel("Runtime", "${it}m")) }
-    item.year?.let { add(MovieDetailInfoRowModel("Year", it.toString())) }
     item.director?.takeIf { it.isNotBlank() }?.let { add(MovieDetailInfoRowModel("Director", it)) }
     item.studios
         .map { it.name }
@@ -778,8 +785,7 @@ internal fun episodeHubInfoRows(
             add(MovieDetailInfoRowModel("Rating", "%.1f/10".format(rating)))
         }
     }
-    item.status?.takeIf { it.isNotBlank() }?.let { add(MovieDetailInfoRowModel("Status", it)) }
-    item.year?.let { add(MovieDetailInfoRowModel("Year", it.toString())) }
+    item.releaseDate?.takeIf { it.isNotBlank() }?.let { add(MovieDetailInfoRowModel("Release Date", it)) }
     item.studios.takeIf { it.isNotEmpty() }?.let { studios ->
         add(MovieDetailInfoRowModel("Network", studios.take(2).joinToString(", ") { it.name }))
     }
@@ -828,8 +834,13 @@ private fun DesktopPremiumMovieDetailsPage(
             else -> 360.dp
         }
         val leftInset = if (maxWidth >= 980.dp) 72.dp else 48.dp
-        val rightInset = if (showSideCard) sideCardWidth + 112.dp else 56.dp
+        val contentEndInset = 56.dp
         val heroMinHeight = (maxHeight * 0.70f).coerceAtLeast(560.dp)
+        val heroTextMaxWidth = if (showSideCard) {
+            (maxWidth - leftInset - sideCardWidth - 180.dp).coerceIn(520.dp, 820.dp)
+        } else {
+            820.dp
+        }
         val bottomSpace = if (reserveDockSpace) 152.dp else 72.dp
 
         Box(Modifier.fillMaxSize().background(colors.shellBackground)) {
@@ -896,7 +907,7 @@ private fun DesktopPremiumMovieDetailsPage(
                 modifier = Modifier
                     .fillMaxWidth()
                     .heightIn(min = heroMinHeight)
-                    .padding(start = leftInset, top = 116.dp, end = rightInset, bottom = 44.dp),
+                    .padding(start = leftInset, top = 116.dp, end = contentEndInset, bottom = 44.dp),
             ) {
                 DesktopMovieHeroContentCluster(
                     item = item,
@@ -917,8 +928,18 @@ private fun DesktopPremiumMovieDetailsPage(
                     onTrailer = onTrailer,
                     modifier = Modifier
                         .align(Alignment.BottomStart)
-                        .widthIn(max = 780.dp),
+                        .widthIn(max = heroTextMaxWidth),
                 )
+                if (showSideCard) {
+                    MovieDetailsSideCard(
+                        item = item,
+                        relatedItems = detailState.similarItems,
+                        onOpenRelated = onOpenRelated,
+                        modifier = Modifier
+                            .align(Alignment.BottomEnd)
+                            .width(sideCardWidth)
+                    )
+                }
             }
 
             if (!showSideCard) {
@@ -935,7 +956,7 @@ private fun DesktopPremiumMovieDetailsPage(
             item.tagline?.takeIf { it.isNotBlank() }?.let { tagline ->
                 Text(
                     text = tagline,
-                    modifier = Modifier.padding(start = leftInset, end = rightInset, bottom = 18.dp),
+                    modifier = Modifier.padding(start = leftInset, end = contentEndInset, bottom = 18.dp),
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Medium,
                     color = Color.White.copy(alpha = 0.78f),
@@ -948,7 +969,7 @@ private fun DesktopPremiumMovieDetailsPage(
                 CinematicCastRail(
                     cast = item.cast,
                     startPadding = leftInset,
-                    endPadding = if (showSideCard) rightInset else 56.dp,
+                    endPadding = contentEndInset,
                     onOpenPerson = onOpenPerson,
                 )
                 Spacer(Modifier.height(28.dp))
@@ -958,7 +979,7 @@ private fun DesktopPremiumMovieDetailsPage(
                 CinematicRelatedRail(
                     items = detailState.similarItems,
                     startPadding = leftInset,
-                    endPadding = if (showSideCard) rightInset else 56.dp,
+                    endPadding = contentEndInset,
                     onOpenRelated = onOpenRelated,
                 )
             }
@@ -966,25 +987,11 @@ private fun DesktopPremiumMovieDetailsPage(
             detailState.detailError?.let { error ->
                 Text(
                     text = error,
-                    modifier = Modifier.padding(start = leftInset, end = rightInset, top = 20.dp),
+                    modifier = Modifier.padding(start = leftInset, end = contentEndInset, top = 20.dp),
                     style = MaterialTheme.typography.bodySmall,
                     color = colors.error,
                 )
             }
-        }
-
-        if (showSideCard) {
-            MovieDetailsSideCard(
-                item = item,
-                relatedItems = detailState.similarItems,
-                onOpenRelated = onOpenRelated,
-                modifier = Modifier
-                    .align(Alignment.TopEnd)
-                    .padding(top = 126.dp, end = 52.dp)
-                    .width(sideCardWidth)
-                    .heightIn(max = maxHeight - 196.dp)
-                    .zIndex(12f),
-            )
         }
 
         FloatingBackButton(
@@ -1058,8 +1065,13 @@ private fun DesktopPremiumTvShowDetailsPage(
             else -> 368.dp
         }
         val leftInset = if (maxWidth >= 980.dp) 72.dp else 48.dp
-        val rightInset = if (showEpisodeHub) hubWidth + 112.dp else 56.dp
+        val contentEndInset = 56.dp
         val heroMinHeight = (maxHeight * 0.66f).coerceAtLeast(540.dp)
+        val heroTextMaxWidth = if (showEpisodeHub) {
+            (maxWidth - leftInset - hubWidth - 184.dp).coerceIn(520.dp, 840.dp)
+        } else {
+            840.dp
+        }
         val bottomSpace = if (reserveDockSpace) 164.dp else 84.dp
 
         Box(Modifier.fillMaxSize().background(colors.shellBackground)) {
@@ -1126,7 +1138,7 @@ private fun DesktopPremiumTvShowDetailsPage(
                     modifier = Modifier
                         .fillMaxWidth()
                         .heightIn(min = heroMinHeight)
-                        .padding(start = leftInset, top = 116.dp, end = rightInset, bottom = 42.dp),
+                        .padding(start = leftInset, top = 116.dp, end = contentEndInset, bottom = 42.dp),
                 ) {
                     DesktopTvHeroContentCluster(
                         item = item,
@@ -1150,8 +1162,21 @@ private fun DesktopPremiumTvShowDetailsPage(
                         onTrailer = onTrailer,
                         modifier = Modifier
                             .align(Alignment.BottomStart)
-                            .widthIn(max = 820.dp),
+                            .widthIn(max = heroTextMaxWidth),
                     )
+                    if (showEpisodeHub) {
+                        EpisodeHubSideCard(
+                            item = item,
+                            selection = selection,
+                            canDownloadShows = canDownloadShows,
+                            onPlayEpisode = onPlayEpisode,
+                            onChooseEpisodeSource = onChooseEpisodeSource,
+                            onDownloadEpisode = onDownloadEpisode,
+                            modifier = Modifier
+                                .align(Alignment.BottomEnd)
+                                .width(hubWidth)
+                        )
+                    }
                 }
             }
 
@@ -1175,7 +1200,7 @@ private fun DesktopPremiumTvShowDetailsPage(
                 item("tagline") {
                     Text(
                         text = tagline,
-                        modifier = Modifier.padding(start = leftInset, end = rightInset, bottom = 18.dp),
+                        modifier = Modifier.padding(start = leftInset, end = contentEndInset, bottom = 18.dp),
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Medium,
                         color = Color.White.copy(alpha = 0.78f),
@@ -1190,7 +1215,7 @@ private fun DesktopPremiumTvShowDetailsPage(
                     CinematicCastRail(
                         cast = item.cast,
                         startPadding = leftInset,
-                        endPadding = if (showEpisodeHub) rightInset else 56.dp,
+                        endPadding = contentEndInset,
                         onOpenPerson = onOpenPerson,
                     )
                     Spacer(Modifier.height(30.dp))
@@ -1201,7 +1226,7 @@ private fun DesktopPremiumTvShowDetailsPage(
                 CinematicSectionHeader(
                     title = "Episodes",
                     subtitle = "Choose a season, select an episode, then play, source, or download that exact episode.",
-                    modifier = Modifier.padding(start = leftInset, end = rightInset, bottom = 14.dp),
+                    modifier = Modifier.padding(start = leftInset, end = contentEndInset, bottom = 14.dp),
                 )
             }
 
@@ -1211,7 +1236,7 @@ private fun DesktopPremiumTvShowDetailsPage(
                         seasons = seasons,
                         selectedSeasonNumber = selectedSeason?.seasonNumber ?: detailState.selectedSeasonNumber,
                         startPadding = leftInset,
-                        endPadding = if (showEpisodeHub) rightInset else 56.dp,
+                        endPadding = contentEndInset,
                         onSelectSeason = onSelectSeason,
                     )
                     Spacer(Modifier.height(18.dp))
@@ -1222,7 +1247,7 @@ private fun DesktopPremiumTvShowDetailsPage(
                 detailState.isLoadingSeason && episodes.isEmpty() -> {
                     item("episodes-loading") {
                         Row(
-                            modifier = Modifier.padding(start = leftInset, end = rightInset, top = 12.dp),
+                            modifier = Modifier.padding(start = leftInset, end = contentEndInset, top = 12.dp),
                             horizontalArrangement = Arrangement.spacedBy(12.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
@@ -1235,7 +1260,7 @@ private fun DesktopPremiumTvShowDetailsPage(
                     item("episodes-empty") {
                         Text(
                             "No episodes are available for ${seasonDisplayName(selectedSeason)} yet.",
-                            modifier = Modifier.padding(start = leftInset, end = rightInset, top = 12.dp),
+                            modifier = Modifier.padding(start = leftInset, end = contentEndInset, top = 12.dp),
                             color = Color.White.copy(alpha = 0.66f),
                             style = MaterialTheme.typography.bodyMedium,
                         )
@@ -1266,7 +1291,7 @@ private fun DesktopPremiumTvShowDetailsPage(
                                 onSelectEpisode(episode)
                                 onDownloadEpisode(item, selectedSeason.seasonNumber, episode.episodeNumber)
                             },
-                            modifier = Modifier.padding(start = leftInset, end = rightInset, bottom = 12.dp),
+                            modifier = Modifier.padding(start = leftInset, end = contentEndInset, bottom = 12.dp),
                         )
                     }
                 }
@@ -1278,7 +1303,7 @@ private fun DesktopPremiumTvShowDetailsPage(
                     CinematicRelatedRail(
                         items = detailState.similarItems,
                         startPadding = leftInset,
-                        endPadding = if (showEpisodeHub) rightInset else 56.dp,
+                        endPadding = contentEndInset,
                         onOpenRelated = onOpenRelated,
                     )
                 }
@@ -1288,29 +1313,12 @@ private fun DesktopPremiumTvShowDetailsPage(
                 item("detail-error") {
                     Text(
                         text = error,
-                        modifier = Modifier.padding(start = leftInset, end = rightInset, top = 20.dp),
+                        modifier = Modifier.padding(start = leftInset, end = contentEndInset, top = 20.dp),
                         style = MaterialTheme.typography.bodySmall,
                         color = colors.error,
                     )
                 }
             }
-        }
-
-        if (showEpisodeHub) {
-            EpisodeHubSideCard(
-                item = item,
-                selection = selection,
-                canDownloadShows = canDownloadShows,
-                onPlayEpisode = onPlayEpisode,
-                onChooseEpisodeSource = onChooseEpisodeSource,
-                onDownloadEpisode = onDownloadEpisode,
-                modifier = Modifier
-                    .align(Alignment.TopEnd)
-                    .padding(top = 126.dp, end = 52.dp)
-                    .width(hubWidth)
-                    .heightIn(max = maxHeight - 196.dp)
-                    .zIndex(12f),
-            )
         }
 
         FloatingBackButton(
@@ -1571,7 +1579,6 @@ private fun EpisodeHubSideCard(
 ) {
     val colors = TorveDesktopThemeTokens.colors
     val rows = remember(item, selection) { episodeHubInfoRows(item, selection) }
-    val scrollState = rememberScrollState()
     Surface(
         modifier = modifier.shadow(34.dp, RoundedCornerShape(28.dp)).clip(RoundedCornerShape(28.dp)),
         color = Color(0xFF07101D).copy(alpha = 0.70f),
@@ -1598,21 +1605,11 @@ private fun EpisodeHubSideCard(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .verticalScroll(scrollState)
-                    .padding(26.dp),
-                verticalArrangement = Arrangement.spacedBy(16.dp),
+                    .padding(horizontal = 22.dp, vertical = 20.dp),
+                verticalArrangement = Arrangement.spacedBy(11.dp),
             ) {
                 Text("Episode hub", color = colors.accent, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
                 selection?.let {
-                    item.status?.takeIf { status -> status.isNotBlank() }?.let { status ->
-                        Surface(
-                            color = colors.accent.copy(alpha = 0.14f),
-                            shape = RoundedCornerShape(999.dp),
-                            border = BorderStroke(1.dp, colors.accent.copy(alpha = 0.34f)),
-                        ) {
-                            Text(status, modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp), color = colors.accent, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
-                        }
-                    }
                     Text(
                         "Selected: ${tvEpisodeShortLabel(it)}",
                         color = Color.White.copy(alpha = 0.95f),
@@ -1632,7 +1629,7 @@ private fun EpisodeHubSideCard(
                     style = MaterialTheme.typography.bodyMedium,
                 )
 
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(9.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     CinematicIconActionButton(
                         text = "Play Episode",
                         contentDescription = "Play selected episode",
@@ -2028,13 +2025,39 @@ private fun DesktopMovieHeroContentCluster(
 
 @Composable
 private fun MovieRatingSourceChips(item: MediaItem, modifier: Modifier = Modifier) {
-    val chips = remember(item.ratings, item.rating) { movieRatingChips(item) }
-    if (chips.isEmpty()) return
-    Row(modifier = modifier, horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-        chips.forEach { chip ->
-            RatingSourceChip(chip)
+    val ratings = remember(item.ratings, item.rating) { item.ratings.withFallbackTmdbScore(item.rating) }
+    val prefs = detailEnrichedRatingPrefs(maxRatings = 8)
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .heightIn(min = 28.dp),
+        contentAlignment = Alignment.CenterStart,
+    ) {
+        if (ratings != null) {
+            DesktopRatingPills(
+                ratings = ratings,
+                showBackground = false,
+                prefs = prefs,
+                visualScale = 1.32f,
+            )
         }
     }
+}
+
+@Composable
+private fun detailEnrichedRatingPrefs(maxRatings: Int): RatingDisplayPrefs {
+    val current = LocalRatingDisplayPrefs.current
+    val preferred = listOf(
+        RatingSource.IMDB,
+        RatingSource.TMDB,
+        RatingSource.TRAKT,
+        RatingSource.ROTTEN_TOMATOES,
+    )
+    return current.copy(
+        enabledProviders = (preferred + current.enabledProviders).distinct(),
+        providerOrder = (preferred + current.providerOrder).distinct(),
+        maxRatingsOnCard = current.maxRatingsOnCard.coerceAtLeast(maxRatings),
+    )
 }
 
 @Composable
@@ -2245,7 +2268,6 @@ private fun MovieDetailsSideCard(
     val colors = TorveDesktopThemeTokens.colors
     val rows = remember(item) { movieDetailsInfoRows(item) }
     val ratingChips = remember(item.ratings, item.rating) { movieRatingChips(item) }
-    val scrollState = rememberScrollState()
     Surface(
         modifier = modifier.shadow(34.dp, RoundedCornerShape(28.dp)).clip(RoundedCornerShape(28.dp)),
         color = Color(0xFF07101D).copy(alpha = 0.68f),
@@ -2272,9 +2294,8 @@ private fun MovieDetailsSideCard(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .verticalScroll(scrollState)
-                    .padding(26.dp),
-                verticalArrangement = Arrangement.spacedBy(16.dp),
+                    .padding(horizontal = 22.dp, vertical = 20.dp),
+                verticalArrangement = Arrangement.spacedBy(11.dp),
             ) {
                 Text("Movie details", color = colors.accent, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
                 rows.forEachIndexed { index, row ->
@@ -2295,16 +2316,80 @@ private fun MovieDetailsSideCard(
                     }
                 }
                 if (relatedItems.isNotEmpty()) {
-                    Spacer(Modifier.height(2.dp))
-                    Text("You might also like", color = Color.White.copy(alpha = 0.88f), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
-                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.Top) {
-                        relatedItems.take(4).forEach { related ->
-                            MiniRelatedTile(item = related, onClick = { onOpenRelated(related) })
-                        }
-                    }
+                    MiniRecommendationRail(
+                        items = relatedItems,
+                        onOpenRelated = onOpenRelated,
+                    )
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun MiniRecommendationRail(
+    items: List<MediaItem>,
+    onOpenRelated: (MediaItem) -> Unit,
+) {
+    val displayItems = remember(items) { items.take(10) }
+    val listState = rememberLazyListState()
+    val scope = rememberCoroutineScope()
+    val visibleCount = listState.layoutInfo.visibleItemsInfo.size
+    val hasOverflow = visibleCount > 0 && displayItems.size > visibleCount
+    val canScrollBackward = listState.firstVisibleItemIndex > 0 || listState.firstVisibleItemScrollOffset > 0
+    val canScrollForward = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index?.let { it < displayItems.lastIndex } == true
+
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text("You might also like", color = Color.White.copy(alpha = 0.88f), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+            if (hasOverflow) {
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                    DetailRailScrollButton(
+                        icon = Icons.Filled.ChevronLeft,
+                        contentDescription = "Scroll recommendations left",
+                        enabled = canScrollBackward,
+                        size = 28.dp,
+                        onClick = {
+                            val page = (visibleCount - 1).coerceAtLeast(1)
+                            scope.launch {
+                                listState.animateScrollToItem((listState.firstVisibleItemIndex - page).coerceAtLeast(0))
+                            }
+                        },
+                    )
+                    DetailRailScrollButton(
+                        icon = Icons.Filled.ChevronRight,
+                        contentDescription = "Scroll recommendations right",
+                        enabled = canScrollForward,
+                        size = 28.dp,
+                        onClick = {
+                            val page = (visibleCount - 1).coerceAtLeast(1)
+                            scope.launch {
+                                listState.animateScrollToItem((listState.firstVisibleItemIndex + page).coerceAtMost(displayItems.lastIndex))
+                            }
+                        },
+                    )
+                }
+            }
+        }
+        LazyRow(
+            state = listState,
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalAlignment = Alignment.Top,
+            contentPadding = PaddingValues(end = 8.dp, bottom = 3.dp),
+        ) {
+            items(displayItems, key = { it.id }) { related ->
+                MiniRelatedTile(item = related, onClick = { onOpenRelated(related) })
+            }
+        }
+        HorizontalScrollbar(
+            adapter = rememberScrollbarAdapter(listState),
+            modifier = Modifier.fillMaxWidth().height(4.dp),
+        )
     }
 }
 
@@ -2314,7 +2399,11 @@ private fun MetadataInfoRow(row: MovieDetailInfoRowModel) {
         Icon(movieInfoIcon(row.label), contentDescription = null, tint = TorveDesktopThemeTokens.colors.accent.copy(alpha = 0.76f), modifier = Modifier.size(18.dp))
         Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
             Text(row.label, color = Color.White.copy(alpha = 0.50f), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.SemiBold)
-            Text(row.value, color = Color.White.copy(alpha = 0.86f), style = MaterialTheme.typography.bodySmall, maxLines = 3, overflow = TextOverflow.Ellipsis)
+            val valueMaxLines = when (row.label) {
+                "Studio", "Network", "Genres" -> 2
+                else -> 3
+            }
+            Text(row.value, color = Color.White.copy(alpha = 0.86f), style = MaterialTheme.typography.bodySmall, maxLines = valueMaxLines, overflow = TextOverflow.Ellipsis)
         }
     }
 }
@@ -2335,6 +2424,8 @@ private fun MiniRelatedTile(item: MediaItem, onClick: () -> Unit) {
     val poster = rememberCachedBitmap(
         if (item.isContentPlaceholder || item.isStubDetail) null else item.posterUrl ?: item.backdropUrl,
     )
+    val displayRatings = remember(item.ratings, item.rating) { item.ratings.withFallbackTmdbScore(item.rating) }
+    val ratingPrefs = detailEnrichedRatingPrefs(maxRatings = 4)
     val interaction = remember { MutableInteractionSource() }
     val hovered by interaction.collectIsHoveredAsState()
     var focused by remember { mutableStateOf(false) }
@@ -2365,6 +2456,106 @@ private fun MiniRelatedTile(item: MediaItem, onClick: () -> Unit) {
                 Text(item.title.take(1), color = Color.White.copy(alpha = 0.7f), fontWeight = FontWeight.Bold)
             }
         }
+        DesktopRatingPills(
+            ratings = displayRatings,
+            modifier = Modifier.align(Alignment.BottomStart).padding(5.dp),
+            prefs = ratingPrefs,
+            showBackground = true,
+        )
+    }
+}
+
+@Composable
+private fun DetailRailHeader(
+    title: String,
+    startPadding: Dp,
+    endPadding: Dp,
+    listState: LazyListState,
+    itemCount: Int,
+) {
+    val scope = rememberCoroutineScope()
+    val visibleCount = listState.layoutInfo.visibleItemsInfo.size
+    val hasOverflow = visibleCount > 0 && itemCount > visibleCount
+    val canScrollBackward = listState.firstVisibleItemIndex > 0 || listState.firstVisibleItemScrollOffset > 0
+    val canScrollForward = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index?.let { it < itemCount - 1 } == true
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(start = startPadding, end = endPadding),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            title,
+            color = Color.White.copy(alpha = 0.95f),
+            style = MaterialTheme.typography.titleLarge,
+            fontWeight = FontWeight.Bold,
+        )
+        if (hasOverflow) {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                DetailRailScrollButton(
+                    icon = Icons.Filled.ChevronLeft,
+                    contentDescription = "Scroll $title left",
+                    enabled = canScrollBackward,
+                    onClick = {
+                        val page = (visibleCount - 1).coerceAtLeast(1)
+                        scope.launch {
+                            listState.animateScrollToItem((listState.firstVisibleItemIndex - page).coerceAtLeast(0))
+                        }
+                    },
+                )
+                DetailRailScrollButton(
+                    icon = Icons.Filled.ChevronRight,
+                    contentDescription = "Scroll $title right",
+                    enabled = canScrollForward,
+                    onClick = {
+                        val page = (visibleCount - 1).coerceAtLeast(1)
+                        scope.launch {
+                            listState.animateScrollToItem((listState.firstVisibleItemIndex + page).coerceAtMost(itemCount - 1))
+                        }
+                    },
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun DetailRailScrollButton(
+    icon: ImageVector,
+    contentDescription: String,
+    enabled: Boolean,
+    size: Dp = 34.dp,
+    onClick: () -> Unit,
+) {
+    val colors = TorveDesktopThemeTokens.colors
+    val interaction = remember { MutableInteractionSource() }
+    val hovered by interaction.collectIsHoveredAsState()
+    val border = if (enabled && hovered) colors.accent.copy(alpha = 0.64f) else Color.White.copy(alpha = if (enabled) 0.14f else 0.07f)
+    val background = if (enabled && hovered) colors.accent.copy(alpha = 0.18f) else Color(0xFF0B1220).copy(alpha = if (enabled) 0.58f else 0.28f)
+    Surface(
+        modifier = Modifier
+            .size(size)
+            .clip(RoundedCornerShape(999.dp))
+            .hoverable(interaction, enabled)
+            .semantics {
+                this.contentDescription = contentDescription
+                role = Role.Button
+            }
+            .clickable(interactionSource = interaction, indication = null, enabled = enabled, onClick = onClick),
+        color = background,
+        shape = RoundedCornerShape(999.dp),
+        border = BorderStroke(1.dp, border),
+    ) {
+        Box(contentAlignment = Alignment.Center) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = Color.White.copy(alpha = if (enabled) 0.88f else 0.30f),
+                modifier = Modifier.size((size.value * 0.58f).dp),
+            )
+        }
     }
 }
 
@@ -2375,22 +2566,33 @@ private fun CinematicCastRail(
     endPadding: Dp,
     onOpenPerson: (Int) -> Unit,
 ) {
+    val displayCast = remember(cast) { cast.take(24) }
+    val listState = rememberLazyListState()
     Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-        Text(
-            "Cast & Crew",
-            modifier = Modifier.padding(start = startPadding, end = endPadding),
-            color = Color.White.copy(alpha = 0.95f),
-            style = MaterialTheme.typography.titleLarge,
-            fontWeight = FontWeight.Bold,
+        DetailRailHeader(
+            title = "Cast & Crew",
+            startPadding = startPadding,
+            endPadding = endPadding,
+            listState = listState,
+            itemCount = displayCast.size,
         )
         LazyRow(
+            state = listState,
+            modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(22.dp),
-            contentPadding = PaddingValues(start = startPadding, end = endPadding),
+            contentPadding = PaddingValues(start = startPadding, end = endPadding, top = 8.dp, bottom = 8.dp),
         ) {
-            items(cast.take(24), key = { it.id }) { member ->
+            items(displayCast, key = { it.id }) { member ->
                 CircularCastMemberCard(member = member, onClick = { onOpenPerson(member.id) })
             }
         }
+        HorizontalScrollbar(
+            adapter = rememberScrollbarAdapter(listState),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = startPadding, end = endPadding)
+                .height(4.dp),
+        )
     }
 }
 
@@ -2471,26 +2673,38 @@ private fun CircularCastMemberCard(
 @Composable
 private fun CinematicRelatedRail(
     items: List<MediaItem>,
+    title: String = "Related",
     startPadding: Dp,
     endPadding: Dp,
     onOpenRelated: (MediaItem) -> Unit,
 ) {
+    val displayItems = remember(items) { items.take(20) }
+    val listState = rememberLazyListState()
     Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-        Text(
-            "Related",
-            modifier = Modifier.padding(start = startPadding, end = endPadding),
-            color = Color.White.copy(alpha = 0.95f),
-            style = MaterialTheme.typography.titleLarge,
-            fontWeight = FontWeight.Bold,
+        DetailRailHeader(
+            title = title,
+            startPadding = startPadding,
+            endPadding = endPadding,
+            listState = listState,
+            itemCount = displayItems.size,
         )
         LazyRow(
+            state = listState,
+            modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(18.dp),
-            contentPadding = PaddingValues(start = startPadding, end = endPadding),
+            contentPadding = PaddingValues(start = startPadding, end = endPadding, top = 8.dp, bottom = 8.dp),
         ) {
-            items(items.take(20), key = { it.id }) { related ->
+            items(displayItems, key = { it.id }) { related ->
                 CinematicRelatedPosterCard(item = related, onClick = { onOpenRelated(related) })
             }
         }
+        HorizontalScrollbar(
+            adapter = rememberScrollbarAdapter(listState),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = startPadding, end = endPadding)
+                .height(4.dp),
+        )
     }
 }
 
@@ -2511,6 +2725,8 @@ private fun CinematicRelatedPosterCard(item: MediaItem, onClick: () -> Unit) {
         label = "relatedPosterScale",
     )
     val poster = rememberCachedBitmap(if (item.isContentPlaceholder || item.isStubDetail) null else item.posterUrl)
+    val displayRatings = remember(item.ratings, item.rating) { item.ratings.withFallbackTmdbScore(item.rating) }
+    val ratingPrefs = detailEnrichedRatingPrefs(maxRatings = 4)
     Column(
         modifier = Modifier
             .width(156.dp)
@@ -2540,16 +2756,23 @@ private fun CinematicRelatedPosterCard(item: MediaItem, onClick: () -> Unit) {
             if (poster != null) {
                 Image(poster, item.title, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
             }
-            item.rating?.takeIf { it > 0 }?.let { rating ->
-                Surface(
-                    modifier = Modifier.align(Alignment.TopEnd).padding(8.dp),
-                    color = Color.Black.copy(alpha = 0.66f),
-                    shape = RoundedCornerShape(999.dp),
-                    border = BorderStroke(1.dp, Color.White.copy(alpha = 0.12f)),
-                ) {
-                    Text("%.1f".format(rating), modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp), color = Color.White.copy(alpha = 0.90f), style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
-                }
-            }
+            Box(
+                modifier = Modifier
+                    .align(Alignment.BottomStart)
+                    .fillMaxWidth()
+                    .height(56.dp)
+                    .background(
+                        Brush.verticalGradient(
+                            listOf(Color.Transparent, Color.Black.copy(alpha = 0.74f)),
+                        ),
+                    ),
+            )
+            DesktopRatingPills(
+                ratings = displayRatings,
+                modifier = Modifier.align(Alignment.BottomStart).padding(8.dp),
+                prefs = ratingPrefs,
+                showBackground = true,
+            )
         }
         Text(item.title, color = Color.White.copy(alpha = 0.92f), style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
         item.year?.let {
@@ -2595,7 +2818,7 @@ private fun FloatingBackButton(
 
     Box(
         modifier = modifier
-            .then(if (compact) Modifier.size(48.dp) else Modifier.height(48.dp).widthIn(min = 104.dp))
+            .then(if (compact) Modifier.size(42.dp) else Modifier.height(42.dp).widthIn(min = 96.dp, max = 128.dp))
             .graphicsLayer {
                 scaleX = scale
                 scaleY = scale
@@ -2639,10 +2862,10 @@ private fun FloatingBackButton(
                 imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                 contentDescription = null,
                 tint = Color.White.copy(alpha = 0.92f),
-                modifier = Modifier.size(20.dp),
+                modifier = Modifier.size(18.dp),
             )
             if (!compact) {
-                Spacer(Modifier.width(8.dp))
+                Spacer(Modifier.width(7.dp))
                 Text(
                     text = label,
                     style = MaterialTheme.typography.labelLarge,
@@ -2916,6 +3139,7 @@ private fun DetailSummary(
 private fun DetailRatingPills(item: MediaItem) {
     val ratings = item.ratings
         ?: item.rating?.let { com.torve.domain.model.MediaRatings(tmdbScore = it.toFloat()) }
+    val prefs = detailEnrichedRatingPrefs(maxRatings = 8)
     // Reserved height so the row below (logo / title) doesn't shift
     // downward when ratings finish hydrating. Without this, the user
     // saw pills appear → title text "overwriting" them → final TMDB
@@ -2932,7 +3156,8 @@ private fun DetailRatingPills(item: MediaItem) {
             com.torve.desktop.ui.v2.components.DesktopRatingPills(
                 ratings = ratings,
                 showBackground = false,
-                prefs = com.torve.desktop.ui.v2.components.LocalRatingDisplayPrefs.current.copy(maxRatingsOnCard = 8),
+                prefs = prefs,
+                visualScale = 1.32f,
             )
         }
     }

@@ -10,12 +10,18 @@ plugins {
     alias(libs.plugins.firebase.crashlytics)
 }
 
+fun String.toBuildConfigStringLiteral(): String =
+    "\"" + replace("\\", "\\\\").replace("\"", "\\\"") + "\""
+
 android {
     namespace = "com.torve.android"
     compileSdk = 36
     val pandaBaseUrl = providers.gradleProperty("pandaBaseUrl")
         .orElse(providers.environmentVariable("TORVE_PANDA_BASE_URL"))
         .orElse("https://panda.torve.app")
+    val torveDiscordInviteUrl = providers.gradleProperty("torveDiscordInviteUrl")
+        .orElse(providers.environmentVariable("TORVE_DISCORD_INVITE_URL"))
+        .orElse("https://discord.gg/dVHFAh7Amx")
 
     signingConfigs {
         create("release") {
@@ -37,14 +43,14 @@ android {
         }
     }
 
-    val baseVersionCode = 78
+    val baseVersionCode = 82
 
     defaultConfig {
         applicationId = "com.torve.app"
         minSdk = 24
         targetSdk = 36
         versionCode = baseVersionCode
-        versionName = "1.0.68"
+        versionName = "1.0.72"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         multiDexEnabled = true
         multiDexKeepProguard = file("multidex-config.pro")
@@ -67,6 +73,7 @@ android {
         buildConfigField("String", "SYNC_BASE_URL", "\"https://api.torve.app\"")
         buildConfigField("String", "SYNC_WS_URL", "\"wss://api.torve.app/ws\"")
         buildConfigField("String", "PANDA_BASE_URL", "\"${pandaBaseUrl.get()}\"")
+        buildConfigField("String", "TORVE_DISCORD_INVITE_URL", torveDiscordInviteUrl.get().toBuildConfigStringLiteral())
     }
 
     flavorDimensions += listOf("store", "formFactor")

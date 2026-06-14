@@ -2,7 +2,6 @@ package com.torve.android.session
 
 import android.content.Context
 import com.torve.android.catalog.CatalogWarmupWorker
-import com.torve.android.epg.EpgWarmupWorker
 import com.torve.android.sync.TraktSyncWorker
 import com.torve.presentation.session.AccountSessionCoordinator
 import com.torve.presentation.session.RestorePhase
@@ -91,14 +90,9 @@ object PostSignInRefresh {
         val appContext = context.applicationContext
         android.util.Log.i(
             "PostSignInRefresh",
-            "enqueuePostRestoreWarmup force=$force lightweight=true missingOnly=true visibleProgress=false",
+            "enqueuePostRestoreWarmup force=$force credentialImport=true",
         )
-        CatalogWarmupWorker.refreshNow(
-            context = appContext,
-            lightweight = true,
-            visibleProgress = false,
-            missingOnly = true,
-        )
+        CatalogWarmupWorker.refreshAfterCredentialImport(appContext)
         TraktSyncWorker.syncNow(appContext)
     }
 
@@ -155,7 +149,6 @@ object PostSignInRefresh {
             visibleProgress = true,
             missingOnly = false,
         )
-        EpgWarmupWorker.refreshNow(appContext)
         TraktSyncWorker.syncNow(appContext)
     }
 

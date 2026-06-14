@@ -50,6 +50,7 @@ import com.torve.android.ui.panda.PandaProviderStep
 import com.torve.android.ui.panda.PandaQualityStep
 import com.torve.android.ui.panda.PandaReviewStep
 import com.torve.android.ui.panda.PandaSourcesStep
+import com.torve.android.ui.panda.PandaSetupTypeStep
 import com.torve.android.ui.panda.PandaUsenetStep
 import com.torve.android.ui.theme.Amber
 import com.torve.android.ui.theme.Gunmetal
@@ -57,6 +58,8 @@ import com.torve.android.ui.theme.Obsidian
 import com.torve.android.ui.theme.Snow
 import com.torve.presentation.panda.PandaSetupStep
 import com.torve.presentation.panda.PandaSetupViewModel
+import com.torve.presentation.panda.progressStepCount
+import com.torve.presentation.panda.progressStepNumber
 import org.koin.compose.koinInject
 
 @Composable
@@ -67,19 +70,20 @@ fun TvPandaSetupScreen(
 ) {
     val state by viewModel.state.collectAsState()
 
-    BackHandler(enabled = state.currentStep != PandaSetupStep.PROVIDER) {
+    BackHandler(enabled = state.currentStep != PandaSetupStep.SETUP_TYPE) {
         viewModel.previousStep()
     }
 
-    val stepIndex = PandaSetupStep.entries.indexOf(state.currentStep)
-    val totalSteps = PandaSetupStep.entries.size
+    val stepNumber = state.progressStepNumber()
+    val totalSteps = state.progressStepCount()
     val stepEntryFocusRequester = remember { FocusRequester() }
     val closeButtonFocusRequester = remember { FocusRequester() }
     val backButtonFocusRequester = remember { FocusRequester() }
     val nextButtonFocusRequester = remember { FocusRequester() }
     val bottomExitButtonFocusRequester = remember { FocusRequester() }
     val canAdvance = when (state.currentStep) {
-        PandaSetupStep.PROVIDER -> state.selectedProvider != null
+        PandaSetupStep.SETUP_TYPE,
+        PandaSetupStep.PROVIDER -> false
         PandaSetupStep.AUTH -> state.authConnected
         PandaSetupStep.SOURCES,
         PandaSetupStep.USENET,
@@ -133,7 +137,7 @@ fun TvPandaSetupScreen(
                 )
                 Spacer(Modifier.weight(1f))
                 Text(
-                    "${stepIndex + 1} / $totalSteps",
+                    "$stepNumber / $totalSteps",
                     style = MaterialTheme.typography.titleMedium,
                     color = Amber,
                     modifier = Modifier.padding(end = 16.dp),
@@ -154,7 +158,7 @@ fun TvPandaSetupScreen(
 
             Spacer(Modifier.height(16.dp))
             LinearProgressIndicator(
-                progress = { (stepIndex + 1).toFloat() / totalSteps },
+                progress = { stepNumber.toFloat() / totalSteps },
                 modifier = Modifier.fillMaxWidth(),
                 color = Amber,
             )
@@ -175,6 +179,11 @@ fun TvPandaSetupScreen(
             ) {
                 CompositionLocalProvider(LocalPandaTvClickToEditFields provides true) {
                     when (state.currentStep) {
+                        PandaSetupStep.SETUP_TYPE -> PandaSetupTypeStep(
+                            state = state,
+                            viewModel = viewModel,
+                            entryFocusRequester = stepEntryFocusRequester,
+                        )
                         PandaSetupStep.PROVIDER -> PandaProviderStep(
                             state = state,
                             viewModel = viewModel,
@@ -220,7 +229,7 @@ fun TvPandaSetupScreen(
                 TvPandaOutlinedNavButton(
                     text = stringResource(R.string.common_back),
                     onClick = {
-                        if (state.currentStep == PandaSetupStep.PROVIDER) onBack()
+                        if (state.currentStep == PandaSetupStep.SETUP_TYPE) onBack()
                         else viewModel.previousStep()
                     },
                     focusRequester = backButtonFocusRequester,

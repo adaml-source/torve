@@ -731,8 +731,15 @@ fun BrandLogo(
     logoUrl: String?,
     modifier: Modifier = Modifier,
 ) {
-    val hasLogoSource = !logoUrl.isNullOrBlank()
-    val bitmap = rememberCachedBitmap(logoUrl)
+    val resolvedLogoUrl = remember(logoUrl) {
+        resolveBrandLogoUrl(
+            absoluteLogoUrl = logoUrl,
+            tmdbLogoPath = logoUrl,
+            size = "w300",
+        )
+    }
+    val hasLogoSource = !resolvedLogoUrl.isNullOrBlank()
+    val bitmap = rememberCachedBitmap(resolvedLogoUrl)
 
     if (hasLogoSource) {
         Box(

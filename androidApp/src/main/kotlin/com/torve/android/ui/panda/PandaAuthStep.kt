@@ -9,6 +9,7 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -49,6 +50,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.torve.android.R
@@ -58,6 +60,7 @@ import com.torve.android.ui.theme.Ruby
 import com.torve.android.ui.theme.Silver
 import com.torve.android.ui.theme.Snow
 import com.torve.android.ui.theme.Steel
+import com.torve.data.panda.PandaProvider
 import com.torve.presentation.panda.PandaSetupUiState
 import com.torve.presentation.panda.PandaSetupViewModel
 
@@ -67,11 +70,7 @@ fun PandaAuthStep(
     viewModel: PandaSetupViewModel,
     entryFocusRequester: FocusRequester? = null,
 ) {
-    val provider = state.selectedProvider ?: return
-    val context = LocalContext.current
-    val supportsOAuth = "oauth" in provider.authMethods
-    val providerConnected = state.debridApiKeys[provider.id]?.isNotBlank() == true ||
-        (state.selectedProvider?.id == provider.id && state.debridApiKey.isNotBlank())
+    val provider = state.selectedProvider
 
     Column(
         modifier = Modifier
@@ -79,16 +78,23 @@ fun PandaAuthStep(
             .verticalScroll(rememberScrollState()),
     ) {
         Text(
-            stringResource(R.string.panda_setup_auth_title, provider.name),
+            provider?.let { stringResource(R.string.panda_setup_auth_title, it.name) }
+                ?: stringResource(R.string.panda_setup_auth_choose_title),
             style = MaterialTheme.typography.headlineSmall,
             fontWeight = FontWeight.Bold,
             color = Snow,
+        )
+        Spacer(Modifier.height(6.dp))
+        Text(
+            stringResource(R.string.panda_setup_auth_inline_hint),
+            color = Silver,
+            style = MaterialTheme.typography.bodyMedium,
         )
         Spacer(Modifier.height(16.dp))
 
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             state.providers.filter { it.id != "none" }.forEach { item ->
-                val selected = item.id == provider.id
+                val selected = item.id == provider?.id
                 val connected = state.debridApiKeys[item.id]?.isNotBlank() == true
                 Row(
                     modifier = Modifier
@@ -111,11 +117,40 @@ fun PandaAuthStep(
                         Icon(Icons.Default.Check, null, tint = Amber, modifier = Modifier.size(18.dp))
                     }
                 }
+
+                if (selected) {
+                    SelectedProviderAuthControls(
+                        state = state,
+                        viewModel = viewModel,
+                        provider = item,
+                        entryFocusRequester = entryFocusRequester,
+                    )
+                }
             }
         }
-        Spacer(Modifier.height(16.dp))
+    }
+}
 
-        // Connected state
+@Composable
+private fun SelectedProviderAuthControls(
+    state: PandaSetupUiState,
+    viewModel: PandaSetupViewModel,
+    provider: PandaProvider,
+    entryFocusRequester: FocusRequester? = null,
+) {
+    val supportsOAuth = "oauth" in provider.authMethods
+    val providerConnected = state.debridApiKeys[provider.id]?.isNotBlank() == true ||
+        (state.selectedProvider?.id == provider.id && state.debridApiKey.isNotBlank())
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(Gunmetal.copy(alpha = 0.72f))
+            .border(1.dp, Amber.copy(alpha = 0.35f), RoundedCornerShape(12.dp))
+            .padding(14.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp),
+    ) {
         if (providerConnected) {
             Column(
                 modifier = Modifier
@@ -161,43 +196,41 @@ fun PandaAuthStep(
                     )
                 }
             }
-            Spacer(Modifier.height(16.dp))
         }
 
-        // Auth method toggle (only if provider supports both)
-        if (supportsOAuth) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                FocusRingFilterChip(
-                    selected = state.authMethod == "oauth",
-                    onClick = { viewModel.setAuthMethod("oauth") },
-                    label = stringResource(R.string.panda_setup_auth_oauth),
-                    entryFocusRequester = entryFocusRequester,
-                )
-                FocusRingFilterChip(
-                    selected = state.authMethod == "apikey",
-                    onClick = { viewModel.setAuthMethod("apikey") },
-                    label = stringResource(R.string.panda_setup_auth_apikey),
+        if (!providerConnected) {
+            // Auth method toggle (only if provider supports both)
+            if (supportsOAuth) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    FocusRingFilterChip(
+                        selected = state.authMethod == "oauth",
+                        onClick = { viewModel.setAuthMethod("oauth") },
+                        label = stringResource(R.string.panda_setup_auth_oauth),
+                        entryFocusRequester = entryFocusRequester,
+                    )
+                    FocusRingFilterChip(
+                        selected = state.authMethod == "apikey",
+                        onClick = { viewModel.setAuthMethod("apikey") },
+                        label = stringResource(R.string.panda_setup_auth_apikey),
+                    )
+                }
+            }
+
+            if (state.authMethod == "oauth" && supportsOAuth) {
+                OAuthSection(state, viewModel)
+            } else {
+                ApiKeySection(
+                    state = state,
+                    viewModel = viewModel,
+                    entryFocusRequester = if (supportsOAuth) null else entryFocusRequester,
                 )
             }
-            Spacer(Modifier.height(16.dp))
         }
 
-        if (state.authMethod == "oauth" && supportsOAuth) {
-            OAuthSection(state, viewModel)
-        } else {
-            ApiKeySection(
-                state = state,
-                viewModel = viewModel,
-                entryFocusRequester = if (supportsOAuth) null else entryFocusRequester,
-            )
-        }
-
-        // Error
         state.error?.let { error ->
-            Spacer(Modifier.height(12.dp))
             Text(error, color = Ruby, style = MaterialTheme.typography.bodySmall)
         }
     }
@@ -225,9 +258,18 @@ private fun FocusRingOutlinedButton(
             ),
         shape = shape,
         border = null,
+        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp),
         interactionSource = interactionSource,
     ) {
-        Text(text, color = if (isFocused) Amber else Snow, fontWeight = FontWeight.SemiBold)
+        Text(
+            text = text,
+            color = if (isFocused) Amber else Snow,
+            fontWeight = FontWeight.SemiBold,
+            fontSize = 12.sp,
+            maxLines = 1,
+            softWrap = false,
+            overflow = TextOverflow.Clip,
+        )
     }
 }
 

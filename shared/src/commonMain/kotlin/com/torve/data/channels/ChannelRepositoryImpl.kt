@@ -2,6 +2,7 @@ package com.torve.data.channels
 
 import com.torve.data.auth.UserIdProvider
 import com.torve.db.Iptv_channel
+import com.torve.db.Iptv_playlist
 import com.torve.db.TorveDatabase
 import com.torve.domain.model.EnrichedChannel
 import com.torve.domain.model.EpgData
@@ -144,6 +145,129 @@ class ChannelRepositoryImpl(
     private val epgErrorCache = mutableMapOf<String, String?>()
     private val epgProgressCache = mutableMapOf<String, EpgBatchProgress>()
 
+    private suspend fun repairDuplicatePlaylistsForCurrentUser(): DuplicatePlaylistRepairResult {
+        val result = repairDuplicatePlaylistsForUser(
+            database = database,
+            userId = uid(),
+            loadXtreamPassword = ::loadXtreamPassword,
+            saveXtreamPassword = ::saveXtreamPassword,
+            removeXtreamPassword = ::removeXtreamPassword,
+        )
+        (result.removedPlaylistIds + result.touchedPlaylistIds).forEach { playlistId ->
+            playlistCache.remove(playlistId)
+            epgCache.remove(playlistId)
+            epgErrorCache.remove(playlistId)
+            epgProgressCache.remove(playlistId)
+        }
+        return result
+    }
+
+    private fun findExistingM3uPlaylist(
+        url: String,
+        excludedId: String? = null,
+    ): Iptv_playlist? {
+        val identity = m3uPlaylistIdentity(url) ?: return null
+        return database.torveQueries.getAllPlaylists(userId = uid())
+            .executeAsList()
+            .firstOrNull { row ->
+                row.id != excludedId &&
+                    playlistIdentityFor(
+                        type = row.type,
+                        url = row.url,
+                        server = row.server,
+                        username = row.username,
+                    ) == identity
+            }
+    }
+
+    private fun findExistingXtreamPlaylist(
+        server: String,
+        username: String,
+        excludedId: String? = null,
+    ): Iptv_playlist? {
+        val identity = xtreamPlaylistIdentity(server, username) ?: return null
+        return database.torveQueries.getAllPlaylists(userId = uid())
+            .executeAsList()
+            .firstOrNull { row ->
+                row.id != excludedId &&
+                    playlistIdentityFor(
+                        type = row.type,
+                        url = row.url,
+                        server = row.server,
+                        username = row.username,
+                    ) == identity
+            }
+    }
+
+    private fun mergeDuplicateM3uMetadataIfUseful(
+        existing: Iptv_playlist,
+        epgUrl: String?,
+    ): Iptv_playlist {
+        val normalizedEpg = epgUrl?.trim()?.takeIf { it.isNotEmpty() }
+        if (existing.epg_url.isNullOrBlank() && normalizedEpg != null) {
+            database.torveQueries.insertPlaylist(
+                user_id = uid(),
+                id = existing.id,
+                name = existing.name,
+                url = existing.url,
+                epg_url = normalizedEpg,
+                channel_count = existing.channel_count,
+                last_updated = Clock.System.now().toEpochMilliseconds(),
+                type = existing.type,
+                server = existing.server,
+                username = existing.username,
+                password = null,
+            )
+            return database.torveQueries.getPlaylist(userId = uid(), playlistId = existing.id)
+                .executeAsOneOrNull()
+                ?: existing
+        }
+        return existing
+    }
+
+    private suspend fun mergeDuplicateXtreamMetadataIfUseful(
+        existing: Iptv_playlist,
+        password: String,
+        epgUrl: String?,
+    ): Iptv_playlist {
+        saveXtreamPassword(existing.id, password)
+        val normalizedEpg = epgUrl?.trim()?.takeIf { it.isNotEmpty() }
+        if (existing.epg_url.isNullOrBlank() && normalizedEpg != null) {
+            database.torveQueries.insertPlaylist(
+                user_id = uid(),
+                id = existing.id,
+                name = existing.name,
+                url = existing.url,
+                epg_url = normalizedEpg,
+                channel_count = existing.channel_count,
+                last_updated = Clock.System.now().toEpochMilliseconds(),
+                type = existing.type,
+                server = existing.server,
+                username = existing.username,
+                password = null,
+            )
+            return database.torveQueries.getPlaylist(userId = uid(), playlistId = existing.id)
+                .executeAsOneOrNull()
+                ?: existing
+        }
+        return existing
+    }
+
+    private suspend fun Iptv_playlist.toDomainPlaylist(): ChannelPlaylist {
+        return ChannelPlaylist(
+            id = id,
+            name = name,
+            url = url,
+            epgUrl = epg_url,
+            channelCount = channel_count.toInt(),
+            lastUpdated = last_updated,
+            type = PlaylistType.fromString(type),
+            server = server,
+            username = username,
+            password = if (type == "xtream") loadXtreamPassword(id) else null,
+        )
+    }
+
     /**
      * Per-playlist mutex guarding [refreshEpg]. Five+ call sites in
      * ChannelsViewModel can each invoke `refreshEpg` for the same
@@ -193,6 +317,10 @@ class ChannelRepositoryImpl(
         id: String?,
         onProgress: ((PlaylistAddProgress) -> Unit)?,
     ): ChannelPlaylist {
+        findExistingM3uPlaylist(url = url, excludedId = id)?.let { existing ->
+            val merged = mergeDuplicateM3uMetadataIfUseful(existing, epgUrl)
+            return merged.toDomainPlaylist()
+        }
         val id = id ?: "ch_${Clock.System.now().toEpochMilliseconds()}"
         val now = Clock.System.now().toEpochMilliseconds()
 
@@ -287,6 +415,9 @@ class ChannelRepositoryImpl(
         epgUrl: String?,
         id: String?,
     ): ChannelPlaylist = withContext(Dispatchers.IO) {
+        findExistingM3uPlaylist(url = url, excludedId = id)?.let { existing ->
+            return@withContext mergeDuplicateM3uMetadataIfUseful(existing, epgUrl).toDomainPlaylist()
+        }
         val playlistId = id ?: "ch_${Clock.System.now().toEpochMilliseconds()}"
         val now = Clock.System.now().toEpochMilliseconds()
         val normalizedEpgUrl = epgUrl?.trim()?.takeIf { it.isNotEmpty() }
@@ -320,11 +451,20 @@ class ChannelRepositoryImpl(
         id: String?,
         epgUrl: String?,
     ): ChannelPlaylist {
-        val id = id ?: "xtream_${Clock.System.now().toEpochMilliseconds()}"
-        val now = Clock.System.now().toEpochMilliseconds()
         val normalizedServer = server.trimEnd('/')
         val xtreamEpgUrl = epgUrl?.trim()?.takeIf { it.isNotEmpty() }
             ?: buildXtreamEpgUrl(normalizedServer, username, password)
+        findExistingXtreamPlaylist(
+            server = normalizedServer,
+            username = username,
+            excludedId = id,
+        )?.let { existing ->
+            val merged = mergeDuplicateXtreamMetadataIfUseful(existing, password, xtreamEpgUrl)
+            return merged.toDomainPlaylist()
+        }
+
+        val id = id ?: "xtream_${Clock.System.now().toEpochMilliseconds()}"
+        val now = Clock.System.now().toEpochMilliseconds()
 
         // Authenticate first
         xtreamClient.authenticate(normalizedServer, username, password)
@@ -430,11 +570,19 @@ class ChannelRepositoryImpl(
         id: String?,
         epgUrl: String?,
     ): ChannelPlaylist = withContext(Dispatchers.IO) {
-        val playlistId = id ?: "xtream_${Clock.System.now().toEpochMilliseconds()}"
-        val now = Clock.System.now().toEpochMilliseconds()
         val normalizedServer = server.trimEnd('/')
         val normalizedEpgUrl = epgUrl?.trim()?.takeIf { it.isNotEmpty() }
             ?: buildXtreamEpgUrl(normalizedServer, username, password)
+        findExistingXtreamPlaylist(
+            server = normalizedServer,
+            username = username,
+            excludedId = id,
+        )?.let { existing ->
+            return@withContext mergeDuplicateXtreamMetadataIfUseful(existing, password, normalizedEpgUrl).toDomainPlaylist()
+        }
+
+        val playlistId = id ?: "xtream_${Clock.System.now().toEpochMilliseconds()}"
+        val now = Clock.System.now().toEpochMilliseconds()
         saveXtreamPassword(playlistId, password)
         persistPlaylistConfigOnly(
             playlistId = playlistId,
@@ -713,24 +861,14 @@ class ChannelRepositoryImpl(
             xtreamPasswordsMigrated = true
             runCatching { migrateXtreamPasswords() }
         }
+        repairDuplicatePlaylistsForCurrentUser()
         return database.torveQueries.getAllPlaylists(userId = uid()).executeAsList().map { row ->
-            ChannelPlaylist(
-                id = row.id,
-                name = row.name,
-                url = row.url,
-                epgUrl = row.epg_url,
-                channelCount = row.channel_count.toInt(),
-                lastUpdated = row.last_updated,
-                type = PlaylistType.fromString(row.type),
-                server = row.server,
-                username = row.username,
-                // Password comes from secure storage, never from SQLite
-                password = if (row.type == "xtream") loadXtreamPassword(row.id) else null,
-            )
+            row.toDomainPlaylist()
         }
     }
 
     override suspend fun getPlaylistSummaries(): List<ChannelPlaylistSummary> {
+        repairDuplicatePlaylistsForCurrentUser()
         return database.torveQueries.getPlaylistSummaries(userId = uid()).executeAsList().map { row ->
             ChannelPlaylistSummary(
                 id = row.id,

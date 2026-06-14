@@ -274,6 +274,11 @@ FROM iptv_channel
 WHERE user_id = :userId AND playlist_id = :playlistId AND generation_id = :generationId
 ORDER BY sort_index ASC;
 
+countChannelsForPlaylistGeneration:
+SELECT COUNT(*) AS channel_count
+FROM iptv_channel
+WHERE user_id = :userId AND playlist_id = :playlistId AND generation_id = :generationId;
+
 getCategoryCountsForPlaylist:
 SELECT group_title, COUNT(*) AS channel_count
 FROM iptv_channel
@@ -482,6 +487,9 @@ DELETE FROM iptv_favorite WHERE user_id = :userId AND channel_id = :channelId;
 isFavorite:
 SELECT COUNT(*) FROM iptv_favorite WHERE user_id = :userId AND channel_id = :channelId;
 
+deleteFavoritesForPlaylist:
+DELETE FROM iptv_favorite WHERE user_id = :userId AND playlist_id = :playlistId;
+
 deleteAllFavorites:
 DELETE FROM iptv_favorite WHERE user_id = :userId;
 
@@ -507,6 +515,12 @@ SELECT * FROM iptv_recent WHERE user_id = :userId ORDER BY viewed_at DESC LIMIT 
 insertRecentChannel:
 INSERT OR REPLACE INTO iptv_recent (user_id, channel_id, playlist_id, name, logo_url, group_title, stream_url, viewed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?);
 
+getAllRecentChannels:
+SELECT * FROM iptv_recent WHERE user_id = :userId ORDER BY viewed_at DESC;
+
+deleteRecentChannelsForPlaylist:
+DELETE FROM iptv_recent WHERE user_id = :userId AND playlist_id = :playlistId;
+
 deleteOldRecentChannels:
 DELETE FROM iptv_recent WHERE user_id = :userId AND viewed_at < :cutoffMs;
 
@@ -531,6 +545,9 @@ SELECT * FROM iptv_category_config WHERE user_id = :userId AND playlist_id = :pl
 
 upsertCategoryConfig:
 INSERT OR REPLACE INTO iptv_category_config (user_id, playlist_id, category_name, is_visible, sort_order) VALUES (?, ?, ?, ?, ?);
+
+deleteCategoryConfigsForPlaylist:
+DELETE FROM iptv_category_config WHERE user_id = :userId AND playlist_id = :playlistId;
 
 deleteAllCategoryConfigsForAllUsers:
 DELETE FROM iptv_category_config;
@@ -569,6 +586,11 @@ SELECT epg_channel_key, xmltv_channel_id, display_name, icon_url
 FROM iptv_epg_channel
 WHERE user_id = :userId AND playlist_id = :playlistId AND generation_id = :generationId;
 
+getAllEpgChannelRowsForPlaylistGeneration:
+SELECT *
+FROM iptv_epg_channel
+WHERE user_id = :userId AND playlist_id = :playlistId AND generation_id = :generationId;
+
 insertEpgChannel:
 INSERT OR REPLACE INTO iptv_epg_channel (
     user_id,
@@ -587,6 +609,9 @@ DELETE FROM iptv_epg_channel WHERE user_id = :userId AND playlist_id = :playlist
 
 deleteEpgChannelsOlderGenerations:
 DELETE FROM iptv_epg_channel WHERE user_id = :userId AND playlist_id = :playlistId AND generation_id != :generationId;
+
+deleteEpgChannelsForPlaylist:
+DELETE FROM iptv_epg_channel WHERE user_id = :userId AND playlist_id = :playlistId;
 
 deleteAllEpgChannelsForAllUsers:
 DELETE FROM iptv_epg_channel;
@@ -613,6 +638,17 @@ SELECT epg_channel_key, xmltv_channel_id, start_time, end_time, title
 FROM iptv_epg_programme
 WHERE user_id = :userId AND playlist_id = :playlistId AND generation_id = :generationId
 ORDER BY epg_channel_key ASC, start_time ASC;
+
+getAllEpgProgrammeRowsForPlaylistGeneration:
+SELECT *
+FROM iptv_epg_programme
+WHERE user_id = :userId AND playlist_id = :playlistId AND generation_id = :generationId
+ORDER BY epg_channel_key ASC, start_time ASC;
+
+countEpgProgrammesForPlaylistGeneration:
+SELECT COUNT(*) AS programme_count
+FROM iptv_epg_programme
+WHERE user_id = :userId AND playlist_id = :playlistId AND generation_id = :generationId;
 
 getEpgProgrammesForPlaylistWindow:
 SELECT epg_channel_key, xmltv_channel_id, start_time, end_time, title
@@ -665,6 +701,9 @@ DELETE FROM iptv_epg_programme WHERE user_id = :userId AND playlist_id = :playli
 
 deleteEpgProgrammesOlderGenerations:
 DELETE FROM iptv_epg_programme WHERE user_id = :userId AND playlist_id = :playlistId AND generation_id != :generationId;
+
+deleteEpgProgrammesForPlaylist:
+DELETE FROM iptv_epg_programme WHERE user_id = :userId AND playlist_id = :playlistId;
 
 deleteAllEpgProgrammesForAllUsers:
 DELETE FROM iptv_epg_programme;
@@ -901,6 +940,136 @@ DELETE FROM watch_history;
 
 getHistoryCount:
 SELECT COUNT(*) FROM watch_history WHERE user_id = :userId;
+
+-- Watch-session stats source of truth (user-scoped)
+CREATE TABLE IF NOT EXISTS watch_session (
+    id TEXT NOT NULL PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    media_id TEXT NOT NULL,
+    media_type TEXT NOT NULL,
+    title TEXT NOT NULL,
+    show_id TEXT,
+    show_title TEXT,
+    season_number INTEGER,
+    episode_number INTEGER,
+    poster_url TEXT,
+    backdrop_url TEXT,
+    tmdb_id INTEGER,
+    imdb_id TEXT,
+    started_at INTEGER NOT NULL,
+    ended_at INTEGER,
+    source TEXT NOT NULL,
+    status TEXT NOT NULL,
+    duration_ms INTEGER,
+    max_position_ms INTEGER NOT NULL DEFAULT 0,
+    counted_watch_ms INTEGER NOT NULL DEFAULT 0,
+    completion_percent REAL NOT NULL DEFAULT 0,
+    watched_threshold_percent REAL NOT NULL DEFAULT 0.85,
+    runtime_confidence TEXT NOT NULL DEFAULT 'unknown',
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_watch_session_user_id ON watch_session(user_id);
+CREATE INDEX IF NOT EXISTS idx_watch_session_media_id ON watch_session(media_id);
+CREATE INDEX IF NOT EXISTS idx_watch_session_media_type ON watch_session(media_type);
+CREATE INDEX IF NOT EXISTS idx_watch_session_status ON watch_session(status);
+CREATE INDEX IF NOT EXISTS idx_watch_session_source ON watch_session(source);
+CREATE INDEX IF NOT EXISTS idx_watch_session_started_at ON watch_session(started_at);
+CREATE INDEX IF NOT EXISTS idx_watch_session_show_id ON watch_session(show_id);
+CREATE INDEX IF NOT EXISTS idx_watch_session_episode_identity ON watch_session(show_id, season_number, episode_number);
+CREATE INDEX IF NOT EXISTS idx_watch_session_tmdb_id ON watch_session(tmdb_id);
+CREATE INDEX IF NOT EXISTS idx_watch_session_imdb_id ON watch_session(imdb_id);
+
+insertOrReplaceWatchSession:
+INSERT OR REPLACE INTO watch_session (
+    id,
+    user_id,
+    media_id,
+    media_type,
+    title,
+    show_id,
+    show_title,
+    season_number,
+    episode_number,
+    poster_url,
+    backdrop_url,
+    tmdb_id,
+    imdb_id,
+    started_at,
+    ended_at,
+    source,
+    status,
+    duration_ms,
+    max_position_ms,
+    counted_watch_ms,
+    completion_percent,
+    watched_threshold_percent,
+    runtime_confidence,
+    created_at,
+    updated_at
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+
+updateWatchSessionProgress:
+UPDATE watch_session
+SET ended_at = :endedAt,
+    status = :status,
+    duration_ms = :durationMs,
+    max_position_ms = :maxPositionMs,
+    counted_watch_ms = :countedWatchMs,
+    completion_percent = :completionPercent,
+    runtime_confidence = :runtimeConfidence,
+    updated_at = :updatedAt
+WHERE user_id = :userId AND id = :id;
+
+selectWatchSessionsForUser:
+SELECT * FROM watch_session
+WHERE user_id = :userId
+ORDER BY started_at DESC;
+
+selectWatchSessionsForUserBetween:
+SELECT * FROM watch_session
+WHERE user_id = :userId AND started_at >= :startMs AND started_at <= :endMs
+ORDER BY started_at DESC;
+
+selectWatchSessionsByMedia:
+SELECT * FROM watch_session
+WHERE user_id = :userId AND media_id = :mediaId
+ORDER BY started_at DESC;
+
+selectWatchSessionsByEpisodeIdentity:
+SELECT * FROM watch_session
+WHERE user_id = :userId
+  AND media_id = :mediaId
+  AND IFNULL(show_id, '') = IFNULL(:showId, '')
+  AND IFNULL(season_number, -1) = IFNULL(:seasonNumber, -1)
+  AND IFNULL(episode_number, -1) = IFNULL(:episodeNumber, -1)
+ORDER BY started_at DESC;
+
+selectWatchSessionsBySource:
+SELECT * FROM watch_session
+WHERE user_id = :userId AND source = :source
+ORDER BY started_at DESC;
+
+selectWatchSessionsByStatus:
+SELECT * FROM watch_session
+WHERE user_id = :userId AND status = :status
+ORDER BY started_at DESC;
+
+deleteWatchSessionsForUser:
+DELETE FROM watch_session WHERE user_id = :userId;
+
+clearWatchSessionsForUser:
+DELETE FROM watch_session WHERE user_id = :userId;
+
+clearWatchSessionsForUserAndMedia:
+DELETE FROM watch_session WHERE user_id = :userId AND media_id = :mediaId;
+
+deleteWatchSessionsForUserAndSource:
+DELETE FROM watch_session WHERE user_id = :userId AND source = :source;
+
+clearAllWatchSessionsForAllUsers:
+DELETE FROM watch_session;
 
 -- Stream resolve memory
 CREATE TABLE IF NOT EXISTS stream_resolve_memory (

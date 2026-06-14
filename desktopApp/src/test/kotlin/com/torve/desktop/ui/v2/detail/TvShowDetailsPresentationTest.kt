@@ -55,6 +55,7 @@ class TvShowDetailsPresentationTest {
         val season = season(number = 1, name = "Season One", episodes = listOf(episode))
         val item = show(
             status = "Returning Series",
+            releaseDate = "2019-06-16",
             year = 2019,
             studios = listOf(MediaCompany(id = 1, name = "HBO")),
             genres = listOf(Genre(id = 18, name = "Drama")),
@@ -69,8 +70,7 @@ class TvShowDetailsPresentationTest {
                 MovieDetailInfoRowModel("Air Date", "2019-06-16"),
                 MovieDetailInfoRowModel("Runtime", "57m"),
                 MovieDetailInfoRowModel("Rating", "8.1/10"),
-                MovieDetailInfoRowModel("Status", "Returning Series"),
-                MovieDetailInfoRowModel("Year", "2019"),
+                MovieDetailInfoRowModel("Release Date", "2019-06-16"),
                 MovieDetailInfoRowModel("Network", "HBO"),
                 MovieDetailInfoRowModel("Genres", "Drama"),
             ),
@@ -94,6 +94,7 @@ class TvShowDetailsPresentationTest {
         posterUrl: String? = null,
         isContentPlaceholder: Boolean = false,
         status: String? = null,
+        releaseDate: String? = null,
         year: Int? = null,
         studios: List<MediaCompany> = emptyList(),
         genres: List<Genre> = emptyList(),
@@ -106,6 +107,7 @@ class TvShowDetailsPresentationTest {
         posterUrl = posterUrl,
         isContentPlaceholder = isContentPlaceholder,
         status = status,
+        releaseDate = releaseDate,
         year = year,
         studios = studios,
         genres = genres,

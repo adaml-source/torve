@@ -34,7 +34,7 @@ import com.torve.presentation.channels.ChannelsSubTab
 
 private val tabs = listOf(
     ChannelsSubTab.LIVE to "LIVE",
-    ChannelsSubTab.MOVIES to "MOVIES",
+    ChannelsSubTab.MOVIES to "VOD",
     ChannelsSubTab.FAVOURITES to "FAVOURITES",
     ChannelsSubTab.GUIDE to "GUIDE",
 )

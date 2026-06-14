@@ -18,11 +18,13 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -32,6 +34,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.zIndex
 import androidx.compose.ui.draw.scale
@@ -87,6 +90,7 @@ fun TvEpisodePicker(
     onFirstContentRequester: (FocusRequester) -> Unit,
     onContentFocused: (FocusRequester) -> Unit,
     autoFocusFirstSeason: Boolean = false,
+    resolvingEpisode: Pair<Int, Int>? = null,
 ) {
     val seasonsLabel = stringResource(R.string.tv_episodes_title)
     val seasonNumbers = remember(seasons) {
@@ -166,9 +170,6 @@ fun TvEpisodePicker(
                 key = { _, s -> "season_${s.seasonNumber}" },
             ) { index, season ->
                 val requester = seasonRequesters[season.seasonNumber] ?: fallbackSeasonRequester
-                if (index == 0) {
-                    onFirstContentRequester(requester)
-                }
                 TvSeasonChip(
                     seasonNumber = season.seasonNumber,
                     isSelected = season.seasonNumber == selectedSeason,
@@ -241,6 +242,7 @@ fun TvEpisodePicker(
                             episode = episode,
                             seasonNumber = selectedSeason,
                             isWatched = isWatched,
+                            isResolving = resolvingEpisode == (selectedSeason to episode.episodeNumber),
                             progress = episodeProgress,
                             ratingPrefs = ratingPrefs,
                             fallbackArtworkUrl = selectedSeasonDetail.posterUrl?.takeIf { it.isNotBlank() }
@@ -521,6 +523,7 @@ private fun TvEpisodeCard(
     episode: Episode,
     seasonNumber: Int,
     isWatched: Boolean,
+    isResolving: Boolean,
     progress: Float?,
     ratingPrefs: RatingDisplayPrefs,
     fallbackArtworkUrl: String?,
@@ -596,6 +599,7 @@ private fun TvEpisodeCard(
                 } else false
             }
             .combinedClickable(
+                enabled = !isResolving,
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null,
                 onClick = onClick,
@@ -673,6 +677,7 @@ private fun TvEpisodeCard(
             modifier = Modifier
                 .fillMaxWidth()
                 .align(Alignment.BottomCenter)
+                .alpha(if (isResolving) 0.64f else 1f)
                 .background(
                     Brush.verticalGradient(
                         colors = listOf(
@@ -734,6 +739,21 @@ private fun TvEpisodeCard(
                         }
                     }
                 }
+            }
+        }
+
+        if (isResolving) {
+            Box(
+                modifier = Modifier
+                    .matchParentSize()
+                    .background(Obsidian.copy(alpha = 0.54f)),
+                contentAlignment = Alignment.Center,
+            ) {
+                CircularProgressIndicator(
+                    color = Amber,
+                    strokeWidth = 2.dp,
+                    modifier = Modifier.size(34.dp),
+                )
             }
         }
 

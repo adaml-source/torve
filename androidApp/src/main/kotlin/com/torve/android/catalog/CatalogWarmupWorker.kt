@@ -110,6 +110,9 @@ class CatalogWarmupWorker(
                         userId = userId,
                         maxShelfCategories = STAGED_LIVE_SHELF_CATEGORIES,
                         includeEpg = false,
+                        progressReporter = { label, value -> progress(label, value, blockNavigation = false) },
+                        progressStart = 0.58f,
+                        progressEnd = 0.72f,
                     )
                 }
                 progress("Preparing VOD shelves", 0.72f, blockNavigation = false)
@@ -162,6 +165,9 @@ class CatalogWarmupWorker(
                     userId = userId,
                     maxShelfCategories = liveShelfLimit,
                     includeEpg = !credentialImport,
+                    progressReporter = { label, value -> progress(label, value) },
+                    progressStart = 0.42f,
+                    progressEnd = 0.66f,
                 )
             }
             progress("Preparing VOD", 0.66f)
@@ -391,15 +397,24 @@ class CatalogWarmupWorker(
         userId: String,
         maxShelfCategories: Int,
         includeEpg: Boolean,
+        progressReporter: (suspend (String, Float) -> Unit)? = null,
+        progressStart: Float = 0.42f,
+        progressEnd: Float = 0.66f,
     ) = withContext(Dispatchers.IO) {
         val channelRepo: ChannelRepository = getKoin().get()
         val localSettingsRepo: DeviceLocalSettingsRepository = getKoin().get()
         val playlist = channelRepo.getPlaylistSummaries()
             .firstOrNull { it.channelCount > 0 }
-            ?: return@withContext
+            ?: run {
+                progressReporter?.invoke("No live TV provider found", progressEnd)
+                return@withContext
+            }
         val categories = channelRepo.getLiveCategoryCounts(playlist.id)
             .filterNot { (name, _) -> name.startsWith("VOD:", ignoreCase = true) }
-        if (categories.isEmpty()) return@withContext
+        if (categories.isEmpty()) {
+            progressReporter?.invoke("No live TV categories found", progressEnd)
+            return@withContext
+        }
         val cleanedCategories = CategoryNameCleaner.processCategoryCountsOnly(categories)
 
         localSettingsRepo.setString(channelsBootstrapSelectedPlaylistKey(userId), playlist.id)
@@ -418,8 +433,12 @@ class CatalogWarmupWorker(
                 channelRepo = channelRepo,
                 localSettingsRepo = localSettingsRepo,
                 includeEpg = includeEpg,
+                progressReporter = progressReporter,
+                progressStart = progressStart,
+                progressEnd = progressEnd,
             )
         }
+        progressReporter?.invoke("Live TV ready", progressEnd)
         warmupLog { "CATALOG_WARMUP: live bootstrap saved playlist=${playlist.id} categories=${cleanedCategories.size}" }
     }
 
@@ -431,6 +450,9 @@ class CatalogWarmupWorker(
         channelRepo: ChannelRepository,
         localSettingsRepo: DeviceLocalSettingsRepository,
         includeEpg: Boolean,
+        progressReporter: (suspend (String, Float) -> Unit)?,
+        progressStart: Float,
+        progressEnd: Float,
     ) {
         val rawByCleanName = rawCounts
             .groupBy { (rawName, _) -> CategoryNameCleaner.clean(rawName).name }
@@ -441,15 +463,22 @@ class CatalogWarmupWorker(
                 .toSet()
         }.getOrDefault(emptySet())
         val programmeWindows = if (includeEpg) {
+            progressReporter?.invoke("Loading guide data", progressStart + ((progressEnd - progressStart) * 0.15f))
             val epgData = runCatching { channelRepo.getEpg(playlistId) }.getOrDefault(com.torve.domain.model.EpgData())
             buildLiveProgrammeWindows(epgData.programmesByChannelKey)
         } else {
             emptyMap()
         }
 
-        cleanedCategories.forEach { category ->
+        val total = cleanedCategories.size.coerceAtLeast(1)
+        cleanedCategories.forEachIndexed { index, category ->
+            if (index == 0 || index % 3 == 0 || index == cleanedCategories.lastIndex) {
+                val fraction = (index.toFloat() / total.toFloat()).coerceIn(0f, 1f)
+                val value = progressStart + ((progressEnd - progressStart) * (0.2f + fraction * 0.75f))
+                progressReporter?.invoke("Preparing live TV ${index + 1}/$total", value)
+            }
             val rawNames = rawByCleanName[category.name].orEmpty()
-            if (rawNames.isEmpty()) return@forEach
+            if (rawNames.isEmpty()) return@forEachIndexed
             val channels = rawNames
                 .flatMap { rawName -> channelRepo.getChannelsForCategory(playlistId, rawName) }
                 .asSequence()
@@ -477,7 +506,7 @@ class CatalogWarmupWorker(
                     )
                 }
                 .toList()
-            if (channels.isEmpty()) return@forEach
+            if (channels.isEmpty()) return@forEachIndexed
             localSettingsRepo.setString(
                 liveDisplayShelfBootstrapKey(userId, playlistId, category.name),
                 LiveBootstrapJson.encodeToString(LiveBootstrapShelf(entries = channels)),

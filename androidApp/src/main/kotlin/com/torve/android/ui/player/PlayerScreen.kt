@@ -138,6 +138,8 @@ import com.torve.data.simkl.SimklClient
 import com.torve.data.simkl.SimklIds
 import com.torve.data.simkl.SimklSyncBody
 import com.torve.data.simkl.SimklSyncItem
+import com.torve.data.stats.WatchSessionMediaIdentity
+import com.torve.data.stats.WatchSessionRecorder
 import com.torve.data.trakt.TraktClient
 import com.torve.domain.integrations.IntegrationSecretKey
 import com.torve.domain.integrations.IntegrationSecretStore
@@ -229,6 +231,7 @@ fun PlayerScreen(
     subtitleAggregator: SubtitleAggregator = koinInject(),
     openSubtitlesClient: OpenSubtitlesClient = koinInject(),
     telemetry: TelemetryEmitter = koinInject(),
+    watchSessionRecorder: WatchSessionRecorder = koinInject(),
 ) {
     val context = LocalContext.current
     val voiceInputUnavailableFallback = context.getString(R.string.voice_input_unavailable)
@@ -364,6 +367,7 @@ fun PlayerScreen(
     var currentUrl by remember { mutableStateOf(url) }
     var currentTitle by remember { mutableStateOf(title) }
     var currentPosterUrl by remember { mutableStateOf(posterUrl) }
+    var currentWatchSessionId by remember { mutableStateOf<String?>(null) }
     val mobileActiveSheet = mobileSheetStack.lastOrNull()
     var autoFallbackInProgress by remember { mutableStateOf(false) }
     var currentStreamHostKey by remember { mutableStateOf(StreamRuntimeTelemetry.keyForUrl(url)) }
@@ -465,6 +469,32 @@ fun PlayerScreen(
     }
     val tmdbId = resolvedTmdbId
     val parsedMediaType = MediaType.fromString(mediaType)
+    fun currentWatchSessionIdentity(): WatchSessionMediaIdentity? {
+        val isSeries = parsedMediaType == MediaType.SERIES
+        val resolvedMediaId = if (isSeries) {
+            showTmdbId?.takeIf { it > 0 }?.toString()
+                ?: showImdbId?.takeIf { it.isNotBlank() }
+                ?: mediaId.takeIf { it.isNotBlank() }
+                ?: tmdbId.takeIf { it > 0 }?.toString()
+        } else {
+            mediaId.takeIf { it.isNotBlank() }
+                ?: tmdbId.takeIf { it > 0 }?.toString()
+                ?: showImdbId?.takeIf { it.isNotBlank() }
+        } ?: return null
+        return WatchSessionMediaIdentity(
+            mediaId = resolvedMediaId,
+            mediaType = parsedMediaType,
+            title = currentTitle.ifBlank { title },
+            showId = if (isSeries) resolvedMediaId else null,
+            showTitle = if (isSeries) title.ifBlank { currentTitle } else null,
+            seasonNumber = currentSeasonNumber,
+            episodeNumber = currentEpisodeNumber,
+            posterUrl = currentPosterUrl.takeIf { it.isNotBlank() } ?: posterUrl.takeIf { it.isNotBlank() },
+            backdropUrl = backdropUrl.takeIf { it.isNotBlank() },
+            tmdbId = tmdbId.takeIf { it > 0 },
+            imdbId = showImdbId?.takeIf { it.isNotBlank() } ?: mediaId.extractImdbIdOrNull(),
+        )
+    }
     var hasMarkedWatched by remember { mutableStateOf(false) }
     val voiceCommandNotRecognizedLabel = "Voice command not recognized"
     val voiceCommandPlayLabel = "Play"
@@ -1429,6 +1459,8 @@ fun PlayerScreen(
             addonRepo = addonRepo,
             settingsViewModel = settingsViewModel,
             watchProgressRepo = watchProgressRepo,
+            watchSessionRecorder = watchSessionRecorder,
+            currentWatchSessionId = currentWatchSessionId,
             mediaId = mediaId,
             mediaType = mediaType,
             posterUrl = posterUrl,
@@ -1439,11 +1471,12 @@ fun PlayerScreen(
             currentSeasonNumber = currentSeasonNumber,
             currentEpisodeNumber = currentEpisodeNumber,
             requestPlayback = ::requestPlayback,
-            onStateUpdate = { newSeason, newEpisode, newUrl, newTitle ->
+            onStateUpdate = { newSeason, newEpisode, newUrl, newTitle, newWatchSessionId ->
                 currentSeasonNumber = newSeason
                 currentEpisodeNumber = newEpisode
                 currentUrl = newUrl
                 currentTitle = newTitle
+                currentWatchSessionId = newWatchSessionId
                 currentPosition = 0L
                 duration = 0L
                 sliderPosition = 0f
@@ -1594,6 +1627,8 @@ fun PlayerScreen(
                             addonRepo = addonRepo,
                             settingsViewModel = settingsViewModel,
                             watchProgressRepo = watchProgressRepo,
+                            watchSessionRecorder = watchSessionRecorder,
+                            currentWatchSessionId = currentWatchSessionId,
                             mediaId = mediaId,
                             mediaType = mediaType,
                             posterUrl = posterUrl,
@@ -1604,11 +1639,12 @@ fun PlayerScreen(
                             currentSeasonNumber = currentSeasonNumber,
                             currentEpisodeNumber = currentEpisodeNumber,
                             requestPlayback = ::requestPlayback,
-                            onStateUpdate = { newSeason, newEpisode, newUrl, newTitle ->
+                            onStateUpdate = { newSeason, newEpisode, newUrl, newTitle, newWatchSessionId ->
                                 currentSeasonNumber = newSeason
                                 currentEpisodeNumber = newEpisode
                                 currentUrl = newUrl
                                 currentTitle = newTitle
+                                currentWatchSessionId = newWatchSessionId
                                 currentPosition = 0L
                                 this@DisposableEffect.run { duration = 0L }
                                 sliderPosition = 0f
@@ -1720,6 +1756,18 @@ fun PlayerScreen(
             initialStartPositionConsumed = true
         }
 
+        val playbackSessionStartedAt = System.currentTimeMillis()
+        currentWatchSessionIdentity()?.let { identity ->
+            scope.launch {
+                runCatching {
+                    currentWatchSessionId = watchSessionRecorder.startPlayerSession(
+                        identity = identity,
+                        startedAt = playbackSessionStartedAt,
+                    )
+                }
+            }
+        }
+
         // Scrobble start on initial playback
         if (canScrobble) {
             scope.launch {
@@ -1805,6 +1853,16 @@ fun PlayerScreen(
                     )
                 }
             }
+            scope.launch {
+                runCatching {
+                    watchSessionRecorder.finishPlayerSession(
+                        sessionId = currentWatchSessionId,
+                        positionMs = finalPosition,
+                        durationMs = finalDuration.takeIf { it > 0L },
+                        endedAt = System.currentTimeMillis(),
+                    )
+                }
+            }
             if (finalContentId.isNotBlank() && finalPosition > 0L) {
                 scope.launch {
                     syncCoordinator.reportWatchState(
@@ -1871,6 +1929,14 @@ fun PlayerScreen(
                         episodeNumber = currentEpisodeNumber,
                     ),
                 )
+                runCatching {
+                    watchSessionRecorder.updatePlayerSessionProgress(
+                        sessionId = currentWatchSessionId,
+                        positionMs = currentPosition,
+                        durationMs = duration.takeIf { it > 0L },
+                        updatedAt = System.currentTimeMillis(),
+                    )
+                }
             }
             delay(500)
         }
@@ -1894,6 +1960,14 @@ fun PlayerScreen(
                         episodeNumber = currentEpisodeNumber,
                     ),
                 )
+                runCatching {
+                    watchSessionRecorder.updatePlayerSessionProgress(
+                        sessionId = currentWatchSessionId,
+                        positionMs = currentPosition,
+                        durationMs = duration.takeIf { it > 0L },
+                        updatedAt = System.currentTimeMillis(),
+                    )
+                }
             }
             delay(10_000)
         }
@@ -2973,6 +3047,8 @@ fun PlayerScreen(
                             addonRepo = addonRepo,
                             settingsViewModel = settingsViewModel,
                             watchProgressRepo = watchProgressRepo,
+                            watchSessionRecorder = watchSessionRecorder,
+                            currentWatchSessionId = currentWatchSessionId,
                             mediaId = mediaId,
                             mediaType = mediaType,
                             posterUrl = posterUrl,
@@ -2983,11 +3059,12 @@ fun PlayerScreen(
                             currentSeasonNumber = currentSeasonNumber,
                             currentEpisodeNumber = currentEpisodeNumber,
                             requestPlayback = ::requestPlayback,
-                            onStateUpdate = { newSeason, newEpisode, newUrl, newTitle ->
+                            onStateUpdate = { newSeason, newEpisode, newUrl, newTitle, newWatchSessionId ->
                                 currentSeasonNumber = newSeason
                                 currentEpisodeNumber = newEpisode
                                 currentUrl = newUrl
                                 currentTitle = newTitle
+                                currentWatchSessionId = newWatchSessionId
                                 currentPosition = 0L
                                 duration = 0L
                                 sliderPosition = 0f
@@ -4234,6 +4311,8 @@ private suspend fun resolveAndPlayNextEpisode(
     addonRepo: AddonRepository,
     settingsViewModel: SettingsViewModel,
     watchProgressRepo: WatchProgressRepository,
+    watchSessionRecorder: WatchSessionRecorder,
+    currentWatchSessionId: String?,
     mediaId: String,
     mediaType: String,
     posterUrl: String,
@@ -4244,7 +4323,7 @@ private suspend fun resolveAndPlayNextEpisode(
     currentSeasonNumber: Int?,
     currentEpisodeNumber: Int?,
     requestPlayback: (String) -> Unit,
-    onStateUpdate: (newSeason: Int, newEpisode: Int, newUrl: String, newTitle: String) -> Unit,
+    onStateUpdate: (newSeason: Int, newEpisode: Int, newUrl: String, newTitle: String, newWatchSessionId: String?) -> Unit,
     onResolvingChange: (Boolean) -> Unit,
     onFailed: () -> Unit,
     traktScrobbler: TraktScrobbler? = null,
@@ -4381,6 +4460,7 @@ private suspend fun resolveAndPlayNextEpisode(
         } else {
             "S${sNum}E${eNum}"
         }
+        val rolloverAt = System.currentTimeMillis()
 
         // Scrobble stop for current episode before switching
         if (traktScrobbler != null && traktAccessToken.isNotBlank() && tmdbId > 0) {
@@ -4391,10 +4471,41 @@ private suspend fun resolveAndPlayNextEpisode(
                 )
             } catch (_: Exception) {}
         }
+        runCatching {
+            watchSessionRecorder.finishPlayerSession(
+                sessionId = currentWatchSessionId,
+                positionMs = currentPosition,
+                durationMs = duration.takeIf { it > 0L },
+                endedAt = rolloverAt,
+            )
+        }
+        val nextShowId = showTmdbId?.takeIf { it > 0 }?.toString()
+            ?: imdbId.takeIf { it.isNotBlank() }
+            ?: mediaId.takeIf { it.isNotBlank() }
+        val nextWatchSessionId = nextShowId?.let { showId ->
+            runCatching {
+                watchSessionRecorder.startPlayerSession(
+                    identity = WatchSessionMediaIdentity(
+                        mediaId = showId,
+                        mediaType = MediaType.SERIES,
+                        title = newTitle,
+                        showId = showId,
+                        showTitle = seriesTitle,
+                        seasonNumber = nextEp.seasonNumber,
+                        episodeNumber = nextEp.episodeNumber,
+                        posterUrl = posterUrl.takeIf { it.isNotBlank() },
+                        backdropUrl = backdropUrl.takeIf { it.isNotBlank() },
+                        tmdbId = showTmdbId?.takeIf { it > 0 } ?: tmdbId.takeIf { it > 0 },
+                        imdbId = imdbId.takeIf { it.isNotBlank() },
+                    ),
+                    startedAt = rolloverAt,
+                )
+            }.getOrNull()
+        }
 
         // Stop current and play new
         engine.stop()
-        onStateUpdate(nextEp.seasonNumber, nextEp.episodeNumber, playUrl, newTitle)
+        onStateUpdate(nextEp.seasonNumber, nextEp.episodeNumber, playUrl, newTitle, nextWatchSessionId)
         requestPlayback(playUrl)
         if (startupSelection.autoplayKeys.contains(playerStreamKey(selectedStream))) {
             android.util.Log.i(

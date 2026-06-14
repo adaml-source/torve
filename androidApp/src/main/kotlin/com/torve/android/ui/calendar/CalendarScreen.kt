@@ -61,6 +61,7 @@ import com.torve.android.ui.theme.Ruby
 import com.torve.android.ui.theme.Snow
 import com.torve.android.ui.theme.Torve
 import com.torve.data.trakt.TraktCalendarEpisode
+import com.torve.presentation.calendar.CalendarStaleReason
 import com.torve.presentation.calendar.CalendarViewModel
 import org.koin.compose.koinInject
 import java.time.ZonedDateTime
@@ -267,6 +268,25 @@ fun CalendarScreen(
                         }
                     }
 
+                    state.refreshWarning?.let { warningKey ->
+                        item(key = "refresh_warning") {
+                            Surface(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 16.dp, vertical = 10.dp),
+                                shape = RoundedCornerShape(12.dp),
+                                color = AmberSubtle,
+                            ) {
+                                Text(
+                                    text = stringResource(warningKey.stringResourceId()),
+                                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = Amber,
+                                )
+                            }
+                        }
+                    }
+
                     state.groupedEpisodes.forEach { (dateLabel, episodes) ->
                         item(key = "header_$dateLabel") {
                             SectionHeader(title = dateLabel)
@@ -308,6 +328,14 @@ fun CalendarScreen(
         }
     }
 }
+
+private fun CalendarStaleReason.stringResourceId(): Int =
+    when (this) {
+        CalendarStaleReason.RATE_LIMITED -> R.string.calendar_stale_rate_limited
+        CalendarStaleReason.NETWORK -> R.string.calendar_stale_network
+        CalendarStaleReason.SERVER -> R.string.calendar_stale_server
+        CalendarStaleReason.UNKNOWN -> R.string.calendar_stale_unknown
+    }
 
 @Composable
 private fun CalendarNotificationToggle(

@@ -106,9 +106,13 @@ import com.torve.presentation.addon.AddonViewModel
 import com.torve.presentation.channels.ChannelsViewModel
 import com.torve.presentation.mdblist.MdbListTab
 import com.torve.presentation.mdblist.MdbListViewModel
+import com.torve.presentation.beta.BetaProgramCopy
+import com.torve.presentation.beta.BetaProgramViewModel
+import com.torve.presentation.beta.shouldShowBetaProgramSettingsEntry
 import com.torve.presentation.settings.AppLanguage
 import com.torve.presentation.settings.SettingsViewModel
-import com.torve.presentation.stats.StatsViewModel
+import com.torve.presentation.stats.WatchStatsUiText
+import com.torve.presentation.stats.WatchStatsViewModel
 import com.torve.presentation.subscription.PurchaseStatusTone
 import com.torve.presentation.subscription.PurchaseVerificationState
 import com.torve.presentation.subscription.SubscriptionViewModel
@@ -255,6 +259,8 @@ internal fun TvSettingsScreen(
     onNavigateToReceiveCredentials: () -> Unit = {},
     onNavigateToTransferDiagnostics: () -> Unit = {},
     onNavigateToReportIssue: () -> Unit = {},
+    onNavigateToWatchStats: () -> Unit = {},
+    onNavigateToBetaProgram: () -> Unit = {},
     onNavigateToPairingSignIn: () -> Unit = {},
     onAuthSuccess: () -> Unit = {},
     pairedDevicesFocusRequester: FocusRequester? = null,
@@ -275,13 +281,15 @@ internal fun TvSettingsScreen(
     addonViewModel: AddonViewModel = koinInject(),
     mdbListViewModel: MdbListViewModel = koinInject(),
     subscriptionViewModel: SubscriptionViewModel = koinInject(),
-    statsViewModel: StatsViewModel = koinInject(),
+    watchStatsViewModel: WatchStatsViewModel = koinInject(),
+    betaProgramViewModel: BetaProgramViewModel = koinInject(),
     deviceGovernanceViewModel: DeviceGovernanceViewModel = koinInject(),
 ) {
     val syncState by syncCoordinator.state.collectAsState()
     val accountSettingsState by accountSettingsRepository.state.collectAsState()
     val settingsState by settingsViewModel.state.collectAsState()
     val subscriptionState by subscriptionViewModel.state.collectAsState()
+    val betaProgramState by betaProgramViewModel.state.collectAsState()
     val deviceGovernanceState by deviceGovernanceViewModel.state.collectAsState()
     val pandaSetupViewModel: PandaSetupViewModel = koinInject()
     val pandaSetupState by pandaSetupViewModel.state.collectAsState()
@@ -376,6 +384,7 @@ internal fun TvSettingsScreen(
     LaunchedEffect(Unit) {
         authUser = authClient.getAuthenticatedUser()
         subscriptionViewModel.refreshAccess()
+        betaProgramViewModel.onOpenBetaProgram()
         if (authUser != null) {
             // Always force-fetch account settings on TV settings entry
             // so changes made on mobile are picked up immediately.
@@ -499,9 +508,15 @@ internal fun TvSettingsScreen(
     val pendingSettingsOrigin = settingsFocusController.pendingRestore
     val hasPendingExactSettingsRestore = pendingSettingsOrigin != null
     val allowPendingRestoreFromRail = pendingSettingsOrigin?.reason == "app_link"
-    val subscriptionSectionHeaderScrollIndex = remember(authUser, authShowRegister, authError) {
+    val hasExistingPremiumAccess = subscriptionState.hasEntitlement || subscriptionState.isPro
+    val showBetaProgramSettingsEntry = shouldShowBetaProgramSettingsEntry(
+        state = betaProgramState,
+        hasPremiumAccess = hasExistingPremiumAccess,
+    )
+    val subscriptionSectionHeaderScrollIndex = remember(authUser, authShowRegister, authError, showBetaProgramSettingsEntry) {
         var index = 0
         index += 1 // section_account
+        if (showBetaProgramSettingsEntry) index += 1 // beta_program
         if (authUser == null) {
             index += 1 // auth_info_banner
             index += 2 // auth_email + auth_password
@@ -725,6 +740,11 @@ internal fun TvSettingsScreen(
     val advancedPandaCardRequester = remember { FocusRequester() }
     val advancedRealDebridCardRequester = remember { FocusRequester() }
     val aboutPandaHealthCardRequester = remember { FocusRequester() }
+    val traktCardRequester = remember { FocusRequester() }
+    val traktReconnectCardRequester = remember { FocusRequester() }
+    val traktDisconnectCardRequester = remember { FocusRequester() }
+    val simklCardRequester = remember { FocusRequester() }
+    val simklDisconnectCardRequester = remember { FocusRequester() }
     var categoryPaneHasFocus by remember { mutableStateOf(false) }
     val addPlaylistCardRequester = remember { FocusRequester() }
     val editPlaylistEpgCardRequester = remember { FocusRequester() }
@@ -734,6 +754,7 @@ internal fun TvSettingsScreen(
     // Registered with the focus state machine so it participates in fallback resolution.
     // addAddonTarget category is set dynamically below where selectedCategory is available
     val addAddonCardRequester = remember { FocusRequester() }
+    val accountBetaProgramRequester = remember { FocusRequester() }
     val authAccountRequester = remember { FocusRequester() }
     val authPrimaryActionRequester = remember { FocusRequester() }
     val authEmailRequester = remember { FocusRequester() }
@@ -1030,6 +1051,14 @@ internal fun TvSettingsScreen(
             focusTargetType = "card",
         )
     }
+    val accountBetaProgramTarget = remember {
+        TvSettingsFocusTarget(
+            itemId = TvSettingsItemIds.ACCOUNT_BETA_PROGRAM,
+            category = TvSettingsCategory.ACCOUNT,
+            listIndex = 9,
+            focusTargetType = "navigation",
+        )
+    }
     val authVerifyTarget = remember {
         TvSettingsFocusTarget(
             itemId = TvSettingsItemIds.ACCOUNT_AUTH_VERIFY,
@@ -1257,12 +1286,36 @@ internal fun TvSettingsScreen(
             focusTargetType = "action",
         )
     }
+    val connectionsTraktReconnectTarget = remember {
+        TvSettingsFocusTarget(
+            itemId = TvSettingsItemIds.CONNECTIONS_TRAKT_RECONNECT,
+            category = TvSettingsCategory.CONNECTIONS,
+            listIndex = 13,
+            focusTargetType = "action",
+        )
+    }
+    val connectionsTraktDisconnectTarget = remember {
+        TvSettingsFocusTarget(
+            itemId = TvSettingsItemIds.CONNECTIONS_TRAKT_DISCONNECT,
+            category = TvSettingsCategory.CONNECTIONS,
+            listIndex = 14,
+            focusTargetType = "dangerous",
+        )
+    }
     val connectionsSimklTarget = remember {
         TvSettingsFocusTarget(
             itemId = TvSettingsItemIds.CONNECTIONS_SIMKL,
             category = TvSettingsCategory.CONNECTIONS,
-            listIndex = 13,
+            listIndex = 20,
             focusTargetType = "action",
+        )
+    }
+    val connectionsSimklDisconnectTarget = remember {
+        TvSettingsFocusTarget(
+            itemId = TvSettingsItemIds.CONNECTIONS_SIMKL_DISCONNECT,
+            category = TvSettingsCategory.CONNECTIONS,
+            listIndex = 21,
+            focusTargetType = "dangerous",
         )
     }
     val advancedEntryTarget = remember {
@@ -1512,10 +1565,54 @@ internal fun TvSettingsScreen(
         onContentFocused(requester)
     }
 
+    fun restoreConnectionFocus(itemId: String, requester: FocusRequester, reason: String) {
+        settingsFocusController.requestRestore(
+            itemId = itemId,
+            reason = reason,
+            outerListState = settingsListState,
+        )
+        runCatching { requester.requestFocus() }
+        onContentFocused(requester)
+        authScope.launch {
+            kotlinx.coroutines.delay(90)
+            settingsFocusController.requestRestore(
+                itemId = itemId,
+                reason = "${reason}_settled",
+                outerListState = settingsListState,
+            )
+            runCatching { requester.requestFocus() }
+            onContentFocused(requester)
+        }
+    }
+
+    fun runProviderHealthCheckWithFeedback(entry: ProviderHealthEntry) {
+        val job = providerHealthCoordinator.runCheck(entry.providerKey)
+        if (job == null) {
+            TvNotificationQueue.post("No check is available for ${entry.label}", NotificationType.INFO)
+            return
+        }
+        TvNotificationQueue.post("Checking ${entry.label}...", NotificationType.INFO)
+        authScope.launch {
+            job.join()
+            val updated = providerHealthCoordinator.entries.value
+                .firstOrNull { it.providerKey == entry.providerKey }
+            val status = updated?.status ?: ProviderHealthStatus.UNKNOWN
+            val (message, type) = when (status) {
+                ProviderHealthStatus.GREEN -> "${entry.label}: connection looks good" to NotificationType.SUCCESS
+                ProviderHealthStatus.YELLOW -> "${entry.label}: needs attention" to NotificationType.INFO
+                ProviderHealthStatus.RED -> "${entry.label}: check failed" to NotificationType.ERROR
+                ProviderHealthStatus.UNCONFIGURED -> "${entry.label}: not configured" to NotificationType.INFO
+                ProviderHealthStatus.UNKNOWN -> "${entry.label}: check finished" to NotificationType.INFO
+            }
+            TvNotificationQueue.post(message, type)
+        }
+    }
+
     fun refreshImportedSetup() {
         if (importedSetupRefreshRunning) return
         authScope.launch {
             importedSetupRefreshRunning = true
+            TvNotificationQueue.post("Checking setup...", NotificationType.INFO)
             try {
                 val result = accountSessionCoordinator.refreshAccountDataAfterCredentialTransfer()
                 settingsViewModel.refreshSettings()
@@ -1678,10 +1775,16 @@ internal fun TvSettingsScreen(
     val traktSubtitle = when {
         settingsState.isPollingTrakt || settingsState.traktDeviceCode != null -> {
             val code = settingsState.traktDeviceCode
-            if (code != null) "Visit ${code.verificationUrl}\nCode: ${code.userCode}" else "Starting…"
+            if (code != null) "Authorization in progress - use the code panel below" else "Starting..."
         }
         settingsState.traktConnected -> {
-            settingsState.traktUser?.username?.let { "$it — $connectedLabel" } ?: connectedLabel
+            settingsState.traktUser?.username?.let { "$it - $connectedLabel" }
+                ?: when {
+                    settingsState.traktApiStatus.equals("Online", ignoreCase = true) -> connectedLabel
+                    settingsState.traktApiStatus?.contains("rate", ignoreCase = true) == true ->
+                        "Connected - Trakt is temporarily limited"
+                    else -> "Token found - press OK to verify or reconnect"
+                }
         }
         else -> notConnectedLabel
     }
@@ -1690,10 +1793,14 @@ internal fun TvSettingsScreen(
     val simklSubtitle = when {
         settingsState.isPollingSimkl || settingsState.simklDeviceCode != null -> {
             val code = settingsState.simklDeviceCode
-            if (code != null) "Visit ${code.verificationUrl}\nCode: ${code.userCode}" else "Starting…"
+            if (code != null) "Authorization in progress - use the code panel below" else "Starting..."
         }
         settingsState.simklConnected -> {
-            settingsState.simklUser?.username?.let { "$it — $connectedLabel" } ?: connectedLabel
+            settingsState.simklUser?.username?.let { "$it - $connectedLabel" } ?: when {
+                settingsState.simklLoading -> "Checking SIMKL connection..."
+                settingsState.simklError != null -> "Token found - SIMKL needs attention"
+                else -> "Token found - press OK to verify or reconnect"
+            }
         }
         else -> notConnectedLabel
     }
@@ -1738,7 +1845,11 @@ internal fun TvSettingsScreen(
 
     val detailRequesterForCategory: (TvSettingsCategory) -> FocusRequester = {
         when (it) {
-            TvSettingsCategory.ACCOUNT -> if (authUser != null) authAccountRequester else authEmailRequester
+            TvSettingsCategory.ACCOUNT -> when {
+                showBetaProgramSettingsEntry -> accountBetaProgramRequester
+                authUser != null -> authAccountRequester
+                else -> authEmailRequester
+            }
             TvSettingsCategory.PLAYBACK -> maxQualityCardRequester
             TvSettingsCategory.APPEARANCE -> reduceMotionCardRequester
             TvSettingsCategory.LIBRARY -> channelsTopRequester
@@ -2449,6 +2560,57 @@ internal fun TvSettingsScreen(
             )
         }
 
+        if (showBetaProgramSettingsEntry) {
+        item(key = "account_beta_program") {
+            val requester = rememberRegisteredTvSettingsFocusRequester(
+                controller = settingsFocusController,
+                target = accountBetaProgramTarget,
+                externalRequester = accountBetaProgramRequester,
+                isDefaultEntry = true,
+            )
+            val betaSubtitle = when {
+                !betaProgramState.isSignedIn -> "Sign in to apply for the Torve Beta Program."
+                betaProgramState.isEmailVerificationRequired -> "Verify your email to apply."
+                hasExistingPremiumAccess &&
+                    !betaProgramState.betaAccessActive &&
+                    betaProgramState.blockedReason != com.torve.domain.beta.BetaBlockedReason.BETA_SIGNUP_CLOSED &&
+                    betaProgramState.blockedReason != com.torve.domain.beta.BetaBlockedReason.BETA_ACCESS_ENDED ->
+                    BetaProgramCopy.PREMIUM_TESTER_APPLICATION
+                betaProgramState.betaAccessActive -> betaProgramState.betaAccessExpiresAt
+                    ?.let { "Free beta premium active until ${it.take(10)}." }
+                    ?: "Beta tester access is active."
+                betaProgramState.applicationStatus == com.torve.domain.beta.BetaApplicationStatus.SUBMITTED ->
+                    "Your application is waiting for review."
+                betaProgramState.blockedReason == com.torve.domain.beta.BetaBlockedReason.BETA_SIGNUP_CLOSED ->
+                    "Beta applications are currently closed."
+                betaProgramState.blockedReason == com.torve.domain.beta.BetaBlockedReason.BETA_ACCESS_ENDED ->
+                    "Free beta premium ended. Tester access may still be available."
+                else -> BetaProgramCopy.SETTINGS_DEFAULT_SUBTITLE
+            }
+            TvSettingCard(
+                title = "Torve Beta Program",
+                subtitle = betaSubtitle,
+                modifier = Modifier.fillMaxWidth().focusProperties {
+                    left = railFocusRequester
+                    up = categoryRequesters.getValue(TvSettingsCategory.ACCOUNT)
+                    down = if (authUser != null) authAccountRequester else authEmailRequester
+                },
+                focusRequester = requester,
+                onFocused = { onSettingsRowFocused(accountBetaProgramTarget, requester) },
+                onClick = {
+                    logSettingsFocus("launch_subpage category=ACCOUNT row=ACCOUNT item=beta_program reason=route_open")
+                    settingsFocusController.captureOrigin(
+                        itemId = accountBetaProgramTarget.itemId,
+                        outerListState = settingsListState,
+                        reason = "route_open",
+                    )
+                    onNavigateToBetaProgram()
+                },
+                rowType = TvSettingRowType.NAVIGATION,
+            )
+        }
+        }
+
         // Account benefit notice
         if (authUser == null) {
             item(key = "auth_info_banner") {
@@ -2494,7 +2656,11 @@ internal fun TvSettingsScreen(
                     else authUser!!.email,
                     modifier = Modifier.fillMaxWidth().focusProperties {
                         left = railFocusRequester
-                        up = categoryRequesters.getValue(TvSettingsCategory.ACCOUNT)
+                        up = if (showBetaProgramSettingsEntry) {
+                            accountBetaProgramRequester
+                        } else {
+                            categoryRequesters.getValue(TvSettingsCategory.ACCOUNT)
+                        }
                     },
                     focusRequester = requester,
                     onFocused = { onSettingsRowFocused(authAccountTarget, requester) },
@@ -2745,7 +2911,11 @@ internal fun TvSettingsScreen(
                     focusRequester = requester,
                     expandedInput = expandedInput,
                     railFocusRequester = railFocusRequester,
-                    upFocusRequester = categoryRequesters.getValue(TvSettingsCategory.ACCOUNT),
+                    upFocusRequester = if (showBetaProgramSettingsEntry) {
+                        accountBetaProgramRequester
+                    } else {
+                        categoryRequesters.getValue(TvSettingsCategory.ACCOUNT)
+                    },
                     onContentFocused = {
                         onSettingsRowFocused(authEmailTarget, requester)
                     },
@@ -3473,32 +3643,66 @@ internal fun TvSettingsScreen(
                 }
                 item(key = "trakt") {
                     val requester = remember("trakt") { FocusRequester() }
-                    val sub = if (settingsState.traktConnected) {
-                        settingsState.traktUser?.username?.let { "$it — $connectedLabel" } ?: connectedLabel
-                    } else notConnectedLabel
                     TvSettingCard(
                         title = traktLabel,
-                        subtitle = sub,
+                        subtitle = traktSubtitle,
                         modifier = Modifier.fillMaxWidth().focusProperties { left = railFocusRequester },
                         focusRequester = requester,
                         onFocused = { onSettingsRowFocused(connectionsTraktTarget, requester) },
-                        onClick = {},
+                        onClick = {
+                            when {
+                                settingsState.traktConnected -> {
+                                    TvNotificationQueue.post("Checking Trakt connection...", NotificationType.INFO)
+                                    settingsViewModel.syncTraktNow()
+                                }
+                                settingsState.isPollingTrakt -> {
+                                    TvNotificationQueue.post("Waiting for Trakt authorization", NotificationType.INFO)
+                                }
+                                else -> {
+                                    TvNotificationQueue.post("Starting Trakt authorization", NotificationType.INFO)
+                                    settingsViewModel.startTraktDeviceAuth()
+                                }
+                            }
+                        },
                         rowType = TvSettingRowType.ACTION,
                         emphasis = TvSettingEmphasis.SECONDARY,
                     )
                 }
                 item(key = "simkl") {
                     val requester = remember("simkl") { FocusRequester() }
-                    val sub = if (settingsState.simklConnected) {
-                        settingsState.simklUser?.username?.let { "$it â€” $connectedLabel" } ?: connectedLabel
-                    } else notConnectedLabel
+                    val simklUser = settingsState.simklUser
+                    val sub = when {
+                        !settingsState.simklConnected -> notConnectedLabel
+                        simklUser != null -> "${simklUser.username} - $connectedLabel"
+                        settingsState.simklLoading -> "Checking SIMKL connection..."
+                        settingsState.simklError != null -> "Token found - SIMKL needs attention"
+                        else -> "Token found - press OK to verify or reconnect"
+                    }
                     TvSettingCard(
                         title = simklLabel,
                         subtitle = sub,
                         modifier = Modifier.fillMaxWidth().focusProperties { left = railFocusRequester },
                         focusRequester = requester,
                         onFocused = { onSettingsRowFocused(connectionsSimklTarget, requester) },
-                        onClick = {},
+                        onClick = {
+                            when {
+                                settingsState.simklConnected && settingsState.simklUser == null -> {
+                                    TvNotificationQueue.post("Checking SIMKL connection...", NotificationType.INFO)
+                                    settingsViewModel.checkSimklConnection()
+                                }
+                                settingsState.simklConnected -> {
+                                    TvNotificationQueue.post("Starting SIMKL reauthorization", NotificationType.INFO)
+                                    settingsViewModel.startSimklDeviceAuth()
+                                }
+                                settingsState.isPollingSimkl -> {
+                                    TvNotificationQueue.post("Waiting for SIMKL authorization", NotificationType.INFO)
+                                }
+                                else -> {
+                                    TvNotificationQueue.post("Starting SIMKL authorization", NotificationType.INFO)
+                                    settingsViewModel.startSimklDeviceAuth()
+                                }
+                            }
+                        },
                         rowType = TvSettingRowType.ACTION,
                         emphasis = TvSettingEmphasis.SECONDARY,
                     )
@@ -3506,6 +3710,23 @@ internal fun TvSettingsScreen(
                 }
 
                 // Phone mode: read-only integration statuses
+                settingsState.simklDeviceCode?.let { code ->
+                    item(key = "simkl_device_code_panel") {
+                        TvDeviceAuthorizationPanel(
+                            title = "Connect SIMKL",
+                            verificationUrl = code.verificationUrl,
+                            userCode = code.userCode,
+                            status = when {
+                                settingsState.simklError != null -> settingsState.simklError!!
+                                settingsState.isPollingSimkl -> stringResource(R.string.tv_settings_auth_waiting_authorization)
+                                else -> stringResource(R.string.tv_settings_auth_open_url_code)
+                            },
+                            isError = settingsState.simklError != null,
+                            isPolling = settingsState.isPollingSimkl,
+                        )
+                    }
+                }
+
                 if (selectedCategory == TvSettingsCategory.ADVANCED && !advancedLocked) {
                 item(key = "section_advanced_phone_metadata") {
                     TvSectionHeader(
@@ -3750,63 +3971,104 @@ internal fun TvSettingsScreen(
                 item(key = "trakt") {
                     val requester = rememberSettingsRowRequester(
                         target = connectionsTraktTarget,
-                        externalRequester = remember("trakt") { FocusRequester() },
+                        externalRequester = traktCardRequester,
                     )
                     TvSettingCard(
                         title = traktLabel,
                         subtitle = traktSubtitle,
-                        modifier = Modifier.fillMaxWidth().focusProperties { left = railFocusRequester },
+                        modifier = Modifier.fillMaxWidth().focusProperties {
+                            left = railFocusRequester
+                            if (settingsState.traktConnected) {
+                                down = traktReconnectCardRequester
+                            }
+                        },
                         focusRequester = requester,
                         onFocused = { onSettingsRowFocused(connectionsTraktTarget, requester) },
                         onClick = {
-                            if (!settingsState.traktConnected && !settingsState.isPollingTrakt) {
-                                settingsViewModel.startTraktDeviceAuth()
+                            when {
+                                settingsState.isPollingTrakt -> {
+                                    TvNotificationQueue.post("Waiting for Trakt authorization", NotificationType.INFO)
+                                }
+                                settingsState.traktConnected -> {
+                                    TvNotificationQueue.post("Checking Trakt connection...", NotificationType.INFO)
+                                    settingsViewModel.syncTraktNow()
+                                }
+                                else -> {
+                                    TvNotificationQueue.post("Starting Trakt authorization", NotificationType.INFO)
+                                    settingsViewModel.startTraktDeviceAuth()
+                                }
                             }
                         },
                         rowType = TvSettingRowType.ACTION,
                     )
                 }
 
+                if (settingsState.traktConnected) {
+                    item(key = "trakt_reconnect") {
+                        val requester = rememberSettingsRowRequester(
+                            target = connectionsTraktReconnectTarget,
+                            externalRequester = traktReconnectCardRequester,
+                        )
+                        TvSettingCard(
+                            title = "Reconnect Trakt",
+                            subtitle = "Start a fresh Trakt device authorization.",
+                            modifier = Modifier.fillMaxWidth().focusProperties {
+                                left = railFocusRequester
+                                up = traktCardRequester
+                                down = traktDisconnectCardRequester
+                            },
+                            focusRequester = requester,
+                            onFocused = { onSettingsRowFocused(connectionsTraktReconnectTarget, requester) },
+                            onClick = {
+                                TvNotificationQueue.post("Starting Trakt reauthorization", NotificationType.INFO)
+                                settingsViewModel.startTraktDeviceAuth()
+                            },
+                            rowType = TvSettingRowType.ACTION,
+                        )
+                    }
+                    item(key = "trakt_disconnect") {
+                        val requester = rememberSettingsRowRequester(
+                            target = connectionsTraktDisconnectTarget,
+                            externalRequester = traktDisconnectCardRequester,
+                        )
+                        TvSettingCard(
+                            title = "Disconnect Trakt",
+                            subtitle = "Clear the Trakt connection on this TV.",
+                            modifier = Modifier.fillMaxWidth().focusProperties {
+                                left = railFocusRequester
+                                up = traktReconnectCardRequester
+                                down = simklCardRequester
+                            },
+                            focusRequester = requester,
+                            onFocused = { onSettingsRowFocused(connectionsTraktDisconnectTarget, requester) },
+                            onClick = {
+                                restoreConnectionFocus(
+                                    itemId = TvSettingsItemIds.CONNECTIONS_TRAKT,
+                                    requester = traktCardRequester,
+                                    reason = "trakt_disconnect",
+                                )
+                                settingsViewModel.disconnectTrakt()
+                                TvNotificationQueue.post("Trakt disconnected", NotificationType.SUCCESS)
+                            },
+                            rowType = TvSettingRowType.DANGEROUS,
+                        )
+                    }
+                }
+
                 settingsState.traktDeviceCode?.let { code ->
                     item(key = "trakt_device_code_panel") {
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .background(Charcoal.copy(alpha = 0.62f), RoundedCornerShape(16.dp))
-                                .border(1.dp, Amber.copy(alpha = 0.45f), RoundedCornerShape(16.dp))
-                                .padding(horizontal = 22.dp, vertical = 18.dp),
-                            verticalArrangement = Arrangement.spacedBy(8.dp),
-                        ) {
-                            Text(
-                                text = "Connect Trakt",
-                                style = MaterialTheme.typography.titleMedium,
-                                color = Snow,
-                                fontWeight = FontWeight.SemiBold,
-                            )
-                            Text(
-                                text = code.userCode,
-                                style = MaterialTheme.typography.headlineMedium,
-                                color = Amber,
-                                fontWeight = FontWeight.Bold,
-                            )
-                            Text(
-                                text = code.verificationUrl,
-                                style = MaterialTheme.typography.bodyLarge,
-                                color = Snow,
-                                maxLines = 2,
-                                overflow = TextOverflow.Visible,
-                            )
-                            val status = when {
+                        TvDeviceAuthorizationPanel(
+                            title = "Connect Trakt",
+                            verificationUrl = code.verificationUrl,
+                            userCode = code.userCode,
+                            status = when {
                                 settingsState.traktError != null -> settingsState.traktError!!
                                 settingsState.isPollingTrakt -> stringResource(R.string.tv_settings_auth_waiting_authorization)
                                 else -> stringResource(R.string.tv_settings_auth_open_url_code)
-                            }
-                            Text(
-                                text = status,
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = if (settingsState.traktError != null) Ruby else Silver,
-                            )
-                        }
+                            },
+                            isError = settingsState.traktError != null,
+                            isPolling = settingsState.isPollingTrakt,
+                        )
                     }
                 }
 
@@ -3814,21 +4076,87 @@ internal fun TvSettingsScreen(
                 item(key = "simkl") {
                     val requester = rememberSettingsRowRequester(
                         target = connectionsSimklTarget,
-                        externalRequester = remember("simkl") { FocusRequester() },
+                        externalRequester = simklCardRequester,
                     )
                     TvSettingCard(
                         title = simklLabel,
                         subtitle = simklSubtitle,
-                        modifier = Modifier.fillMaxWidth().focusProperties { left = railFocusRequester },
+                        modifier = Modifier.fillMaxWidth().focusProperties {
+                            left = railFocusRequester
+                            if (settingsState.traktConnected) {
+                                up = traktDisconnectCardRequester
+                            }
+                            if (settingsState.simklConnected) {
+                                down = simklDisconnectCardRequester
+                            }
+                        },
                         focusRequester = requester,
                         onFocused = { onSettingsRowFocused(connectionsSimklTarget, requester) },
                         onClick = {
-                            if (!settingsState.simklConnected && !settingsState.isPollingSimkl) {
-                                settingsViewModel.startSimklDeviceAuth()
+                            when {
+                                settingsState.isPollingSimkl -> {
+                                    TvNotificationQueue.post("Waiting for SIMKL authorization", NotificationType.INFO)
+                                }
+                                settingsState.simklConnected && settingsState.simklUser == null -> {
+                                    TvNotificationQueue.post("Checking SIMKL connection...", NotificationType.INFO)
+                                    settingsViewModel.checkSimklConnection()
+                                }
+                                settingsState.simklConnected -> {
+                                    TvNotificationQueue.post("Starting SIMKL reauthorization", NotificationType.INFO)
+                                    settingsViewModel.startSimklDeviceAuth()
+                                }
+                                else -> {
+                                    TvNotificationQueue.post("Starting SIMKL authorization", NotificationType.INFO)
+                                    settingsViewModel.startSimklDeviceAuth()
+                                }
                             }
                         },
                         rowType = TvSettingRowType.ACTION,
                     )
+                    if (settingsState.simklConnected) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        val disconnectRequester = rememberSettingsRowRequester(
+                            target = connectionsSimklDisconnectTarget,
+                            externalRequester = simklDisconnectCardRequester,
+                        )
+                        TvSettingCard(
+                            title = "Disconnect SIMKL",
+                            subtitle = "Clear the SIMKL connection on this TV.",
+                            modifier = Modifier.fillMaxWidth().focusProperties {
+                                left = railFocusRequester
+                                up = simklCardRequester
+                            },
+                            focusRequester = disconnectRequester,
+                            onFocused = { onSettingsRowFocused(connectionsSimklDisconnectTarget, disconnectRequester) },
+                            onClick = {
+                                restoreConnectionFocus(
+                                    itemId = TvSettingsItemIds.CONNECTIONS_SIMKL,
+                                    requester = simklCardRequester,
+                                    reason = "simkl_disconnect",
+                                )
+                                settingsViewModel.disconnectSimkl()
+                                TvNotificationQueue.post("SIMKL disconnected", NotificationType.SUCCESS)
+                            },
+                            rowType = TvSettingRowType.DANGEROUS,
+                        )
+                    }
+                }
+
+                settingsState.simklDeviceCode?.let { code ->
+                    item(key = "simkl_device_code_panel") {
+                        TvDeviceAuthorizationPanel(
+                            title = "Connect SIMKL",
+                            verificationUrl = code.verificationUrl,
+                            userCode = code.userCode,
+                            status = when {
+                                settingsState.simklError != null -> settingsState.simklError!!
+                                settingsState.isPollingSimkl -> stringResource(R.string.tv_settings_auth_waiting_authorization)
+                                else -> stringResource(R.string.tv_settings_auth_open_url_code)
+                            },
+                            isError = settingsState.simklError != null,
+                            isPolling = settingsState.isPollingSimkl,
+                        )
+                    }
                 }
 
                 // ── Integrations section (TV-only) ──
@@ -6228,22 +6556,25 @@ internal fun TvSettingsScreen(
                 target = aboutStatsTarget,
                 externalRequester = remember("about_stats") { FocusRequester() },
             )
-            val statsState by statsViewModel.state.collectAsState()
-            LaunchedEffect(Unit) { statsViewModel.loadStats() }
-            val hours = statsState.totalMinutes / 60
+            val statsState by watchStatsViewModel.state.collectAsState()
+            LaunchedEffect(Unit) { watchStatsViewModel.load() }
+            val statsCopy = WatchStatsUiText.aboutCard(statsState.summary)
             TvSettingCard(
-                title = stringResource(R.string.tv_settings_stats),
-                subtitle = stringResource(
-                    R.string.tv_settings_stats_summary,
-                    statsState.totalMovies,
-                    statsState.totalEpisodes,
-                    hours,
-                ),
+                title = statsCopy.title,
+                subtitle = statsCopy.body,
                 modifier = Modifier.fillMaxWidth().focusProperties { left = railFocusRequester },
                 focusRequester = requester,
                 onFocused = { onSettingsRowFocused(aboutStatsTarget, requester) },
-                onClick = {},
-                emphasis = TvSettingEmphasis.SECONDARY,
+                onClick = {
+                    logSettingsFocus("launch_subpage category=ABOUT row=ABOUT item=watch_stats reason=route_open")
+                    settingsFocusController.captureOrigin(
+                        itemId = aboutStatsTarget.itemId,
+                        outerListState = settingsListState,
+                        reason = "route_open",
+                    )
+                    onNavigateToWatchStats()
+                },
+                rowType = TvSettingRowType.NAVIGATION,
             )
         }
 
@@ -6305,8 +6636,7 @@ internal fun TvSettingsScreen(
                     val pandaOwned = entry.category.isPandaOwnedProviderCategory()
                     val (subtitleSuffix, onTap) = when (primary) {
                         null -> statusView.primaryActionLabel.orEmpty() to {
-                            providerHealthCoordinator.runCheck(entry.providerKey)
-                            Unit
+                            runProviderHealthCheckWithFeedback(entry)
                         }
                         else -> if (pandaOwned) {
                             stringResource(R.string.tv_settings_open_panda_setup) to { onNavigateToPandaSetup() }
@@ -6317,8 +6647,7 @@ internal fun TvSettingsScreen(
                                 com.torve.presentation.providerhealth.ProviderRepairAction.OpenDiagnostics ->
                                     stringResource(R.string.tv_settings_open_diagnostics) to { onNavigateToTransferDiagnostics() }
                                 else -> "" to {
-                                    providerHealthCoordinator.runCheck(entry.providerKey)
-                                    Unit
+                                    runProviderHealthCheckWithFeedback(entry)
                                 }
                             }
                         }
@@ -7280,6 +7609,91 @@ private fun prettifyProviderId(id: String): String =
         .split(" ")
         .filter { it.isNotBlank() }
         .joinToString(" ") { part -> part.replaceFirstChar { it.uppercase() } }
+
+private fun tvReadableAuthUrl(url: String): String =
+    url.trim()
+        .removePrefix("https://")
+        .removePrefix("http://")
+        .removePrefix("www.")
+        .trimEnd('/')
+
+@Composable
+private fun TvDeviceAuthorizationPanel(
+    title: String,
+    verificationUrl: String,
+    userCode: String,
+    status: String,
+    isError: Boolean,
+    isPolling: Boolean,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(Charcoal.copy(alpha = 0.62f), RoundedCornerShape(16.dp))
+            .border(1.dp, Amber.copy(alpha = 0.45f), RoundedCornerShape(16.dp))
+            .padding(horizontal = 24.dp, vertical = 20.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.titleMedium,
+                color = Snow,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.weight(1f),
+            )
+            if (isPolling) {
+                CircularProgressIndicator(
+                    modifier = Modifier.width(22.dp).height(22.dp),
+                    strokeWidth = 2.dp,
+                    color = Amber,
+                )
+            }
+        }
+        Text(
+            text = "1. On your phone or computer, open:",
+            style = MaterialTheme.typography.bodyLarge,
+            color = Silver,
+        )
+        Text(
+            text = tvReadableAuthUrl(verificationUrl),
+            style = MaterialTheme.typography.headlineSmall,
+            color = AmberLight,
+            fontWeight = FontWeight.Bold,
+            maxLines = 2,
+            softWrap = true,
+            overflow = TextOverflow.Visible,
+        )
+        Text(
+            text = "2. Enter this code:",
+            style = MaterialTheme.typography.bodyLarge,
+            color = Silver,
+        )
+        Text(
+            text = userCode,
+            style = MaterialTheme.typography.headlineLarge,
+            color = Snow,
+            fontWeight = FontWeight.Bold,
+            letterSpacing = 1.5.sp,
+        )
+        Text(
+            text = status,
+            style = MaterialTheme.typography.bodyMedium,
+            color = if (isError) Ruby else Silver,
+        )
+        if (!isError) {
+            Text(
+                text = "Torve will continue automatically after authorization.",
+                style = MaterialTheme.typography.bodySmall,
+                color = Ash,
+            )
+        }
+    }
+}
 
 @Composable
 internal fun TvSettingCard(

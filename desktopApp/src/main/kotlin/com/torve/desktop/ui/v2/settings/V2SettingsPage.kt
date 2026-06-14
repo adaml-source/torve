@@ -110,6 +110,10 @@ import com.torve.presentation.settings.AppLanguage
 import com.torve.presentation.settings.SettingsUiState
 import com.torve.presentation.settings.SettingsViewModel
 import com.torve.presentation.settings.ThemeMode
+import com.torve.presentation.beta.BetaProgramCopy
+import com.torve.presentation.beta.BetaProgramUiState
+import com.torve.presentation.beta.BetaProgramViewModel
+import com.torve.presentation.beta.shouldShowBetaProgramSettingsEntry
 import com.torve.presentation.subscription.accessPresentation
 import com.torve.domain.streams.StreamRulePatternValidator
 import java.time.Instant
@@ -158,6 +162,29 @@ private fun openDesktopBugReportEmail(body: String): Boolean {
         )
     }.isSuccess
 }
+
+private fun openDesktopUrl(url: String): Boolean = runCatching {
+    java.awt.Desktop.getDesktop().browse(java.net.URI(url))
+}.isSuccess
+
+private const val DEFAULT_TORVE_DISCORD_INVITE_URL = "https://discord.gg/dVHFAh7Amx"
+
+private fun resolveDesktopDiscordInviteUrl(backendUrl: String?): String? =
+    backendUrl
+        ?.trim()
+        ?.takeIf { it.isNotBlank() }
+        ?: System.getProperty("torve.discord.invite")
+            ?.trim()
+            ?.takeIf { it.isNotBlank() }
+        ?: System.getenv("TORVE_DISCORD_INVITE_URL")
+            ?.trim()
+            ?.takeIf { it.isNotBlank() }
+        ?: DEFAULT_TORVE_DISCORD_INVITE_URL
+
+private fun copyDesktopText(value: String): Boolean = runCatching {
+    val selection = java.awt.datatransfer.StringSelection(value)
+    java.awt.Toolkit.getDefaultToolkit().systemClipboard.setContents(selection, selection)
+}.isSuccess
 
 private fun encodeMailtoQuery(value: String): String =
     java.net.URLEncoder.encode(value, java.nio.charset.StandardCharsets.UTF_8.name())
@@ -289,6 +316,11 @@ fun V2SettingsPage(
             DesktopPandaSetupNudgeCard(
                 onSetupClick = onOpenPandaSetup,
                 eligible = pandaNudgeEligible,
+            )
+            DesktopBetaProgramSection(
+                compact = true,
+                hasPremiumAccess = authState.subscriptionState.hasEntitlement || authState.subscriptionState.isPro,
+                onOpenAccount = { selectedCategory = SettingsCategory.ACCOUNT },
             )
 
             when (selectedCategory) {
@@ -1175,6 +1207,185 @@ private fun formatIsoDateForDisplay(iso: String): String {
 }
 
 @Composable
+private fun DesktopBetaProgramSection(
+    compact: Boolean = false,
+    hasPremiumAccess: Boolean = false,
+    onOpenAccount: (() -> Unit)? = null,
+) {
+    val betaViewModel = remember {
+        org.koin.mp.KoinPlatform.getKoin().get<BetaProgramViewModel>()
+    }
+    val state by betaViewModel.state.collectAsState()
+    val discordInviteUrl = resolveDesktopDiscordInviteUrl(state.discordInviteUrl)
+    LaunchedEffect(Unit) {
+        betaViewModel.onOpenBetaProgram()
+    }
+    if (!shouldShowBetaProgramSettingsEntry(state, hasPremiumAccess = hasPremiumAccess)) {
+        return
+    }
+
+    TorveSectionCard(
+        title = ds("Torve Beta Program"),
+        supportingText = if (compact) {
+            ds("Want early access? Apply from Settings.")
+        } else {
+            BetaProgramCopy.DETAIL_INTRO
+        },
+        trailing = {
+            TorveBadge(
+                text = state.primaryBadge,
+                tone = betaBadgeTone(state),
+            )
+        },
+    ) {
+        Text(
+            text = BetaProgramCopy.DEADLINE,
+            style = MaterialTheme.typography.bodyMedium,
+            color = TorveDesktopThemeTokens.colors.textSecondary,
+        )
+        Text(
+            text = state.body,
+            style = MaterialTheme.typography.bodyMedium,
+            color = TorveDesktopThemeTokens.colors.textPrimary,
+        )
+        if (hasPremiumAccess) {
+            Text(
+                text = BetaProgramCopy.PREMIUM_TESTER_APPLICATION,
+                style = MaterialTheme.typography.bodyMedium,
+                color = TorveDesktopThemeTokens.colors.textPrimary,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Text(
+                text = BetaProgramCopy.FREE_PREMIUM_NON_PREMIUM_ONLY,
+                style = MaterialTheme.typography.bodySmall,
+                color = TorveDesktopThemeTokens.colors.textSecondary,
+            )
+        }
+
+        state.generatedCode?.takeIf { it.isNotBlank() }?.let { code ->
+            Surface(
+                color = TorveDesktopThemeTokens.colors.fieldSurface,
+                shape = RoundedCornerShape(TorveDesktopThemeTokens.radii.md),
+                border = BorderStroke(1.dp, TorveDesktopThemeTokens.colors.accentContainerStrong),
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(14.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    Text(
+                        text = ds("Discord link code"),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = TorveDesktopThemeTokens.colors.accent,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    Text(
+                        text = code,
+                        style = MaterialTheme.typography.headlineMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = TorveDesktopThemeTokens.colors.textPrimary,
+                    )
+                    state.generatedCodeExpiresAt?.let {
+                        Text(
+                            text = ds("Expires at") + " $it",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = TorveDesktopThemeTokens.colors.textSecondary,
+                        )
+                    }
+                    Text(
+                        text = BetaProgramCopy.DISCORD_INSTRUCTION,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = TorveDesktopThemeTokens.colors.textSecondary,
+                    )
+                    Text(
+                        text = ds("Torve Discord") + ": $discordInviteUrl",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = TorveDesktopThemeTokens.colors.textSecondary,
+                    )
+                }
+            }
+        }
+
+        if (!compact || state.generatedCode != null || state.errorMessage != null) {
+            Text(
+                text = BetaProgramCopy.SAFETY,
+                style = MaterialTheme.typography.bodySmall,
+                color = TorveDesktopThemeTokens.colors.textSecondary,
+            )
+        }
+
+        state.errorMessage?.let { message ->
+            TorveBanner(
+                title = ds("Beta status issue"),
+                description = message,
+                tone = TorveBannerTone.Error,
+            )
+        }
+
+        FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            TorvePrimaryButton(
+                text = if (state.isGeneratingCode) ds("Generating...") else state.primaryActionLabel,
+                onClick = {
+                    handleDesktopBetaPrimaryAction(
+                        state = state,
+                        viewModel = betaViewModel,
+                        onOpenAccount = onOpenAccount,
+                    )
+                },
+                enabled = !state.isGeneratingCode && !state.isRefreshing && !state.isLoading,
+            )
+            if (discordInviteUrl != null) {
+                TorveSecondaryButton(
+                    text = ds("Open Discord"),
+                    onClick = { openDesktopUrl(discordInviteUrl) },
+                )
+            }
+            if (state.showVerifyEmail) {
+                TorveSecondaryButton(
+                    text = ds("Resend Verification Email"),
+                    onClick = betaViewModel::onResendVerificationEmail,
+                )
+            }
+            TorveGhostButton(
+                text = if (state.isRefreshing) ds("Refreshing...") else ds("Refresh Status"),
+                onClick = betaViewModel::onRefreshStatus,
+                enabled = !state.isRefreshing && !state.isLoading,
+            )
+        }
+    }
+}
+
+private fun handleDesktopBetaPrimaryAction(
+    state: BetaProgramUiState,
+    viewModel: BetaProgramViewModel,
+    onOpenAccount: (() -> Unit)?,
+) {
+    when {
+        !state.isSignedIn -> onOpenAccount?.invoke()
+        state.showVerifyEmail -> viewModel.onVerifyEmail()
+        state.showGenerateCode -> viewModel.onGenerateCode()
+        state.showCopyCode && !state.generatedCode.isNullOrBlank() -> {
+            if (copyDesktopText(state.generatedCode.orEmpty())) {
+                viewModel.onCopyCode()
+            }
+        }
+        else -> viewModel.onRefreshStatus()
+    }
+}
+
+private fun betaBadgeTone(state: BetaProgramUiState): TorveBadgeTone = when {
+    state.betaAccessActive -> TorveBadgeTone.Success
+    state.isEmailVerificationRequired -> TorveBadgeTone.Warning
+    state.errorMessage != null -> TorveBadgeTone.Error
+    state.applicationStatus == com.torve.domain.beta.BetaApplicationStatus.SUBMITTED -> TorveBadgeTone.Accent
+    else -> TorveBadgeTone.Accent
+}
+
+@Composable
 private fun AccountSection(
     authState: DesktopAuthUiState,
     authController: DesktopAuthController,
@@ -1184,6 +1395,9 @@ private fun AccountSection(
     val openLabel = ds("Open")
     Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
         SubscriptionSection()
+        DesktopBetaProgramSection(
+            hasPremiumAccess = authState.subscriptionState.hasEntitlement || authState.subscriptionState.isPro,
+        )
         TorveSectionCard(
             title = ds("Identity"),
             supportingText = ds("Desktop account status, verification, and access are visible here."),

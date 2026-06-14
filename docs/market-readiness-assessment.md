@@ -1,486 +1,656 @@
 # Torve Market Readiness Assessment
 
-Last updated: 2026-05-23
+Last updated: 2026-05-27
 
-Repo baseline for this assessment: `master` / `origin/master` at `af33771`
-(`Update desktop V2 experience and playback recovery`).
+Assessment baseline: current local workspace in `C:\Users\Anwender\StudioProjects\streamvault`.
+The workspace is heavily modified and contains the recent Watch Stats, Discord
+Beta Program, diagnostics/support, Android TV/Fire TV, mobile, desktop, and
+release-artifact work. This assessment assumes the current implementation is the
+product baseline, not only `origin/master`.
 
-This is not tax, legal, or investment advice. It is a product and revenue
-readiness assessment for deciding whether Torve can realistically become a
-2,000-3,000 USD/month after-tax income source for a Germany-based solo
+This is not tax, legal, or investment advice. It is a product, release, pricing,
+and revenue-readiness assessment for deciding whether Torve can realistically
+become a 2,000-3,000 USD/month after-tax income source for a Germany-based solo
 operator.
 
-## Harsh Verdict
+## Executive Verdict
 
-Torve is no longer just a "strong beta foundation." Since the last assessment,
-the product has gained a much more serious desktop V2 experience, a materially
-better Android TV couch interface, account-scoped favorites, Panda/TorBox
-credential improvements, Stripe/direct billing, trust-signal hardening, more
-diagnostics, more provider intelligence, and a much wider test surface.
+Torve is materially more market-ready than it was in the previous assessment.
+The biggest change is that the product now has credible "launch machinery":
 
-The product now has a credible commercial sentence:
+- Android Google Mobile and Google TV release AABs build at version code 82.
+- Fire TV release APK builds and was installed successfully on both test Fire TV
+  devices, `192.168.178.110:5555` and `192.168.178.142:5555`.
+- Windows MSI packaging works and produced `Torve-1.0.72.msi`.
+- Discord Beta Program exists across shared KMP, Android mobile, Android TV /
+  Fire TV, and desktop, with verified-email gating, code generation, status
+  states, premium separation, and a non-expiring Discord invite fallback.
+- TV Watch Stats exists as a Settings > About sub-route, uses the watch_session
+  pipeline, and now has semantic filters, source/confidence visuals, recent
+  activity, and premium/unavailable states.
+- Report a Problem / diagnostics work is now much stronger, especially for a
+  beta/support-heavy product.
+- Watch history, Trakt/manual/imported session writes, runtime confidence labels,
+  and truthful stats are much more defensible than before.
 
-> Torve is a credential-first media hub for people who already pay for services,
-> servers, playlists, debrid, Usenet, or local storage, and want one app that
-> tells them what is actually playable right now.
+That changes the verdict:
 
-That is a real wedge. It is also not yet a stable paid launch.
+> Torve is now credible for a controlled public beta and founder sale, but not
+> yet safe to present as a finished stable product.
 
-The previous red Gradle signal has been resolved: the Channels startup tests now
-match the current local-first startup contract, and
-`:shared:desktopTest :desktopApp:test` has been reported green. That removes an
-important beta blocker. Public paid stable still remains **NO-GO** until the
-backend test path is exercised with Docker running, and the release/smoke gates
-are cleared.
+The limiting factor is no longer "there is not enough product." The limiting
+factors are release trust, policy risk, support load, app-store approval, and
+the missing iOS surface.
 
-The income goal is possible, but not with hobby pricing, not with a vague Reddit
-launch, and not with support-heavy instability. To reliably net 2,000-3,000 USD
-after German tax/health-insurance drag at the stated **1.99/month** price,
-Torve likely needs roughly **3,000-5,100 active monthly subscribers**, or a
-similar mix of monthly plus annual/founder cash, with support volume kept low.
-The updated lifetime structure is much healthier than the earlier 23.99 idea:
-**39.99 founder lifetime capped at 500 users**, then **69.99 regular lifetime**.
+The commercial wedge is still strong:
 
-## Current Readiness
+> Torve is a credential-first media hub for people who already use servers,
+> playlists, debrid, Usenet, Trakt/SIMKL, local files, or TV boxes, and want one
+> account-backed app that explains what is playable and keeps their watch state
+> honest.
+
+At the current price point, Torve is underpriced for the amount of product, but
+that may be acceptable as an adoption strategy. The 39.99 founder lifetime offer
+capped at 500 users is useful for runway and early trust. The 69.99 post-founder
+lifetime is commercially reasonable, but lifetime must remain capped or
+deliberately rationed because it can cannibalize the 1.99/month base.
+
+## Current Readiness Ratings
 
 | Target | Rating | Verdict |
 | --- | ---: | --- |
-| Closed enthusiast beta | 8.2/10 | GO from the shared/desktop test perspective. Still use known users who tolerate provider variability. |
-| Public desktop + Android beta | 8.1/10 | Conditional GO after backend test path is run with Docker, Android TV real-device smoke runs, and beta artifacts install cleanly. |
-| Public paid stable | 6.7/10 | NO-GO. Feature set is sellable; release trust, tests, iOS/macOS, signing, and real-device proof are not done. |
-| Android TV commercial UX | 8.0/10 | Much closer to a couch product. Needs real Shield/Fire TV/Onn smoke and fewer sharp edges. |
-| Desktop commercial UX | 8.5/10 | Now the strongest surface. Needs signed installer, clean-VM proof, and no broken updater/test residue. |
-| Android mobile | 7.5/10 | Useful companion and playback surface, but not the main sales story. |
-| iOS beta | 3.5/10 | Code exists, but no macOS build, no simulator smoke, no TestFlight, no App Review proof. |
-| Income readiness | 5.5/10 | The app can plausibly reach the target, but the current release state cannot be marketed hard yet. |
+| Closed enthusiast beta | 9.0/10 | GO. Use Discord beta flow, verified email, diagnostics, and known users. |
+| Public beta, no iOS | 8.4/10 | GO if positioned honestly as beta and support capacity is protected. |
+| Founder paid beta | 8.0/10 | GO with clear limitations, capped founder lifetime, and no "finished stable" wording. |
+| Public paid stable | 7.2/10 | Not yet. Needs store approvals, Windows signing/trust proof, backend smoke, and broader real-device QA. |
+| Android TV / Fire TV | 8.4/10 | Strong enough for beta. Needs continued D-pad smoke and visual QA, but release APK installed on real Fire TV devices. |
+| Android mobile | 8.1/10 | Strong companion/account surface; Beta Program and Discord entry are now real. |
+| Desktop Windows | 8.2/10 | Strong product surface; MSI builds. Still needs signing/SmartScreen clean-machine proof. |
+| Watch Stats | 8.0/10 | Differentiating and truthful. Needs real-history QA and continued runtime metadata cleanup. |
+| Discord Beta Program | 8.5/10 | Product-ready client flow. Backend must keep premium/beta separation authoritative. |
+| iOS | 2.5/10 | Not in scope yet. This is the largest platform/trust gap. |
+| Income readiness | 6.7/10 | Plausible with beta/founder strategy; monthly-only 1.99 requires high volume. |
 
-The rating went up on product value and down on release confidence. That is the
-right tradeoff to state honestly: Torve is more valuable than it was on May 3,
-but the current branch is not clean enough to sell as stable.
+The honest improvement is significant: Torve moved from "promising but not
+sellable" to "sellable as a serious beta." The honest limitation is also clear:
+without iOS, signed Windows reputation, and store approval proof, it is not yet
+a broad consumer launch.
 
 ## What Changed Since The Previous Assessment
 
-### Desktop V2, layout, and playback recovery
+### Discord Beta Program
 
-Major movement landed in the desktop app:
+The Beta Program is now a real cross-platform feature instead of a plan:
 
-- V2 detail page rebuilt into a high-density, premium-feeling view with richer
-  hero metadata, ratings, source actions, related content, watchlist/download
-  controls, and cleaner media presentation.
-- Discovery controls now have dedicated filter config and tests, including
-  TV/movie/mixed modes instead of one generic browse surface.
-- Live TV V2 gained premium components, richer EPG behavior, improved grid
-  handling, channel search/filtering, and better dense layout.
-- Recording UI and services improved materially: path resolution, recording
-  service tests, recording notification copy, and a much more complete
-  recordings page.
-- Desktop handoff expiry recovery was added and tested. This matters because
-  expiring provider URLs are a common real-world failure path.
-- Provider health initialization and playback-health bridging improved the
-  "tell me what broke" side of the product.
-- Desktop V2 now feels like the hub surface, not just a port of mobile flows.
+- Settings entry is visible from main settings surfaces.
+- Email verification gates code generation.
+- Premium users can still apply as beta testers for early builds/features.
+- Paid premium remains separate from temporary `discord_beta` free premium.
+- The July 31, 2026 date is now treated as the end of free beta premium access,
+  not the end of Discord beta tester opt-in.
+- Android mobile can open the Torve Discord invite and prefers the Discord app
+  when installed.
+- Android TV / Fire TV shows the invite and instructs users to use phone/desktop
+  for Discord rather than forcing a TV browser flow.
+- Desktop shows the invite and opens it through the OS browser.
+- The current non-expiring invite fallback is:
+  `https://discord.gg/dVHFAh7Amx`.
 
-Harsh read: this is the right product direction, but the desktop surface is now
-large enough that test failures and layout regressions are more likely. It needs
-release discipline, not more features.
+This matters commercially. A Discord beta gives Torve a launch funnel, a support
+venue, a way to verify tester intent, and a controlled path for early feedback.
+It also reduces the risk of dumping a complex media app straight into public
+store reviews.
 
-### Android TV design, focus, and browsing
+Remaining risk: the client must never grant beta or premium locally. Backend
+state from `/me/beta/status` and `/me/access-state` must remain authoritative.
 
-Android TV moved from "promising" to "actually plausible as the primary
-consumption surface":
+### Watch Stats
 
-- Catalog rails, search, see-all, library, sports, IPTV, details, and settings
-  screens were significantly reworked for D-pad navigation.
-- Search navigation and rating display were refined, with TMDB/IMDb/Rotten
-  Tomatoes assets and rating enrichment logic.
-- `TvImagePrefetcher` and metadata caching reduce TV browse jank.
-- Focus panels, hero overlays, media rails, nav rail behavior, and settings
-  focus repair all improved.
-- VOD library and Xtream movie/series paths are more explicit.
-- TV startup and content loading were stabilized with warmup workers and
-  cache-first patterns.
+Watch Stats is now one of Torve's clearest premium differentiators:
 
-Harsh read: this is where Torve can beat Stremio/Syncler for households if the
-real-device smoke passes. But "works in code" is not enough for TV. Remote UX
-bugs feel ten times worse from the couch.
+- `watch_session` exists as a truthful source of watch activity.
+- Playback, manual watched, and Trakt imported completed paths write explicit
+  sessions.
+- `WatchProgressRepository.saveProgress()` does not create watch sessions.
+- TV Watch Stats opens from Settings > About only, not as a top-level route.
+- Source/status/runtime confidence labels exist: Torve, Trakt, Manual,
+  Migrated; measured, estimated, unknown; completed, partial, manual completed,
+  imported completed, abandoned.
+- Semantic dashboard modes now exist in product terms: All/Movies/Shows scope,
+  Source, Ratings, Genres, Years, Activity.
+- The dashboard no longer needs fake charts to look useful: Source and runtime
+  confidence are real, while ratings/genres/years can show unavailable states
+  when local metadata is missing.
 
-### Panda, TorBox, debrid, and credential intelligence
+Commercial value: Watch Stats is not just decoration. It gives Torve a concrete
+"premium insight" story, especially for users importing Trakt history or moving
+between devices. The strongest marketing wording is not "analytics dashboard";
+it is "Torve tells you what it counted, where it came from, and whether runtime
+was measured, estimated, or unknown."
 
-The credential-first story became stronger:
+Remaining risk: imported episodes can still expose runtime metadata gaps. Users
+expect episode runtimes to exist from Trakt/SIMKL/TMDB/IMDb-style metadata. The
+UI must keep avoiding misleading `0m` / `Unknown` presentation when the app
+could lazily hydrate locally without blocking page open.
 
-- Panda now supports multiple debrid credentials instead of forcing a single
-  debrid path.
-- Provider switching has dedicated tests.
-- TorBox credentials sync across clients and restore after sign-in/bootstrap.
-- Account-session bootstrap now does more work to hydrate credentials and
-  settings after login.
-- Desktop and Android setup flows steer more through Panda and reduce manual
-  setup burden.
+### TV / Fire TV
 
-Harsh read: this is commercially important. "Sign in, connect what you already
-pay for, and Torve makes it usable" is the clearest reason someone pays. It must
-be made boringly reliable.
+TV is now much closer to the sales surface Torve needs:
 
-### Billing, subscription, and trust hardening
+- Settings > About > Watch Stats route is implemented and remains a sub-route.
+- TV Beta Program entry is reachable and focusable.
+- Report a Problem text input behavior was corrected so keyboard opening is
+  controlled instead of stealing focus.
+- D-pad/focus fixes landed across settings, beta, and Watch Stats.
+- Fire TV release APK built and installed successfully on both real devices:
+  `192.168.178.110:5555` and `192.168.178.142:5555`.
 
-Monetization is less theoretical now:
+Commercial value: Android TV / Fire TV is probably Torve's best first market.
+The no-iOS limitation hurts less for a TV-box/debrid/IPTV audience than it would
+for mainstream mobile-first software.
 
-- Stripe checkout, billing portal, webhook handling, and eligibility rules were
-  added on the backend.
-- Android billing flavor wiring was hardened across Google/Amazon/mobile/TV
-  combinations.
-- Store and direct billing states are clearer in subscription UI.
-- Backend device limits are now used by clients instead of duplicated
-  client-side assumptions.
-- Google Play Integrity / client trust-signal plumbing was added.
-- Desktop secure secret storage was upgraded.
-- Diagnostics redaction and network error sanitization improved.
-- Account-scoped media favorites sync landed on backend/shared/desktop/Android
-  surfaces.
+Remaining risk: TV UX bugs are conversion killers. A mouse-user might forgive a
+layout glitch; a couch user will quit if focus gets stuck. Every TV release
+still needs manual D-pad smoke on real hardware.
 
-Harsh read: the money path exists, but the current test failure in media
-favorites means the sync layer cannot be called stable today. Do not sell this
-as "cross-device reliable" until that regression is fixed.
+### Desktop Windows
 
-### Intelligence and source selection
+Desktop remains one of Torve's strongest surfaces:
 
-Torve's intelligence layer is now a real differentiator:
+- MSI packaging now works through `packageMsiCloseApp`.
+- Latest MSI artifact produced: `Torve-1.0.72.msi`.
+- Desktop Beta Program uses the same Discord invite fallback.
+- Desktop is still the best place for account/settings, diagnostics, local
+  source management, downloads, and high-density media browsing.
 
-- Source availability combines debrid cache, addon, Usenet readiness, IPTV live,
-  Plex/Jellyfin, local download, LAN library, and watch history signals.
-- Source-aware AI search and privacy sanitization are present.
-- Stream scoring/filtering/handoff policy improved, including telemetry for
-  provider categories and playback path outcomes.
-- Mood and rating filters were added with tests.
-- Media ratings are richer: TMDB, IMDb, Rotten Tomatoes style display, rating
-  predicates, rating preferences, and detail/search/TV presentation.
-- Live TV logo and EPG resolvers improved.
-- Sports release display parsing was added.
+Commercial value: Windows can be Torve's "control center" while TV is the
+consumption surface.
 
-Harsh read: this is the layer competitors do not fully have. The danger is
-explainability. Users will not pay for "AI says no"; they will pay for "Torve
-knows you have a cached 1080p source, your Plex copy, and tonight's live airing."
+Remaining risk: unsigned MSI / SmartScreen friction can destroy cold traffic
+conversion. A product asking users to connect sensitive media credentials cannot
+look like an unknown executable from a random folder.
 
-### IPTV, EPG, VOD, and DVR
+### Diagnostics and Report a Problem
 
-The IPTV/VOD surface is much stronger:
+The diagnostics/support story is much stronger:
 
-- Xtream live, movie, and series handling is more explicit.
-- Startup cache hydration improved, though current tests show regressions in
-  cache-first channel restoration.
-- EPG guide source resolution and channel logo resolution now have dedicated
-  logic/tests.
-- Recording metadata, file naming, storage quota, recording path resolution,
-  recording service behavior, and UI states are better covered.
-- Series-pass schema/resolver logic exists, but scheduler comments still mark
-  series passes as not fully active unless the resolver hook is wired. Treat DVR
-  as beta unless real provider smoke proves it.
+- Report a Problem exists on TV.
+- Android diagnostics export/redaction work exists.
+- Server-side support route/tests exist in the workspace.
+- TV input behavior was corrected after real-device feedback.
 
-Harsh read: IPTV users are valuable but high-support. Every playlist/provider
-weirdness becomes your ticket. This can be a moat or a time sink.
+Commercial value: diagnostics reduce support cost, which is critical at
+1.99/month. At that price, you cannot manually debug every playlist, account,
+provider, and TV-box issue.
 
-### Release and platform work
+Remaining risk: support must be operationalized. A diagnostic zip without a
+triage process still becomes manual support work.
 
-Release tooling improved but still is not stable-launch complete:
+### Billing, Entitlements, and Beta Separation
 
-- Desktop release appcast endpoint and release ritual exist.
-- Linux packaging path and docs were added.
-- Kotlin/AGP/Gradle readiness work landed.
-- Updater handoff tests were adjusted so test workers do not exit.
-- Windows install polish from the previous assessment still stands: appcast,
-  MSI handoff, close-app WiX path, watchdog, and release script.
+The current product rules are much healthier:
 
-Harsh read: unsigned desktop binaries remain a commercial trust problem.
-SmartScreen friction can destroy conversion from Reddit traffic.
+- Paid premium remains separate from beta access.
+- Premium users can apply for beta tester access.
+- Non-premium approved beta testers may receive temporary free premium through
+  backend state.
+- Temporary free premium ends no later than July 31, 2026.
+- Discord beta tester opt-in can continue after that without granting free
+  premium.
+- Founder lifetime is capped at 500 users.
 
-## Verification Run On 2026-05-23
+Commercial value: this avoids the worst beta mistake: confusing "tester" with
+"free paid entitlement forever."
 
-Latest verification reported after the startup-contract fix:
+Remaining risk: backend and client copy must stay aligned. If one layer says
+applications are closed while another says beta opt-in continues, users will not
+trust the program.
+
+## Verification Snapshot
+
+Recent commands run successfully in this workspace:
 
 ```powershell
-.\gradlew.bat :shared:desktopTest :desktopApp:test --continue
+.\gradlew.bat :shared:desktopTest --tests "com.torve.presentation.beta.*" --tests "com.torve.data.beta.*"
+.\gradlew.bat :androidApp:compileGoogleMobileDebugKotlin :androidApp:compileAmazonTvDebugKotlin :desktopApp:compileKotlin
+.\gradlew.bat :androidApp:bundleGoogleMobileRelease :androidApp:bundleGoogleTvRelease
+.\gradlew.bat :androidApp:assembleAmazonTvRelease
+.\gradlew.bat "-PtorveMsiVersion=1.0.72" :desktopApp:packageMsiCloseApp
+git diff --check
 ```
 
-Result:
+Recent artifact results:
 
-- Passed. The two prior `ChannelsViewModelStartupTest` failures were realigned
-  with the intended local-first startup contract: cached channels render
-  immediately and startup does not issue a catalog refresh call.
+- Google Mobile AAB:
+  `androidApp/build/outputs/bundle/googleMobileRelease/androidApp-google-mobile-release.aab`
+- Google TV AAB:
+  `androidApp/build/outputs/bundle/googleTvRelease/androidApp-google-tv-release.aab`
+- Amazon / Fire TV APK:
+  `androidApp/build/outputs/apk/amazonTv/release/androidApp-amazon-tv-release.apk`
+- Windows MSI:
+  `desktopApp/build/compose/binaries/main-closeapp/msi/Torve-1.0.72.msi`
 
-Backend test command:
+Android versioning:
 
-```powershell
-.\scripts\dev.ps1 backend-test
-```
+- Base version code: `82`
+- Google Mobile version code: `10082`
+- Google TV / Amazon TV version code: `20082`
+- Version name: `1.0.72`
 
-- `-DryRun` passes and shows the intended flow: set safe test env defaults,
-  start local Postgres when needed, wait for readiness, run dependency import
-  check, run Alembic migrations, then run pytest.
-- Real execution currently fails cleanly with setup instructions because Docker
-  is installed but not running on this machine. This is a better failure mode
-  than the prior raw Pydantic `DATABASE_URL` / `JWT_SECRET` import error, but it
-  is not a backend test pass.
+Fire TV install results:
 
-Current test inventory is broad: 255 Kotlin/Python test files across backend,
-shared, desktop, Android unit tests, and Android instrumentation tests. That is
-good. The desktop/shared slice is now green by report; backend still needs a
-full run with Docker or an explicit database.
+- `adb -s 192.168.178.110:5555 install -r ...androidApp-amazon-tv-release.apk`: success
+- `adb -s 192.168.178.142:5555 install -r ...androidApp-amazon-tv-release.apk`: success
+
+What this does not prove:
+
+- It does not prove Google Play / Google TV review approval.
+- It does not prove Amazon Appstore approval.
+- It does not prove Windows SmartScreen trust.
+- It does not prove iOS/macOS readiness.
+- It does not prove full backend pytest passed in a clean environment.
+- It does not prove long-session TV playback stability across real provider
+  variability.
 
 ## Competitive Reality
 
-### Direct competitor set
+Torve is entering a market with brutal free and low-cost anchors.
 
 | Competitor | Current reality | Impact on Torve |
 | --- | --- | --- |
-| Stremio | Official site claims more than 30M users and broad platform support across Android, Android TV, Windows, macOS, Linux, LG TV, and more. Source: <https://www.stremio.com/?lang=en> | Torve cannot beat Stremio on free scale. Torve must beat it on credential-aware reliability, source explanation, LAN/downloads/Desktop hub, and paid support quality. |
-| Syncler+ | Android/debrid psychology is strong. Official pricing is very cheap: Personal 5 devices is 15 USD/year, about 1.25 USD/month. Source: <https://app.syncler.net/plus> | Torve's 1.99/month can compete on price, but it still cannot win as "cheap debrid app only." It must win on AIO setup, cross-device, desktop, TV polish, and diagnostics. |
-| Plex | Plex now monetizes remote personal media via Plex Pass or Remote Watch Pass; official Remote Watch Pass moves from 1.99/month intro to 2.99/month after June 1, 2026. Source: <https://www.plex.tv/plans/> | Plex validates that users pay for media convenience, but Plex is trusted and mainstream. Torve must look safer than an unsigned niche app. |
-| Jellyfin | Free software, official clients free, no fees. Source: <https://jellyfin.org/> | Jellyfin sets a zero-price anchor. Torve must sell setup simplification and multi-source playback, not "media server." |
-| Emby Premiere | 4.99/month, 54/year, 119 lifetime. Source: <https://emby.tv/premiere.html> | 4.99/month is market-acceptable if Torve looks serious and solves a painful workflow. |
-| Channels DVR | 8/month or 80/year for a polished whole-home DVR. Source: <https://getchannels.com/docs/getting-started/quick-start-guide/subscription/> | IPTV/DVR users will pay, but only for reliability. Channels is the quality bar for live TV ergonomics. |
-| Infuse Pro | App Store shows 1.99/month, 16.99/year, 99.99 lifetime in US pricing; Firecore support confirms monthly/yearly/lifetime Pro options. Sources: <https://apps.apple.com/us/app/infuse/id1136220934>, <https://support.firecore.com/hc/en-us/articles/360046954753-Purchases-and-Family-Sharing> | Infuse owns Apple playback polish. Torve on iOS must avoid competing as "video player only." |
-| Kodi | Free, plugin-heavy, enormous install base. | Torve's advantage is opinionated setup, account sync, and provider explanation. Kodi users tolerate complexity; Torve buyers pay to remove it. |
+| Stremio | Official marketing says Stremio is free and available across Windows, macOS, Linux, Android, Android TV, Samsung/LG TV, browser, and iOS web/sideload paths; official pages also claim more than 30M users. Sources: [Stremio device support](https://stremio-app.com/), [Stremio 30M claim](https://www.stremio.com/?data1=google_disp_cp2_adv1_ag1_ad2). | Torve cannot win as a cheaper Stremio. It must win on account-backed setup, source explanation, diagnostics, TV focus quality, desktop hub value, and trustworthy premium support. |
+| Syncler+ | Syncler+ is still the cheap Android/debrid mental anchor; official pricing positions Personal 5-device access as the entry plan. Source: [Syncler+ pricing](https://syncler.net/plus). | 1.99/month is competitive, but Syncler trains users to expect very low pricing. Torve needs broader value than debrid playback. |
+| Plex | Plex validates paid personal-media convenience. Remote Watch Pass is 1.99/month before June 1, 2026 and moves to 2.99/month after that; Plex Pass is the stronger mainstream trust product. Source: [Plex plans](https://www.plex.tv/plans/). | Torve at 1.99/month is plausible, but Plex is trusted. Torve must overcome unknown-brand friction. |
+| Jellyfin | Official positioning is free software, and official server/clients are free. Sources: [Jellyfin home](https://jellyfin.org/), [Jellyfin clients](https://jellyfin.org/downloads/). | Jellyfin creates a zero-price anchor. Torve must sell convenience, cross-source workflow, TV UX, setup, and diagnostics. |
+| Emby Premiere | Common pricing remains around 4.99/month, 54/year, 119 lifetime. Source: [Emby Premiere](https://emby.tv/premiere.html). | 4.99/month is market-accepted for media utility if the product feels mature. Torve's 1.99/month is low, not high. |
+| Channels DVR | Whole-home DVR subscription remains a paid niche product; official docs position it as a subscription media powerhouse. Source: [Channels subscription docs](https://getchannels.com/docs/getting-started/quick-start-guide/subscription/). | IPTV/DVR users will pay, but reliability expectations are high. |
+| Infuse Pro | App Store pricing examples show monthly and lifetime Pro options, e.g. UK listing shows 1.99/month and 99.99 lifetime. Source: [Infuse App Store listing](https://apps.apple.com/gb/app/infuse-video-player/id1136220934). | Infuse proves polished playback can support paid subscriptions/lifetime, but it also sets an Apple-grade UX expectation Torve cannot claim without iOS/macOS proof. |
 
-### Where Torve is genuinely differentiated
+### Torve's Real Differentiation
 
-- Credential-first onboarding through Panda instead of "install 10 addons and
-  debug every provider manually."
-- Source availability intelligence: debrid cache, addon, Usenet, IPTV, LAN,
-  Plex/Jellyfin, local downloads, and watch history can all participate.
-- Desktop as a real hub: local library, recordings, downloads, LAN serving,
-  diagnostics, update management, and rich playback.
-- Android TV is becoming a first-class couch surface instead of a stretched
-  mobile app.
-- Provider health and recovery explanations can make Torve feel safer than
-  hobby apps if the copy is specific and honest.
-- Direct billing plus store billing gives monetization flexibility.
+Torve is not strongest as a player. It is strongest as a multi-source media
+operating layer:
 
-### Where competitors still crush Torve
+- Credential-first setup and account restoration.
+- TV-first browsing and playback decisions.
+- Desktop control-center behavior.
+- Watch Stats with measured/estimated/unknown truthfulness.
+- Source/status diagnostics users can understand.
+- Discord beta funnel and support loop.
+- BYO services, local libraries, playlists, debrid, Usenet, Trakt/SIMKL, and
+  provider-health thinking in one product.
 
-- Trust: Stremio/Plex/Infuse/Emby/Channels are known names. Torve is unknown.
-- Platform coverage: iOS/macOS are still not verified.
-- Price: Syncler is dramatically cheaper.
-- Store distribution: Torve still has App Review / Google TV / Amazon review
-  and policy risk.
-- Reputation: unsigned Windows binaries and unproven real-device/release smoke
-  are not acceptable for a hard public push.
-- Support burden: Torve combines many fragile domains. Every provider outage,
-  playlist bug, and debrid/Usenet failure can look like Torve's fault.
+### Where Torve Still Loses
 
-## Market Potential
+- No iOS.
+- Unknown brand.
+- Unsigned/low-reputation Windows installer risk.
+- App-store policy uncertainty.
+- Pricing psychology: Stremio/Jellyfin are free; Syncler is cheap.
+- Support complexity: every provider outage can look like a Torve bug.
+- Metadata edge cases: runtimes, years, genres, ratings, show/episode identity.
 
-Torve should not aim at mainstream streaming users first. The mainstream buyer
-does not understand debrid, Usenet, Stremio addons, M3U, Xtream, EPG, LAN
-handoff, or provider health. The first market is power users who already live in
-one or more of these worlds and are tired of glue code.
+## Market Potential Without iOS
 
-### Without iOS
+No iOS does not kill the first market. The first serious Torve buyers are likely
+Android TV / Fire TV / Windows / self-hosted / debrid / IPTV users. That market
+is more tolerant of non-iOS products than mainstream families are.
 
-No iOS does not kill the niche. The debrid/IPTV/Android TV audience is heavily
-Android/Windows/TV-box weighted. But no iOS reduces household trust, family
-sharing, review credibility, and mainstream conversion.
+But no iOS reduces:
 
-| Scenario | Paid users | Gross MRR at 1.99 | Harsh interpretation |
+- household trust,
+- family sharing,
+- App Store credibility,
+- creator/influencer confidence,
+- mainstream "this is a real product" perception.
+
+### Paid User Potential
+
+| Scenario | Paid accounts | Gross MRR at 1.99 | Honest interpretation |
 | --- | ---: | ---: | --- |
-| Weak launch | 150-400 | 300-800 USD | Not enough. Likely if Reddit sees it as another paid wrapper or install friction is high. |
-| Modest niche win | 600-1,200 | 1,200-2,400 USD | Useful validation, but below the Germany after-tax income target. |
-| Good indie outcome | 3,000-5,000 | 6,000-10,000 USD | This is the realistic target band for 2,000-3,000 USD/month after tax if support is controlled. |
-| Strong niche breakout | 10,000+ | 19,900+ USD | Possible only if Android TV is excellent, Reddit trust forms, and churn/support stay low. |
+| Weak beta conversion | 100-300 | 199-597 USD | Easy to hit from Discord/Reddit, but not a business. |
+| Useful niche validation | 500-1,000 | 995-1,990 USD | Good signal. Still not enough after German tax/health/support. |
+| Strong no-iOS indie outcome | 2,000-4,000 | 3,980-7,960 USD | Plausible if TV/Fire TV is reliable and Discord/Reddit trust forms. |
+| Breakout niche | 8,000-15,000 | 15,920-29,850 USD | Possible but requires creator/community distribution and very low support drag. |
 
-My honest estimate without iOS: **3,000 active monthly users is possible but
-hard**. Torve must ship a clean beta, show real TV/desktop demos, and earn trust
-in communities. The current branch is not ready for that push because the test
-run is red.
+My updated no-iOS estimate:
 
-### With iOS Implemented And Approved
+- 500-1,000 paid accounts is realistic if the beta funnel is handled well.
+- 2,000-4,000 paid accounts is possible but not automatic.
+- 8,000+ is not impossible, but it requires Torve to become a known niche tool,
+  not merely "another media app."
 
-iOS changes the trust story more than the technical story. Many people in the
-target niche use Android TV boxes and Windows desktops, but families often have
-iPhones/iPads. iOS also gives Torve a stronger "this is a real product" signal.
+The current product can plausibly support the first 500-1,000 paying users as a
+beta if support is tightly controlled. It is not yet proven for 5,000+ users.
 
-| Scenario | Paid users | Gross MRR at 1.99 | Harsh interpretation |
-| --- | ---: | ---: | --- |
-| iOS approved but weak demand | 1,000-2,000 | 2,000-4,000 USD | Still not enough if support is heavy. |
-| Solid cross-platform product | 3,000-6,000 | 6,000-12,000 USD | Income target becomes realistic and less fragile. |
-| Real brand in the niche | 10,000-25,000 | 19,900-49,750 USD | Requires app-store acceptance, excellent TV UX, low churn, and community trust. |
+## Pricing Assessment
 
-Harsh iOS caveat: App Review can be the blocker. If Torve looks like a source
-aggregation/piracy-adjacent app instead of a legal BYO-credentials/local-media
-tool, iOS may not ship or may ship with features constrained.
+Current intended pricing:
 
-## MRR And Germany After-Tax Reality
+- Monthly: `1.99`
+- Founder lifetime: `39.99`, capped at `500` users
+- Regular lifetime after founder cap: `69.99`
 
-Exchange-rate reference for this assessment: 1 USD is roughly 0.862 EUR on May
-23, 2026. Source: <https://www.xe.com/en-us/currencyconverter/convert/?Amount=1&From=USD&To=EUR>
+### Monthly 1.99
 
-Germany-specific constraints:
+1.99/month is good for adoption but weak for income. It is psychologically easy
+to buy and lines up with low-cost media utilities like Plex Remote Watch Pass
+and Infuse monthly pricing, but it requires volume.
 
-- The 2026 German basic tax-free allowance is 12,348 EUR for a single taxpayer
-  under Section 32a EStG. Source: <https://ao.bundesfinanzministerium.de/lsth/2026/A-Einkommensteuergesetz/IV-Tarif-31-34b/Paragraf-32a/paragraf-32a.html>
-- Self-employed statutory health insurance is a serious monthly cost. TK's 2026
-  self-employed contribution table shows health insurance around 16.69%-17.29%
-  depending on sickness benefit, plus long-term care insurance around 3.6%-4.2%,
-  with minimum and maximum income bases. Source: <https://www.tk.de/en/member/health-care-contribution-self-employed-2176982>
-- Google Play subscriptions are generally 15% service fee. Source:
-  <https://support.google.com/googleplay/android-developer/answer/112622>
-- Apple Small Business Program is 15% commission if accepted. Source:
-  <https://developer.apple.com/app-store/small-business-program/>
-- Amazon says developers under 1M USD/year receive 80/20 revenue share. Source:
-  <https://www.developer.amazon.com/apps-and-games>
-- Stripe Germany card processing is much lower than app-store commission but
-  still not zero. Source: <https://stripe.com/en-de/payments>
+Assumptions for rough solo-operator math:
 
-### Required paid user count
+- Consumer price is 1.99/month.
+- App-store subscriptions generally cost around 15% platform fee on Google Play
+  subscriptions and Apple Small Business Program IAPs. Sources: [Google Play
+  service fees](https://support.google.com/googleplay/android-developer/answer/112622?hl=en-CA),
+  [Apple Small Business Program](https://developer.apple.com/app-store/small-business-program/).
+- Direct Stripe is cheaper than app stores, but low-ticket payments still have
+  meaningful fixed-fee drag.
+- EU VAT / store tax handling, refunds, payment failures, support tooling, and
+  hosting reduce the useful gross.
+- Germany self-employed health/care contributions are serious; TK lists 2026
+  self-employed health contribution structures with 14.0%-14.6% base plus a
+  2.69% TK supplementary contribution, before long-term care. Source:
+  [TK self-employed contribution rates](https://www.tk.de/en/member/health-care-contribution-self-employed-2176982).
+- USD/EUR reference is around 0.859 EUR per USD on May 25-27, 2026. Sources:
+  [ExchangeRates UK USD/EUR](https://www.exchangerates.org.uk/Dollars-to-Euros-currency-conversion-page.html),
+  [X-Rates USD/EUR](https://www.x-rates.com/calculator/).
 
-Assumptions:
+Practical after-platform/support/tax value per 1.99 subscriber is likely around
+0.65-0.95 USD/month to the operator, depending on channel mix, VAT handling,
+support cost, and personal tax facts.
 
-- Price is 1.99/month standard.
-- Lifetime structure is 39.99 founder lifetime capped at 500 users, then 69.99
-  regular lifetime.
-- Average platform/payment drag: 10%-20%.
-- Refunds/payment failures/support/ops reserve: 8%-18%.
-- German income tax + health/care reserve on operator profit: roughly 35%-45%
-  at the target income band, depending on personal facts.
-- No pension provision is included. If you want retirement savings, the target
-  gross must be higher.
+| Desired after-tax operator income | Required active monthly subscribers at 1.99 |
+| ---: | ---: |
+| 1,000 USD/month | roughly 1,100-1,550 |
+| 2,000 USD/month | roughly 2,200-3,100 |
+| 3,000 USD/month | roughly 3,200-4,700 |
 
-| Monthly price | Paid users likely needed for 2,000-3,000 USD/month after tax | Verdict |
-| ---: | ---: | --- |
-| 1.99 | 3,000-5,100 | Too many for a first launch unless Torve becomes a viral niche app. Do not make this the normal price. |
-| 2.99 | 2,000-3,400 | Possible but still hard; leaves weak support margin. |
-| 3.99 | 1,500-2,500 | Viable if churn is low and annual conversion is good. |
-| 4.99 | 1,200-2,000 | Best default target. Comparable to Emby, cheaper than Channels, above Plex Remote Watch because Torve does more. |
-| 7.99 | 750-1,250 | Only plausible for a power/pro tier with DVR/LAN/family/device benefits. |
+Harsh read: at 1.99/month, the product must become a volume product. Torve can
+reach the lower end if Discord/Reddit/TV-box communities trust it. It will not
+reach the upper end from passive app-store discovery.
 
-### Pricing recommendation
+### Founder Lifetime 39.99, Capped At 500
 
-- Default monthly: **1.99 USD/EUR** if low-friction adoption is the strategy.
-- Founder lifetime: **39.99**, capped at **500 accounts**.
-- Regular lifetime after the founder cap: **69.99**.
-- Do not reopen 23.99 lifetime. It was too cheap and would have cannibalized MRR
-  after only 12 months of monthly-equivalent revenue.
-- Later premium lifetime, once Android TV/desktop/LAN/DVR/support are proven:
-  **99.99** is optional.
-- Family/power tier: **7.99-9.99/month** only after TV/DVR/LAN is proven.
-- At 1.99/month, Torve needs volume. The pricing can work only if support
-  volume stays low and Reddit/community trust drives thousands of paid users.
+Gross potential:
 
-## Reddit Marketing Assessment
+```text
+500 * 39.99 = 19,995 gross
+```
 
-Reddit can work for Torve because the audience is there. Reddit can also bury
-Torve immediately if it smells like spam, piracy bait, or a paid wrapper around
-free tools.
+This is a good beta runway mechanism, not a long-term business model.
 
-Relevant Reddit facts:
+Why it works:
 
-- Reddit ads support community, interest, and keyword targeting around active
-  communities/conversations. Source:
-  <https://www.business.reddit.com/advertise/targeting/community-and-interest>
-- Reddit ad formats include free-form/text/link/image/video/carousel/conversation
-  styles, and Reddit explicitly says authenticity matters. Source:
-  <https://www.business.reddit.com/learning-hub/articles/what-are-reddit-ads-formats-smbs>
-- Many communities still enforce strict self-promotion norms; Reddit's own mod
-  guidance notes some communities use a 10% self-promo rule. Source:
-  <https://support.reddithelp.com/hc/en-us/articles/28012014962580-How-do-I-keep-spam-out-of-my-community>
+- It creates urgency.
+- It rewards early risk-taking.
+- It gives a cash cushion for signing, hosting, devices, store fees, and
+  support infrastructure.
+- The cap prevents permanent underpricing.
 
-### Organic Reddit plan
+Why it is dangerous:
 
-Do not launch with "I built an app, please buy it." That will underperform.
+- 500 lifetime users can create a lot of support without recurring revenue.
+- If the first 500 are the most enthusiastic users, you may cannibalize the
+  best future monthly customers.
+- At 39.99, the customer breaks even versus 1.99/month after about 20 months.
+  That is generous.
 
-1. Spend 2-4 weeks participating before launch with the founder account.
-2. Post useful technical writeups, not sales pages:
-   - "How to debug IPTV EPG mismatch without leaking playlist URLs"
-   - "Why debrid cached-source detection lies sometimes"
-   - "What I learned making Android TV focus not feel broken"
-   - "How to transfer media credentials without syncing plaintext secrets"
-3. Ask mods before posting in communities that are strict about tools/products.
-4. Use transparent disclosure every time: "I am building Torve."
-5. Avoid piracy-coded claims like "watch anything." Use "your services, your
-   libraries, your legal playlists, your credentials."
-6. Launch with a demo video, exact platform status, known limitations, and a
-   founder beta discount.
+Recommendation: keep the 500 cap hard. Do not extend it casually.
 
-Likely target communities, subject to their rules:
+### Regular Lifetime 69.99
 
-- `r/AndroidTV`, `r/ShieldAndroidTV`, `r/FireTV`
-- `r/PleX`, `r/jellyfin`, `r/kodi`
-- `r/selfhosted`, `r/HomeServer`, `r/usenet`
-- debrid and Stremio-adjacent communities only with careful positioning and mod
-  approval
-- IPTV communities only if legal/BYO wording is clear and no provider sourcing
+69.99 is reasonable for the post-founder lifetime price.
 
-### Paid Reddit ads
+At 1.99/month, 69.99 equals about 35 months of monthly revenue before fees.
+That is fair for a media utility if Torve looks stable. It is still cheaper
+than many mature lifetime media products:
 
-Start small:
+- Emby lifetime is commonly positioned around 119.
+- Infuse lifetime examples are around 99.99 in App Store listings.
 
-- 20-50 USD/day for 14 days.
-- Separate ad groups for Android TV, Plex/Jellyfin/local library, IPTV/EPG/DVR,
-  and debrid/Usenet setup.
-- Use free-form/text ads that look like a real founder post.
-- Landing page must show a 60-90 second product demo above the fold.
-- Do not send ad traffic to a generic homepage.
+Recommendation:
 
-KPI math:
+- 39.99 founder lifetime: yes, capped at 500.
+- 69.99 regular lifetime: yes, but do not make it the default CTA forever.
+- Monthly 1.99: yes for beta/adoption, but consider raising later.
+- Future annual: strongly consider `19.99/year` or `24.99/year`.
+- Future monthly after beta: consider `2.99` or `3.99` if support load is high.
 
-- If visitor-to-install is 8% and install-to-paid is 5%, 10,000 qualified
-  visitors produce about 40 paid users.
-- To reach 1,200 paid users, you need either much better conversion, sustained
-  organic trust, affiliates/YouTube, or repeated community exposure.
-- Reddit alone probably will not carry the whole business. It can seed the
-  first 100-500 serious users if the product demo is strong.
+## Revenue Model Scenarios
 
-Harsh Reddit verdict: Torve has enough differentiated product to earn attention,
-but not enough launch trust while tests are red and installers are unsigned. Fix
-the release trust issues first, then use Reddit to recruit beta users, not to
-declare stable.
+### Scenario A: Founder Beta Launch
 
-## What Blocks Stable Paid Launch
+Assume:
 
-| Blocker | Why it matters |
-| --- | --- |
-| Backend pytest not fully run yet | `scripts/dev.ps1 backend-test` now has preflight/setup handling, but real execution still needs Docker running or an explicit test database. |
-| Unsigned Windows artifacts | SmartScreen/Defender friction kills cold traffic conversion. |
-| Clean Windows VM smoke | Sandbox smoke was useful, but stable needs clean real-user Windows install/update/playback proof. |
-| Android TV real-device smoke | TV is now the sales surface. Emulator/build success is not enough. |
-| iOS/macOS not built | iOS remains hypothetical until Xcode/simulator/TestFlight exist. |
-| App-store policy proof | Google TV, Amazon, and Apple review can reject or constrain source-aggregation language/features. |
-| Support workflow | Need diagnostics export, known-issue status, provider outage copy, and a support triage routine before paid users arrive. |
-| Landing page and demo | The product is too complex to sell from screenshots. Needs a short, concrete demo. |
-| Pricing discipline | 1.99/month requires thousands of active subscribers; the 39.99 founder lifetime cap must stay hard, then lifetime should move to 69.99. |
+- 500 founder lifetime accounts sell over 1-3 months.
+- 300-800 monthly subscribers remain after founder cap starts closing.
 
-## Highest Value Next Actions
+Gross:
 
-1. Run `.\scripts\dev.ps1 backend-test` with Docker running or an explicit
-   `DATABASE_URL`, and record the actual pytest result.
-2. Keep `.\gradlew.bat :shared:desktopTest :desktopApp:test` green in the
-   release checklist now that the local-first startup contract is locked.
-3. Run Android TV real-device smoke on at least Shield/Google TV and Fire TV.
-4. Produce a fresh Windows beta MSI, install it in a clean VM, verify launch,
-   playback, updates, uninstall, and Defender behavior.
-5. Procure/wire Windows code signing before any serious paid traffic.
-6. Cut a no-iOS beta launch page with exact platform badges: Windows, Android
-   mobile, Android TV, Fire TV; iOS "not yet."
-7. Record a founder demo focused on one workflow: sign in, connect credentials,
-   see what is playable, play on TV/desktop, and show provider failure copy.
-8. Prepare a Reddit beta campaign with useful posts first, launch post second,
-   paid ads third.
-9. Run macOS/iOS build and simulator smoke as soon as a Mac is available.
-10. Keep feature scope frozen until the above is done.
+- Founder lifetime: 19,995 one-time gross.
+- Monthly: 597-1,592 MRR gross.
 
-## Net Call
+Verdict: good runway, not yet income stability. This can fund the next phase:
+code signing, devices, backend/support, landing page, iOS prep.
 
-- **Closed beta:** GO from the shared/desktop test perspective. Use known
-  enthusiast users who understand provider variability.
-- **Public beta:** Conditional GO after backend pytest is actually run,
-  Android TV real-device smoke, and clean Windows VM smoke.
-- **Public paid stable:** NO-GO today.
-- **iOS:** NO-GO today.
-- **Income target:** Possible, not guaranteed. Without iOS, the practical target
-  is roughly 3,000-5,100 active monthly users at 1.99/month, or a strong
-  monthly/founder-lifetime mix. With iOS approved and good TV execution, the
-  target becomes meaningfully easier, but App Review is a real risk.
+### Scenario B: Conservative Paid Beta
 
-Final harsh sentence: Torve now has enough product to justify charging money,
-but not enough release proof to confidently ask strangers on Reddit for money.
-Fix the red tests and trust gates first; then market it as a serious beta, not
-as finished stable software.
+Assume:
+
+- 250 founder lifetime users.
+- 700 monthly users at 1.99.
+
+Gross:
+
+- 9,997.50 one-time founder gross.
+- 1,393 MRR gross.
+
+Verdict: useful validation. Not enough as full income, but enough to prove
+people pay.
+
+### Scenario C: Strong Niche No-iOS Launch
+
+Assume:
+
+- 500 founder lifetime users sold out.
+- 2,500 monthly subscribers at 1.99.
+
+Gross:
+
+- 19,995 one-time founder gross.
+- 4,975 MRR gross.
+
+Verdict: close to the lower end of the 2,000-3,000 USD after-tax goal if support
+does not explode. This is a realistic target for the first serious year without
+iOS, but it requires strong community distribution.
+
+### Scenario D: Mature Cross-Platform With iOS Later
+
+Assume:
+
+- 4,000-8,000 monthly subscribers.
+- Lifetime remains available at 69.99 but is not over-promoted.
+
+Gross:
+
+- 7,960-15,920 MRR gross, plus lifetime cash spikes.
+
+Verdict: the income target becomes realistic. iOS is not necessary for the first
+validation, but it makes the long-term business much less fragile.
+
+## Go-To-Market Recommendation
+
+### Positioning
+
+Do not position Torve as:
+
+- "watch anything,"
+- "Netflix replacement,"
+- "piracy app,"
+- "Stremio but paid,"
+- "just another player."
+
+Position Torve as:
+
+> A premium media control center for your own sources, services, libraries,
+> playlists, and watch history.
+
+Best short pitch:
+
+> Connect what you already use. Torve shows what is playable, tracks what was
+> actually watched, and keeps TV, desktop, and mobile in sync.
+
+### First Funnel
+
+Use Discord beta as the first funnel:
+
+1. Settings-visible Beta Program card.
+2. Verified email required.
+3. Generate Discord code.
+4. User joins Discord and applies in `#beta-info`.
+5. Staff approves testers.
+6. Non-premium testers may receive temporary free premium until July 31, 2026.
+7. Premium users can still become beta testers without needing a free premium
+   grant.
+
+This is better than opening paid access to everyone immediately because Torve's
+support surface is broad.
+
+### Founder Offer
+
+Use founder lifetime carefully:
+
+- "First 500 founder accounts."
+- "39.99 one-time."
+- "Includes premium features for the life of the Torve product."
+- "Beta software; iOS not available yet."
+- "Discord beta tester access is separate from paid premium."
+
+Avoid:
+
+- unlimited lifetime sale,
+- false urgency beyond the 500 cap,
+- implying free beta premium is permanent,
+- hiding known platform limitations.
+
+### Reddit / Community
+
+Reddit can work, but not with a hard sales post first.
+
+Useful first posts:
+
+- "How I fixed D-pad focus traps in a complex Android TV app."
+- "What makes watch stats dishonest, and how to label measured vs estimated
+  runtime."
+- "Why media apps need diagnostics that redact credentials."
+- "How to avoid leaking playlist/provider secrets in bug reports."
+- "What I learned building a beta flow that does not grant access locally."
+
+Then launch:
+
+- show a TV demo,
+- show Watch Stats,
+- show Discord beta flow,
+- be explicit about no iOS,
+- be explicit that users bring their own legal sources/services.
+
+## Remaining Stable-Launch Blockers
+
+| Blocker | Severity | Why it matters |
+| --- | ---: | --- |
+| iOS missing | High | Limits trust, household coverage, App Store legitimacy, and mainstream appeal. |
+| Windows code signing / SmartScreen | High | Cold users will not trust an unsigned media app that handles credentials. |
+| Store review approval not proven | High | Google TV/Amazon policy may constrain wording/features. |
+| Full backend pytest / deployment smoke | High | Beta, billing, support, and entitlement trust depend on backend correctness. |
+| Real-device TV smoke matrix | High | Fire TV install succeeded, but focus/playback/settings/reporting need repeated manual QA. |
+| Support operations | High | 1.99/month cannot support high-touch manual debugging. |
+| Runtime metadata gaps | Medium | Watch Stats must avoid `Unknown` where runtime can be locally hydrated. |
+| Landing page/demo | Medium | Product is too complex to sell without a short demo. |
+| Pricing migration plan | Medium | 1.99 is good for beta but may be too low long-term. |
+| App-store legal copy | Medium | Must avoid piracy wording and credential/provider leakage. |
+
+## Highest-Value Next Actions
+
+1. Upload Google Mobile and Google TV AABs to internal testing and record review
+   or install-track result.
+2. Run a structured Fire TV QA pass on both devices after the latest build:
+   Settings, Beta Program, Watch Stats, Report a Problem, playback, details,
+   account restore.
+3. Install `Torve-1.0.72.msi` on a clean Windows VM and record SmartScreen,
+   launch, sign-in, playback, update/uninstall behavior.
+4. Procure Windows code signing before any broad paid traffic.
+5. Run backend tests in a clean environment and document the result.
+6. Create a beta landing page with:
+   - Windows,
+   - Android mobile,
+   - Android TV,
+   - Fire TV,
+   - "iOS coming later",
+   - Discord beta application instructions,
+   - founder lifetime cap.
+7. Record a 60-90 second TV + desktop demo:
+   - sign in,
+   - connect/setup,
+   - play on TV,
+   - view Watch Stats,
+   - report a problem safely.
+8. Keep founder lifetime capped at 500.
+9. Start beta with 50-100 curated Discord users before opening the founder sale
+   to a wider audience.
+10. Plan iOS/macOS feasibility as the next major trust multiplier, not as a
+    blocker for initial beta.
+
+## Updated Net Call
+
+### Closed Beta
+
+GO.
+
+Torve is now strong enough for curated testers. The Discord flow, diagnostics,
+TV install proof, MSI build, and Watch Stats work make this credible.
+
+### Public Beta
+
+GO, if the wording is honest.
+
+Use "beta" loudly. Say no iOS. Say users bring their own sources/services. Say
+metadata and provider behavior can vary. Say diagnostics are safe/redacted.
+
+### Founder Paid Beta
+
+GO, with guardrails.
+
+The 39.99 founder lifetime capped at 500 is commercially reasonable. It should
+be framed as an early-supporter offer, not as proof the app is finished.
+
+### Public Paid Stable
+
+Not yet.
+
+Stable needs store approval proof, Windows signing/trust, backend smoke, and a
+larger TV QA pass. The product can charge now as beta; it should not yet claim
+stable.
+
+### Income Potential
+
+Possible, not guaranteed.
+
+At 1.99/month, Torve needs roughly 2,200-4,700 active monthly subscribers to
+net around 2,000-3,000 USD/month after platform fees, support/ops, and German
+tax/health drag. The founder lifetime sale can create meaningful runway, but it
+does not replace recurring revenue.
+
+The strongest realistic path is:
+
+1. curated Discord beta,
+2. founder lifetime capped at 500,
+3. TV/Windows proof,
+4. internal/public store tracks,
+5. controlled Reddit/community launch,
+6. then decide whether 1.99 remains the long-term price or becomes the beta
+   acquisition price before moving to 2.99/3.99.
+
+Final harsh sentence: Torve is now good enough to ask enthusiasts for money as a
+beta, but not yet proven enough to ask the general market to trust it as stable.
+The product value is there; the next bottleneck is trust, not features.

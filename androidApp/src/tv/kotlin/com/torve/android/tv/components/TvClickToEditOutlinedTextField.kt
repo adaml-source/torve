@@ -24,6 +24,9 @@ import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.material3.MaterialTheme
@@ -36,6 +39,9 @@ fun TvClickToEditOutlinedTextField(
     label: @Composable (() -> Unit),
     singleLine: Boolean,
     modifier: Modifier = Modifier,
+    placeholder: @Composable (() -> Unit)? = null,
+    minLines: Int = 1,
+    maxLines: Int = if (singleLine) 1 else Int.MAX_VALUE,
     visualTransformation: androidx.compose.ui.text.input.VisualTransformation =
         androidx.compose.ui.text.input.VisualTransformation.None,
 ) {
@@ -85,7 +91,9 @@ fun TvClickToEditOutlinedTextField(
                             editMode = true
                             true
                         } else {
-                            false
+                            editMode = false
+                            hideKeyboard()
+                            true
                         }
                     }
 
@@ -119,8 +127,20 @@ fun TvClickToEditOutlinedTextField(
             },
             readOnly = !editMode,
             singleLine = singleLine,
+            minLines = minLines,
+            maxLines = maxLines,
             label = label,
+            placeholder = placeholder,
             visualTransformation = visualTransformation,
+            keyboardOptions = KeyboardOptions(
+                imeAction = ImeAction.Done,
+            ),
+            keyboardActions = KeyboardActions(
+                onDone = {
+                    editMode = false
+                    hideKeyboard()
+                },
+            ),
             colors = OutlinedTextFieldDefaults.colors(
                 unfocusedBorderColor = borderColor,
             ),

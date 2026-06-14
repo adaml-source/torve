@@ -42,6 +42,7 @@ import androidx.compose.material.icons.outlined.Movie
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.Tv
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -62,10 +63,12 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.layout
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.torve.android.R
+import com.torve.android.background.BackgroundWork
 import com.torve.android.deeplink.TorveAppLink
 import com.torve.android.deeplink.TorveAppLinkTarget
 import androidx.navigation.NavHostController
@@ -76,6 +79,7 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.torve.android.ui.auth.LoginScreen
+import com.torve.android.ui.beta.BetaProgramScreen
 import com.torve.android.ui.calendar.CalendarScreen
 import com.torve.android.ui.catalog.CatalogScreen
 import com.torve.android.ui.detail.DetailScreen
@@ -151,8 +155,12 @@ import com.torve.presentation.subscription.SubscriptionViewModel
 import com.torve.presentation.watchlist.WatchlistViewModel
 import com.torve.presentation.home.HomeViewModel
 import org.koin.compose.koinInject
+import androidx.work.WorkInfo
+import androidx.work.WorkManager
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // Safe detail navigation — guards against null tmdbId
@@ -241,6 +249,11 @@ data class NavTab(
     val labelResId: Int,
     val iconSelected: ImageVector,
     val iconUnselected: ImageVector,
+)
+
+private data class BackgroundRefreshStatus(
+    val label: String,
+    val progress: Float,
 )
 
 @Composable
@@ -353,6 +366,7 @@ fun TorveNavGraph(
     val authClient: AuthClient = koinInject()
     val authUser by authClient.authUserFlow.collectAsState()
     val navScope = rememberCoroutineScope()
+    val appContext = LocalContext.current.applicationContext
     val watchlistViewModel: WatchlistViewModel = koinInject()
     val mediaFavoritesRepository: MediaFavoritesRepository = koinInject()
     val homeViewModel: HomeViewModel = koinInject()
@@ -363,6 +377,7 @@ fun TorveNavGraph(
     val watchlistState by watchlistViewModel.state.collectAsState()
     val subscriptionState by subscriptionViewModel.state.collectAsState()
     val syncState by syncCoordinator.state.collectAsState()
+    var backgroundRefreshStatus by remember { mutableStateOf<BackgroundRefreshStatus?>(null) }
     var didInitialWatchlistSync by remember { mutableStateOf(false) }
     var mobileOnboardingComplete by rememberSaveable { mutableStateOf(false) }
     var mobileOnboardingRequired by rememberSaveable { mutableStateOf(false) }
@@ -373,6 +388,35 @@ fun TorveNavGraph(
     )
     val isLocked: (PremiumFeature) -> Boolean = remember(accessTier) {
         { feature -> PremiumAccess.isPremiumLocked(feature, accessTier) }
+    }
+    LaunchedEffect(appContext) {
+        val workManager = WorkManager.getInstance(appContext)
+        while (true) {
+            val active = runCatching {
+                withContext(Dispatchers.IO) {
+                    workManager.getWorkInfosByTag(BackgroundWork.TAG_HEAVY_PRELOAD)
+                        .get()
+                        .filter {
+                            it.state == WorkInfo.State.ENQUEUED ||
+                                it.state == WorkInfo.State.RUNNING ||
+                                it.state == WorkInfo.State.BLOCKED
+                        }
+                        .maxByOrNull {
+                            it.progress.getFloat(BackgroundWork.KEY_PROGRESS, -1f)
+                        }
+                }
+            }.getOrNull()
+            backgroundRefreshStatus = active?.let { workInfo ->
+                BackgroundRefreshStatus(
+                    label = workInfo.progress.getString(BackgroundWork.KEY_LABEL)
+                        ?: "Refreshing in background",
+                    progress = workInfo.progress
+                        .getFloat(BackgroundWork.KEY_PROGRESS, 0f)
+                        .coerceIn(0f, 1f),
+                )
+            }
+            delay(750L)
+        }
     }
     val requestLifetimeUnlock: (PremiumFeature) -> Unit = remember(
         navController,
@@ -815,6 +859,47 @@ fun TorveNavGraph(
             }
         }
 
+        backgroundRefreshStatus?.takeIf {
+            !restoreProgress.isImporting && !accountSessionState.isBootstrapping
+        }?.let { status ->
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .zIndex(80f)
+                    .statusBarsPadding()
+                    .padding(horizontal = 16.dp, vertical = 8.dp),
+            ) {
+                androidx.compose.material3.Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = androidx.compose.material3.CardDefaults.cardColors(
+                        containerColor = com.torve.android.ui.theme.Gunmetal,
+                    ),
+                    shape = RoundedCornerShape(10.dp),
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp, vertical = 10.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        Text(
+                            text = status.label,
+                            style = androidx.compose.material3.MaterialTheme.typography.bodySmall,
+                            color = com.torve.android.ui.theme.Snow,
+                        )
+                        LinearProgressIndicator(
+                            progress = { status.progress },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(3.dp),
+                            color = com.torve.android.ui.theme.Amber,
+                            trackColor = com.torve.android.ui.theme.Snow.copy(alpha = 0.14f),
+                        )
+                    }
+                }
+            }
+        }
+
         // Main content
         NavHost(
             navController = navController,
@@ -1129,6 +1214,7 @@ fun TorveNavGraph(
                             onTransferDiagnosticsClick = { navController.navigate("transfer_diagnostics") },
                             onStartSetupClick = { navController.navigate(SETUP_CHOICE_ROUTE) },
                             onStatusRepairClick = { navController.navigate("status_repair") },
+                            onBetaProgramClick = { navController.navigate("beta_program") },
                         )
                     }
                 }
@@ -1409,6 +1495,14 @@ fun TorveNavGraph(
                     onTransferDiagnosticsClick = { navController.navigate("transfer_diagnostics") },
                     onStartSetupClick = { navController.navigate(SETUP_CHOICE_ROUTE) },
                     onStatusRepairClick = { navController.navigate("status_repair") },
+                    onBetaProgramClick = { navController.navigate("beta_program") },
+                )
+            }
+
+            composable("beta_program") {
+                BetaProgramScreen(
+                    onBack = { navController.popBackStack() },
+                    onSignIn = { navController.navigate("login") },
                 )
             }
 

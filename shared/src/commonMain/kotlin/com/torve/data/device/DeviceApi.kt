@@ -1,6 +1,7 @@
 package com.torve.data.device
 
 import com.torve.data.auth.DeviceRegistrationDto
+import com.torve.data.beta.BetaAccessStateDto
 import com.torve.data.error.deviceLimitReachedMessage
 import com.torve.data.error.parseBackendError
 import com.torve.domain.device.DeviceType
@@ -367,6 +368,8 @@ data class AccessStateDto(
     val expires_at: String? = null,
     @SerialName("granted_at")
     val granted_at: String? = null,
+    @SerialName("beta_access")
+    val beta_access: BetaAccessStateDto? = null,
 )
 
 fun AccessStateDto.resolvedHasPremiumEntitlement(): Boolean {

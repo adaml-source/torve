@@ -1236,8 +1236,8 @@
     <string name="settings_diagnostics">Diagnósticos</string>
     <string name="settings_report_issue">Reportar Problema</string>
     <string name="bug_report_title">Reportar um problema</string>
-    <string name="bug_report_subtitle">Envie um relatório redigido para %1$s. Logs colados são limpos antes do envio.</string>
-    <string name="bug_report_tv_subtitle">Gere um relatório redigido para %1$s. Use e-mail, compartilhar ou copiar nesta TV.</string>
+    <string name="bug_report_subtitle">Send a redacted report directly to Torve support. Pasted logs are scrubbed before sending.</string>
+    <string name="bug_report_tv_subtitle">Send a redacted report directly to Torve support. No email or share app is required.</string>
     <string name="bug_report_tv_settings_subtitle">Criar um relatório de diagnóstico redigido para o suporte</string>
     <string name="bug_report_issue_type">Tipo de problema</string>
     <string name="bug_report_type_playback">Reprodução</string>

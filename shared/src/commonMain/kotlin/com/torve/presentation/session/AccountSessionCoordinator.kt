@@ -213,7 +213,9 @@ class AccountSessionCoordinator(
      * from content cache workers: first restore backend account state and
      * integration credentials, then callers can warm catalog caches once.
      */
-    suspend fun refreshAccountDataAfterCredentialTransfer(): AccountSessionBootstrapResult {
+    suspend fun refreshAccountDataAfterCredentialTransfer(
+        initialMessage: String = "Activating imported credentials...",
+    ): AccountSessionBootstrapResult {
         val token = authClient.getValidAccessToken()
             ?: return AccountSessionBootstrapResult(
                 isReady = false,
@@ -225,7 +227,7 @@ class AccountSessionCoordinator(
         _state.update { it.copy(isBootstrapping = true, lastError = null) }
         _restoreProgress.value = RestoreProgress(
             phase = RestorePhase.RUNNING,
-            message = "Activating imported credentials...",
+            message = initialMessage,
             isImporting = true,
         )
 
@@ -399,6 +401,7 @@ class AccountSessionCoordinator(
             queries.deleteAllShelfConfigsForAllUsers()
             queries.clearWatchlistForAllUsers()
             queries.clearAllHistoryForAllUsers()
+            queries.clearAllWatchSessionsForAllUsers()
             queries.clearResolveMemory()
             queries.clearTraktRatings()
             queries.clearTraktSyncState()

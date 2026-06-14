@@ -26,6 +26,7 @@ class MovieDetailsPresentationTest {
     fun movie_details_rows_only_include_available_real_metadata() {
         val item = movie(
             status = "Released",
+            releaseDate = "2025-06-20",
             runtime = 148,
             year = 2025,
             director = "Jane Director",
@@ -35,9 +36,8 @@ class MovieDetailsPresentationTest {
 
         assertEquals(
             listOf(
-                MovieDetailInfoRowModel("Status", "Released"),
+                MovieDetailInfoRowModel("Release Date", "2025-06-20"),
                 MovieDetailInfoRowModel("Runtime", "148m"),
-                MovieDetailInfoRowModel("Year", "2025"),
                 MovieDetailInfoRowModel("Director", "Jane Director"),
                 MovieDetailInfoRowModel("Studio", "Long Studio Name"),
                 MovieDetailInfoRowModel("Genres", "Drama, Science Fiction"),
@@ -81,6 +81,7 @@ class MovieDetailsPresentationTest {
         posterUrl: String? = null,
         isContentPlaceholder: Boolean = false,
         status: String? = null,
+        releaseDate: String? = null,
         runtime: Int? = null,
         year: Int? = null,
         director: String? = null,
@@ -96,6 +97,7 @@ class MovieDetailsPresentationTest {
         posterUrl = posterUrl,
         isContentPlaceholder = isContentPlaceholder,
         status = status,
+        releaseDate = releaseDate,
         runtime = runtime,
         year = year,
         director = director,

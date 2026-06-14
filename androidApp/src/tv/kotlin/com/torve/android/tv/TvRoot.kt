@@ -71,6 +71,7 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.torve.android.R
 import com.torve.android.background.BackgroundWork
+import com.torve.android.diagnostics.AndroidDiagnosticsRecorder
 import com.torve.android.deeplink.TorveAppLink
 import com.torve.android.deeplink.TorveAppLinkTarget
 import com.torve.android.premium.rememberEffectivePremiumAccessTier
@@ -361,6 +362,11 @@ fun TvRoot(
     var selectedTopRoute by rememberSaveable { mutableStateOf(TvRoutes.HOME) }
     /** The tab confirmed for content display. Updated when user navigates into content. */
     var confirmedTopRoute by rememberSaveable { mutableStateOf(TvRoutes.HOME) }
+
+    LaunchedEffect(selectedTopRoute, currentSubRoute) {
+        AndroidDiagnosticsRecorder.recordScreen(currentSubRoute ?: selectedTopRoute)
+    }
+
     // Cache LazyListState per route so scroll position survives tab switches.
     // TODO: pass per-route scroll states to individual screen composables (TvHomeScreen, etc.)
     //       once their signatures accept an external LazyListState parameter.
@@ -2599,7 +2605,12 @@ fun TvRoot(
                                         TvSettingsDestination.MAIN -> {
                                             TvSettingsScreen(
                                                 railFocusRequester = railFocusRequester,
-                                                onFirstContentRequester = { firstContentFocusByRoute[TvRoutes.SETTINGS] = it },
+                                                onFirstContentRequester = { requester ->
+                                                    firstContentFocusByRoute[TvRoutes.SETTINGS] = requester
+                                                    if (pendingContentEntryRoute == TvRoutes.SETTINGS) {
+                                                        focusRestoreTrigger++
+                                                    }
+                                                },
                                                 onContentFocused = { markContentFocused(TvRoutes.SETTINGS, it) },
                                                 onMoveFocusToRail = {
                                                     suppressBackToHome = true
@@ -2639,6 +2650,12 @@ fun TvRoot(
                                                 },
                                                 onNavigateToReportIssue = {
                                                     navController.navigate("bug_report_tv")
+                                                },
+                                                onNavigateToWatchStats = {
+                                                    navController.navigate(TvRoutes.WATCH_STATS)
+                                                },
+                                                onNavigateToBetaProgram = {
+                                                    navController.navigate(TvRoutes.BETA_PROGRAM)
                                                 },
                                                 onNavigateToPairingSignIn = {
                                                     navController.navigate("pairing_signin_tv")
@@ -2780,6 +2797,16 @@ fun TvRoot(
                             pendingSettingsSubpageEntryRoute = null
                             settingsFocusStateMachine.requestRestore(
                                 itemId = TvSettingsItemIds.APPEARANCE_RATINGS,
+                                reason = "route_return",
+                            )
+                            navController.popBackStack()
+                        },
+                        onWatchStatsBack = {
+                            Log.d("TvSettingsFocus", "route_return item=watch_stats reason=route_return")
+                            pendingSettingsSubpageEntryRoute = null
+                            settingsFocusStateMachine.selectedCategory = TvSettingsCategory.ABOUT
+                            settingsFocusStateMachine.requestRestore(
+                                itemId = TvSettingsItemIds.ABOUT_STATS,
                                 reason = "route_return",
                             )
                             navController.popBackStack()

@@ -1,6 +1,10 @@
 package com.torve.android.ui.settings
 
+import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -21,6 +25,7 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Switch
@@ -35,6 +40,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.res.stringResource
@@ -58,6 +64,47 @@ fun StreamGroupsScreen(
     viewModel: SettingsViewModel = koinInject(),
 ) {
     val state by viewModel.state.collectAsState()
+    val context = LocalContext.current
+    var pendingExportJson by remember { mutableStateOf<String?>(null) }
+    val importLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument(),
+    ) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        try {
+            val jsonText = context.contentResolver.openInputStream(uri)
+                ?.bufferedReader()
+                ?.use { it.readText() }
+                ?: return@rememberLauncherForActivityResult
+            val result = viewModel.importStreamGroupsJson(jsonText)
+            val message = if (result.disabledOnImport > 0) {
+                context.getString(
+                    R.string.stream_groups_imported_disabled,
+                    result.items.size,
+                    result.disabledOnImport,
+                )
+            } else {
+                context.getString(R.string.stream_groups_imported, result.items.size)
+            }
+            Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
+        } catch (_: Exception) {
+            Toast.makeText(context, context.getString(R.string.stream_groups_import_failed), Toast.LENGTH_SHORT).show()
+        }
+    }
+    val exportLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("application/json"),
+    ) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        try {
+            val jsonText = pendingExportJson ?: viewModel.exportStreamGroupsJson()
+            context.contentResolver.openOutputStream(uri)?.use { output ->
+                output.write(jsonText.toByteArray())
+            }
+            pendingExportJson = null
+            Toast.makeText(context, context.getString(R.string.stream_groups_exported), Toast.LENGTH_SHORT).show()
+        } catch (_: Exception) {
+            Toast.makeText(context, context.getString(R.string.stream_groups_export_failed), Toast.LENGTH_SHORT).show()
+        }
+    }
 
     Column(
         Modifier
@@ -91,6 +138,29 @@ fun StreamGroupsScreen(
             color = Silver,
             modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
         )
+
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp, vertical = 4.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            OutlinedButton(
+                onClick = { importLauncher.launch(arrayOf("application/json", "text/*", "*/*")) },
+                modifier = Modifier.weight(1f),
+            ) {
+                Text(stringResource(R.string.stream_groups_import_json), color = Amber)
+            }
+            OutlinedButton(
+                onClick = {
+                    pendingExportJson = viewModel.exportStreamGroupsJson()
+                    exportLauncher.launch("torve_stream_groups.json")
+                },
+                modifier = Modifier.weight(1f),
+            ) {
+                Text(stringResource(R.string.stream_groups_export_json), color = Amber)
+            }
+        }
 
         Row(
             Modifier.padding(horizontal = 20.dp, vertical = 4.dp),

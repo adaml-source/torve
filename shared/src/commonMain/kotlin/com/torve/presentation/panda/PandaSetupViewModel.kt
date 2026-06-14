@@ -36,10 +36,13 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
-enum class PandaSetupStep { PROVIDER, AUTH, SOURCES, USENET, QUALITY, REVIEW }
+enum class PandaSetupStep { SETUP_TYPE, PROVIDER, AUTH, SOURCES, USENET, QUALITY, REVIEW }
+
+enum class PandaSetupMode { DEBRID, USENET_ONLY }
 
 data class PandaSetupUiState(
-    val currentStep: PandaSetupStep = PandaSetupStep.PROVIDER,
+    val currentStep: PandaSetupStep = PandaSetupStep.SETUP_TYPE,
+    val setupMode: PandaSetupMode? = null,
     // Provider
     val providers: List<PandaProvider> = emptyList(),
     val providersLoading: Boolean = false,
@@ -143,6 +146,34 @@ data class PandaSetupUiState(
     val serverHasSecrets: Set<String> = emptySet(),
 )
 
+fun PandaSetupUiState.progressStepNumber(): Int {
+    val steps = progressSteps()
+    return (steps.indexOf(currentStep).takeIf { it >= 0 } ?: 0) + 1
+}
+
+fun PandaSetupUiState.progressStepCount(): Int = progressSteps().size
+
+private fun PandaSetupUiState.progressSteps(): List<PandaSetupStep> =
+    if (setupMode == PandaSetupMode.USENET_ONLY || selectedProvider?.id == "none") {
+        listOf(
+            PandaSetupStep.SETUP_TYPE,
+            PandaSetupStep.USENET,
+            PandaSetupStep.QUALITY,
+            PandaSetupStep.REVIEW,
+        )
+    } else if (setupMode == PandaSetupMode.DEBRID) {
+        listOf(
+            PandaSetupStep.SETUP_TYPE,
+            PandaSetupStep.AUTH,
+            PandaSetupStep.SOURCES,
+            PandaSetupStep.USENET,
+            PandaSetupStep.QUALITY,
+            PandaSetupStep.REVIEW,
+        )
+    } else {
+        PandaSetupStep.entries.toList()
+    }
+
 /**
  * Returns true if [value] looks like a server-side redaction placeholder
  * (e.g. `[redacted]`, `***redacted***`, `<redacted>`). Panda emits these
@@ -163,6 +194,9 @@ internal fun cleanCredential(value: String?): String? {
 }
 
 internal fun pandaDebridConnectionsForPayload(state: PandaSetupUiState): List<PandaDebridConnection> {
+    if (state.setupMode == PandaSetupMode.USENET_ONLY || state.selectedProvider?.id == "none") {
+        return emptyList()
+    }
     val merged = linkedMapOf<String, String>()
     state.debridApiKeys.forEach { (provider, apiKey) ->
         cleanCredential(apiKey)?.let { merged[provider] = it }
@@ -177,6 +211,9 @@ internal fun pandaDebridConnectionsForPayload(state: PandaSetupUiState): List<Pa
 }
 
 internal fun primaryPandaDebridConnection(state: PandaSetupUiState): PandaDebridConnection {
+    if (state.setupMode == PandaSetupMode.USENET_ONLY || state.selectedProvider?.id == "none") {
+        return PandaDebridConnection(provider = "none", apiKey = "", enabled = false)
+    }
     val connections = pandaDebridConnectionsForPayload(state)
     val selectedId = state.selectedProvider?.id
     return connections.firstOrNull { it.provider == selectedId }
@@ -361,8 +398,7 @@ class PandaSetupViewModel(
                 // Merge: use API data for providers it knows, add missing ones from the full list,
                 // and always keep the "no debrid" skip row at the top.
                 val apiIds = apiProviders.map { it.id }.toSet()
-                val merged = listOf(noDebridProvider) +
-                    apiProviders.filter { it.id != "none" } +
+                val merged = apiProviders.filter { it.id != "none" } +
                     allPandaProviders.filter { it.id !in apiIds && it.id != "none" }
                 val storedDebridKeys = readStoredDebridApiKeys()
                 _state.update {
@@ -378,7 +414,7 @@ class PandaSetupViewModel(
                 // Fallback to hardcoded list if API is unreachable
                 _state.update {
                     it.copy(
-                        providers = listOf(noDebridProvider) + allPandaProviders,
+                        providers = allPandaProviders,
                         providersLoading = false,
                         debridApiKeys = it.debridApiKeys + storedDebridKeys,
                         authConnected = it.authConnected || storedDebridKeys.isNotEmpty(),
@@ -392,32 +428,59 @@ class PandaSetupViewModel(
         loadProviders()
     }
 
+    fun selectSetupMode(mode: PandaSetupMode) {
+        when (mode) {
+            PandaSetupMode.DEBRID -> {
+                pollJob?.cancel()
+                _state.update { state ->
+                    val selected = state.selectedProvider?.takeUnless { it.id == "none" }
+                    state.copy(
+                        setupMode = PandaSetupMode.DEBRID,
+                        selectedProvider = selected,
+                        authConnected = state.debridApiKeys.isNotEmpty(),
+                        enabledSources = state.enabledSources.ifEmpty { defaultEnabledSources },
+                        currentStep = PandaSetupStep.AUTH,
+                        error = null,
+                    )
+                }
+            }
+            PandaSetupMode.USENET_ONLY -> selectUsenetOnly()
+        }
+    }
+
+    private fun selectUsenetOnly() {
+        pollJob?.cancel()
+        // Usenet-only path: skip provider auth and torrent sources entirely.
+        // Keep a synthetic provider internally because the Panda payload still
+        // represents "no debrid" as debridService = "none".
+        _state.update {
+            it.copy(
+                setupMode = PandaSetupMode.USENET_ONLY,
+                selectedProvider = noDebridProvider,
+                authMethod = "apikey",
+                authConnected = true,
+                existingCredentialDetected = false,
+                debridApiKey = "",
+                apiKeyInput = "",
+                deviceCode = null,
+                error = null,
+                enabledSources = emptySet(),
+                enableUsenet = true,
+                currentStep = PandaSetupStep.USENET,
+            )
+        }
+    }
+
     fun selectProvider(provider: PandaProvider) {
         if (provider.id == "none") {
-            // Usenet-only path: skip AUTH and torrent SOURCES entirely. Clear enabled
-            // torrent providers (nothing to scrape), auto-enable usenet, and mark auth
-            // as "connected" so the save gate on the review step passes.
-            _state.update {
-                it.copy(
-                    selectedProvider = provider,
-                    authMethod = "apikey",
-                    authConnected = true,
-                    existingCredentialDetected = false,
-                    debridApiKey = "",
-                    apiKeyInput = "",
-                    deviceCode = null,
-                    error = null,
-                    enabledSources = emptySet(),
-                    enableUsenet = true,
-                    currentStep = PandaSetupStep.USENET,
-                )
-            }
+            selectUsenetOnly()
             return
         }
         val defaultAuth = if ("oauth" in provider.authMethods) "oauth" else "apikey"
         _state.update {
             val existingKey = cleanCredential(it.debridApiKeys[provider.id])
             it.copy(
+                setupMode = PandaSetupMode.DEBRID,
                 selectedProvider = provider,
                 authMethod = defaultAuth,
                 authConnected = it.debridApiKeys.isNotEmpty(),
@@ -828,6 +891,11 @@ class PandaSetupViewModel(
     fun nextStep() {
         _state.update { s ->
             val next = when (s.currentStep) {
+                PandaSetupStep.SETUP_TYPE -> when (s.setupMode) {
+                    PandaSetupMode.DEBRID -> PandaSetupStep.AUTH
+                    PandaSetupMode.USENET_ONLY -> PandaSetupStep.USENET
+                    null -> PandaSetupStep.SETUP_TYPE
+                }
                 PandaSetupStep.PROVIDER -> PandaSetupStep.AUTH
                 PandaSetupStep.AUTH -> PandaSetupStep.SOURCES
                 PandaSetupStep.SOURCES -> PandaSetupStep.USENET
@@ -842,14 +910,15 @@ class PandaSetupViewModel(
     fun previousStep() {
         pollJob?.cancel()
         _state.update { s ->
-            val skipDebrid = s.selectedProvider?.id == "none"
+            val skipDebrid = s.setupMode == PandaSetupMode.USENET_ONLY || s.selectedProvider?.id == "none"
             val prev = when (s.currentStep) {
-                PandaSetupStep.PROVIDER -> PandaSetupStep.PROVIDER
-                PandaSetupStep.AUTH -> PandaSetupStep.PROVIDER
+                PandaSetupStep.SETUP_TYPE -> PandaSetupStep.SETUP_TYPE
+                PandaSetupStep.PROVIDER -> PandaSetupStep.SETUP_TYPE
+                PandaSetupStep.AUTH -> PandaSetupStep.SETUP_TYPE
                 // "No debrid" path never enters AUTH — jump straight back to PROVIDER.
-                PandaSetupStep.SOURCES -> if (skipDebrid) PandaSetupStep.PROVIDER else PandaSetupStep.AUTH
+                PandaSetupStep.SOURCES -> if (skipDebrid) PandaSetupStep.SETUP_TYPE else PandaSetupStep.AUTH
                 // "No debrid" path skips SOURCES entirely — back from USENET → PROVIDER.
-                PandaSetupStep.USENET -> if (skipDebrid) PandaSetupStep.PROVIDER else PandaSetupStep.SOURCES
+                PandaSetupStep.USENET -> if (skipDebrid) PandaSetupStep.SETUP_TYPE else PandaSetupStep.SOURCES
                 PandaSetupStep.QUALITY -> PandaSetupStep.USENET
                 PandaSetupStep.REVIEW -> PandaSetupStep.QUALITY
             }
@@ -1556,6 +1625,11 @@ class PandaSetupViewModel(
                         configId = resolvedConfigId,
                         hasManagementToken = hasMgmt,
                         editRequiresRecovery = false,
+                        setupMode = if (config.debridService == "none") {
+                            PandaSetupMode.USENET_ONLY
+                        } else {
+                            PandaSetupMode.DEBRID
+                        },
                         selectedProvider = matchedProvider,
                         debridApiKey = cleanedDebridApiKeys[primarySavedProviderId] ?: cleanDebridApiKey,
                         apiKeyInput = cleanedDebridApiKeys[primarySavedProviderId] ?: cleanDebridApiKey,
@@ -1652,7 +1726,7 @@ class PandaSetupViewModel(
             _state.update {
                 PandaSetupUiState(
                     providers = it.providers,
-                    currentStep = PandaSetupStep.PROVIDER,
+                    currentStep = PandaSetupStep.SETUP_TYPE,
                     schema = it.schema,
                     sourceProviders = it.sourceProviders,
                     enabledSources = defaultEnabledSources,

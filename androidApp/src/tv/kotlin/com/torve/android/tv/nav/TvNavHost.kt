@@ -15,6 +15,7 @@ import com.torve.android.tv.focus.TvScreenFocusHandle
 import com.torve.android.tv.screens.TvDetailsScreen
 import com.torve.android.tv.screens.TvDeviceLimitReachedScreen
 import com.torve.android.tv.screens.TvBugReportScreen
+import com.torve.android.tv.screens.TvBetaProgramScreen
 import com.torve.android.tv.screens.TvHomeLayoutScreen
 import com.torve.android.tv.screens.TvLivePlayerScreen
 import com.torve.android.tv.screens.TvPandaSetupScreen
@@ -22,10 +23,12 @@ import com.torve.android.tv.screens.TvRatingsSettingsScreen
 import com.torve.android.tv.screens.TvSeeAllScreen
 import com.torve.android.tv.screens.TvVodSeriesDetailsArgs
 import com.torve.android.tv.screens.TvVodSeriesDetailsScreen
+import com.torve.android.tv.screens.stats.TvWatchStatsScreen
 import com.torve.android.tv.premium.TvEntitledFeature
 import com.torve.android.ui.player.PlayerScreen
 import com.torve.domain.model.MediaItem
 import com.torve.domain.model.MediaType
+import com.torve.domain.model.extractTmdbIdOrNull
 import com.torve.domain.repository.WatchProgressRepository
 import kotlinx.coroutines.launch
 import org.koin.compose.koinInject
@@ -54,6 +57,8 @@ internal fun TvNavHost(
     onHomeLayoutBack: () -> Unit = { navController.popBackStack() },
     // Focus state cleanup handled in TvRoot via isSubRouteActive LaunchedEffect
     onRatingsBack: () -> Unit = { navController.popBackStack() },
+    onWatchStatsBack: () -> Unit = { navController.popBackStack() },
+    onBetaProgramBack: () -> Unit = { navController.popBackStack() },
     onPandaSetupBack: () -> Unit = { navController.popBackStack() },
     onSeeAllBack: () -> Unit = { navController.popBackStack() },
     onDetailsBack: () -> Unit = { navController.popBackStack() },
@@ -102,6 +107,33 @@ internal fun TvNavHost(
                 entryFocusRequester = ratingsEntryFocusRequester,
                 onEntryFocusReadyChanged = onRatingsEntryReadyChanged,
                 onEntryFocusFocused = onRatingsEntryFocused,
+            )
+        }
+
+        composable(TvRoutes.WATCH_STATS) {
+            val entryFocusRequester = androidx.compose.runtime.remember { FocusRequester() }
+            TvWatchStatsScreen(
+                railFocusRequester = railFocusRequester,
+                onBack = onWatchStatsBack,
+                onOpenDetails = { session ->
+                    val id = session.tmdbId
+                        ?: session.mediaId.extractTmdbIdOrNull()
+                        ?: session.mediaId.toIntOrNull()
+                    if (id != null) {
+                        val type = if (session.mediaType == MediaType.SERIES) "tv" else "movie"
+                        navController.navigate(TvRoutes.details(type = type, id = id))
+                    }
+                },
+                onRequestLifetimeUnlock = onRequestLifetimeUnlock,
+                onFirstContentRequester = onFirstContentRequester,
+                onContentFocused = onContentFocused,
+                entryFocusRequester = entryFocusRequester,
+            )
+        }
+
+        composable(TvRoutes.BETA_PROGRAM) {
+            TvBetaProgramScreen(
+                onBack = onBetaProgramBack,
             )
         }
 

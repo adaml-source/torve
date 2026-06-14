@@ -112,6 +112,7 @@ import com.torve.domain.repository.MetadataRepository
 import com.torve.domain.repository.DeviceLocalSettingsRepository
 import com.torve.data.mdblist.RatingsEnricher
 import com.torve.presentation.home.HomeViewModel
+import com.torve.presentation.home.UpcomingScheduleStatus
 import com.torve.presentation.settings.SettingsViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
@@ -240,6 +241,12 @@ internal fun TvCatalogRailsScreen(
     LaunchedEffect(hasAiSearch, searchMode) {
         if (!hasAiSearch && searchMode == CatalogSearchMode.AI) {
             searchMode = CatalogSearchMode.STANDARD
+        }
+    }
+
+    LaunchedEffect(isMovieCatalog, settingsState.traktConnected, settingsState.traktAccessToken) {
+        if (!isMovieCatalog && settingsState.traktConnected) {
+            homeViewModel.refreshUpcomingSchedule()
         }
     }
 
@@ -751,6 +758,21 @@ internal fun TvCatalogRailsScreen(
                 R.string.tv_catalog_search_shows_subtitle
             },
         )
+        val upcomingScheduleMessage = remember(
+            isMovieCatalog,
+            homeState.upcomingScheduleStatus,
+            homeState.upcomingSchedule.isNotEmpty(),
+        ) {
+            if (isMovieCatalog) {
+                null
+            } else {
+                tvUpcomingScheduleStatusMessage(
+                    status = homeState.upcomingScheduleStatus,
+                    hasUpcomingData = homeState.upcomingSchedule.isNotEmpty(),
+                    traktConnected = settingsState.traktConnected,
+                )
+            }
+        }
         TvMediaRails(
             rails = filteredRails,
             railFocusRequester = railFocusRequester,
@@ -773,13 +795,22 @@ internal fun TvCatalogRailsScreen(
             leadingContentFocusRequester = searchEntryRequester,
             leadingContentVisible = searchEntryFocused,
             leadingContent = {
-                Box(
+                Column(
                     modifier = Modifier
-                        .height(if (searchEntryFocused) 86.dp else 1.dp)
+                        .height(
+                            if (!searchEntryFocused) {
+                                1.dp
+                            } else if (upcomingScheduleMessage != null) {
+                                124.dp
+                            } else {
+                                86.dp
+                            },
+                        )
                         .clipToBounds()
                         .graphicsLayer { alpha = if (searchEntryFocused) 1f else 0f }
                         .then(if (searchEntryFocused) Modifier else Modifier.clearAndSetSemantics { })
                         .padding(start = TV_PAGE_CONTENT_GUTTER, end = TV_PAGE_END_GUTTER),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     TvCatalogSearchEntry(
                         title = searchTitle,
@@ -803,6 +834,9 @@ internal fun TvCatalogRailsScreen(
                             searchActive = true
                         },
                     )
+                    upcomingScheduleMessage?.let { message ->
+                        TvUpcomingScheduleStatusBanner(message)
+                    }
                 }
             },
             shouldAutoFocus = shouldAutoFocus,
@@ -882,6 +916,55 @@ private fun TvCatalogSearchEntry(
                 overflow = TextOverflow.Ellipsis,
             )
         }
+    }
+}
+
+private fun tvUpcomingScheduleStatusMessage(
+    status: UpcomingScheduleStatus,
+    hasUpcomingData: Boolean,
+    traktConnected: Boolean,
+): String? = when (status) {
+    UpcomingScheduleStatus.LOADING -> "Loading upcoming episodes"
+    UpcomingScheduleStatus.HAS_DATA -> null
+    UpcomingScheduleStatus.EMPTY_CONNECTED -> "No upcoming episodes found"
+    UpcomingScheduleStatus.DISCONNECTED -> if (traktConnected) {
+        "Calendar did not load. Reconnect Trakt in Settings."
+    } else {
+        "Connect Trakt calendar to see upcoming episodes"
+    }
+    UpcomingScheduleStatus.STALE -> if (hasUpcomingData) {
+        "Showing saved calendar data"
+    } else {
+        "Calendar did not load. Reconnect Trakt in Settings."
+    }
+    UpcomingScheduleStatus.RATE_LIMITED -> "Calendar is temporarily limited. Try again later."
+    UpcomingScheduleStatus.ERROR -> if (traktConnected) {
+        "Calendar did not load. Reconnect Trakt in Settings."
+    } else {
+        "Upcoming episodes are unavailable right now"
+    }
+}
+
+@Composable
+private fun TvUpcomingScheduleStatusBanner(message: String) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(30.dp)
+            .clip(RoundedCornerShape(14.dp))
+            .background(Charcoal.copy(alpha = 0.70f))
+            .border(1.dp, Steel.copy(alpha = 0.28f), RoundedCornerShape(14.dp))
+            .padding(horizontal = 14.dp),
+        contentAlignment = Alignment.CenterStart,
+    ) {
+        Text(
+            text = message,
+            style = MaterialTheme.typography.labelMedium,
+            color = Snow,
+            fontWeight = FontWeight.Medium,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
     }
 }
 

@@ -64,6 +64,7 @@ actual class DatabaseDriverFactory(private val context: Context) {
                         """CREATE INDEX IF NOT EXISTS idx_stream_resolve_memory_content_recent
                             ON stream_resolve_memory(content_key, last_success_at DESC)""",
                     )
+                    ensureWatchSessionTable(db)
                     runCatching { db.execSQL("ALTER TABLE addon ADD COLUMN server_id TEXT") }
                     runCatching { db.execSQL("ALTER TABLE addon ADD COLUMN synced_at INTEGER") }
                     runCatching { db.execSQL("ALTER TABLE addon ADD COLUMN installed_from TEXT NOT NULL DEFAULT 'app'") }
@@ -330,6 +331,7 @@ actual class DatabaseDriverFactory(private val context: Context) {
                 show_title TEXT
             )""",
         )
+        ensureWatchSessionTable(db)
 
         db.execSQL(
             """CREATE TABLE IF NOT EXISTS trakt_rating (
@@ -416,5 +418,47 @@ actual class DatabaseDriverFactory(private val context: Context) {
         if (!hasNextRetryAt) {
             db.execSQL("ALTER TABLE trakt_sync_queue ADD COLUMN next_retry_at INTEGER")
         }
+    }
+
+    private fun ensureWatchSessionTable(db: SupportSQLiteDatabase) {
+        db.execSQL(
+            """CREATE TABLE IF NOT EXISTS watch_session (
+                id TEXT NOT NULL PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                media_id TEXT NOT NULL,
+                media_type TEXT NOT NULL,
+                title TEXT NOT NULL,
+                show_id TEXT,
+                show_title TEXT,
+                season_number INTEGER,
+                episode_number INTEGER,
+                poster_url TEXT,
+                backdrop_url TEXT,
+                tmdb_id INTEGER,
+                imdb_id TEXT,
+                started_at INTEGER NOT NULL,
+                ended_at INTEGER,
+                source TEXT NOT NULL,
+                status TEXT NOT NULL,
+                duration_ms INTEGER,
+                max_position_ms INTEGER NOT NULL DEFAULT 0,
+                counted_watch_ms INTEGER NOT NULL DEFAULT 0,
+                completion_percent REAL NOT NULL DEFAULT 0,
+                watched_threshold_percent REAL NOT NULL DEFAULT 0.85,
+                runtime_confidence TEXT NOT NULL DEFAULT 'unknown',
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL
+            )""",
+        )
+        db.execSQL("CREATE INDEX IF NOT EXISTS idx_watch_session_user_id ON watch_session(user_id)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS idx_watch_session_media_id ON watch_session(media_id)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS idx_watch_session_media_type ON watch_session(media_type)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS idx_watch_session_status ON watch_session(status)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS idx_watch_session_source ON watch_session(source)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS idx_watch_session_started_at ON watch_session(started_at)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS idx_watch_session_show_id ON watch_session(show_id)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS idx_watch_session_episode_identity ON watch_session(show_id, season_number, episode_number)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS idx_watch_session_tmdb_id ON watch_session(tmdb_id)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS idx_watch_session_imdb_id ON watch_session(imdb_id)")
     }
 }

@@ -92,6 +92,7 @@ class DesktopSearchController(
         scope.launch {
             val tmdbId = item.tmdbId ?: item.id.toIntOrNull()
             if (tmdbId == null) {
+                if (!isCurrentSelection(item)) return@launch
                 _state.update {
                     it.copy(
                         detailItem = item,
@@ -104,6 +105,7 @@ class DesktopSearchController(
 
             val type = item.type.toTmdbType()
             val rawDetail = runCatching { metadataRepository.getDetail(type, tmdbId) }.getOrElse { error ->
+                if (!isCurrentSelection(item)) return@launch
                 _state.update {
                     it.copy(
                         detailItem = item,
@@ -122,6 +124,7 @@ class DesktopSearchController(
             val detail = ratingsEnricher?.hydrateFromCache(rawDetail) ?: rawDetail
             val similar = ratingsEnricher?.hydrateListFromCache(rawSimilar) ?: rawSimilar
 
+            if (!isCurrentSelection(item)) return@launch
             _state.update {
                 it.copy(
                     detailItem = detail,
@@ -147,6 +150,9 @@ class DesktopSearchController(
             }
         }
     }
+
+    private fun isCurrentSelection(item: MediaItem): Boolean =
+        _state.value.selectedResult?.id == item.id
 
     fun refreshSelectedDetail() {
         state.value.selectedResult?.let(::selectResult)
@@ -180,6 +186,7 @@ class DesktopSearchController(
                 return@launch
             }
             _state.update {
+                if (it.detailItem?.id != detail.id) return@update it
                 it.copy(
                     selectedSeasonNumber = seasonNumber,
                     selectedSeason = season,

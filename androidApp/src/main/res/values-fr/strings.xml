@@ -1237,8 +1237,8 @@
     <string name="settings_diagnostics">Diagnostics</string>
     <string name="settings_report_issue">Signaler un problème</string>
     <string name="bug_report_title">Signaler un problème</string>
-    <string name="bug_report_subtitle">Envoyez un rapport expurgé à %1$s. Les logs collés sont nettoyés avant l\'envoi.</string>
-    <string name="bug_report_tv_subtitle">Générez un rapport expurgé pour %1$s. Utilisez e-mail, partage ou copie depuis ce TV.</string>
+    <string name="bug_report_subtitle">Send a redacted report directly to Torve support. Pasted logs are scrubbed before sending.</string>
+    <string name="bug_report_tv_subtitle">Send a redacted report directly to Torve support. No email or share app is required.</string>
     <string name="bug_report_tv_settings_subtitle">Créer un rapport de diagnostic expurgé pour le support</string>
     <string name="bug_report_issue_type">Type de problème</string>
     <string name="bug_report_type_playback">Lecture</string>

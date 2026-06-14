@@ -47,6 +47,8 @@ import com.torve.android.ui.theme.Silver
 import com.torve.android.ui.theme.Snow
 import com.torve.presentation.panda.PandaSetupStep
 import com.torve.presentation.panda.PandaSetupViewModel
+import com.torve.presentation.panda.progressStepCount
+import com.torve.presentation.panda.progressStepNumber
 import org.koin.compose.koinInject
 
 @Composable
@@ -60,12 +62,12 @@ fun PandaSetupScreen(
     val pandaConfigUrl = remember { "${BuildConfig.PANDA_BASE_URL.trimEnd('/')}/configure" }
 
     // Intercept system back: go one step back within the wizard, or exit on first step
-    BackHandler(enabled = state.currentStep != PandaSetupStep.PROVIDER) {
+    BackHandler(enabled = state.currentStep != PandaSetupStep.SETUP_TYPE) {
         viewModel.previousStep()
     }
 
-    val stepIndex = PandaSetupStep.entries.indexOf(state.currentStep)
-    val totalSteps = PandaSetupStep.entries.size
+    val stepNumber = state.progressStepNumber()
+    val totalSteps = state.progressStepCount()
 
     Column(
         modifier = Modifier
@@ -82,7 +84,7 @@ fun PandaSetupScreen(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             BackButton(onClick = {
-                if (state.currentStep == PandaSetupStep.PROVIDER) onBack() else viewModel.previousStep()
+                if (state.currentStep == PandaSetupStep.SETUP_TYPE) onBack() else viewModel.previousStep()
             })
             Spacer(Modifier.width(12.dp))
             Text(
@@ -105,7 +107,7 @@ fun PandaSetupScreen(
 
         // Progress
         LinearProgressIndicator(
-            progress = { (stepIndex + 1).toFloat() / totalSteps },
+            progress = { stepNumber.toFloat() / totalSteps },
             modifier = Modifier.fillMaxWidth(),
             color = Amber,
         )
@@ -121,6 +123,7 @@ fun PandaSetupScreen(
             label = "panda_step",
         ) { step ->
             when (step) {
+                PandaSetupStep.SETUP_TYPE -> PandaSetupTypeStep(state, viewModel)
                 PandaSetupStep.PROVIDER -> PandaProviderStep(state, viewModel)
                 PandaSetupStep.AUTH -> PandaAuthStep(state, viewModel)
                 PandaSetupStep.SOURCES -> PandaSourcesStep(state, viewModel)
@@ -137,7 +140,7 @@ fun PandaSetupScreen(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                if (state.currentStep != PandaSetupStep.PROVIDER) {
+                if (state.currentStep != PandaSetupStep.SETUP_TYPE) {
                     OutlinedButton(onClick = { viewModel.previousStep() }) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, null, Modifier.size(18.dp))
                         Spacer(Modifier.width(4.dp))

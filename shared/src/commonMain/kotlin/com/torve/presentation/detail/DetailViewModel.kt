@@ -17,6 +17,8 @@ import com.torve.data.simkl.SimklClient
 import com.torve.data.simkl.SimklIds
 import com.torve.data.simkl.SimklSyncBody
 import com.torve.data.simkl.SimklSyncItem
+import com.torve.data.stats.WatchSessionMediaIdentity
+import com.torve.data.stats.WatchSessionRecorder
 import com.torve.data.trakt.api.TraktAuthorizedApi
 import com.torve.data.trakt.TraktHistoryBody
 import com.torve.data.trakt.TraktHistoryMovie
@@ -130,6 +132,7 @@ class DetailViewModel(
      * keep compiling; Koin wires the real implementation on Android.
      */
     private val watchStateRemoteSource: com.torve.domain.integrations.WatchStateRemoteSource? = null,
+    private val watchSessionRecorder: WatchSessionRecorder? = null,
 ) {
     private data class StreamPresentationResult(
         val ordered: List<ParsedStream>,
@@ -2385,6 +2388,13 @@ class DetailViewModel(
         val item = _state.value.mediaItem ?: return
         scope.launch {
             _state.update { it.copy(isMarkedWatched = true) }
+            val now = Clock.System.now().toEpochMilliseconds()
+            recordManualWatchedSession(
+                item = item,
+                eventAt = now,
+                title = item.title,
+                runtimeMinutes = item.runtime,
+            )
             val tmdbId = item.tmdbId ?: return@launch
             val localProgressPersisted = saveWholeItemWatchedProgress(item)
             if (item.type == MediaType.MOVIE && localProgressPersisted) {
@@ -2473,11 +2483,12 @@ class DetailViewModel(
             try {
                 val now = Clock.System.now().toEpochMilliseconds()
                 for (ep in 1..episodeCount) {
+                    val episode = seasonDetail?.episodes?.getOrNull(ep - 1)
                     val entry = WatchHistoryEntry(
                         id = "${item.id}_${episodeKey(seasonNumber, ep)}",
                         mediaId = item.id,
                         mediaType = MediaType.SERIES.name,
-                        title = seasonDetail?.episodes?.getOrNull(ep - 1)?.name ?: "Episode $ep",
+                        title = episode?.name ?: "Episode $ep",
                         posterUrl = item.posterUrl,
                         backdropUrl = item.backdropUrl,
                         watchedAt = now,
@@ -2487,6 +2498,14 @@ class DetailViewModel(
                         showTitle = item.title,
                     )
                     watchHistoryRepo.record(entry)
+                    recordManualWatchedSession(
+                        item = item,
+                        eventAt = now,
+                        seasonNumber = seasonNumber,
+                        episodeNumber = ep,
+                        title = episode?.name ?: "Episode $ep",
+                        runtimeMinutes = episode?.runtime,
+                    )
                 }
                 val newWatched = _state.value.watchedEpisodes.toMutableSet()
                 for (ep in 1..episodeCount) {
@@ -2518,6 +2537,33 @@ class DetailViewModel(
         }
     }
 
+    private suspend fun recordManualWatchedSession(
+        item: MediaItem,
+        eventAt: Long,
+        seasonNumber: Int? = null,
+        episodeNumber: Int? = null,
+        title: String,
+        runtimeMinutes: Int?,
+    ) {
+        watchSessionRecorder?.recordManualCompleted(
+            identity = WatchSessionMediaIdentity(
+                mediaId = item.id,
+                mediaType = item.type,
+                title = title,
+                showId = if (item.type == MediaType.SERIES) item.id else null,
+                showTitle = if (item.type == MediaType.SERIES) item.title else null,
+                seasonNumber = seasonNumber,
+                episodeNumber = episodeNumber,
+                posterUrl = item.posterUrl,
+                backdropUrl = item.backdropUrl,
+                tmdbId = item.tmdbId,
+                imdbId = item.imdbId,
+            ),
+            eventAt = eventAt,
+            runtimeMs = runtimeMinutes?.takeIf { it > 0 }?.toLong()?.times(60_000L),
+        )
+    }
+
     private suspend fun clearWholeItemWatchedState(item: com.torve.domain.model.MediaItem) {
         try {
             watchProgressRepo.deleteProgress(item.id)
@@ -2547,6 +2593,9 @@ class DetailViewModel(
             try {
                 val epTitle = _state.value.seasonDetail?.episodes
                     ?.getOrNull(episodeNumber - 1)?.name ?: "Episode $episodeNumber"
+                val episodeRuntime = _state.value.seasonDetail?.episodes
+                    ?.getOrNull(episodeNumber - 1)?.runtime
+                val now = Clock.System.now().toEpochMilliseconds()
                 val entry = WatchHistoryEntry(
                     id = "${item.id}_${episodeKey(seasonNumber, episodeNumber)}",
                     mediaId = item.id,
@@ -2554,13 +2603,21 @@ class DetailViewModel(
                     title = epTitle,
                     posterUrl = item.posterUrl,
                     backdropUrl = item.backdropUrl,
-                    watchedAt = Clock.System.now().toEpochMilliseconds(),
+                    watchedAt = now,
                     durationWatchedMs = 0,
                     seasonNumber = seasonNumber,
                     episodeNumber = episodeNumber,
                     showTitle = item.title,
                 )
                 watchHistoryRepo.record(entry)
+                recordManualWatchedSession(
+                    item = item,
+                    eventAt = now,
+                    seasonNumber = seasonNumber,
+                    episodeNumber = episodeNumber,
+                    title = epTitle,
+                    runtimeMinutes = episodeRuntime,
+                )
                 val newWatched = _state.value.watchedEpisodes + episodeKey(seasonNumber, episodeNumber)
                 _state.update { it.copy(watchedEpisodes = newWatched) }
                 resolveNextEpisode()

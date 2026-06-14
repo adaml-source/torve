@@ -18,6 +18,21 @@ import java.util.Locale
 
 internal const val TORVE_SUPPORT_EMAIL: String = LegalUrls.SUPPORT_EMAIL
 
+internal fun androidBugReportPlatformLabel(): String =
+    if (BuildConfig.FLAVOR_formFactor.equals("tv", ignoreCase = true)) {
+        when {
+            BuildConfig.FLAVOR_store.equals("amazon", ignoreCase = true) -> "Fire TV"
+            BuildConfig.FLAVOR_store.equals("google", ignoreCase = true) -> "Google TV"
+            else -> "Android TV"
+        }
+    } else {
+        "Android Mobile"
+    }
+
+internal fun androidBugReportAppVersion(context: Context): String {
+    return androidBugReportVersionParts(context).appVersion
+}
+
 internal fun buildAndroidBugReport(
     context: Context,
     settingsState: SettingsUiState,

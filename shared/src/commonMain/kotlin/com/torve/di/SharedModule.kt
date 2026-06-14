@@ -22,6 +22,8 @@ import com.torve.data.addon.SubtitleAggregator
 import com.torve.data.addon.StreamRepositoryImpl
 import com.torve.data.auth.AuthClient
 import com.torve.data.auth.UserIdProvider
+import com.torve.data.beta.BetaProgramApi
+import com.torve.data.beta.BetaProgramRepositoryImpl
 import com.torve.data.ai.AiSuggestClient
 import com.torve.data.ai.KeywordSearchService
 import com.torve.data.billing.BillingApi
@@ -62,6 +64,8 @@ import com.torve.data.metadata.TmdbApiClient
 import com.torve.data.network.HttpClientFactory
 import com.torve.data.progress.PreferencesRepositoryImpl
 import com.torve.data.progress.WatchProgressRepositoryImpl
+import com.torve.data.stats.WatchSessionRecorder
+import com.torve.data.stats.WatchStatsRepositoryImpl
 import com.torve.data.subscription.RebateCodeApi
 import com.torve.data.subscription.SubscriptionRepositoryImpl
 import com.torve.data.history.WatchHistoryRepositoryImpl
@@ -73,6 +77,8 @@ import com.torve.data.trakt.repo.TraktSyncRepositoryImpl
 import com.torve.data.watchlist.WatchlistRepositoryImpl
 import com.torve.domain.recommendation.GetRecommendationsUseCase
 import com.torve.domain.recommendation.MoodMatcher
+import com.torve.data.trakt.PersistedTraktAuthScopeProvider
+import com.torve.data.trakt.TraktAuthScopeProvider
 import com.torve.data.trakt.TraktClient
 import com.torve.domain.integrations.AvailabilityProvider
 import com.torve.domain.integrations.LibraryOverlayService
@@ -80,6 +86,7 @@ import com.torve.presentation.player.TraktScrobbler
 import com.torve.db.TorveDatabase
 import com.torve.domain.repository.AddonRepository
 import com.torve.domain.repository.AvailabilityRepository
+import com.torve.domain.repository.BetaProgramRepository
 import com.torve.domain.repository.DownloadRepository
 import com.torve.domain.repository.ChannelRepository
 import com.torve.domain.repository.DeviceLocalSettingsRepository
@@ -93,10 +100,13 @@ import com.torve.domain.repository.SubscriptionRepository
 import com.torve.domain.repository.WatchHistoryRepository
 import com.torve.domain.repository.WatchProgressRepository
 import com.torve.domain.repository.WatchlistRepository
+import com.torve.domain.stats.WatchStatsEngine
+import com.torve.domain.stats.WatchStatsRepository
 import com.torve.domain.sync.SyncRepository
 import com.torve.platform.DatabaseDriverFactory
 import com.torve.presentation.addon.AddonViewModel
 import com.torve.presentation.calendar.CalendarViewModel
+import com.torve.presentation.beta.BetaProgramViewModel
 import com.torve.presentation.detail.DetailViewModel
 import com.torve.presentation.detail.PersonViewModel
 import com.torve.presentation.download.DownloadCatalogueViewModel
@@ -117,6 +127,7 @@ import com.torve.presentation.mdblist.MdbListViewModel
 import com.torve.presentation.mood.MoodMatcherViewModel
 import com.torve.presentation.seeall.SeeAllViewModel
 import com.torve.presentation.stats.StatsViewModel
+import com.torve.presentation.stats.WatchStatsViewModel
 import com.torve.presentation.device.DeviceGovernanceViewModel
 import com.torve.presentation.subscription.SubscriptionViewModel
 import com.torve.presentation.watchlist.WatchlistViewModel
@@ -208,9 +219,10 @@ val sharedModule = module {
     single<LibraryOverlayService> { CompositeLibraryOverlayService(get(), get(), get(), get()) }
 
     // Trakt
-    single { TraktClient(get(), get()) }
+    single<TraktAuthScopeProvider> { PersistedTraktAuthScopeProvider(get()) }
+    single { TraktClient(get(), get(), authScopeProvider = get()) }
     single { TraktTokenStore(get(), get()) }
-    single { TraktAuthorizedApi(get(), get()) }
+    single { TraktAuthorizedApi(get(), get(), authScopeProvider = get()) }
     single<TraktSyncRepository> { TraktSyncRepositoryImpl(get(), get(), get(), get()) }
     factory { TraktScrobbler(get(), get()) }
 
@@ -270,6 +282,14 @@ val sharedModule = module {
         )
     }
     single {
+        BetaProgramApi(
+            httpClient = get(),
+            authClient = get(),
+            baseUrlProvider = { com.torve.data.auth.AuthClient.DEFAULT_BASE_URL },
+            installationIdProvider = { get<com.torve.domain.device.DeviceIdProvider>().getDeviceId() },
+        )
+    }
+    single {
         com.torve.data.security.TrustSignalsApi(
             httpClient = get(),
             baseUrlProvider = { com.torve.data.auth.AuthClient.DEFAULT_BASE_URL },
@@ -322,6 +342,9 @@ val sharedModule = module {
 
     // Watch Progress
     single<WatchProgressRepository> { WatchProgressRepositoryImpl(get(), get(), get(), get(), get(), get(), get()) }
+    single { WatchStatsEngine() }
+    single<WatchStatsRepository> { WatchStatsRepositoryImpl(get(), get(), get(), get(), get()) }
+    single { WatchSessionRecorder(get(), currentUserId = { get<UserIdProvider>().currentUserId() }) }
 
     // Preferences / Settings sync
     single<DeviceLocalSettingsRepository> { PreferencesRepositoryImpl(get(), get()) }
@@ -413,12 +436,13 @@ val sharedModule = module {
     // Subscription
     single { RebateCodeApi(get()) }
     single<SubscriptionRepository> { SubscriptionRepositoryImpl(get(), get(), get(), get(), get()) }
+    single<BetaProgramRepository> { BetaProgramRepositoryImpl(get(), get(), get()) }
 
     // Watchlist Repository
     single<WatchlistRepository> { WatchlistRepositoryImpl(get(), get(), get(), get(), get(), get(), get(), get()) }
 
     // Watch History Repository
-    single<WatchHistoryRepository> { WatchHistoryRepositoryImpl(get(), get(), get(), get(), get(), get(), get()) }
+    single<WatchHistoryRepository> { WatchHistoryRepositoryImpl(get(), get(), get(), get(), get(), get(), get(), get()) }
 
     // Sync Repository
     single<SyncRepository> { SyncRepositoryImpl(get(), get(), get(), get()) }
@@ -818,11 +842,16 @@ val sharedModule = module {
             usenetJobPoller = get(),
             telemetry = get(),
             watchStateRemoteSource = getOrNull(),
+            watchSessionRecorder = get(),
         )
     }
     factoryOf(::PersonViewModel)
     single {
-        SettingsViewModel(get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get()).also { vm ->
+        SettingsViewModel(
+            get(), get(), get(), get(), get(), get(), get(), get(), get(), get(),
+            get(), get(), get(), get(), get(), get(), get(), get(), get(), get(),
+            get(),
+        ).also { vm ->
             // Wire integration save callback — breaks circular dep by using lazy resolution.
             vm.onIntegrationSaved = { type, credential, label ->
                 get<AccountSessionCoordinator>().saveIntegrationToBackend(type, credential, label)
@@ -862,6 +891,14 @@ val sharedModule = module {
     // coordinators land in later prompts and inject UsenetRepository.
     single {
         com.torve.data.usenet.UsenetApi(
+            httpClient = get(),
+            authClient = get(),
+            baseUrlProvider = { com.torve.data.auth.AuthClient.DEFAULT_BASE_URL },
+            installationIdProvider = { get<com.torve.domain.device.DeviceIdProvider>().getDeviceId() },
+        )
+    }
+    single {
+        com.torve.data.support.SupportApi(
             httpClient = get(),
             authClient = get(),
             baseUrlProvider = { com.torve.data.auth.AuthClient.DEFAULT_BASE_URL },
@@ -949,6 +986,7 @@ val sharedModule = module {
     factoryOf(::MoodMatcherViewModel)
     factoryOf(::MdbListViewModel)
     factoryOf(::StatsViewModel)
+    factoryOf(::WatchStatsViewModel)
     factory {
         SeeAllViewModel(
             metadataRepo = get(),
@@ -964,6 +1002,7 @@ val sharedModule = module {
             traktApi = getOrNull(),
         )
     }
+    single { BetaProgramViewModel(get(), get()) }
     factory { SensitiveMaterialSettingsViewModel(get()) }
     factory { com.torve.presentation.jellyfin.JellyfinBrowserViewModel(get()) }
 }
