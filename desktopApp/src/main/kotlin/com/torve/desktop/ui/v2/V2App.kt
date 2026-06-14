@@ -542,8 +542,10 @@ fun V2App(
         val isSeries = item.type == com.torve.domain.model.MediaType.SERIES
         val hint: com.torve.desktop.adult.NewznabItem? = if (isSeries) {
             com.torve.desktop.adult.NzbPlaybackHints.findTvEpisode(tmdbId, sn, ep)
+                ?: nzbTvCatalogService.findReleaseFor(tmdbId, sn, ep)
         } else {
-            com.torve.desktop.adult.NzbPlaybackHints.consume(tmdbId)
+            com.torve.desktop.adult.NzbPlaybackHints.peek(tmdbId)
+                ?: nzbCatalogService.findReleaseFor(tmdbId)?.nzb
         }
         if (hint == null) {
             println("TORVE NZB ┃ no hint for tmdb=$tmdbId series=$isSeries sn=$sn ep=$ep")

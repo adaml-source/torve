@@ -242,11 +242,11 @@ internal val globalReminderStore: com.torve.desktop.reminders.EpgReminderStore b
     com.torve.desktop.reminders.EpgReminderStore(rootDir = com.torve.desktop.platform.desktopDataDir())
 }
 
-// Normal desktop launches should behave like normal desktop windows.
-// Fullscreen launch remains opt-in for kiosk/smoke-test scenarios.
+// Desktop launches fullscreen by default. Windowed launch remains opt-in
+// for dev/smoke-test scenarios.
 private val launchFullscreen: Boolean =
     System.getProperty("torve.desktop.launchFullscreen")?.toBooleanStrictOrNull()
-        ?: System.getProperty("torve.desktop.loginFullscreenPreview", "false").toBoolean()
+        ?: System.getProperty("torve.desktop.loginFullscreenPreview", "true").toBoolean()
 
 fun main() {
     // Splash BEFORE application { ... } starts composing. The Compose
@@ -408,6 +408,22 @@ fun main() {
             if (window.isResizable != shouldBeResizable) {
                 window.isResizable = shouldBeResizable
             }
+        }
+
+        DisposableEffect(window) {
+            val listener = object : java.awt.event.WindowFocusListener {
+                override fun windowGainedFocus(event: java.awt.event.WindowEvent?) = Unit
+
+                override fun windowLostFocus(event: java.awt.event.WindowEvent?) {
+                    val opposite = event?.oppositeWindow
+                    val sameAppWindow = opposite === window || opposite?.owner === window
+                    if (!sameAppWindow && windowState.placement == WindowPlacement.Fullscreen && window.isVisible) {
+                        window.extendedState = window.extendedState or java.awt.Frame.ICONIFIED
+                    }
+                }
+            }
+            window.addWindowFocusListener(listener)
+            onDispose { window.removeWindowFocusListener(listener) }
         }
 
         // Show the window only after the first frame has been

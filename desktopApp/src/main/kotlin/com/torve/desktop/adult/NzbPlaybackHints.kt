@@ -8,10 +8,9 @@ package com.torve.desktop.adult
  * Stremio-addon source resolver - which is the addressed user
  * complaint: "it shows movie posters without playable sources".
  *
- * Each hint is consumed on first Play. If the user opens the detail
- * page and never plays, the hint stays around but is harmless - it'd
- * only surprise them on the next Play of the SAME tmdbId, in which
- * case using the NZB they originally clicked is reasonable behavior.
+ * Movie hints persist while the app is running so repeated Play clicks
+ * from the same detail page keep using the NZB the user selected instead
+ * of falling into the generic IMDb-based source resolver.
  */
 object NzbPlaybackHints {
     private val byTmdbId = mutableMapOf<Int, NewznabItem>()
