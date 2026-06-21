@@ -47,7 +47,11 @@ const htmlFiles = files.filter((file) => extname(file) === ".html");
 const routes = new Set(htmlFiles.map((file) => "/" + relative(siteRoot, file).replaceAll("\\", "/")));
 
 for (const file of files) {
-  const text = (await readFile(file, "utf8")).replaceAll("Donations are optional and never unlock features.", "");
+  const text = (await readFile(file, "utf8"))
+    .replaceAll("Donations are optional and never unlock features.", "")
+    .replaceAll("Do donations unlock features?", "")
+    .replaceAll("No. Donations are optional and never unlock features.", "")
+    .replaceAll("There are no subscriptions, paid tiers, premium features, or purchase requirements.", "");
   const rel = relative(siteRoot, file);
   for (const pattern of banned) {
     if (pattern.test(text)) {
@@ -124,11 +128,20 @@ const index = await readFile(join(siteRoot, "index.html"), "utf8");
 if (!index.includes("Your media companion, free and open source.")) {
   fail("Home headline is missing the required copy.");
 }
-if (!index.includes("Torve is free software. There are no subscriptions, no paid tiers, and no purchase required.")) {
+if (!index.includes("Torve is free software. No subscriptions, no paid tiers, and no purchase required.")) {
   fail("Home supporting copy is missing the required copy.");
 }
-if (!index.includes("An account is required for cross-device sync, device linking, and account-backed data. Local functionality does not require a paid plan.")) {
+if (!index.includes("Sign in to sync across devices, link devices, and manage account-backed data. Local functionality does not require a paid plan.")) {
   fail("Home account copy is missing the required copy.");
+}
+for (const requiredFaq of [
+  "Yes. Torve is free software. There are no subscriptions, paid tiers, premium features, or purchase requirements.",
+  "An account is required for cross-device sync, device linking, account-backed watch state and preferences, data export, and account deletion.",
+  "No. Donations are optional and never unlock features."
+]) {
+  if (!index.includes(requiredFaq)) {
+    fail(`Missing required FAQ copy: ${requiredFaq}`);
+  }
 }
 
 if (expectDonation) {
