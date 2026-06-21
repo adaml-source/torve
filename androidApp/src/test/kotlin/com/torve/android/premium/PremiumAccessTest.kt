@@ -69,6 +69,8 @@ class PremiumAccessTest {
 
     @Test
     fun googlePlayMobileDonationLinksAreHiddenByDefault() {
+        assertFalse(BuildConfig.HAS_BILLING)
+        assertFalse(BuildConfig.SUPPORTS_TV_BILLING)
         assertFalse(BuildConfig.TORVE_SHOW_DONATION_LINKS)
         assertTrue(BuildConfig.TORVE_DONATION_URL.isBlank())
     }

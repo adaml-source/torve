@@ -1,0 +1,51 @@
+name: Feature request
+description: Suggest an improvement for Torve
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Torve has no subscriptions, no paid tiers, no premium features, and no purchase requirement. Please do not request donor-only or paid-gated features.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What user problem would this solve?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: Describe the change.
+    validations:
+      required: true
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      multiple: true
+      options:
+        - Backend
+        - Shared KMP
+        - Android mobile
+        - Google TV
+        - Amazon Fire TV
+        - Desktop
+        - iOS
+        - Documentation
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+  - type: checkboxes
+    id: invariants
+    attributes:
+      label: Product model
+      options:
+        - label: This request does not add billing, subscriptions, paid tiers, premium gates, donor-only features, or supporter benefits.
+          required: true

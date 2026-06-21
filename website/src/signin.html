@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sign in to Torve Sync</title>
+  <meta name="description" content="Sign in to Torve for sync, device linking, and account-backed data.">
+  <link rel="canonical" href="https://torve.app/signin.html">
+  <meta property="og:title" content="Sign in to Torve Sync">
+  <meta property="og:description" content="Authentication protects sync and account-scoped services.">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://torve.app/signin.html">
+  <meta property="og:image" content="https://torve.app/assets/torve-home.png">
+  <meta name="twitter:card" content="summary_large_image">
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+  <header class="site-header"><nav class="nav" aria-label="Primary"><a class="brand" href="/"><span class="brand-mark">T</span><span>Torve</span></a><div class="nav-links"><a href="/download.html">Downloads</a><a href="/signup.html">Create account</a></div></nav></header>
+  <main id="main" class="band">
+    <div class="container two-col">
+      <section>
+        <h1>Sign in for sync</h1>
+        <p class="lede">Sign in to sync across devices, link devices, and manage account-backed data. Local-only use is not a payment flow.</p>
+        <form class="form" data-auth-form="/web/auth/login">
+          <label>Email <input name="email" type="email" autocomplete="email" required></label>
+          <label>Password <input name="password" type="password" autocomplete="current-password" required minlength="8"></label>
+          <button class="button primary" type="submit">Sign in</button>
+          <p class="status-message" data-message></p>
+        </form>
+      </section>
+      <aside class="card">
+        <h2>Why sign in?</h2>
+        <ul class="plain-list">
+          <li>Cross-device sync</li>
+          <li>Device linking</li>
+          <li>Account-backed watch state and preferences</li>
+          <li>Account export requests and account deletion</li>
+        </ul>
+        <p><a href="/signup.html">Create an account</a></p>
+      </aside>
+    </div>
+  </main>
+  <footer class="site-footer"><div class="container footer-links"><a href="/">Home</a><a href="/privacy.html">Privacy</a><a href="/account-deletion.html">Account deletion</a></div></footer>
+  <script src="/site.js"></script>
+</body>
+</html>

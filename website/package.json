@@ -1,0 +1,17 @@
+{
+  "name": "@torve/website",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "lint": "node scripts/validate-site.mjs",
+    "typecheck": "node scripts/validate-site.mjs",
+    "test": "node scripts/validate-site.mjs",
+    "build": "node scripts/build-site.mjs",
+    "preview": "node scripts/serve-site.mjs --root dist --port 4173",
+    "check:links": "node scripts/validate-site.mjs --links",
+    "check:a11y": "node scripts/validate-site.mjs --a11y",
+    "check:responsive": "node scripts/validate-site.mjs --responsive",
+    "check:donation": "node scripts/check-donation.mjs"
+  }
+}

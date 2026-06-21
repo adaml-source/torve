@@ -1,31 +1,20 @@
 # Torve Backend
 
-This checkout, `/opt/torve-backend`, is the canonical Torve backend source in
-this environment and the backend tree to use for a future sanitized public
-source export. Do not treat `server/app` as canonical unless a synced
-`server/app` tree is intentionally created and verified from this checkout.
+The public backend source lives in `backend/` inside the Torve repository.
 
-For a combined public Torve repository, include this backend as `backend/` or
-another deliberate backend directory, and keep the public export free of local
-runtime state, secrets, build outputs, and generated artifacts.
+This backend provides authentication, account-scoped sync services, device registration, account lifecycle endpoints, diagnostics, release metadata, provider integration compatibility, and historical billing/entitlement compatibility code.
 
 ## License
 
-This backend source is licensed as `AGPL-3.0-or-later`. See `LICENSE` in this
-directory. In the combined public source export, the official GNU AGPL v3 text
-must be present in the repository's top-level `LICENSE` file.
+This backend source is licensed as `AGPL-3.0-or-later`. See the repository's top-level [LICENSE](../LICENSE).
 
-No noncommercial, no-modification, field-of-use, or paid-feature restrictions
-are added by this backend.
+No noncommercial, no-modification, field-of-use, paid-feature, donor-only, or supporter-only restrictions are added by this backend.
 
 ## Access Model
 
-Torve backend product access is free/default for active authenticated accounts.
-The current access resolver returns the `free` access tier and treats legacy
-premium booleans as compatibility fields for older clients.
+Authenticated active accounts receive free/default product access.
 
-The following records and integrations do not unlock product features, remove
-product features, or decide whether an account may use the application:
+The following records and integrations are historical, compatibility, reconciliation, refund, support, or audit data. They do not unlock product features, remove product features, or decide whether an account may use Torve:
 
 - subscriptions
 - purchases and restore flows
@@ -38,27 +27,20 @@ product features, or decide whether an account may use the application:
 - Apple or StoreKit receipt state from clients
 - donations, donor status, supporter status, or funding status
 
-Those systems may still exist for historical records, refund handling,
-reconciliation, compatibility with old clients, support workflows, or tests
-that prove they are non-gating.
-
-Remaining limits and checks are for auth, ownership, privacy, device security,
-anti-abuse, sync integrity, or technical stability. They must not be changed
-into paid access gates.
+Remaining limits and checks are for auth, ownership, privacy, device security, anti-abuse, sync integrity, or technical stability. They must not be changed into paid access gates.
 
 ## Stack
 
 - FastAPI + SQLAlchemy + psycopg2-binary
 - Postgres
 - Alembic migrations in `alembic/versions/`
-- Sentry, Resend, Discord, release metadata, and historical billing/support
-  integrations
 - Pytest test suite in `tests/`
+- Sentry, Resend, Discord, release metadata, and historical billing/support integrations
 
 ## Layout
 
 ```text
-.
+backend/
 |-- app/
 |   |-- main.py
 |   |-- models.py
@@ -79,77 +61,64 @@ into paid access gates.
 `-- torve-backend.service
 ```
 
-## Local Development
+## Local Setup
+
+Use placeholder-only local configuration. Do not use production credentials for contributor development.
 
 ```bash
-cd /opt/torve-backend
+cd backend
 python -m venv venv
 source venv/bin/activate
+python -m pip install --upgrade pip
 pip install -r requirements.txt
-
-# Copy .env.example to .env and fill in local-only values.
-# Never commit .env or secret-bearing backups.
 cp .env.example .env
-
 alembic upgrade head
-uvicorn app.main:app --reload --port 8000
 pytest
 ```
 
-## Secrets
+On Windows PowerShell, activate the virtual environment with:
 
-Secrets belong in `.env` or another deployment secret store, not in git.
-Examples include database URLs, JWT secrets, integration encryption keys,
-webhook URLs, provider API keys, service-account JSON, signing material, and
-admin secrets.
+```powershell
+.\venv\Scripts\Activate.ps1
+```
 
-The tracked `.env.example` file must contain placeholders only. Legacy billing
-and store-provider variables in that file are for historical, refund,
-reconciliation, compatibility, readiness, or test-only workflows. They are not
-required for product access.
+## Local Configuration
 
-## Public Export Exclusions
+`.env.example` contains dummy development values. Copy it to `.env` and adjust only local settings such as `DATABASE_URL`.
 
-A sanitized public source export must exclude:
+`INTEGRATION_SECRET_KEY` must be a syntactically valid Fernet key when code imports `app.crypto`. Dummy local and CI values are acceptable as long as they are never used for production data.
 
-- `.git/`
-- `.env`
-- `.env.*`
-- `venv/`
-- `__pycache__/`
-- `.pytest_cache/`
-- build outputs and generated packages
-- logs, dumps, and backups
-- generated release artifacts such as `*.zip`, `*.apk`, `*.aab`, and `*.msi`
-- service-account files, signing keys, certificates, provisioning profiles,
-  and other local credentials
-
-If this backend is copied into a combined public repository, copy source,
-tests, migrations, docs, scripts, examples, and license notices only.
+Legacy billing and store-provider variables are optional for normal local tests. They remain present for historical compatibility and non-gating test coverage.
 
 ## Checks
 
-Run the backend test suite before export or deployment:
-
 ```bash
-/opt/torve-backend/venv/bin/python -m pytest -v --tb=short
+cd backend
+alembic upgrade head
+pytest -v --tb=short
+python -c "import app.main; print('backend import ok')"
 ```
 
-Useful export-safety checks:
+Useful safety checks:
 
 ```bash
-git diff --check
 git grep -n "Depends(require_premium" -- app tests
 git grep -n "premium_required" -- app tests
 git grep -n "premium_lifetime\|premium_subscription" -- app tests
 ```
 
-## Deployment Notes
+## Secrets
 
-`scripts/deploy.sh` is an on-host helper for this checkout. It installs
-dependencies, runs Alembic migrations, restarts `torve-backend`, and performs a
-local health check when invoked by an operator with the required permissions.
+Secrets belong in `.env` or another deployment secret store, not in git.
 
-Deployment secrets remain outside git in `/opt/torve-backend/.env` or the
-deployment secret manager. Public contributors should be able to run normal
-tests with placeholder values and without production credentials.
+Examples include database URLs, JWT secrets, integration encryption keys, webhook URLs, provider API keys, service-account JSON, signing material, and admin secrets.
+
+The tracked `.env.example` file must contain placeholders only.
+
+## Maintainer Deployment Notes
+
+Production deployment is maintainer-only. Do not deploy the backend from public contributor workflows.
+
+`scripts/deploy.sh` and `torve-backend.service` may still be relevant to the maintainer-operated environment. If used, deployment secrets remain outside git in `/opt/torve-backend/.env` or the deployment secret manager.
+
+Public contributors should be able to run normal tests with placeholder values and without production credentials.
