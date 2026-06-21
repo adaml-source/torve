@@ -1,0 +1,38 @@
+# Secrets
+.env
+.env.save
+.env.local
+.env.*.local
+# Ad-hoc backups (e.g. .env.bak-google-play-20260423) — never commit.
+.env.bak*
+.env.backup*
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+venv/
+.venv/
+env/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.cache/
+
+# Build / dist
+build/
+dist/
+
+# Editor / OS
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/

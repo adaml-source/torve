@@ -1,0 +1,159 @@
+*.iml
+.gradle
+.gradle-user-home/
+.gradle-user/
+/local.properties
+/.idea
+.DS_Store
+/build
+/captures
+.externalNativeBuild
+.cxx
+local.properties
+/androidApp/build
+/shared/build
+*.apk
+*.aab
+
+# Claude Code local settings
+.claude/
+
+# Build / temp artifacts
+.android/
+androidApp/.android/
+.kotlin/
+.tmp_*
+apk_check/
+store_bundles/
+torve_assessment_bundle/
+analytics.settings
+
+# Public-release/archive hazards
+# Keep generated archives and private assessment exports out of future public snapshots.
+*.zip
+*.tar
+*.tar.gz
+*.tgz
+*.7z
+*.rar
+/audit/*.zip
+/tv-assessment.zip
+/torve_assessment_bundle.zip
+/reddit_launch_pack/
+
+# Sensitive
+androidApp/google-services.json
+keystore.properties
+*.keystore
+*.jks
+
+# Store audit bundles
+store_audit/
+
+# Asset exports
+extracted_banner.png
+extracted_icon.png
+tv_banner_source.png
+
+# ── Release hazards added 2026-04-29 (Prompt 5 stabilization audit) ──
+# Tightened so a stray `git add .` cannot ship a private key, env file,
+# local SQLite, log, smoke screenshot, build output, or copied unauthorized
+# Kodi addon. Patterns are repo-rooted unless they need to be tree-wide
+# (e.g. *.pem, *.env can appear under server/ or androidApp/).
+
+# Private keys / signing materials (operator-side staging only)
+*.pem
+*.p12
+*.p8
+*.cer
+*.crt
+*.key
+
+# Env files anywhere in tree (server/.env, server/.env.tvtest, etc.)
+.env
+.env.*
+*.env
+!.env.example
+!.env.sample
+
+# Local databases (Android device pulls, server test DBs)
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+
+# Logs and crash dumps
+*.log
+anr_trace.txt
+bugreport.zip
+crash_log.txt
+*_logcat.txt
+phone_startup_raw.log
+sharedmodule_javap.txt
+tv_focus_audit.txt
+
+# Manual-smoke artifacts at repo root (UI dumps, screenshots, scratch XML)
+/tmp-torve-*.xml
+/tmp-torve-*.png
+/tmp_*.xml
+/tmp_*.png
+/tmp_window_dump.xml
+/home.png
+/home2.png
+/home3.png
+/home4.png
+/torve-home.png
+/torve_*.png
+/reval_*.png
+/desktop_login_fullscreen_check.png
+/tv_landing_*.png
+/tv_validation_screen.png
+/docs_extract_frontend.zip
+
+# Per-host Gradle/Android scratch dirs (siblings of the already-ignored .gradle / .android/)
+.gradle-*/
+.android-*/
+.codex_tmp/
+
+# Build outputs not yet covered
+desktopApp/build/
+*.wixobj
+
+# Smoke harness scratch — live run artefacts. The harness lives in
+# scripts/smoke/ and the matrix doc in docs/smoke/; the per-run result
+# files are operator artefacts, optionally committed alongside a
+# release tag.
+smoke-results/
+
+# Copied third-party Kodi addons (roadmap forbids unauthorized content sources)
+plugin.video.*/
+script.module.*/
+script.video.*/
+*-Kodi.zip
+
+# Stray asset that landed in /assets (smoke pic) — keep real product assets
+/desktopApp/picexamples/
+
+# Python bytecode caches under server/
+__pycache__/
+*.pyc
+
+# Extracted/disassembled JAR contents that landed at repo root
+/docs_extract/
+/uk/
+
+# Sandbox smoke kit — runtime artefacts (huge MSIs, cloudflared.exe,
+# generated appcast.xml, feed-url.txt, cloudflared.log). Scripts in
+# this directory are committed under their own paths; the kit folder
+# itself is operator scratch.
+smoke-kit/Torve-*.msi
+smoke-kit/cloudflared.exe
+smoke-kit/cloudflared.log
+smoke-kit/appcast.xml
+smoke-kit/feed-url.txt
+
+# Stray VLC runtime that landed at the repo root rather than under
+# the structured runtime/windows/vlc/ tree (recovered from previous
+# packaging troubleshooting).

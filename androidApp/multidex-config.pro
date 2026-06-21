@@ -1,0 +1,13 @@
+-keep class com.torve.android.TorveApp { *; }
+-keep class com.torve.android.MainActivity { *; }
+-keep class com.torve.android.TvMainActivity { *; }
+-keep class com.torve.android.deeplink.** { *; }
+-keep class com.torve.android.di.** { *; }
+-keep class com.torve.android.billing.** { *; }
+-keep class com.torve.di.SharedModuleKt { *; }
+-keep class org.koin.** { *; }
+-keep class com.torve.data.auth.AuthClient { *; }
+-keep class com.torve.db.** { *; }
+-keep class com.torve.data.ai.** { *; }
+-keep class com.torve.data.addon.** { *; }
+-keep class com.torve.presentation.settings.SettingsViewModel { *; }

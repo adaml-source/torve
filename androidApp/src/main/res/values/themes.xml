@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.Torve" parent="Theme.AppCompat.NoActionBar">
+        <!-- Transparent bars keep the app visually edge-to-edge while app code handles insets. -->
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:windowBackground">@android:color/black</item>
+    </style>
+
+    <style name="Theme.Torve.Splash" parent="Theme.Torve">
+        <item name="android:windowSplashScreenBackground">#050507</item>
+        <item name="android:windowSplashScreenAnimatedIcon">@drawable/ic_launcher_foreground</item>
+        <item name="android:windowSplashScreenIconBackgroundColor">#050507</item>
+    </style>
+</resources>

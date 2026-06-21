@@ -1,0 +1,41 @@
+Google Play Store - Android TV Checklist
+========================================
+
+Positioning
+-----------
+[ ] Listing states: Torve is free software.
+[ ] Listing states: no subscriptions, no paid tiers, no premium TV features, no purchase required.
+[ ] Remove TV in-app products and subscriptions from Play Console.
+[ ] Remove premium, purchase, subscription, lifetime, and paywall screenshots/copy.
+[ ] Donation links remain hidden by default.
+
+Build
+-----
+[x] applicationId: com.torve.app
+[x] LEANBACK_LAUNCHER intent filter present
+[x] TV banner drawable present
+[x] Signing config wired
+[ ] Generate signed AAB: ./gradlew :androidApp:bundleGoogleTvRelease
+[ ] Verify TV banner in manifest
+
+TV Requirements
+---------------
+[ ] All UI navigable via D-pad.
+[ ] Focus states visible on all interactive elements.
+[ ] Settings screen fully D-pad navigable.
+[ ] Player controls work with D-pad/remote.
+[ ] Back button behavior correct on all screens.
+[ ] No subscription or billing focus target remains.
+
+Store Listing
+-------------
+[ ] TV screenshots
+[ ] TV banner
+[ ] Listing copy avoids paywall, subscription, purchase, and premium wording.
+
+Testing
+-------
+[ ] Test on Android TV emulator.
+[ ] Test on physical Android TV / Google TV hardware.
+[ ] Test D-pad navigation end-to-end.
+[ ] Verify no Play Billing access requirement appears.

@@ -1,0 +1,12 @@
+-- Migration v7 -> v8: indexed IPTV media-type browse paths.
+--
+-- The unified iptv_channel table remains the source of truth, but VOD movies
+-- and VOD series need cheap persisted reads that do not scan a mixed live/VOD
+-- catalogue. These covering indexes make Movies/Shows startup and category
+-- shelves read from the local DB by content_type immediately.
+
+CREATE INDEX IF NOT EXISTS idx_iptv_channel_user_playlist_generation_content_sort
+    ON iptv_channel(user_id, playlist_id, generation_id, content_type, sort_index);
+
+CREATE INDEX IF NOT EXISTS idx_iptv_channel_user_playlist_generation_content_group_sort
+    ON iptv_channel(user_id, playlist_id, generation_id, content_type, group_title, sort_index);

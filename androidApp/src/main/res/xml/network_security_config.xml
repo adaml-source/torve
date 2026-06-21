@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<network-security-config>
+    <!-- Allow cleartext for local IPs (LAN media servers: Jellyfin, Plex, Kodi) -->
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="true">10.0.0.0</domain>
+        <domain includeSubdomains="true">172.16.0.0</domain>
+        <domain includeSubdomains="true">192.168.0.0</domain>
+        <domain includeSubdomains="true">localhost</domain>
+    </domain-config>
+
+    <!-- Allow cleartext globally — needed for user-configured media servers (Jellyfin, Plex, Kodi) -->
+    <!-- that may run on non-standard ports/IPs. All API calls use HTTPS. -->
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+
+    <!--
+        Debug-only: Android 7+ apps do not trust user-added CAs by default.
+        Emulator and local QA setups commonly route traffic through host/proxy
+        trust stores, which otherwise makes public catalog TLS fail with
+        "Chain validation failed" and leaves the TV Home surface blank. This
+        block is ignored in non-debuggable release builds.
+    -->
+    <debug-overrides>
+        <trust-anchors>
+            <certificates src="user" />
+        </trust-anchors>
+    </debug-overrides>
+</network-security-config>

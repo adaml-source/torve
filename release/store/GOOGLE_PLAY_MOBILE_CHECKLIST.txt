@@ -1,0 +1,52 @@
+Google Play Store - Mobile Checklist
+====================================
+
+Positioning
+-----------
+[ ] Listing states: Torve is free software.
+[ ] Listing states: no subscriptions, no paid tiers, no premium features, no purchase required.
+[ ] Remove in-app products and subscriptions from Play Console.
+[ ] Remove paywall, premium, upgrade, paid-tier, lifetime, and purchase screenshots/copy.
+[ ] Donation links remain hidden unless policy-reviewed.
+
+Build
+-----
+[x] applicationId: com.torve.app
+[x] targetSdk configured in androidApp/build.gradle.kts
+[x] Signing config wired to release build type
+[ ] Generate signed AAB: ./gradlew :androidApp:bundleGoogleMobileRelease
+[ ] Test install from AAB via bundletool
+
+Data Safety
+-----------
+[ ] Firebase Analytics: disclose for Google Play builds if enabled.
+[ ] Firebase Crashlytics: disclose for Google Play builds if enabled.
+[ ] TMDB API: disclose metadata requests if required.
+[ ] No ad SDKs and no advertising ID collection.
+[ ] Review Firebase key restrictions before public release.
+
+Privacy Policy
+--------------
+[ ] Host privacy policy at public URL.
+[ ] Privacy policy reflects account, sync, diagnostics, connected services, and Firebase behavior.
+[ ] Enter URL in Play Console.
+
+Store Listing
+-------------
+[ ] App name: Torve
+[ ] Short description
+[ ] Full description
+[ ] Feature graphic
+[ ] App icon
+[ ] Phone screenshots
+[ ] Tablet screenshots if targeting tablets
+[ ] App category: Entertainment
+[ ] Content rating questionnaire
+[ ] Target audience not children
+
+Testing
+-------
+[ ] Test on phone and tablet.
+[ ] Test navigation and account flows.
+[ ] Verify no paywall route or Play Billing requirement appears.
+[ ] Verify donation links are hidden by default.

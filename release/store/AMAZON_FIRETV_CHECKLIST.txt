@@ -1,0 +1,48 @@
+Amazon Appstore - Fire TV Checklist
+===================================
+
+Positioning
+-----------
+[ ] Listing states: Torve is free software.
+[ ] Listing states: no subscriptions, no paid tiers, no premium TV features, no purchase required.
+[ ] Remove Amazon IAP products.
+[ ] Remove subscription, premium, lifetime, checkout, restore, and purchase wording.
+[ ] Donation links remain hidden by default.
+
+Build
+-----
+[x] applicationId: com.torve.app.amazon
+[x] No Google Play Services dependencies
+[x] No Firebase in Amazon build
+[x] No Cast SDK in Amazon build
+[x] No Amazon IAP access requirement
+[x] No Stripe checkout access requirement
+[x] Signing config wired
+[ ] Generate signed APK: ./gradlew :androidApp:assembleAmazonTvRelease
+[ ] Verify APK has no unintended Google or billing classes.
+
+Store Listing
+-------------
+[ ] App name: Torve
+[ ] Short description
+[ ] Long description
+[ ] App icon
+[ ] Screenshots
+[ ] Fire TV banner
+[ ] Content rating questionnaire
+[ ] Category: Entertainment
+
+Fire TV Requirements
+--------------------
+[ ] All UI navigable via Fire TV remote.
+[ ] No touchscreen-only interactions.
+[ ] Media playback controls on remote buttons.
+[ ] Back button exits app from home screen.
+[ ] No subscription or billing focus target remains.
+
+Testing
+-------
+[ ] Test on Fire TV Stick.
+[ ] Test on Fire TV Cube if available.
+[ ] Test sideload: adb install -r app.apk.
+[ ] Verify no Amazon IAP, Stripe checkout, restore purchase, or donation link appears by default.

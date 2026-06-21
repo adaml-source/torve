@@ -1,0 +1,19 @@
+SPDX-License-Identifier: AGPL-3.0-or-later
+
+Torve Backend License Notice
+============================
+
+The Torve backend source in this directory is licensed under the GNU Affero
+General Public License, version 3 or any later version, as published by the
+Free Software Foundation.
+
+In the combined Torve public source export, the repository's top-level
+`LICENSE` file must contain the official GNU AGPL v3 license text and applies
+to this backend source.
+
+If this backend directory is distributed independently from the combined Torve
+source tree, include the official GNU AGPL v3 license text with the
+distribution or replace this notice with that full license text.
+
+No additional noncommercial, no-modification, no-redistribution, proprietary,
+paid-feature, or field-of-use restriction is added here.

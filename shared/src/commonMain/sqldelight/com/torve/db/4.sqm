@@ -1,0 +1,134 @@
+-- Migration v3 → v4: scope the remaining user-owned tables by user_id.
+-- Existing rows have no user attribution (were written before scoping), so they
+-- are dropped — the same approach used by the v3 migration for watch_progress
+-- and watchlist. Each table gets a composite primary key (user_id, original_pk).
+
+-- preference
+DROP TABLE preference;
+CREATE TABLE preference (
+    user_id TEXT NOT NULL DEFAULT '',
+    key TEXT NOT NULL,
+    value TEXT NOT NULL,
+    PRIMARY KEY (user_id, key)
+);
+
+-- debrid_account
+DROP TABLE debrid_account;
+CREATE TABLE debrid_account (
+    user_id TEXT NOT NULL DEFAULT '',
+    service TEXT NOT NULL,
+    api_key TEXT NOT NULL,
+    username TEXT,
+    email TEXT,
+    premium_until TEXT,
+    is_active INTEGER NOT NULL DEFAULT 1,
+    PRIMARY KEY (user_id, service)
+);
+
+-- iptv_playlist
+DROP TABLE iptv_playlist;
+CREATE TABLE iptv_playlist (
+    user_id TEXT NOT NULL DEFAULT '',
+    id TEXT NOT NULL,
+    name TEXT NOT NULL,
+    url TEXT NOT NULL,
+    epg_url TEXT,
+    channel_count INTEGER NOT NULL DEFAULT 0,
+    last_updated INTEGER,
+    type TEXT NOT NULL DEFAULT 'm3u',
+    server TEXT,
+    username TEXT,
+    password TEXT,
+    PRIMARY KEY (user_id, id)
+);
+
+-- iptv_favorite
+DROP TABLE iptv_favorite;
+CREATE TABLE iptv_favorite (
+    user_id TEXT NOT NULL DEFAULT '',
+    channel_id TEXT NOT NULL,
+    playlist_id TEXT NOT NULL,
+    name TEXT NOT NULL,
+    logo_url TEXT,
+    group_title TEXT,
+    added_at INTEGER NOT NULL,
+    PRIMARY KEY (user_id, channel_id)
+);
+
+-- iptv_recent
+DROP TABLE iptv_recent;
+CREATE TABLE iptv_recent (
+    user_id TEXT NOT NULL DEFAULT '',
+    channel_id TEXT NOT NULL,
+    playlist_id TEXT NOT NULL,
+    name TEXT NOT NULL,
+    logo_url TEXT,
+    group_title TEXT,
+    stream_url TEXT NOT NULL,
+    viewed_at INTEGER NOT NULL,
+    PRIMARY KEY (user_id, channel_id)
+);
+
+-- download_queue
+DROP TABLE download_queue;
+CREATE TABLE download_queue (
+    user_id TEXT NOT NULL DEFAULT '',
+    id TEXT NOT NULL,
+    media_id TEXT NOT NULL,
+    media_type TEXT NOT NULL,
+    title TEXT NOT NULL,
+    poster_url TEXT,
+    stream_url TEXT NOT NULL,
+    file_path TEXT,
+    file_size_bytes INTEGER,
+    downloaded_bytes INTEGER NOT NULL DEFAULT 0,
+    status TEXT NOT NULL DEFAULT 'pending',
+    season_number INTEGER,
+    episode_number INTEGER,
+    created_at INTEGER NOT NULL,
+    completed_at INTEGER,
+    bulk_group_id TEXT,
+    PRIMARY KEY (user_id, id)
+);
+
+-- user_profile
+DROP TABLE user_profile;
+CREATE TABLE user_profile (
+    user_id TEXT NOT NULL DEFAULT '',
+    id TEXT NOT NULL,
+    name TEXT NOT NULL,
+    avatar_index INTEGER NOT NULL DEFAULT 0,
+    is_active INTEGER NOT NULL DEFAULT 0,
+    pin TEXT,
+    max_content_rating TEXT,
+    created_at INTEGER NOT NULL,
+    PRIMARY KEY (user_id, id)
+);
+
+-- home_shelf_config
+DROP TABLE home_shelf_config;
+CREATE TABLE home_shelf_config (
+    user_id TEXT NOT NULL DEFAULT '',
+    shelf_id TEXT NOT NULL,
+    is_visible INTEGER NOT NULL DEFAULT 1,
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (user_id, shelf_id)
+);
+
+-- watch_history
+DROP TABLE watch_history;
+CREATE TABLE watch_history (
+    user_id TEXT NOT NULL DEFAULT '',
+    id TEXT NOT NULL,
+    media_id TEXT NOT NULL,
+    media_type TEXT NOT NULL,
+    title TEXT NOT NULL,
+    poster_url TEXT,
+    backdrop_url TEXT,
+    watched_at INTEGER NOT NULL,
+    duration_watched_ms INTEGER NOT NULL DEFAULT 0,
+    season_number INTEGER,
+    episode_number INTEGER,
+    show_title TEXT,
+    PRIMARY KEY (user_id, id)
+);

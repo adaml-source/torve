@@ -1,0 +1,41 @@
+Torve - Store Metadata Cleanup Summary
+======================================
+Date: 2026-06-15
+
+Torve is free software. There are no subscriptions, no paid tiers, no premium features, and no purchase required. Donations are optional and never unlock features.
+
+Repository code and docs have moved away from active paid-product positioning, but external store metadata still requires manual cleanup outside this repository.
+
+Required external cleanup:
+
+1. Google Play mobile
+   - Remove in-app products and subscriptions.
+   - Remove premium, paywall, subscription, purchase, and paid-tier listing copy.
+   - Remove paywall screenshots.
+   - Verify donation links are hidden unless policy-reviewed.
+   - Review Firebase key restrictions.
+
+2. Google TV / Android TV
+   - Remove TV in-app products and subscriptions.
+   - Remove premium and purchase TV listing copy.
+   - Remove paywall screenshots.
+   - Verify donation links are hidden by default.
+
+3. Amazon Appstore / Fire TV
+   - Remove Amazon IAP products.
+   - Remove subscription, premium, lifetime, checkout, and restore wording.
+   - Verify donation links are hidden by default.
+
+4. iOS App Store
+   - Remove IAP and subscription products.
+   - Remove paywall screenshots.
+   - Remove premium and purchase copy.
+   - Verify donation links are hidden by default unless policy-reviewed.
+
+5. Desktop
+   - Ensure packaging embeds AGPL-3.0-or-later license text or a pointer to the top-level LICENSE.
+   - Keep signing credentials and appcast/admin secrets outside the repository.
+
+Publication note:
+
+This private repository should not be made public directly. The public release should be created from a fresh sanitized source export after final audit.

@@ -1,0 +1,29 @@
+[Unit]
+Description=Torve Backend (FastAPI/uvicorn)
+After=network.target postgresql.service
+Wants=postgresql.service
+
+[Service]
+Type=simple
+User=torve
+Group=torve
+WorkingDirectory=/opt/torve-backend
+EnvironmentFile=/opt/torve-backend/.env
+ExecStart=/opt/torve-backend/venv/bin/uvicorn app.main:app \
+    --host 127.0.0.1 \
+    --port 8000 \
+    --workers 2 \
+    --log-level info
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=torve-backend
+
+# Harden the service process
+NoNewPrivileges=true
+ProtectSystem=full
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

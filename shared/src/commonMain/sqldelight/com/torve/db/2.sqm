@@ -1,0 +1,3 @@
+ALTER TABLE addon ADD COLUMN server_id TEXT;
+ALTER TABLE addon ADD COLUMN synced_at INTEGER;
+ALTER TABLE addon ADD COLUMN installed_from TEXT NOT NULL DEFAULT 'app';

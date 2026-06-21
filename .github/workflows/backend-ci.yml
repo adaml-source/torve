@@ -1,0 +1,122 @@
+name: Backend CI
+
+# Runs on PRs and pushes that touch server/. Catches what the desktop
+# B4 smoke caught manually: install gates (deps install cleanly?),
+# import-time errors, schema migrations apply against an empty
+# database, and the test suite passes.
+#
+# Triggered only on relevant paths so unrelated commits (Android,
+# desktop UI, docs) don't pay CI time.
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'server/**'
+      - '.github/workflows/backend-ci.yml'
+  pull_request:
+    paths:
+      - 'server/**'
+      - '.github/workflows/backend-ci.yml'
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    # Job-level env so every step (alembic, pytest) inherits it.
+    # `app/config.py` constructs `Settings()` at import time and
+    # requires DATABASE_URL + JWT_SECRET — without these, even
+    # `alembic upgrade head` can't load env.py.
+    env:
+      DATABASE_URL: postgresql+psycopg2://torve_test:torve_test@localhost:5432/torve_test
+      JWT_SECRET: ci-only-jwt-secret-do-not-use-in-prod
+      # Must be a valid Fernet key (32 raw bytes urlsafe-b64-encoded = 44 chars
+      # ending in '='). Zero-bytes is fine for CI — these envs never encrypt
+      # anything that survives the job. Using a non-Fernet-shaped string here
+      # crashes every test that imports app.crypto with "Fernet key must be 32
+      # url-safe base64-encoded bytes". Caught by Backend CI 2026-05-03.
+      INTEGRATION_SECRET_KEY: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
+      APP_ENV: test
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: torve_test
+          POSTGRES_PASSWORD: torve_test
+          POSTGRES_DB: torve_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U torve_test"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+
+    defaults:
+      run:
+        working-directory: server
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: server/requirements.txt
+
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          # Test-only deps not in production requirements
+          pip install pytest pytest-asyncio
+
+      - name: Alembic migrations apply against an empty database
+        run: |
+          alembic upgrade head
+          # Verify head matches latest migration file (catches drift
+          # between alembic/versions/ and the recorded current head).
+          alembic current
+
+      - name: Run pytest
+        run: |
+          pytest -v --tb=short
+
+  import-check:
+    # Catches the import-time class of bug separately from the test
+    # run, so even if tests are slow / flaky this stays fast and
+    # gives a clear "your code doesn't even import" signal.
+    runs-on: ubuntu-latest
+    env:
+      # Settings() validates at import time — these dummies satisfy
+      # the required-field check so we can confirm every module
+      # imports cleanly. Real DB / real secrets aren't used here.
+      DATABASE_URL: postgresql+psycopg2://nobody:nobody@localhost:5432/nobody
+      JWT_SECRET: import-check-only
+      INTEGRATION_SECRET_KEY: import-check-only
+      APP_ENV: test
+    defaults:
+      run:
+        working-directory: server
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: server/requirements.txt
+      - run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Import every module
+        run: |
+          python -c "
+          import importlib, pkgutil
+          import app
+          for _, name, _ in pkgutil.walk_packages(app.__path__, 'app.'):
+              importlib.import_module(name)
+              print(f'  ok: {name}')
+          "

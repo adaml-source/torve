@@ -1,0 +1,5 @@
+-- Migration v4 → v5: persist the Panda config_id alongside the manifest URL
+-- so the client can authenticate management-token calls (PATCH/DELETE/rotate)
+-- without parsing it from the opaque manifest-URL token segment. Null for
+-- non-Panda addons and for pre-migration rows; callers tolerate absence.
+ALTER TABLE addon ADD COLUMN config_id TEXT;

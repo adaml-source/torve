@@ -1,0 +1,529 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="tv_nav_iptv">Canales</string>
+    <string name="tv_nav_search">Buscar</string>
+    <string name="tv_nav_library">Biblioteca</string>
+    <string name="tv_nav_settings">Ajustes</string>
+
+    <string name="tv_section_continue_watching">Seguir viendo</string>
+    <string name="tv_section_recommended">Recomendado</string>
+    <string name="tv_section_trending_movies">Pel\u00edculas en tendencia</string>
+    <string name="tv_section_trending_shows">Series en tendencia</string>
+    <string name="tv_section_popular_movies">Pel\u00edculas populares</string>
+    <string name="tv_section_top_rated_movies">Pel\u00edculas mejor valoradas</string>
+    <string name="tv_section_popular_shows">Series populares</string>
+    <string name="tv_section_top_rated_shows">Series mejor valoradas</string>
+    <string name="tv_section_watchlist_movies">Lista de pel\u00edculas</string>
+    <string name="tv_section_watchlist_shows">Lista de series</string>
+    <string name="tv_section_popular_searches">B\u00fasquedas populares</string>
+    <string name="tv_section_search_results">Resultados</string>
+
+    <string name="tv_hero_subtitle_home">Seleccionado para tu noche</string>
+    <string name="tv_hero_subtitle_movies">Lo mejor del cine</string>
+    <string name="tv_hero_subtitle_shows">Series para maratonear</string>
+    <string name="tv_hero_subtitle_iptv">Tus canales de TV en vivo</string>
+    <string name="tv_hero_subtitle_search">Encuentra algo para ver</string>
+    <string name="tv_hero_subtitle_library">Tus t\u00edtulos guardados</string>
+    <string name="tv_hero_subtitle_settings">Ajusta tu experiencia</string>
+
+    <string name="tv_action_play">Reproducir</string>
+    <string name="tv_streams_pick">Elegir stream</string>
+    <string name="tv_watchlist_add_to">A\u00f1adir a\u2026</string>
+    <string name="tv_watchlist_local_only">Solo lista local</string>
+    <string name="tv_action_details">Detalles</string>
+    <string name="tv_action_add_watchlist">A\u00f1adir a la lista</string>
+    <string name="tv_action_remove_watchlist">Quitar de la lista</string>
+    <string name="tv_action_trailer">Tr\u00e1iler</string>
+    <string name="tv_action_back">Volver</string>
+
+    <string name="tv_search_hint">Buscar pel\u00edculas y series</string>
+    <string name="tv_search_empty">Usa la b\u00fasqueda o t\u00e9rminos populares</string>
+    <string name="tv_library_empty">Tu biblioteca est\u00e1 vac\u00eda</string>
+    <string name="tv_loading">Cargando</string>
+    <string name="tv_no_data">Nada disponible en este momento</string>
+    <string name="tv_player_preparing">Preparando reproducci\u00f3n</string>
+    <string name="tv_settings_description">Usa esta pantalla para configurar el comportamiento del TV y las integraciones de cuenta desde el control remoto.</string>
+    <string name="tv_settings_cast">Cast funciona en Android TV y se gestiona correctamente en Fire TV cuando los servicios de Play no est\u00e1n disponibles.</string>
+
+    <!-- Genre labels -->
+    <string name="tv_genre_action">Acci\u00f3n</string>
+    <string name="tv_genre_comedy">Comedia</string>
+    <string name="tv_genre_sci_fi">Sci-Fi</string>
+    <string name="tv_genre_horror">Terror</string>
+    <string name="tv_genre_drama">Drama</string>
+    <string name="tv_genre_animation">Animaci\u00f3n</string>
+    <string name="tv_genre_action_adventure">Acci\u00f3n &amp; Aventura</string>
+    <string name="tv_genre_sci_fi_fantasy">Sci-Fi &amp; Fantas\u00eda</string>
+    <string name="tv_genre_crime">Crimen</string>
+
+    <!-- Episode picker -->
+    <string name="tv_episodes_title">Episodios</string>
+    <string name="tv_no_episodes">No hay episodios disponibles</string>
+    <string name="tv_watched">Visto</string>
+
+    <string name="tv_see_all">Ver todo</string>
+
+    <!-- Settings screen -->
+    <string name="tv_settings_section_account">Cuenta</string>
+    <string name="tv_settings_section_app">App</string>
+    <string name="tv_settings_section_about">Acerca de</string>
+    <string name="tv_settings_cloud_service">Servicio en la nube</string>
+    <string name="tv_settings_trakt">Trakt</string>
+    <string name="tv_settings_phone_pairing">Vinculaci\u00f3n con tel\u00e9fono</string>
+    <string name="tv_settings_language">Idioma</string>
+    <string name="tv_settings_playback_quality">Calidad de reproducci\u00f3n</string>
+    <string name="tv_settings_version">Versi\u00f3n</string>
+    <string name="tv_settings_connected">Conectado</string>
+    <string name="tv_settings_not_connected">No conectado</string>
+    <string name="tv_settings_needs_setup">Requiere configuraci\u00f3n</string>
+    <string name="tv_settings_paired">Vinculado</string>
+    <string name="tv_settings_pairing_code">C\u00f3digo de vinculaci\u00f3n:</string>
+    <string name="tv_settings_generating_code">Generando c\u00f3digo de vinculaci\u00f3n</string>
+    <string name="tv_settings_not_paired">No vinculado</string>
+    <string name="tv_settings_debug">Debug</string>
+    <string name="tv_settings_diagnostics">Diagn\u00f3sticos</string>
+    <string name="tv_settings_sync_status">Estado de sincronizaci\u00f3n</string>
+
+    <!-- Voice search -->
+    <string name="tv_voice_listening">Escuchando\u2026</string>
+    <string name="tv_voice_processing">Procesando entrada de voz\u2026</string>
+    <string name="tv_voice_unavailable">La entrada de voz no est\u00e1 disponible en este dispositivo</string>
+
+    <!-- IPTV -->
+    <string name="tv_iptv_empty">No hay canales disponibles. A\u00f1ade una playlist en Ajustes.</string>
+    <string name="tv_iptv_recently_viewed">Vistos recientemente</string>
+    <string name="tv_iptv_favorites">Favoritos</string>
+    <string name="tv_iptv_no_playlists_title">No hay canales configurados</string>
+    <string name="tv_iptv_no_playlists_subtitle">A\u00f1ade una playlist M3U en tu tel\u00e9fono y sincron\u00edzala con el TV</string>
+    <string name="tv_iptv_all_channels">Todos los canales</string>
+    <string name="tv_iptv_channels_count">%d canales</string>
+    <string name="tv_iptv_now_playing">Reproduci\u00e9ndose</string>
+    <string name="tv_iptv_no_channels_in_group">No hay canales en este grupo</string>
+    <string name="tv_iptv_search_hint">Buscar canales\u2026</string>
+    <string name="tv_iptv_filter_all">Todos</string>
+    <string name="tv_iptv_filter_hd">HD</string>
+    <string name="tv_iptv_filter_fhd">FHD</string>
+    <string name="tv_iptv_filter_4k">4K</string>
+    <string name="tv_iptv_filter_favorites">Favoritos</string>
+    <string name="tv_iptv_preview">Vista previa</string>
+    <string name="tv_iptv_hold_to_favorite">Mant\u00e9n OK para a\u00f1adir a favoritos</string>
+    <string name="tv_iptv_no_search_results">No se encontraron canales</string>
+
+    <!-- Additional settings -->
+    <string name="tv_settings_section_customization">Personalizaci\u00f3n</string>
+    <string name="tv_settings_sync_from_phone">Sincronizar ajustes del tel\u00e9fono</string>
+    <string name="tv_settings_sync_ready">Importar todos los ajustes del tel\u00e9fono vinculado</string>
+    <string name="tv_settings_pair_first">Vincula un tel\u00e9fono primero para sincronizar</string>
+    <string name="tv_settings_region">Regi\u00f3n de contenido</string>
+    <string name="tv_settings_streaming_services">Servicios de disponibilidad</string>
+    <string name="tv_settings_home_layout_note">Para personalizar el dise\u00f1o de inicio, estilos de tarjeta, fuentes de valoraci\u00f3n y servicios de disponibilidad \u2014 config\u00faralos en la app m\u00f3vil de Torve y toca \"Sincronizar ajustes del tel\u00e9fono\" arriba.</string>
+
+    <!-- Setup mode -->
+    <string name="tv_settings_setup_prompt">\u00bfC\u00f3mo usas Torve?</string>
+    <string name="tv_settings_setup_mode">Modo de configuraci\u00f3n</string>
+    <string name="tv_settings_tap_to_change">toca para cambiar</string>
+    <string name="tv_settings_mode_android">Tengo Torve en Android</string>
+    <string name="tv_settings_mode_android_desc">Vincula tu tel\u00e9fono para sincronizar todos los ajustes instant\u00e1neamente</string>
+    <string name="tv_settings_mode_ios">Tengo Torve en iOS</string>
+    <string name="tv_settings_mode_ios_desc">Vincula tu iPhone para sincronizar ajustes</string>
+    <string name="tv_settings_mode_tv_only">Solo TV \u2014 sin app m\u00f3vil</string>
+    <string name="tv_settings_mode_tv_only_desc">Configura todo directamente en tu TV</string>
+    <string name="tv_settings_simkl">SIMKL</string>
+    <string name="tv_settings_change_provider">Proveedor en la nube</string>
+    <string name="tv_settings_sync_note">Para personalizar el dise\u00f1o de inicio, estilos de tarjeta y fuentes de valoraci\u00f3n \u2014 configura en la app m\u00f3vil y toca Sincronizar.</string>
+
+    <!-- Detail screen -->
+    <string name="tv_detail_director">Director</string>
+    <string name="tv_detail_cast">Reparto</string>
+    <string name="tv_detail_more_like_this">T\u00edtulos similares</string>
+    <string name="tv_detail_connect_cloud">Conectar nube</string>
+    <string name="tv_detail_select_manually">Seleccionar manualmente</string>
+    <string name="tv_detail_finding_streams">Buscando streams\u2026</string>
+    <string name="tv_detail_resolving">Resolviendo\u2026</string>
+    <string name="tv_detail_watched">Visto</string>
+    <string name="tv_detail_unwatched">No visto</string>
+    <string name="tv_detail_rate">Valorar</string>
+    <string name="tv_detail_rated">Valorado %1$d/10</string>
+    <string name="tv_detail_where_to_watch">D\u00f3nde ver</string>
+    <string name="tv_detail_no_offers">No hay ofertas de streaming disponibles</string>
+    <string name="tv_detail_in_library">En biblioteca</string>
+
+    <!-- Sync notices -->
+    <string name="tv_sync_search_received">B\u00fasqueda recibida del tel\u00e9fono</string>
+    <string name="tv_sync_playback_received">Transferencia de reproducci\u00f3n recibida</string>
+    <string name="tv_notification_search_query">Buscar: %1$s</string>
+    <string name="tv_notification_trailer_unavailable">Tr\u00e1iler no disponible</string>
+    <string name="tv_notification_welcome">\u00a1Bienvenido a Torve TV! Usa la barra izquierda para navegar.</string>
+    <string name="tv_restore_account_data">Restaurando los datos de tu cuenta\u2026</string>
+    <string name="tv_restore_playlists_count">%1$d/%2$d playlists</string>
+    <string name="tv_action_resume">Continuar</string>
+    <string name="tv_action_start_over">Empezar de nuevo</string>
+    <string name="tv_action_go_to_seasons">Ir a temporadas</string>
+    <string name="tv_action_add_favorites">A\u00f1adir a favoritos</string>
+    <string name="tv_action_remove_favorites">Quitar de favoritos</string>
+    <string name="tv_action_mark_show_watched">Marcar serie como vista</string>
+    <string name="tv_action_mark_show_unwatched">Marcar serie como no vista</string>
+    <string name="tv_action_mark_watched">Marcar como visto</string>
+    <string name="tv_action_mark_unwatched">Marcar como no visto</string>
+    <string name="tv_action_view_details">Ver detalles</string>
+    <string name="tv_action_choose_source">Elegir fuente</string>
+    <string name="tv_notification_watchlist_added">%1$s a\u00f1adido a la watchlist</string>
+    <string name="tv_notification_watchlist_removed">%1$s eliminado de la watchlist</string>
+    <string name="tv_notification_favorites_added">%1$s a\u00f1adido a favoritos</string>
+    <string name="tv_notification_favorites_removed">%1$s eliminado de favoritos</string>
+    <string name="tv_notification_marked_watched">%1$s marcado como visto</string>
+    <string name="tv_notification_marked_unwatched">%1$s marcado como no visto</string>
+    <string name="tv_catalog_search_movies">Buscar pel\u00edculas</string>
+    <string name="tv_catalog_search_shows">Buscar series</string>
+    <string name="tv_catalog_search_movies_heading">Buscar pel\u00edculas</string>
+    <string name="tv_catalog_search_shows_heading">Buscar series</string>
+    <string name="tv_catalog_search_movies_subtitle">Buscar dentro de Pel\u00edculas</string>
+    <string name="tv_catalog_search_shows_subtitle">Buscar dentro de Series</string>
+    <string name="tv_catalog_movies_preparing">Las pel\u00edculas se est\u00e1n preparando en segundo plano</string>
+    <string name="tv_catalog_shows_preparing">Las series se est\u00e1n preparando en segundo plano</string>
+    <string name="tv_search_ai_provider_required">Configura un proveedor de IA en Ajustes antes de usar B\u00fasqueda IA.</string>
+    <string name="tv_settings_panda_streaming_setup">Configuraci\u00f3n de streaming de Panda</string>
+    <string name="tv_settings_panda_streaming_setup_desc">Configura debrid, usenet, clientes de descarga y estado de proveedores en un solo lugar.</string>
+    <string name="tv_settings_panda_configured_enabled">Configurado y activado. Reconfigura proveedores de streaming y automatizaci\u00f3n.</string>
+    <string name="tv_settings_panda_configured_disabled">Configurado pero desactivado. Abre Panda para activarlo o reconfigurarlo.</string>
+    <string name="tv_settings_panda_setup_desc">Prepara Torve para streaming con debrid, usenet y clientes de descarga.</string>
+    <string name="tv_settings_realdebrid_connect">Conectar Real-Debrid</string>
+    <string name="tv_settings_realdebrid_connect_panda">Conectar Real-Debrid en Panda</string>
+    <string name="tv_settings_realdebrid_managed_authorize">Gestionado por Panda. Completa la autorizaci\u00f3n del dispositivo para conectar Real-Debrid.</string>
+    <string name="tv_settings_realdebrid_managed_connected">Gestionado por Panda. Conectado.</string>
+    <string name="tv_settings_realdebrid_managed_connected_as">Gestionado por Panda. Conectado como %1$s.</string>
+    <string name="tv_settings_realdebrid_managed_reconnect">Gestionado por Panda. Necesita reconexi\u00f3n: %1$s</string>
+    <string name="tv_settings_realdebrid_managed_not_connected">Gestionado por Panda. No conectado.</string>
+    <string name="tv_settings_auth_waiting_authorization">Esperando autorizaci\u00f3n\u2026</string>
+    <string name="tv_settings_auth_open_url_code">Abre la URL en otro dispositivo e introduce el c\u00f3digo.</string>
+    <string name="tv_settings_panda_health_monitor">Monitor de estado de Panda</string>
+    <string name="tv_settings_panda_health_monitor_desc">Comprueba si los servicios de streaming necesitan reparaci\u00f3n antes de que falle la reproducci\u00f3n.</string>
+    <string name="tv_settings_streaming_health">Estado de streaming</string>
+    <string name="tv_settings_streaming_health_clear">No se detectaron problemas reparables de proveedores.</string>
+    <string name="tv_settings_open_credential_transfer">Abrir transferencia de credenciales</string>
+    <string name="tv_settings_open_diagnostics">Abrir diagn\u00f3sticos</string>
+
+    <!-- Channels section -->
+    <string name="tv_settings_section_channels">Canales</string>
+    <string name="tv_settings_add_playlist">A\u00f1adir playlist</string>
+    <string name="tv_settings_playlist_name">Nombre de playlist</string>
+    <string name="tv_settings_playlist_url">URL de playlist</string>
+    <string name="tv_settings_playlist_save">Guardar playlist</string>
+    <string name="tv_settings_playlist_type_m3u">Playlist M3U</string>
+    <string name="tv_settings_playlist_type_xtream">Login de proveedor</string>
+    <string name="tv_settings_xtream_server">URL del servidor</string>
+    <string name="tv_settings_xtream_username">Usuario</string>
+    <string name="tv_settings_xtream_password">Contrase\u00f1a</string>
+    <string name="tv_settings_playlist_remove">Eliminar</string>
+    <string name="tv_settings_playlist_confirm_remove">Toca de nuevo para confirmar</string>
+    <string name="tv_settings_no_playlists">No hay playlists configuradas</string>
+    <string name="tv_settings_channels_count">%d canales</string>
+
+    <!-- Integrations section -->
+    <string name="tv_settings_section_integrations">Integraciones</string>
+    <string name="tv_settings_omdb">OMDB</string>
+    <string name="tv_settings_omdb_api_key">Clave API de OMDB</string>
+    <string name="tv_settings_omdb_test">Probar OMDB</string>
+    <string name="tv_settings_mdblist">MDBList</string>
+    <string name="tv_settings_mdblist_api_key">Clave API de MDBList</string>
+    <string name="tv_settings_jellyfin">Jellyfin</string>
+    <string name="tv_settings_jellyfin_url">URL del servidor Jellyfin</string>
+    <string name="tv_settings_jellyfin_api_key">Clave API de Jellyfin</string>
+    <string name="tv_settings_jellyfin_test">Probar Jellyfin</string>
+    <string name="tv_settings_plex">Plex</string>
+    <string name="tv_settings_plex_url">URL del servidor Plex</string>
+    <string name="tv_settings_plex_token">Token de acceso de Plex</string>
+    <string name="tv_settings_plex_test">Probar Plex</string>
+    <string name="tv_settings_kodi">Kodi</string>
+    <string name="tv_settings_kodi_name">Nombre</string>
+    <string name="tv_settings_kodi_ip">Host / IP</string>
+    <string name="tv_settings_kodi_port">Puerto</string>
+    <string name="tv_settings_kodi_add">A\u00f1adir host Kodi</string>
+    <string name="tv_settings_kodi_test">Probar</string>
+    <string name="tv_settings_test_success">Conectado</string>
+    <string name="tv_settings_test_failed">Conexi\u00f3n fallida</string>
+    <string name="tv_settings_validating">Validando\u2026</string>
+    <string name="tv_settings_valid">V\u00e1lido</string>
+    <string name="tv_settings_invalid">No v\u00e1lido</string>
+    <string name="tv_settings_not_set">No configurado</string>
+    <string name="tv_settings_set">Configurado</string>
+    <string name="tv_settings_tap_to_edit">Toca para editar</string>
+
+    <!-- AI Search -->
+    <string name="tv_settings_section_ai">B\u00fasqueda IA</string>
+    <string name="tv_settings_ai_provider">Proveedor de IA</string>
+    <string name="tv_settings_ai_api_key">Clave API</string>
+    <string name="tv_settings_ai_test">Probar conexi\u00f3n IA</string>
+
+    <!-- App section -->
+    <string name="tv_settings_dedupe">Deduplicar streams</string>
+    <string name="tv_settings_dedupe_on">Activado \u2014 streams duplicados ocultos</string>
+    <string name="tv_settings_dedupe_off">Desactivado \u2014 todos los streams visibles</string>
+    <string name="tv_settings_home_layout">Dise\u00f1o de inicio</string>
+    <string name="tv_settings_home_layout_subtitle">Personalizar secciones en la pesta\u00f1a de inicio</string>
+    <string name="tv_settings_ratings">Proveedores de valoraci\u00f3n</string>
+    <string name="tv_settings_ratings_subtitle">Elige qu\u00e9 valoraciones mostrar</string>
+
+    <!-- Home Layout -->
+    <string name="tv_home_layout_title">Dise\u00f1o de inicio</string>
+    <string name="tv_home_layout_enabled">Activado</string>
+    <string name="tv_home_layout_disabled">Desactivado</string>
+    <string name="tv_home_layout_move_up">Subir</string>
+    <string name="tv_home_layout_move_down">Bajar</string>
+    <string name="tv_home_layout_reset">Restablecer valores predeterminados</string>
+    <string name="tv_home_layout_reset_subtitle">Restaurar todas las secciones a su orden y visibilidad predeterminados</string>
+    <string name="tv_home_layout_create_custom">Crear secci\u00f3n personalizada</string>
+    <string name="tv_home_layout_create_custom_subtitle">A\u00f1adir una fila de contenido personalizada</string>
+    <string name="tv_home_layout_section_title">T\u00edtulo de secci\u00f3n</string>
+
+    <!-- Ratings settings -->
+    <string name="tv_ratings_title">Proveedores de valoraci\u00f3n</string>
+    <string name="tv_ratings_show_on_detail">Mostrar valoraciones en la p\u00e1gina de detalles</string>
+    <string name="tv_ratings_show_torve_score">Mostrar puntuaci\u00f3n Torve</string>
+    <string name="tv_ratings_section_sources">Fuentes de valoraci\u00f3n</string>
+    <string name="tv_ratings_max_on_cards">M\u00e1x. valoraciones en tarjetas</string>
+    <string name="tv_ratings_reset">Restablecer preferencias de valoraci\u00f3n</string>
+    <string name="tv_ratings_reset_subtitle">Restaurar fuentes y visualizaci\u00f3n de valoraciones predeterminadas</string>
+
+    <!-- Addons -->
+    <string name="tv_settings_section_addons">Addons</string>
+    <string name="tv_settings_no_addons">No hay addons instalados</string>
+    <string name="tv_settings_addon_install_url">URL del manifiesto del addon</string>
+    <string name="tv_settings_addon_install">Instalar addon</string>
+    <string name="tv_settings_addon_installing">Instalando\u2026</string>
+    <string name="tv_settings_addon_enabled">Activado</string>
+    <string name="tv_settings_addon_disabled">Desactivado</string>
+    <string name="tv_settings_addon_remove">Eliminar</string>
+    <string name="tv_settings_addon_confirm_remove">Toca de nuevo para confirmar</string>
+
+    <!-- MDBList browse -->
+    <string name="tv_settings_mdblist_browse">Explorar MDBList</string>
+    <string name="tv_settings_mdblist_popular">Listas populares</string>
+    <string name="tv_settings_mdblist_search">Buscar listas</string>
+    <string name="tv_settings_mdblist_search_hint">Buscar listas de la comunidad\u2026</string>
+    <string name="tv_settings_mdblist_no_results">Sin resultados</string>
+    <string name="tv_settings_mdblist_items">%d elementos</string>
+    <string name="tv_settings_mdblist_by">por %s</string>
+    <string name="tv_settings_mdblist_saved">Listas guardadas</string>
+    <string name="tv_settings_mdblist_no_saved">No hay listas guardadas</string>
+    <string name="tv_settings_mdblist_add">A\u00f1adir</string>
+    <string name="tv_settings_mdblist_added">A\u00f1adido</string>
+    <string name="tv_settings_mdblist_no_api_key">Configura la clave API de MDBList primero</string>
+    <string name="tv_settings_mdblist_loading">Cargando listas\u2026</string>
+
+    <!-- Custom section AI -->
+    <string name="tv_home_layout_ai_prompt">Describe lo que quieres</string>
+    <string name="tv_home_layout_ai_hint">p. ej. pel\u00edculas acogedoras de invierno, thrillers oscuros de sci-fi\u2026</string>
+    <string name="tv_home_layout_ai_search">Buscar con IA</string>
+    <string name="tv_home_layout_ai_searching">Buscando\u2026</string>
+    <string name="tv_home_layout_ai_found">IA encontr\u00f3: %s</string>
+    <string name="tv_home_layout_ai_error">B\u00fasqueda IA fallida \u2014 int\u00e9ntalo de nuevo</string>
+    <string name="tv_home_layout_save">Guardar secci\u00f3n</string>
+    <string name="tv_home_layout_media_type">Tipo de medio</string>
+
+    <!-- Live TV Player -->
+    <string name="tv_live_tv_guide">Gu\u00eda TV</string>
+    <string name="tv_live_history">Historial</string>
+    <string name="tv_live_clear">Borrar</string>
+    <string name="tv_live_next_label">Siguiente:</string>
+    <string name="tv_live_search">Buscar</string>
+    <string name="tv_live_channels_list">Canales</string>
+    <string name="tv_live_channels">Canales</string>
+    <string name="tv_live_recordings">Grabaciones</string>
+    <string name="tv_live_multiview">Multivista</string>
+    <string name="tv_live_pip">PiP</string>
+    <string name="tv_live_coming_soon">Pr\u00f3ximamente</string>
+    <string name="tv_live_no_programme_data">Sin datos de programaci\u00f3n</string>
+    <string name="tv_live_settings">Ajustes</string>
+    <string name="tv_live_playlists">Playlists</string>
+    <string name="tv_live_countries">Pa\u00edses</string>
+    <string name="tv_live_select_all">Seleccionar todo</string>
+    <string name="tv_live_clear_all">Borrar todo</string>
+    <string name="tv_live_current_channel">Canal actual</string>
+    <string name="tv_live_add_favorite">A\u00f1adir %s a favoritos</string>
+    <string name="tv_live_remove_favorite">Quitar %s de favoritos</string>
+    <string name="tv_live_category_visibility">Visibilidad de categor\u00eda</string>
+    <string name="tv_live_hidden">Oculto</string>
+    <string name="tv_live_visible">Visible</string>
+    <string name="tv_live_adult_content">Contenido adulto</string>
+    <string name="tv_live_show_adult">Mostrar canales adultos</string>
+    <string name="tv_live_active">Activo</string>
+
+    <!-- Channel manager -->
+    <string name="tv_settings_manage_channels">Administrar canales</string>
+    <string name="tv_settings_manage_channels_sub">Mostrar u ocultar grupos de canales por pa\u00eds</string>
+    <string name="tv_settings_show_all">Mostrar todo</string>
+    <string name="tv_settings_hide_all">Ocultar todo</string>
+    <string name="tv_settings_channels_visible">%1$d / %2$d visibles</string>
+    <string name="tv_settings_no_categories">No hay grupos de canales cargados \u2014 selecciona una playlist primero</string>
+
+    <string name="tv_settings_refresh_epg_title">Actualizar EPG</string>
+    <string name="tv_settings_refresh_epg_subtitle">Descarga datos nuevos de la gu\u00eda para la playlist seleccionada</string>
+    <string name="tv_settings_refresh_epg_subtitle_loaded">Gu\u00eda lista: %1$d programas en cach\u00e9</string>
+    <string name="tv_settings_refresh_epg_loading">Actualizando gu\u00eda...</string>
+    <string name="tv_settings_refresh_epg_not_configured">A\u00f1ade primero una URL de gu\u00eda a la playlist seleccionada</string>
+    <string name="tv_settings_refresh_epg_started">Actualizaci\u00f3n de EPG iniciada</string>
+
+    <!-- Settings reorganization -->
+    <string name="tv_settings_section_stream_quality">Calidad de stream &amp; reproducci\u00f3n</string>
+    <string name="tv_settings_section_language_region">Idioma &amp; regi\u00f3n</string>
+    <string name="tv_settings_section_content">Gesti\u00f3n de contenido</string>
+    <string name="tv_settings_autoplay">Reproducir mejor stream autom\u00e1ticamente</string>
+    <string name="tv_settings_autoplay_on">Activado \u2014 reproduce el mejor stream autom\u00e1ticamente</string>
+    <string name="tv_settings_autoplay_off">Desactivado \u2014 muestra el selector de stream</string>
+    <string name="tv_settings_autoplay_next">Reproducir siguiente episodio autom\u00e1ticamente</string>
+    <string name="tv_settings_autoplay_next_on">Activado \u2014 el siguiente episodio se reproduce autom\u00e1ticamente</string>
+    <string name="tv_settings_autoplay_next_off">Desactivado \u2014 vuelve a la pantalla de detalles</string>
+    <string name="tv_settings_min_quality">Calidad m\u00ednima</string>
+    <string name="tv_settings_max_quality">Calidad m\u00e1xima</string>
+    <string name="tv_settings_select_quality">Seleccionar calidad</string>
+    <string name="tv_settings_select_language">Seleccionar idioma</string>
+
+    <!-- Library tabs -->
+    <string name="tv_library_tab_watchlist">Lista</string>
+    <string name="tv_library_tab_downloads">Descargas</string>
+    <string name="tv_library_tab_recordings">Grabaciones</string>
+    <string name="tv_library_recordings_coming_soon">Grabaciones de TV en vivo \u2014 pr\u00f3ximamente</string>
+    <string name="tv_library_no_downloads">A\u00fan no hay descargas</string>
+
+    <!-- Download actions -->
+    <string name="tv_action_download">Descargar</string>
+    <string name="tv_action_download_all">Descargar todo</string>
+    <string name="tv_action_download_season">Descargar temporada %d</string>
+    <string name="tv_download_queued">Descarga en cola</string>
+
+    <!-- Addon catalog -->
+    <string name="tv_addon_category_all">Todos</string>
+    <string name="tv_addon_category_streams">Fuentes</string>
+    <string name="tv_addon_category_catalogs">Cat\u00e1logos</string>
+    <string name="tv_addon_category_subtitles">Subt\u00edtulos</string>
+    <string name="tv_addon_suggested">Addons sugeridos</string>
+    <string name="tv_addon_installed">Instalado</string>
+
+    <!-- Search AI mode -->
+    <string name="tv_search_mode_standard">Est\u00e1ndar</string>
+    <string name="tv_search_mode_ai">B\u00fasqueda IA</string>
+    <string name="tv_search_ai_configure">Configurar en Ajustes</string>
+    <string name="tv_search_ai_label">IA: %s</string>
+    <string name="tv_search_ai_fallback">IA no disponible, mostrando resultados est\u00e1ndar</string>
+    <string name="tv_iptv_filter_chip">Filtro: %s</string>
+    <string name="tv_iptv_sort_chip">Orden: %s</string>
+    <string name="tv_iptv_search_prompt">Buscar</string>
+    <string name="tv_iptv_search_query">B\u00fasqueda: %s</string>
+    <string name="tv_iptv_preview_idle">Ning\u00fan canal seleccionado</string>
+    <string name="tv_iptv_lists_title">Filtros de lista</string>
+    <string name="tv_iptv_manage_channels">Administrar canales</string>
+    <string name="tv_iptv_countries_all">Pa\u00edses: Todos</string>
+    <string name="tv_iptv_countries_selected">Pa\u00edses: %d seleccionados</string>
+    <string name="tv_iptv_country_filter_title">Filtro por pa\u00eds</string>
+    <string name="tv_iptv_country_select_all">Seleccionar todos los pa\u00edses</string>
+    <string name="tv_iptv_country_clear_all">Borrar filtro de pa\u00edses</string>
+    <string name="tv_iptv_country_included">Incluido</string>
+    <string name="tv_iptv_country_filtered">Excluido</string>
+    <string name="tv_iptv_country_search_prompt">Buscar pa\u00edses</string>
+    <string name="tv_iptv_country_search_query">B\u00fasqueda: %s</string>
+    <string name="tv_iptv_country_no_results">No se encontraron pa\u00edses</string>
+    <string name="tv_iptv_country_include_visible">Incluir visibles</string>
+
+    <string name="tv_settings_enabled">Activado</string>
+    <string name="tv_settings_disabled">Desactivado</string>
+    <string name="tv_settings_live_audio_mode">Modo de audio en vivo</string>
+    <string name="tv_settings_live_audio_passthrough">Audio passthrough</string>
+    <string name="tv_settings_live_audio_surround">Preferir codecs surround</string>
+
+    <string name="tv_live_search_hint">Escribe para buscar canales</string>
+    <string name="tv_live_search_query">B\u00fasqueda: %s</string>
+    <string name="tv_live_search_clear_hint">Retroceso para borrar</string>
+    <string name="tv_live_no_channels_in_list">No hay canales que coincidan</string>
+    <string name="tv_live_mini_preview_title">Vista previa en vivo</string>
+    <string name="tv_live_mini_preview_subtitle">La reproducci\u00f3n contin\u00faa mientras exploras</string>
+    <string name="tv_live_no_channel_playing">Ning\u00fan canal reproduci\u00e9ndose</string>
+    <string name="tv_live_favorite_hint">Mant\u00e9n OK o presiona Men\u00fa para favoritos</string>
+    <string name="tv_live_audio_output">Salida de audio</string>
+    <string name="tv_live_audio_mode_auto">Autom\u00e1tico</string>
+    <string name="tv_live_audio_mode_compatible">Preferir audio compatible</string>
+    <string name="tv_live_audio_mode_stereo">Forzar est\u00e9reo / PCM</string>
+    <string name="tv_live_audio_passthrough">Activar passthrough</string>
+    <string name="tv_live_audio_passthrough_desc">Enviar AC3/EAC3/DTS al AVR cuando sea compatible</string>
+    <string name="tv_live_audio_prefer_surround">Preferir pistas surround</string>
+    <string name="tv_live_audio_prefer_surround_desc">Priorizar audio multicanal sobre est\u00e9reo</string>
+    <string name="tv_notification_device_removed_data_cleared">Este televisor fue eliminado de tus dispositivos activos. Se borraron los datos locales de Torve.</string>
+    <string name="tv_notification_setup_sync_premium_verify_failed">Setup sync could not refresh account access on this TV.</string>
+    <string name="tv_notification_setup_sync_premium_device_blocked">Setup sync is waiting for this TV device registration.</string>
+    <string name="tv_notification_setup_sync_premium_required">This TV needs account setup before receiving setup sync.</string>
+    <string name="tv_notification_setup_sync_premium_offline">Connect to Torve before receiving setup sync.</string>
+    <string name="tv_notification_invalid_settings_data">Datos de configuraci\u00f3n no v\u00e1lidos: %1$s</string>
+    <string name="tv_notification_sync_import_failed">Error al importar sincronizaci\u00f3n: %1$s</string>
+    <string name="tv_notification_settings_synced">Configuraci\u00f3n sincronizada: %1$s</string>
+    <string name="tv_notification_sync_no_changes">sin cambios</string>
+    <string name="tv_notification_sync_summary_addons">%1$d complementos</string>
+    <string name="tv_notification_sync_summary_preferences">%1$d preferencias</string>
+    <string name="tv_notification_sync_summary_integrations">%1$d integraciones</string>
+    <string name="tv_notification_sync_summary_playlists">%1$d listas</string>
+    <string name="tv_notification_sync_summary_favorites">%1$d favoritos</string>
+    <string name="tv_notification_sync_summary_progress">%1$d entradas de progreso</string>
+    <string name="tv_notification_sync_error">Error de sincronizaci\u00f3n: %1$s</string>
+    <string name="tv_notification_downloads_completed">%1$d descargas completadas</string>
+    <string name="tv_unlock_purchase_phone_title">Torve is free software</string>
+    <string name="tv_unlock_purchase_phone_body">Torve is free software. No subscriptions. No paid tiers.</string>
+    <string name="tv_action_got_it">Entendido</string>
+    <string name="tv_home_on_now">En directo ahora</string>
+    <string name="tv_home_available_now">Disponible ahora</string>
+    <string name="tv_home_downloads_on_desktop">Descargas en escritorio</string>
+    <string name="tv_home_recently_added_sources">A\u00f1adido recientemente desde mis fuentes</string>
+    <string name="tv_pairing_sign_in_title">Inicia sesi\u00f3n con tu tel\u00e9fono</string>
+    <string name="tv_pairing_sign_in_desc">Escanea este c\u00f3digo QR con la app Torve de tu tel\u00e9fono, o abre Ajustes &gt; Dispositivos e introduce el c\u00f3digo de abajo.</string>
+    <string name="tv_pairing_preparing_code">Preparando c\u00f3digo de inicio...</string>
+    <string name="tv_pairing_code_expired_title">C\u00f3digo caducado</string>
+    <string name="tv_pairing_code_expired_desc">El c\u00f3digo de emparejamiento caduc\u00f3. Genera uno nuevo e int\u00e9ntalo otra vez.</string>
+    <string name="tv_pairing_generate_new_code">Generar c\u00f3digo nuevo</string>
+    <string name="tv_pairing_welcome_format">Bienvenido%1$s!</string>
+    <string name="tv_pairing_error_title">No se pudo iniciar sesi\u00f3n</string>
+    <string name="tv_pairing_try_again">Intentar de nuevo</string>
+    <string name="tv_pairing_qr_content_description">C\u00f3digo QR de inicio de sesi\u00f3n</string>
+    <string name="tv_pairing_qr_unavailable">QR no disponible</string>
+    <string name="tv_pairing_waiting_phone">Esperando tu tel\u00e9fono...</string>
+    <string name="tv_panda_close_setup">Cerrar configuraci\u00f3n</string>
+    <string name="tv_panda_exit_setup">Salir de la configuraci\u00f3n</string>
+    <string name="tv_settings_account_syncing">Sincronizando configuraci\u00f3n de la cuenta...</string>
+    <string name="tv_settings_account_sync_failed_retry">Fall\u00f3 la \u00faltima sincronizaci\u00f3n. Toca para reintentar.</string>
+    <string name="tv_settings_account_sync_synced">Configuraci\u00f3n sincronizada mediante inicio de sesi\u00f3n.</string>
+    <string name="tv_settings_account_sync_tap_sync">Toca para sincronizar la configuraci\u00f3n compartida de tu cuenta.</string>
+    <string name="tv_settings_account_refreshed">Configuraci\u00f3n de cuenta actualizada.</string>
+    <string name="tv_auth_failed_to_send">No se pudo enviar</string>
+    <string name="tv_auth_account_created_verify">Cuenta creada. Revisa tu correo para verificar la direcci\u00f3n.</string>
+    <string name="tv_auth_logged_in">Sesi\u00f3n iniciada.</string>
+    <string name="tv_auth_failed">Error</string>
+    <string name="tv_auth_email_required">Introduce primero tu correo</string>
+    <string name="tv_auth_email_unverified">%1$s (sin verificar)</string>
+    <string name="tv_auth_sign_out_confirm">Pulsa otra vez para cerrar sesi\u00f3n en este televisor</string>
+    <string name="tv_auth_sign_out_desc">Cerrar sesi\u00f3n de tu cuenta Torve</string>
+    <string name="tv_auth_logged_out">Sesi\u00f3n cerrada</string>
+    <string name="tv_auth_sign_out_second_press_hint">Requiere una segunda pulsaci\u00f3n para evitar cerrar sesi\u00f3n por accidente.</string>
+    <string name="tv_settings_pair_phone_title">Inicia sesi\u00f3n con tu tel\u00e9fono</string>
+    <string name="tv_settings_pair_phone_subtitle">Escanea un QR con la app Torve de tu tel\u00e9fono - sin escribir.</string>
+    <string name="tv_purchase_verifying_premium">Access refresh received.</string>
+    <string name="tv_purchase_restore_started">Access refresh started.</string>
+    <string name="tv_purchase_cancelled">No purchase required.</string>
+    <string name="tv_purchase_verification_pending">Account access refresh is already pending.</string>
+    <string name="tv_purchase_billing_managed_by">No billing is required.</string>
+    <string name="tv_purchase_choose_billing_store">Torve is free software. No billing is required.</string>
+    <string name="tv_settings_receive_credentials_import_desc">Muestra un c\u00f3digo de emparejamiento \u00fanico para importar secretos de Debrid, Plex y Panda sin escribir.</string>
+    <string name="tv_settings_receive_credentials_tv_desc">Muestra un c\u00f3digo de emparejamiento \u00fanico para que un escritorio o tel\u00e9fono env\u00ede credenciales de Debrid, Plex y Panda sin escribir con el mando.</string>
+    <string name="tv_settings_open_transfer_arrow">Abrir transferencia &gt;</string>
+    <string name="tv_settings_open_diagnostics_arrow">Abrir diagn\u00f3sticos &gt;</string>
+    <string name="tv_settings_debrid_connecting_to">Conectando con %1$s...</string>
+    <string name="tv_settings_debrid_visit_url">Visita: %1$s</string>
+    <string name="tv_settings_debrid_enter_code">Introduce el c\u00f3digo: %1$s</string>
+    <string name="tv_settings_debrid_cancel_auth_desc">Dejar de esperar autorizaci\u00f3n del dispositivo</string>
+    <string name="tv_settings_debrid_disconnect_desc">Eliminar credenciales guardadas</string>
+    <string name="tv_settings_debrid_reauth">Reautenticar</string>
+    <string name="tv_settings_debrid_reauth_desc">Obtener un token nuevo con c\u00f3digo de dispositivo</string>
+    <string name="tv_settings_realdebrid_authorize_desc">Autorizar con c\u00f3digo de dispositivo - visita la URL mostrada en cualquier dispositivo</string>
+    <string name="tv_settings_opensubtitles_api_key">Clave API de OpenSubtitles</string>
+    <string name="tv_settings_stats_summary">%1$d pel\u00edculas &#183; %2$d episodios &#183; %3$dh vistas</string>
+    <string name="tv_settings_transport_status">Transporte: %1$s</string>
+    <string name="tv_vod_rating_value">Valoraci\u00f3n %1$s</string>
+    <!-- Added translations for recently introduced strings. -->
+    <string name="tv_library_tab_vod">VOD</string>
+</resources>

@@ -1,0 +1,38 @@
+Torve — Privacy Disclosure Matrix
+===================================
+
+                          Google Play    Amazon Fire TV    iOS App Store
+                          (mobile+TV)
+Firebase Analytics        YES            NO                NO
+Firebase Crashlytics      YES            NO                NO
+Advertising SDKs          NO             NO                NO
+Advertising ID (GAID)     NO             NO                NO
+TMDB API (metadata)       YES            YES               YES
+Trakt.tv (user-initiated) YES            YES               YES
+SIMKL (user-initiated)    YES            YES               YES
+AI Providers (user keys)  YES            YES               YES
+Cloud/Debrid services     YES            YES               YES
+Jellyfin/Plex (LAN)      YES            YES               YES
+Kodi (LAN)               YES            YES               YES
+iCloud Sync               NO             NO                YES (optional)
+
+DATA TYPES COLLECTED (Google Play Data Safety):
+- Crash logs (Crashlytics) — automatic, encrypted in transit
+- App interactions (Analytics) — automatic, encrypted in transit
+- Device identifiers (Analytics) — automatic, encrypted in transit
+- NO names, emails, phone numbers, or payment info collected by the app
+- NO data shared with third parties for advertising
+- NO data used for cross-app tracking
+
+APPLE APP PRIVACY (Nutrition Labels):
+- "Data Not Collected" — correct for iOS build
+  (no Firebase, no analytics, no crash SDKs)
+
+AMAZON APPSTORE:
+- No analytics or telemetry SDKs included
+- Privacy disclosure: data stored on-device only
+
+IN-APP PRIVACY POLICY TEXT:
+- Android: Section 3 now discloses Firebase Analytics + Crashlytics for Google Play builds
+- Android: Section 3 notes Amazon builds have no analytics
+- iOS: "Data We Do NOT Collect" section updated — confirms no analytics SDKs in iOS build

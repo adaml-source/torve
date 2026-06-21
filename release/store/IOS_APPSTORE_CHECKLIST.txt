@@ -1,0 +1,49 @@
+iOS App Store - Submission Checklist
+====================================
+
+Positioning
+-----------
+[ ] Listing states: Torve is free software.
+[ ] Listing states: no subscriptions, no paid tiers, no premium features, no in-app purchases, no purchase required.
+[ ] Remove IAP and subscription products from App Store Connect.
+[ ] Remove paywall, premium, restore-purchase, subscription, and purchase screenshots/copy.
+[ ] Donation links remain hidden by default unless policy-reviewed.
+
+Build
+-----
+[x] CFBundleDisplayName: Torve
+[x] ATS allows local networking while external traffic remains HTTPS-only
+[ ] Set PRODUCT_BUNDLE_IDENTIFIER in Xcode project
+[ ] Configure Apple Developer signing
+[ ] Archive and upload via Xcode or xcodebuild on macOS
+
+Privacy - App Store Connect
+---------------------------
+[ ] Complete privacy nutrition labels.
+[ ] Privacy policy URL in App Store Connect.
+[ ] Confirm no analytics or crash SDKs are included unless policy/docs are updated.
+
+Store Listing
+-------------
+[ ] App name: Torve
+[ ] Subtitle
+[ ] Description
+[ ] Keywords
+[ ] App icon
+[ ] iPhone screenshots
+[ ] iPad screenshots if supporting iPad
+[ ] Category: Entertainment
+[ ] Content rating questionnaire
+
+App Review Notes
+----------------
+[ ] Explain that the app connects to user-configured media servers and services.
+[ ] Provide demo instructions if needed.
+[ ] State that there are no subscriptions, no IAP, and no paywall.
+
+Testing
+-------
+[ ] Test on physical iPhone.
+[ ] Test on iPad if universal.
+[ ] Verify no StoreKit purchase, receipt, restore, or paywall path appears.
+[ ] Verify donation links are hidden by default.

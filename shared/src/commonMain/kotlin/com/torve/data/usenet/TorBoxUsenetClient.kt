@@ -1,0 +1,257 @@
+package com.torve.data.usenet
+
+import io.ktor.client.HttpClient
+import io.ktor.client.request.get
+import io.ktor.client.request.header
+import io.ktor.client.request.post
+import io.ktor.client.request.setBody
+import io.ktor.client.statement.bodyAsBytes
+import io.ktor.client.statement.bodyAsText
+import io.ktor.http.HttpHeaders
+import io.ktor.http.HttpStatusCode
+import io.ktor.http.isSuccess
+import kotlinx.coroutines.delay
+import kotlinx.datetime.Clock
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
+
+/**
+ * Direct TorBox Usenet integration shared between the desktop and TV
+ * Sports surfaces. KMP-friendly Ktor rewrite of the previous JVM-only
+ * `desktop.adult.TorBoxUsenetClient`.
+ *
+ * Flow when a user clicks "Play" on a Newznab result:
+ *  1. Fetch the NZB XML content from the indexer URL.
+ *  2. POST it as multipart to `/api/v1/api/usenet/createusenetdownload`.
+ *  3. Poll `/api/v1/api/usenet/mylist?id=...` until `download_state`
+ *     is `"completed"` (or one of TorBox's terminal-success synonyms).
+ *  4. Pick the largest video file in the result.
+ *  5. GET `/api/v1/api/usenet/requestdl?token=...&usenet_id=...&file_id=...`
+ *     for a streamable URL.
+ *
+ * All errors collapse to a [Result.failure] with a short
+ * human-readable reason — the caller surfaces them to the user.
+ */
+class TorBoxUsenetClient(
+    private val httpClient: HttpClient,
+) {
+    private val json = Json { ignoreUnknownKeys = true; isLenient = true }
+
+    /**
+     * Resolve a Newznab NZB URL to a TorBox-served stream URL.
+     * [onStatus] is fired with short status updates (the caller
+     * surfaces them in the row UI) — e.g. "Uploading NZB",
+     * "TorBox preparing 35%", "Resolving link".
+     */
+    suspend fun resolve(
+        nzbUrl: String,
+        torboxApiKey: String,
+        onStatus: (String) -> Unit,
+    ): Result<ResolvedNzb> = runCatching {
+        require(nzbUrl.isNotBlank()) { "NZB URL is empty" }
+        require(torboxApiKey.isNotBlank()) { "TorBox API key not set" }
+
+        onStatus("Downloading NZB from indexer…")
+        val nzbBytes = fetchBytes(nzbUrl)
+            ?: error("Could not download NZB file from indexer")
+
+        onStatus("Uploading NZB to TorBox…")
+        val createResp = uploadNzbMultipart(torboxApiKey, nzbBytes)
+        val usenetId = parseCreateResponse(createResp)
+            ?: run {
+                val friendly = parseTorBoxError(createResp)
+                if (friendly != null) error(friendly)
+                else error("TorBox upload failed (response: ${createResp.take(160)})")
+            }
+
+        onStatus("TorBox queued · waiting…")
+        val info = pollUntilReady(torboxApiKey, usenetId, onStatus)
+        val files = info.files
+        require(files.isNotEmpty()) { "TorBox download has no files" }
+
+        val target = files
+            .filter { isPlayableVideo(it.name) }
+            .maxByOrNull { it.size }
+            ?: files.maxByOrNull { it.size }
+            ?: files.first()
+
+        onStatus("Resolving stream link…")
+        val streamUrl = requestDownloadUrl(torboxApiKey, usenetId, target.id)
+            ?: error("TorBox returned no download URL for file id ${target.id}")
+
+        ResolvedNzb(streamUrl = streamUrl, fileName = target.name, sizeBytes = target.size)
+    }
+
+    private suspend fun fetchBytes(url: String): ByteArray? = try {
+        val response = httpClient.get(url)
+        if (response.status.isSuccess()) response.bodyAsBytes() else null
+    } catch (_: Throwable) {
+        null
+    }
+
+    private suspend fun uploadNzbMultipart(apiKey: String, nzbBytes: ByteArray): String {
+        // Hand-rolled multipart so we don't depend on Ktor's
+        // forms.MultiPartFormDataContent (which has had occasional
+        // chunked-encoding quirks against TorBox specifically). Format
+        // matches the desktop client byte-for-byte.
+        val boundary = "torve-${randomBoundaryToken()}"
+        val partHeader = ("--$boundary\r\n" +
+            "Content-Disposition: form-data; name=\"file\"; filename=\"upload.nzb\"\r\n" +
+            "Content-Type: application/x-nzb\r\n\r\n").encodeToByteArray()
+        val partFooter = "\r\n--$boundary--\r\n".encodeToByteArray()
+        val body = partHeader + nzbBytes + partFooter
+
+        return try {
+            val response = httpClient.post(
+                "https://api.torbox.app/v1/api/usenet/createusenetdownload",
+            ) {
+                header(HttpHeaders.Authorization, "Bearer $apiKey")
+                header(HttpHeaders.ContentType, "multipart/form-data; boundary=$boundary")
+                setBody(body)
+            }
+            response.bodyAsText()
+        } catch (t: Throwable) {
+            "{\"success\":false,\"error\":\"NETWORK\",\"detail\":\"${t.message ?: "request failed"}\"}"
+        }
+    }
+
+    private fun parseCreateResponse(body: String): String? = runCatching {
+        val root = json.parseToJsonElement(body).jsonObject
+        val data = root["data"]?.jsonObject ?: return@runCatching null
+        // TorBox sometimes uses `usenetdownload_id`, sometimes just `id`.
+        (data["usenetdownload_id"] ?: data["id"])?.jsonPrimitive?.content
+    }.getOrNull()
+
+    /**
+     * Pull a human-friendly message from a TorBox error envelope.
+     * Bodies look like:
+     *   {"success":false,"error":"BAD_TOKEN","detail":"...","data":null}
+     * Surface `detail` first (most readable), then `error` (machine
+     * code), then null if neither is present.
+     */
+    private fun parseTorBoxError(body: String): String? = runCatching {
+        val root = json.parseToJsonElement(body).jsonObject
+        val detail = root["detail"]?.jsonPrimitive?.content
+        val errorCode = root["error"]?.jsonPrimitive?.content
+        when {
+            !detail.isNullOrBlank() && !errorCode.isNullOrBlank() -> "$detail (code: $errorCode)"
+            !detail.isNullOrBlank() -> detail
+            !errorCode.isNullOrBlank() -> "TorBox error: $errorCode"
+            else -> null
+        }
+    }.getOrNull()
+
+    /** Heuristic — was the failure an auth issue the user can fix by rotating their key? */
+    fun isAuthError(message: String?): Boolean {
+        if (message.isNullOrBlank()) return false
+        val lower = message.lowercase()
+        return "bad_token" in lower ||
+            "invalid" in lower && "token" in lower ||
+            "expired" in lower && "token" in lower ||
+            "unauthorized" in lower ||
+            "401" in lower
+    }
+
+    private suspend fun pollUntilReady(
+        apiKey: String,
+        usenetId: String,
+        onStatus: (String) -> Unit,
+    ): UsenetInfo {
+        val deadlineMs = Clock.System.now().toEpochMilliseconds() + 5 * 60 * 1000L  // 5min
+        var lastProgress: Int? = null
+        while (Clock.System.now().toEpochMilliseconds() < deadlineMs) {
+            val info = fetchUsenetInfo(apiKey, usenetId)
+            if (info != null) {
+                val state = info.state.lowercase()
+                val terminalSuccess = state == "completed" ||
+                    state == "downloaded" ||
+                    state == "uploaded" ||
+                    info.progress >= 100
+                if (terminalSuccess && info.files.isNotEmpty()) return info
+                if (state.contains("error") || state.contains("fail")) {
+                    error("TorBox reports state=${info.state} for this NZB")
+                }
+                if (info.progress != lastProgress) {
+                    lastProgress = info.progress
+                    onStatus("TorBox preparing · ${info.state} · ${info.progress}%")
+                }
+            }
+            delay(2000)
+        }
+        error("TorBox didn't finish preparing within 5 minutes")
+    }
+
+    private suspend fun fetchUsenetInfo(apiKey: String, usenetId: String): UsenetInfo? = runCatching {
+        val response = httpClient.get("https://api.torbox.app/v1/api/usenet/mylist?id=$usenetId") {
+            header(HttpHeaders.Authorization, "Bearer $apiKey")
+        }
+        if (!response.status.isSuccess()) return@runCatching null
+        val body = response.bodyAsText()
+        val root = json.parseToJsonElement(body).jsonObject
+        val dataEl = root["data"] ?: return@runCatching null
+        val obj = if (dataEl.toString().startsWith("[")) {
+            dataEl.jsonArray.firstOrNull()?.jsonObject ?: return@runCatching null
+        } else dataEl.jsonObject
+        UsenetInfo(
+            state = obj["download_state"]?.jsonPrimitive?.content
+                ?: obj["state"]?.jsonPrimitive?.content
+                ?: "unknown",
+            progress = (obj["progress"]?.jsonPrimitive?.content?.toFloatOrNull()?.toInt())
+                ?: (obj["download_progress"]?.jsonPrimitive?.content?.toFloatOrNull()?.toInt())
+                ?: 0,
+            files = (obj["files"]?.jsonArray ?: return@runCatching null).mapNotNull { fEl ->
+                val f = fEl.jsonObject
+                val id = f["id"]?.jsonPrimitive?.content ?: return@mapNotNull null
+                val name = f["name"]?.jsonPrimitive?.content
+                    ?: f["short_name"]?.jsonPrimitive?.content
+                    ?: return@mapNotNull null
+                val size = f["size"]?.jsonPrimitive?.content?.toLongOrNull() ?: 0L
+                UsenetFile(id = id, name = name, size = size)
+            },
+        )
+    }.getOrNull()
+
+    private suspend fun requestDownloadUrl(
+        apiKey: String,
+        usenetId: String,
+        fileId: String,
+    ): String? = runCatching {
+        val response = httpClient.get(
+            "https://api.torbox.app/v1/api/usenet/requestdl?token=$apiKey&usenet_id=$usenetId&file_id=$fileId",
+        ) {
+            header(HttpHeaders.Authorization, "Bearer $apiKey")
+        }
+        if (!response.status.isSuccess()) return@runCatching null
+        val body = response.bodyAsText()
+        // TorBox returns either {"data": "https://..."} or a JSON
+        // object with `data.data`. Walk both.
+        runCatching {
+            val root = json.parseToJsonElement(body).jsonObject
+            (root["data"]?.jsonPrimitive?.content)
+                ?: root["data"]?.jsonObject?.get("data")?.jsonPrimitive?.content
+                ?: root["url"]?.jsonPrimitive?.content
+        }.getOrNull() ?: body.takeIf { it.startsWith("http") }?.trim()
+    }.getOrNull()
+
+    private fun isPlayableVideo(name: String): Boolean {
+        val lower = name.lowercase()
+        return listOf(".mp4", ".mkv", ".m4v", ".avi", ".mov", ".webm", ".ts").any { lower.endsWith(it) }
+    }
+
+    /**
+     * Random alphanumeric token for the multipart boundary. Doesn't
+     * need to be cryptographically secure — just unique within the
+     * request. Hand-rolled so we don't reach for `java.util.UUID`
+     * (JVM-only) on the iOS / mobile callsites.
+     */
+    private fun randomBoundaryToken(): String {
+        val charset = "abcdefghijklmnopqrstuvwxyz0123456789"
+        return (1..16).map { charset.random() }.joinToString("")
+    }
+
+    data class ResolvedNzb(val streamUrl: String, val fileName: String, val sizeBytes: Long)
+    data class UsenetInfo(val state: String, val progress: Int, val files: List<UsenetFile>)
+    data class UsenetFile(val id: String, val name: String, val size: Long)
+}
