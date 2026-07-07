@@ -93,6 +93,7 @@ import com.torve.android.catalog.CatalogRailsBootstrapPayload
 import com.torve.android.catalog.CatalogRailsBootstrapRail
 import com.torve.android.catalog.PUBLIC_CATALOG_RAILS_USER_ID
 import com.torve.android.catalog.catalogRailsBootstrapKey
+import com.torve.android.tv.isTvCatalogProgress
 import com.torve.data.ai.KeywordSearchResult
 import com.torve.data.ai.KeywordSearchService
 import com.torve.data.auth.AuthClient
@@ -131,10 +132,24 @@ private data class CatalogRailsUiState(
     val error: String? = null,
 )
 
+private object TvCatalogRailsSessionCache {
+    private val lastGoodStates = mutableMapOf<String, CatalogRailsUiState>()
+
+    fun get(key: String): CatalogRailsUiState? =
+        lastGoodStates[key]?.takeIf { it.rails.isNotEmpty() }
+
+    fun put(key: String, state: CatalogRailsUiState) {
+        if (state.rails.isNotEmpty()) {
+            lastGoodStates[key] = state.copy(loading = false, error = null)
+        }
+    }
+}
+
 private const val TV_CATALOG_RAIL_ITEM_LIMIT = 24
 private const val TV_CATALOG_RAIL_CANDIDATE_LIMIT = TV_CATALOG_RAIL_ITEM_LIMIT * 4
 private const val TV_CATALOG_TOP_RATED_MIN_RATING = 7.0
 private const val TV_CATALOG_TOP_RATED_MIN_VOTES = 200
+private const val TV_CATALOG_TOP_RATED_MIN_RT = 70
 private val TV_CATALOG_RAIL_RETRY_DELAYS_MS = listOf(0L, 2_500L, 5_000L, 10_000L, 20_000L)
 
 private data class GenreSpec(val id: Int, val label: String)
@@ -326,12 +341,26 @@ internal fun TvCatalogRailsScreen(
 
     val cacheKey = "catalog_${mediaType}_trusted_v4"
     var uiState by remember {
-        mutableStateOf(TvScreenCache.get<CatalogRailsUiState>(cacheKey) ?: CatalogRailsUiState())
+        mutableStateOf(
+            TvScreenCache.get<CatalogRailsUiState>(cacheKey)
+                ?.takeIf { it.rails.isNotEmpty() }
+                ?: TvCatalogRailsSessionCache.get(cacheKey)
+                ?: CatalogRailsUiState(),
+        )
     }
 
     LaunchedEffect(mediaType) {
-        if (uiState.rails.isNotEmpty()) return@LaunchedEffect
-        uiState = CatalogRailsUiState(loading = true)
+        if (uiState.rails.isNotEmpty()) {
+            TvCatalogRailsSessionCache.put(cacheKey, uiState)
+            return@LaunchedEffect
+        }
+        val previousGoodState = uiState
+            .takeIf { it.rails.isNotEmpty() }
+            ?: TvScreenCache.get<CatalogRailsUiState>(cacheKey)
+                ?.takeIf { it.rails.isNotEmpty() }
+            ?: TvCatalogRailsSessionCache.get(cacheKey)
+        uiState = previousGoodState?.copy(loading = true, error = null)
+            ?: CatalogRailsUiState(loading = true)
 
         var lastState = CatalogRailsUiState(loading = true)
         TV_CATALOG_RAIL_RETRY_DELAYS_MS.forEachIndexed { attempt, delayMs ->
@@ -359,6 +388,7 @@ internal fun TvCatalogRailsScreen(
             if (loadedState.rails.isNotEmpty()) {
                 uiState = loadedState
                 TvScreenCache.put(cacheKey, loadedState)
+                TvCatalogRailsSessionCache.put(cacheKey, loadedState)
                 return@LaunchedEffect
             }
             lastState = loadedState
@@ -376,8 +406,21 @@ internal fun TvCatalogRailsScreen(
             loading = false,
             error = lastState.error ?: catalogContentLoadErrorMessage(mediaType),
         )
-        uiState = finalState
-        TvScreenCache.put(cacheKey, finalState)
+        if (previousGoodState != null) {
+            Log.w(
+                "TvCatalogRails",
+                "keeping previous non-empty rails after empty reload mediaType=$mediaType " +
+                    "previousRails=${previousGoodState.rails.size} error=${finalState.error ?: "none"}",
+            )
+            uiState = previousGoodState.copy(loading = false, error = null)
+            TvScreenCache.put(cacheKey, uiState)
+            TvCatalogRailsSessionCache.put(cacheKey, uiState)
+        } else {
+            uiState = finalState
+            // Do not cache empty/error catalog states. A transient TMDB,
+            // ratings, or bootstrap miss must not poison the Movies/Shows
+            // tab for the rest of the process while the hero cache survives.
+        }
     }
 
     /*
@@ -448,6 +491,7 @@ internal fun TvCatalogRailsScreen(
         if (railsRatingsChanged(uiState.rails, hydrated)) {
             uiState = uiState.copy(rails = hydrated)
             TvScreenCache.put(cacheKey, uiState)
+            TvCatalogRailsSessionCache.put(cacheKey, uiState)
         }
     }
 
@@ -488,6 +532,7 @@ internal fun TvCatalogRailsScreen(
                         uiState = uiState.copy(rails = enrichedRails)
                     }
                     TvScreenCache.put(cacheKey, uiState)
+                    TvCatalogRailsSessionCache.put(cacheKey, uiState)
                 }
                 val remainingMs = ratingsEnricher.rateLimitRemainingMs()
                 if (remainingMs <= 0L) break
@@ -527,7 +572,7 @@ internal fun TvCatalogRailsScreen(
             items = items,
             cardStyle = TvCardStyle.BACKDROP,
             progressByMediaId = homeState.continueWatching
-                .filter { it.mediaType == targetMediaType && it.progressPercent > 0f }
+                .filter { it.isTvCatalogProgress() && it.mediaType == targetMediaType && it.progressPercent > 0f }
                 .associate { it.mediaId to it.progressPercent },
         )
     }
@@ -608,7 +653,7 @@ internal fun TvCatalogRailsScreen(
         }
     }
 
-    val filteredRails = remember(uiState.rails, maxContentRating, displayInjectedRails) {
+    val filteredRails = remember(uiState.rails, uiState.loading, maxContentRating, displayInjectedRails) {
         val catalogRails = if (maxContentRating == null) {
             uiState.rails
         } else {
@@ -617,7 +662,11 @@ internal fun TvCatalogRailsScreen(
                 if (filtered.isEmpty()) null else rail.copy(items = filtered)
             }
         }
-        displayInjectedRails + catalogRails
+        if (uiState.loading && catalogRails.isEmpty()) {
+            emptyList()
+        } else {
+            displayInjectedRails + catalogRails
+        }
     }
 
     val defaultHeroItem = remember(filteredRails, mediaType) {
@@ -1654,8 +1703,7 @@ private fun List<MediaItem>.sortedCatalogSearchItems(sort: CatalogSearchSort): L
 
 private fun MediaItem.catalogSearchRatingValue(): Double =
     ratings?.imdbScore?.toDouble()
-        ?: ratings?.tmdbScore?.toDouble()
-        ?: rating
+        ?: ratings?.rottenTomatoesScore?.toDouble()?.div(10.0)
         ?: 0.0
 
 private fun MediaItem.catalogSearchStableKey(): String = "${type.name}:${tmdbId ?: id}"
@@ -1913,7 +1961,7 @@ private fun TvCatalogSearchResultCard(
                     item.ratings.withFallbackTmdbScore(item.rating)?.let { ratings ->
                         PreferredRatingPills(
                             ratings = ratings,
-                            prefs = ratingPrefs,
+                            prefs = ratingPrefs.tvExternalCardRatingPrefs(),
                         )
                     }
                     item.overview?.takeIf { it.isNotBlank() }?.let { overview ->
@@ -1961,7 +2009,7 @@ private fun TvCatalogSearchResultCard(
                 item.ratings.withFallbackTmdbScore(item.rating)?.let { ratings ->
                     PreferredRatingPills(
                         ratings = ratings,
-                        prefs = ratingPrefs,
+                        prefs = ratingPrefs.tvExternalCardRatingPrefs(),
                         modifier = Modifier
                             .align(Alignment.BottomEnd)
                             .padding(7.dp),
@@ -2114,7 +2162,6 @@ private fun List<TvContentRail>.finalizeCatalogRails(
 ): List<TvContentRail> {
     if (isEmpty()) return emptyList()
     val selectedByKey = linkedMapOf<String, List<MediaItem>>()
-    val seen = linkedSetOf<String>()
     val railsByPriority = sortedWith(
         compareBy<TvContentRail> { catalogRailPriority(it.key) }
             .thenBy { indexOfFirst { candidate -> candidate.key == it.key }.takeIf { index -> index >= 0 } ?: Int.MAX_VALUE },
@@ -2133,12 +2180,11 @@ private fun List<TvContentRail>.finalizeCatalogRails(
                 continue
             }
             val identity = item.catalogDedupeIdentity()
-            if (!locallySeen.add(identity) || identity in seen) {
+            if (!locallySeen.add(identity)) {
                 removedByDedupe++
                 continue
             }
             selected += item
-            seen += identity
             if (selected.size >= targetCount) break
         }
 
@@ -2174,7 +2220,7 @@ private fun catalogRailPriority(key: String): Int = when {
 private fun catalogRailTrustedSource(key: String): String = when {
     key.startsWith("trending_") -> "tmdb.trending"
     key.startsWith("popular_") -> "tmdb.popular"
-    key.startsWith("top_rated_") -> "tmdb.top_rated"
+    key.startsWith("top_rated_") -> "external.imdb_rt"
     key == "now-playing" -> "tmdb.now_playing"
     key == "upcoming" -> "tmdb.upcoming"
     key == "airing_today_tv" -> "tmdb.airing_today"
@@ -2210,21 +2256,20 @@ private fun String.normalizedCatalogTitle(): String {
 
 private fun MediaItem.passesCatalogRailQuality(railKey: String): Boolean {
     if (!railKey.startsWith("top_rated_")) return true
-    val ratings = ratings.withFallbackTmdbScore(rating)
-    val imdbScore = ratings?.imdbScore?.toDouble() ?: return false
-    val imdbVotes = ratings.imdbVotes ?: return false
-    return imdbScore >= TV_CATALOG_TOP_RATED_MIN_RATING &&
+    val ratings = ratings ?: return false
+    val imdbScore = ratings.imdbScore?.toDouble()
+    val imdbVotes = ratings.imdbVotes ?: 0
+    val rtScore = ratings.rottenTomatoesScore
+    val passesImdb = imdbScore != null &&
+        imdbScore >= TV_CATALOG_TOP_RATED_MIN_RATING &&
         imdbVotes >= TV_CATALOG_TOP_RATED_MIN_VOTES
+    val passesRt = rtScore != null && rtScore >= TV_CATALOG_TOP_RATED_MIN_RT
+    return passesImdb || passesRt
 }
 
 private fun MediaItem.passesCatalogRailCandidateQuality(railKey: String): Boolean {
     if (!railKey.startsWith("top_rated_")) return true
-    val candidateScore = listOfNotNull(
-        rating,
-        ratings?.tmdbScore?.toDouble(),
-        ratings?.imdbScore?.toDouble(),
-    ).maxOrNull() ?: return true
-    return candidateScore >= 6.5
+    return true
 }
 
 private fun isUsableCatalogBootstrap(
@@ -2317,7 +2362,7 @@ private suspend fun loadCatalogRailItems(
             when (spec.special) {
                 "trending" -> metadataRepo.getTrending(mediaType, page)
                 "popular" -> metadataRepo.getPopular(mediaType, page)
-                "top_rated" -> metadataRepo.getTopRated(mediaType, page)
+                "top_rated" -> metadataRepo.getPopular(mediaType, page)
                 "now_playing" -> metadataRepo.getNowPlaying(page)
                 "upcoming" -> metadataRepo.getUpcoming(page)
                 "airing_today" -> metadataRepo.getAiringToday(page)
@@ -2354,8 +2399,7 @@ private suspend fun loadCatalogRailFallbackItems(
             ).items
             "top_rated" -> metadataRepo.discover(
                 type = mediaType,
-                sortBy = "vote_average.desc",
-                minRating = 7.0f,
+                sortBy = "popularity.desc",
                 page = page,
             ).items
             "airing_today" -> metadataRepo.discover(
@@ -2420,8 +2464,30 @@ private suspend fun List<TvContentRail>.enrichTopRatedRailsForImdbGate(
     if (!rail.key.startsWith("top_rated_") || rail.items.isEmpty()) {
         rail
     } else {
-        rail.copy(items = ratingsEnricher.enrichList(rail.items, apiKey))
+        val enriched = ratingsEnricher.enrichList(rail.items, apiKey)
+        rail.copy(
+            items = enriched
+                .filter { it.topRatedExternalScore() != null }
+                .sortedWith(
+                    compareByDescending<MediaItem> { it.topRatedExternalScore() ?: -1.0 }
+                        .thenByDescending { it.ratings?.imdbVotes ?: 0 },
+                ),
+        )
     }
+}
+
+private fun MediaItem.topRatedExternalScore(): Double? {
+    val ratings = ratings ?: return null
+    val imdb = ratings.imdbScore
+        ?.takeIf { it > 0f }
+        ?.toDouble()
+        ?.times(10.0)
+    val rt = ratings.rottenTomatoesScore
+        ?.takeIf { it in 1..100 }
+        ?.toDouble()
+    val values = listOfNotNull(imdb, rt)
+    if (values.isEmpty()) return null
+    return values.average()
 }
 
 private fun List<TvContentRail>.needsRatingEnrichment(): Boolean =

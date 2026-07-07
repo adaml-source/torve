@@ -48,22 +48,15 @@ class NewznabClient {
         limit: Int = 100,
     ): List<NewznabItem> {
         if (baseUrl.isBlank() || apiKey.isBlank()) return emptyList()
-        // `o=xml` is the *output format* (vs json) - distinct from sort
-        // order, which Newznab keys as `attrs=` / sort. Pubdate-desc is
-        // the default for movie/search, but we re-sort client-side too
-        // so older indexers without that default still hand back the
-        // freshest releases first.
-        val url = buildUrl(baseUrl, mapOf(
-            "t" to "movie",
-            "cat" to category,
-            "apikey" to apiKey,
-            "extended" to "1",
-            "offset" to offset.toString(),
-            "limit" to limit.toString(),
-            "o" to "xml",
-        ))
-        val xml = fetchOrNull(url) ?: return emptyList()
-        return parseItems(xml).sortedByDateDesc()
+        return fetchFirstNonEmpty(
+            baseUrl = baseUrl,
+            apiKey = apiKey,
+            category = category,
+            query = null,
+            offset = offset,
+            limit = limit,
+            types = listOf("search", "movie"),
+        )
     }
 
     suspend fun search(
@@ -75,18 +68,15 @@ class NewznabClient {
         limit: Int = 100,
     ): List<NewznabItem> {
         if (baseUrl.isBlank() || apiKey.isBlank() || query.isBlank()) return emptyList()
-        val url = buildUrl(baseUrl, mapOf(
-            "t" to "search",
-            "cat" to category,
-            "q" to query,
-            "apikey" to apiKey,
-            "extended" to "1",
-            "offset" to offset.toString(),
-            "limit" to limit.toString(),
-            "o" to "xml",
-        ))
-        val xml = fetchOrNull(url) ?: return emptyList()
-        return parseItems(xml).sortedByDateDesc()
+        return fetchFirstNonEmpty(
+            baseUrl = baseUrl,
+            apiKey = apiKey,
+            category = category,
+            query = query,
+            offset = offset,
+            limit = limit,
+            types = listOf("search", "movie"),
+        )
     }
 
     /**
@@ -102,8 +92,8 @@ class NewznabClient {
         category: String,
         maxItems: Int,
         pageSize: Int = 100,
-    ): List<NewznabItem> = paginate(maxItems, pageSize) { offset, limit ->
-        browse(baseUrl, apiKey, category, offset, limit)
+    ): List<NewznabItem> = paginateWithCategoryFallback(category, maxItems, pageSize) { cat, offset, limit ->
+        browse(baseUrl, apiKey, cat, offset, limit)
     }
 
     suspend fun searchAllPages(
@@ -113,8 +103,47 @@ class NewznabClient {
         query: String,
         maxItems: Int,
         pageSize: Int = 100,
-    ): List<NewznabItem> = paginate(maxItems, pageSize) { offset, limit ->
-        search(baseUrl, apiKey, category, query, offset, limit)
+    ): List<NewznabItem> = paginateWithCategoryFallback(category, maxItems, pageSize) { cat, offset, limit ->
+        search(baseUrl, apiKey, cat, query, offset, limit)
+    }
+
+    fun adultCategories(baseUrl: String, apiKey: String): List<NewznabCategory> {
+        if (baseUrl.isBlank() || apiKey.isBlank()) return emptyList()
+        val url = buildUrl(baseUrl, mapOf(
+            "t" to "caps",
+            "apikey" to apiKey,
+            "o" to "xml",
+        ))
+        val xml = fetchOrNull(url) ?: return emptyList()
+        return parseAdultCategories(xml)
+    }
+
+    private suspend fun paginateWithCategoryFallback(
+        category: String,
+        maxItems: Int,
+        pageSize: Int,
+        fetchPage: suspend (category: String, offset: Int, limit: Int) -> List<NewznabItem>,
+    ): List<NewznabItem> {
+        val combined = paginate(maxItems, pageSize) { offset, limit ->
+            fetchPage(category, offset, limit)
+        }
+        if (combined.isNotEmpty() || ',' !in category) return combined
+
+        val seen = LinkedHashMap<String, NewznabItem>()
+        category.split(',')
+            .map { it.trim() }
+            .filter { it.isNotBlank() }
+            .distinct()
+            .forEach { cat ->
+                val page = paginate(maxItems, pageSize) { offset, limit ->
+                    fetchPage(cat, offset, limit)
+                }
+                page.forEach { item ->
+                    val key = item.guid ?: item.nzbUrl
+                    if (key !in seen) seen[key] = item
+                }
+            }
+        return seen.values.toList().sortedByDateDesc().take(maxItems)
     }
 
     private suspend fun paginate(
@@ -130,15 +159,51 @@ class NewznabClient {
         val maxPages = (maxItems + pageSize - 1) / pageSize + 1
         repeat(maxPages) {
             val page = fetchPage(offset, pageSize)
-            if (page.isEmpty()) return@repeat
+            if (page.isEmpty()) return seen.values.toList().sortedByDateDesc().take(maxItems)
             page.forEach { item ->
                 val key = item.guid ?: item.nzbUrl
                 if (key !in seen) seen[key] = item
             }
             offset += pageSize
-            if (seen.size >= maxItems) return@repeat
+            if (seen.size >= maxItems) return seen.values.toList().sortedByDateDesc().take(maxItems)
         }
         return seen.values.toList().sortedByDateDesc().take(maxItems)
+    }
+
+    private fun fetchFirstNonEmpty(
+        baseUrl: String,
+        apiKey: String,
+        category: String,
+        query: String?,
+        offset: Int,
+        limit: Int,
+        types: List<String>,
+    ): List<NewznabItem> {
+        var firstParsed: List<NewznabItem> = emptyList()
+        for (type in types.distinct()) {
+            val params = linkedMapOf(
+                "t" to type,
+                "cat" to category,
+                "apikey" to apiKey,
+                "extended" to "1",
+                "offset" to offset.toString(),
+                "limit" to limit.toString(),
+                "o" to "xml",
+            )
+            if (!query.isNullOrBlank()) {
+                params["q"] = query.trim()
+            }
+            val url = buildUrl(baseUrl, params)
+            val xml = fetchOrNull(url) ?: continue
+            val parsed = parseItems(xml, baseUrl).sortedByDateDesc()
+            if (firstParsed.isEmpty()) firstParsed = parsed
+            if (parsed.isNotEmpty()) {
+                newznabDebugLog { "TORVE NEWZNAB | type=$type cat=$category query=${!query.isNullOrBlank()} items=${parsed.size}" }
+                return parsed
+            }
+        }
+        newznabDebugLog { "TORVE NEWZNAB | empty after fallback cat=$category query=${!query.isNullOrBlank()} types=${types.joinToString(",")}" }
+        return firstParsed
     }
 
     /**
@@ -184,7 +249,7 @@ class NewznabClient {
         if (resp.statusCode() in 200..299) body else null
     }.getOrNull()
 
-    private fun parseItems(xml: String): List<NewznabItem> {
+    private fun parseItems(xml: String, baseUrl: String): List<NewznabItem> {
         // Newznab error envelope: <error code="100" description="Incorrect user credentials"/>.
         // Surface as an exception so the page banner shows what the
         // indexer said instead of an empty grid.
@@ -213,8 +278,8 @@ class NewznabClient {
             val category = newznabAttr(body, "category")
             out += NewznabItem(
                 title = decodeEntities(title),
-                nzbUrl = link.trim(),
-                guid = guid?.trim(),
+                nzbUrl = normalizeNzbUrl(link, baseUrl),
+                guid = guid?.let(::decodeEntities)?.trim(),
                 pubDate = pubDate?.trim(),
                 sizeBytes = size,
                 fileCount = files,
@@ -223,6 +288,64 @@ class NewznabClient {
             )
         }
         return out
+    }
+
+    private fun parseAdultCategories(xml: String): List<NewznabCategory> {
+        val out = linkedMapOf<String, NewznabCategory>()
+        val categoryRegex = Regex("<category\\b([^>]*)>([\\s\\S]*?)</category>", RegexOption.IGNORE_CASE)
+        for (match in categoryRegex.findAll(xml)) {
+            val attrs = match.groupValues[1]
+            val body = match.groupValues[2]
+            val parent = NewznabCategory(
+                id = attrValue(attrs, "id") ?: continue,
+                name = decodeEntities(attrValue(attrs, "name") ?: ""),
+            )
+            val subcats = Regex("<subcat\\b([^>]*)/?>", RegexOption.IGNORE_CASE)
+                .findAll(body)
+                .mapNotNull { sub ->
+                    val subAttrs = sub.groupValues[1]
+                    NewznabCategory(
+                        id = attrValue(subAttrs, "id") ?: return@mapNotNull null,
+                        name = decodeEntities(attrValue(subAttrs, "name") ?: ""),
+                    )
+                }
+                .toList()
+            if (parent.isAdultCategory()) {
+                val leafCategories = subcats.ifEmpty { listOf(parent) }
+                leafCategories.forEach { out[it.id] = it }
+            }
+        }
+
+        // Some indexers return flat caps XML. If no adult parent block was
+        // detected, fall back to any explicit adult-named category/subcat.
+        if (out.isEmpty()) {
+            Regex("<(?:category|subcat)\\b([^>]*)/?>", RegexOption.IGNORE_CASE)
+                .findAll(xml)
+                .mapNotNull { tag ->
+                    val attrs = tag.groupValues[1]
+                    NewznabCategory(
+                        id = attrValue(attrs, "id") ?: return@mapNotNull null,
+                        name = decodeEntities(attrValue(attrs, "name") ?: ""),
+                    )
+                }
+                .filter { it.isAdultCategory() }
+                .forEach { out[it.id] = it }
+        }
+
+        newznabDebugLog {
+            "TORVE NEWZNAB | caps adultCategories=" +
+                out.values.joinToString(",") { "${it.id}:${it.name}" }
+        }
+        return out.values.toList()
+    }
+
+    private fun NewznabCategory.isAdultCategory(): Boolean {
+        val n = name.lowercase()
+        return id.startsWith("60") ||
+            "xxx" in n ||
+            "adult" in n ||
+            "erotic" in n ||
+            "porn" in n
     }
 
     private fun textBetween(body: String, tag: String): String? {
@@ -248,12 +371,31 @@ class NewznabClient {
         return m.groupValues[1]
     }
 
+    private fun attrValue(attrs: String, name: String): String? {
+        val m = Regex("\\b$name=\"([^\"]*)\"", RegexOption.IGNORE_CASE).find(attrs)
+            ?: return null
+        return m.groupValues[1]
+    }
+
     private fun decodeEntities(s: String): String =
         s.replace("&amp;", "&")
             .replace("&lt;", "<")
             .replace("&gt;", ">")
             .replace("&quot;", "\"")
             .replace("&#39;", "'")
+
+    private fun normalizeNzbUrl(raw: String, baseUrl: String): String {
+        val decoded = decodeEntities(raw).trim()
+        val absolute = when {
+            decoded.startsWith("http://", ignoreCase = true) ||
+                decoded.startsWith("https://", ignoreCase = true) -> decoded
+            decoded.startsWith("/") -> baseUrl.trimEnd('/') + decoded
+            else -> baseUrl.trimEnd('/') + "/" + decoded
+        }
+        return absolute
+            .replace("https://scenenzbs.com", "https://treasure-maps.com", ignoreCase = true)
+            .replace("http://scenenzbs.com", "https://treasure-maps.com", ignoreCase = true)
+    }
 }
 
 @kotlinx.serialization.Serializable
@@ -266,4 +408,9 @@ data class NewznabItem(
     val fileCount: Int?,
     val grabs: Int?,
     val categoryId: String? = null,
+)
+
+data class NewznabCategory(
+    val id: String,
+    val name: String,
 )

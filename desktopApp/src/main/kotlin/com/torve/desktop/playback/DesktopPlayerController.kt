@@ -56,6 +56,51 @@ data class DesktopPlaybackRequest(
     val sourceSurface: String,
 )
 
+internal fun buildPreResolvedDesktopPlaybackSession(
+    streamUrl: String,
+    resolvedStreamUrl: String = streamUrl,
+    title: String,
+    sizeBytes: Long? = null,
+    sourceSurface: String = "adult",
+    mediaItem: MediaItem? = null,
+    episodeContext: DesktopPlaybackEpisodeContext? = null,
+): DesktopPlaybackSession {
+    val mediaType = mediaItem?.type ?: MediaType.MOVIE
+    val mediaId = "direct:${streamUrl.hashCode().toUInt().toString(16)}"
+    val request = DesktopPlaybackRequest(
+        mediaId = mediaId,
+        mediaType = mediaType,
+        title = title,
+        sourceSurface = sourceSurface,
+        seasonNumber = episodeContext?.seasonNumber,
+        episodeNumber = episodeContext?.episodeNumber,
+    )
+    val resolvedMediaItem = mediaItem?.copy(id = mediaId)
+        ?: MediaItem(
+            id = mediaId,
+            type = mediaType,
+            title = title,
+        )
+    val candidate = DesktopPlaybackSourceCandidate(
+        candidateId = "direct",
+        addonName = sourceSurface,
+        title = title,
+        quality = "auto",
+        score = 0,
+        directUrl = resolvedStreamUrl,
+    )
+    return DesktopPlaybackSession(
+        request = request,
+        mediaItem = resolvedMediaItem,
+        selectedCandidate = candidate,
+        resolvedCandidateId = candidate.candidateId,
+        resolvedUrl = resolvedStreamUrl,
+        resolvedFileName = title,
+        resolvedFileSize = sizeBytes,
+        episodeContext = episodeContext,
+    )
+}
+
 enum class DesktopPlayerPhase {
     IDLE,
     RESOLVING,
@@ -291,15 +336,14 @@ class DesktopPlayerController(
          *  history/scrobble row. */
         episodeContext: DesktopPlaybackEpisodeContext? = null,
     ) {
-        val mediaType = mediaItem?.type ?: com.torve.domain.model.MediaType.MOVIE
         // Stable mediaId so dedup against the Continue Watching / source
         // cache works across replays of the same NZB → TorBox URL.
-        val mediaId = "direct:${streamUrl.hashCode().toUInt().toString(16)}"
         // Local-first short-circuit: if the same media is on disk under
         // the configured download folder, swap to a `file://` URL. Only
         // runs when a router is wired into the controller; provider
         // fallback remains unchanged for every other route type.
         val resolvedStreamUrl: String = localFirstPlaybackRouter?.let { router ->
+            val mediaId = "direct:${streamUrl.hashCode().toUInt().toString(16)}"
             val lookupId = mediaItem?.tmdbId?.toString() ?: mediaItem?.id ?: mediaId
             val pick = kotlinx.coroutines.runBlocking {
                 router.route(lookupId, providerStreamUrl = streamUrl).pick()
@@ -310,42 +354,17 @@ class DesktopPlayerController(
                 else -> streamUrl
             }
         } ?: streamUrl
-        val request = DesktopPlaybackRequest(
-            mediaId = mediaId,
-            mediaType = mediaType,
+        val session = buildPreResolvedDesktopPlaybackSession(
+            streamUrl = streamUrl,
+            resolvedStreamUrl = resolvedStreamUrl,
             title = title,
+            sizeBytes = sizeBytes,
             sourceSurface = sourceSurface,
-            seasonNumber = episodeContext?.seasonNumber,
-            episodeNumber = episodeContext?.episodeNumber,
-        )
-        // Carry the user-supplied MediaItem through verbatim if given;
-        // otherwise build the same minimal fallback we used before.
-        val resolvedMediaItem = mediaItem?.copy(id = mediaId)
-            ?: com.torve.domain.model.MediaItem(
-                id = mediaId,
-                type = mediaType,
-                title = title,
-            )
-        val candidate = DesktopPlaybackSourceCandidate(
-            candidateId = "direct",
-            addonName = sourceSurface,
-            title = title,
-            quality = "auto",
-            score = 0,
-            directUrl = resolvedStreamUrl,
-        )
-        val session = DesktopPlaybackSession(
-            request = request,
-            mediaItem = resolvedMediaItem,
-            selectedCandidate = candidate,
-            resolvedCandidateId = candidate.candidateId,
-            resolvedUrl = resolvedStreamUrl,
-            resolvedFileName = title,
-            resolvedFileSize = sizeBytes,
+            mediaItem = mediaItem,
             episodeContext = episodeContext,
         )
         cachePreparedSession(session)
-        open(request)
+        open(session.request)
         play()
     }
 
@@ -657,7 +676,9 @@ class DesktopPlayerController(
             return
         }
 
-        val currentSession = _state.value.preparedSession
+        val cachedDirectSession = cachedSessionFor(currentRequest)
+            ?.takeIf { it.isPreResolvedDirectSession() }
+        val currentSession = _state.value.preparedSession ?: cachedDirectSession
         when (_state.value.phase) {
             DesktopPlayerPhase.PAUSED -> {
                 scope.launch {
@@ -688,6 +709,16 @@ class DesktopPlayerController(
         activeStartupTrace = startupTrace
 
         if (currentSession != null) {
+            if (_state.value.preparedSession == null) {
+                _state.update {
+                    it.copy(
+                        phase = DesktopPlayerPhase.RESOLVED,
+                        preparedSession = currentSession,
+                        engineMessage = "Pre-resolved playback target restored.",
+                        error = null,
+                    )
+                }
+            }
             scope.launch {
                 launchPreparedSession(
                     session = currentSession,
@@ -1062,7 +1093,10 @@ class DesktopPlayerController(
 
     private fun cachedSessionFor(request: DesktopPlaybackRequest): DesktopPlaybackSession? =
         synchronized(preparedSessionCache) { preparedSessionCache[request.cacheKey()] }
-            ?.takeIf { it.streamRulesCacheKey == currentStreamRulesCacheKey() }
+            ?.takeIf { session ->
+                session.isPreResolvedDirectSession() ||
+                    session.streamRulesCacheKey == currentStreamRulesCacheKey()
+            }
 
     private fun currentStreamRulesCacheKey(): String {
         if (!com.torve.desktop.premium.DesktopPremiumStateHolder.isPremium()) return "free"
@@ -1080,6 +1114,10 @@ class DesktopPlayerController(
             preparedSessionCache[session.request.cacheKey()] = session.withoutTemporaryResolvedUrl()
         }
     }
+
+    private fun DesktopPlaybackSession.isPreResolvedDirectSession(): Boolean =
+        selectedCandidate?.candidateId == "direct" &&
+            !resolvedUrl.isNullOrBlank()
 
     private fun DesktopPlaybackSession.withoutTemporaryResolvedUrl(): DesktopPlaybackSession {
         if (!resolvedIsTemporary) return this

@@ -118,11 +118,11 @@ import com.torve.android.ui.theme.Ruby
 import com.torve.android.ui.theme.Snow
 import com.torve.domain.model.MediaItem
 import com.torve.domain.model.MediaType
+import com.torve.domain.model.extractTmdbIdOrNull
 import com.torve.domain.model.favoriteMediaKey
 import com.torve.domain.model.toMediaItem
 import com.torve.data.auth.AuthClient
 import com.torve.domain.model.WatchProgress
-import com.torve.domain.repository.BackendPremiumResult
 import com.torve.domain.repository.MediaFavoritesRepository
 import com.torve.domain.repository.MetadataRepository
 import com.torve.domain.repository.SubscriptionRepository
@@ -165,6 +165,15 @@ internal object TvScreenCache {
     fun <T> get(key: String): T? = data[key] as? T
     fun put(key: String, value: Any) { data[key] = value }
     fun clear() { data.clear() }
+    fun clearAccountScoped() {
+        val stableCatalogData = data.filterKeys { key ->
+            key.startsWith("catalog_") ||
+                key.startsWith("featured:") ||
+                key.startsWith("enriched_")
+        }
+        data.clear()
+        data.putAll(stableCatalogData)
+    }
 }
 
 private data class TvFocusBackStackEntry(
@@ -189,10 +198,46 @@ private fun NavHostController.navigateToTvDetails(
     autoPlay: Boolean = false,
     focusEpisodes: Boolean = false,
 ) {
-    val id = item.tmdbId ?: item.id.toIntOrNull() ?: return
+    val id = item.tmdbId ?: item.id.toIntOrNull() ?: item.id.extractTmdbIdOrNull() ?: return
     val type = if (item.type == MediaType.SERIES) "tv" else "movie"
     navigate(TvRoutes.details(type = type, id = id, autoPlay = autoPlay, focusEpisodes = focusEpisodes))
 }
+
+private suspend fun MediaItem.resolveForTvDetails(metadataRepo: MetadataRepository): MediaItem? {
+    val directId = tmdbId ?: id.toIntOrNull() ?: id.extractTmdbIdOrNull()
+    if (directId != null) {
+        return if (tmdbId == directId) this else copy(tmdbId = directId)
+    }
+
+    val metadataType = if (type == MediaType.SERIES) "tv" else "movie"
+    imdbId
+        ?.takeIf { it.isNotBlank() }
+        ?.let { imdb -> runCatching { metadataRepo.findByImdbId(imdb, metadataType) }.getOrNull() }
+        ?.let { return it }
+
+    if (title.isBlank()) return null
+    val normalizedTitle = title.normalizeTvDetailLookupTitle()
+    val searchResult = runCatching { metadataRepo.searchMulti(title, page = 1) }.getOrNull().orEmpty()
+        .filter { it.type == type }
+        .sortedWith(
+            compareByDescending<MediaItem> { candidate ->
+                if (candidate.title.normalizeTvDetailLookupTitle() == normalizedTitle) 1 else 0
+            }.thenByDescending { candidate ->
+                if (year != null && candidate.year == year) 1 else 0
+            },
+        )
+        .firstOrNull()
+
+    return searchResult?.let { found ->
+        val foundId = found.tmdbId ?: found.id.toIntOrNull() ?: found.id.extractTmdbIdOrNull()
+        if (foundId == null) null else found.copy(tmdbId = foundId)
+    }
+}
+
+private fun String.normalizeTvDetailLookupTitle(): String =
+    lowercase()
+        .replace(Regex("""[^a-z0-9]+"""), " ")
+        .trim()
 
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
@@ -303,7 +348,7 @@ fun TvRoot(
         }
         lastTvChannelReloadAtMs = now
         if (clearScreenCache) {
-            TvScreenCache.clear()
+            TvScreenCache.clearAccountScoped()
         }
         settingsViewModel.refreshSettings()
         runCatching {
@@ -418,11 +463,11 @@ fun TvRoot(
     // Clear stale focus requesters and account-scoped in-memory data when auth changes.
     // Home is always composed, so its requesters survive across auth transitions
     // but point to nodes that were recomposed during the state change.
-    LaunchedEffect(signedInUserId, syncState.isAuthenticated, subscriptionState.isPro) {
+    LaunchedEffect(signedInUserId) {
         firstContentFocusByRoute.clear()
         lastFocusedContentByRoute.clear()
         focusHandlesByRoute.clear()
-        TvScreenCache.clear()
+        TvScreenCache.clearAccountScoped()
     }
 
     var handledDeviceRevocationForUser by remember { mutableStateOf<String?>(null) }
@@ -519,26 +564,27 @@ fun TvRoot(
 
     val onBrowseMediaFocused: (MediaItem) -> Unit = remember(logoCache, logoLoadingByKey) {
         onFocus@{ item ->
-            val tmdbId = item.tmdbId
-            val focusKey = tmdbId?.let { "${item.type}:$it" } ?: "${item.type}:${item.id}"
+            val tmdbId = item.tmdbId ?: item.id.extractTmdbIdOrNull()
+            val focusItem = if (tmdbId != null && item.tmdbId == null) item.copy(tmdbId = tmdbId) else item
+            val focusKey = tmdbId?.let { "${focusItem.type}:$it" } ?: "${focusItem.type}:${focusItem.id}"
             if (focusKey == lastBrowseFocusKey) return@onFocus
             lastBrowseFocusKey = focusKey
             if (tmdbId == null) {
-                focusedMediaItem = item
+                focusedMediaItem = focusItem
             } else {
-                val cacheKey = "${item.type}:$tmdbId"
+                val cacheKey = "${focusItem.type}:$tmdbId"
                 when {
-                    !item.logoUrl.isNullOrBlank() -> {
-                        focusedMediaItem = item
-                        logoCache[cacheKey] = item.logoUrl
+                    !focusItem.logoUrl.isNullOrBlank() -> {
+                        focusedMediaItem = focusItem
+                        logoCache[cacheKey] = focusItem.logoUrl
                         logoLoadingByKey.remove(cacheKey)
                     }
                     logoCache[cacheKey] != null -> {
-                        focusedMediaItem = item.copy(logoUrl = logoCache[cacheKey])
+                        focusedMediaItem = focusItem.copy(logoUrl = logoCache[cacheKey])
                         logoLoadingByKey.remove(cacheKey)
                     }
                     else -> {
-                        focusedMediaItem = item
+                        focusedMediaItem = focusItem
                         // Mark immediately so the panel can avoid text-first flash.
                         logoLoadingByKey[cacheKey] = true
                     }
@@ -547,9 +593,9 @@ fun TvRoot(
         }
     }
 
-    LaunchedEffect(focusedMediaItem?.let { "${it.type}:${it.tmdbId}" }) {
+    LaunchedEffect(focusedMediaItem?.let { "${it.type}:${it.tmdbId ?: it.id.extractTmdbIdOrNull()}:${it.id}" }) {
         val item = focusedMediaItem ?: return@LaunchedEffect
-        val tmdbId = item.tmdbId ?: return@LaunchedEffect
+        val tmdbId = item.tmdbId ?: item.id.extractTmdbIdOrNull() ?: return@LaunchedEffect
         // Already has a logo from the detail endpoint
         if (!item.logoUrl.isNullOrBlank()) {
             logoCache["${item.type}:$tmdbId"] = item.logoUrl
@@ -568,7 +614,7 @@ fun TvRoot(
             // Short debounce: keeps network usage controlled without delaying UI as much.
             delay(80)
             // Check if focus already moved on
-            if (focusedMediaItem?.tmdbId != tmdbId) return@LaunchedEffect
+            if (focusedMediaItem?.let { it.tmdbId ?: it.id.extractTmdbIdOrNull() } != tmdbId) return@LaunchedEffect
             val type = if (item.type == MediaType.MOVIE) "movie" else "tv"
             val (detail, url) = withContext(Dispatchers.IO) {
                 val directLogo = runCatching { metadataRepo.getLogoUrl(type, tmdbId) }
@@ -588,8 +634,24 @@ fun TvRoot(
                 logoCache.remove(cacheKey)
             }
             // Only update if still the focused item
-            if (focusedMediaItem?.tmdbId == tmdbId && url != null) {
-                focusedMediaItem = focusedMediaItem?.copy(logoUrl = url)
+            if (focusedMediaItem?.let { it.tmdbId ?: it.id.extractTmdbIdOrNull() } == tmdbId) {
+                val current = focusedMediaItem
+                focusedMediaItem = if (detail != null && current != null) {
+                    current.copy(
+                        posterUrl = current.posterUrl?.takeIf { it.isNotBlank() } ?: detail.posterUrl,
+                        backdropUrl = current.backdropUrl?.takeIf { it.isNotBlank() } ?: detail.backdropUrl,
+                        logoUrl = current.logoUrl?.takeIf { it.isNotBlank() } ?: url ?: detail.logoUrl,
+                        overview = current.overview?.takeIf { it.isNotBlank() } ?: detail.overview,
+                        rating = current.rating ?: detail.rating,
+                        ratings = current.ratings ?: detail.ratings,
+                        genres = current.genres.ifEmpty { detail.genres },
+                        runtime = current.runtime ?: detail.runtime,
+                    )
+                } else if (url != null) {
+                    current?.copy(logoUrl = url)
+                } else {
+                    current
+                }
             }
         } finally {
             logoLoadingByKey.remove(cacheKey)
@@ -924,8 +986,6 @@ fun TvRoot(
             // registered while the tab had canFocus=false during the sub-route overlay.
             firstContentFocusByRoute.remove(TvRoutes.DETAILS)
             lastFocusedContentByRoute.remove(TvRoutes.DETAILS)
-            // Also clear the active tab's stale requesters so fresh ones are used
-            lastFocusedContentByRoute.remove(selectedTopRoute)
             pendingContentEntryRoute = pendingFocusBackRestore?.route ?: selectedTopRoute
         }
         focusRestoreTrigger++
@@ -1233,44 +1293,18 @@ fun TvRoot(
                 }
 
                 is SyncInboundEvent.SettingsPush -> {
-                    val premiumResult = try {
+                    runCatching {
                         withContext(Dispatchers.IO) {
                             subscriptionRepository.refreshFromBackendDetailed()
                         }
-                    } catch (e: Exception) {
-                        Log.e("TvRoot", "Failed to verify premium access for settings sync", e)
+                    }.onFailure { e ->
+                        Log.e("TvRoot", "Failed to refresh account state for settings sync", e)
                         TvNotificationQueue.post(
-                            context.getString(R.string.tv_notification_setup_sync_premium_verify_failed),
-                            NotificationType.ERROR,
+                            context.getString(R.string.tv_notification_setup_sync_refresh_failed),
+                            NotificationType.INFO,
                         )
-                        null
                     }
                     subscriptionViewModel.loadSubscription()
-                    when (premiumResult) {
-                        BackendPremiumResult.Active -> Unit
-                        is BackendPremiumResult.DeviceBlocked -> {
-                            TvNotificationQueue.post(
-                                context.getString(R.string.tv_notification_setup_sync_premium_device_blocked),
-                                NotificationType.ERROR,
-                            )
-                            return@collect
-                        }
-                        BackendPremiumResult.NoEntitlement -> {
-                            TvNotificationQueue.post(
-                                context.getString(R.string.tv_notification_setup_sync_premium_required),
-                                NotificationType.ERROR,
-                            )
-                            return@collect
-                        }
-                        is BackendPremiumResult.Offline -> {
-                            TvNotificationQueue.post(
-                                context.getString(R.string.tv_notification_setup_sync_premium_offline),
-                                NotificationType.ERROR,
-                            )
-                            return@collect
-                        }
-                        null -> return@collect
-                    }
                     val syncJson = Json { ignoreUnknownKeys = true }
                     val payload = try {
                         syncJson.decodeFromString<SyncPayload>(event.payloadJson)
@@ -1482,9 +1516,13 @@ fun TvRoot(
         } ?: featuredItem
     }
 
-    LaunchedEffect(displayedFeaturedItem?.type, displayedFeaturedItem?.tmdbId) {
+    LaunchedEffect(
+        displayedFeaturedItem?.type,
+        displayedFeaturedItem?.id,
+        displayedFeaturedItem?.tmdbId,
+    ) {
         val item = displayedFeaturedItem ?: return@LaunchedEffect
-        val tmdbId = item.tmdbId ?: return@LaunchedEffect
+        val tmdbId = item.tmdbId ?: item.id.extractTmdbIdOrNull() ?: return@LaunchedEffect
         val cacheKey = "${item.type}:$tmdbId"
         if (heroDetailCache[cacheKey] != null) return@LaunchedEffect
 
@@ -1513,11 +1551,12 @@ fun TvRoot(
     /* ── Section titles ────────────────────────────────────────────────────────────────── */
     LaunchedEffect(
         displayedFeaturedItem?.type,
+        displayedFeaturedItem?.id,
         displayedFeaturedItem?.tmdbId,
         displayedFeaturedItem?.logoUrl,
     ) {
         val item = displayedFeaturedItem ?: return@LaunchedEffect
-        val tmdbId = item.tmdbId ?: return@LaunchedEffect
+        val tmdbId = item.tmdbId ?: item.id.extractTmdbIdOrNull() ?: return@LaunchedEffect
         val cacheKey = "${item.type}:$tmdbId"
         if (!item.logoUrl.isNullOrBlank()) {
             logoCache[cacheKey] = item.logoUrl
@@ -1555,34 +1594,35 @@ fun TvRoot(
     }
 
     val displayedHeroItem = displayedFeaturedItem?.let { item ->
-        val tmdbId = item.tmdbId
-        val detail = tmdbId?.let { heroDetailCache["${item.type}:$it"] }
+        val tmdbId = item.tmdbId ?: item.id.extractTmdbIdOrNull()
+        val heroBaseItem = if (tmdbId != null && item.tmdbId == null) item.copy(tmdbId = tmdbId) else item
+        val detail = tmdbId?.let { heroDetailCache["${heroBaseItem.type}:$it"] }
         val enriched = if (detail == null) {
-            item
+            heroBaseItem
         } else {
-            item.copy(
-                imdbId = item.imdbId ?: detail.imdbId,
-                year = item.year ?: detail.year,
-                overview = item.overview?.takeIf { it.isNotBlank() } ?: detail.overview,
-                posterUrl = item.posterUrl?.takeIf { it.isNotBlank() } ?: detail.posterUrl,
-                backdropUrl = item.backdropUrl?.takeIf { it.isNotBlank() } ?: detail.backdropUrl,
-                logoUrl = item.logoUrl?.takeIf { it.isNotBlank() } ?: detail.logoUrl,
-                rating = item.rating ?: detail.rating,
-                voteCount = item.voteCount ?: detail.voteCount,
-                runtime = item.runtime ?: detail.runtime,
-                genres = if (item.genres.isNotEmpty()) item.genres else detail.genres,
-                genreIds = if (item.genreIds.isNotEmpty()) item.genreIds else detail.genreIds,
-                releaseDate = item.releaseDate?.takeIf { it.isNotBlank() } ?: detail.releaseDate,
-                status = item.status?.takeIf { it.isNotBlank() } ?: detail.status,
-                trailerKey = item.trailerKey?.takeIf { it.isNotBlank() } ?: detail.trailerKey,
-                tagline = item.tagline?.takeIf { it.isNotBlank() } ?: detail.tagline,
-                ratings = item.ratings ?: detail.ratings,
+            heroBaseItem.copy(
+                imdbId = heroBaseItem.imdbId ?: detail.imdbId,
+                year = heroBaseItem.year ?: detail.year,
+                overview = heroBaseItem.overview?.takeIf { it.isNotBlank() } ?: detail.overview,
+                posterUrl = heroBaseItem.posterUrl?.takeIf { it.isNotBlank() } ?: detail.posterUrl,
+                backdropUrl = heroBaseItem.backdropUrl?.takeIf { it.isNotBlank() } ?: detail.backdropUrl,
+                logoUrl = heroBaseItem.logoUrl?.takeIf { it.isNotBlank() } ?: detail.logoUrl,
+                rating = heroBaseItem.rating ?: detail.rating,
+                voteCount = heroBaseItem.voteCount ?: detail.voteCount,
+                runtime = heroBaseItem.runtime ?: detail.runtime,
+                genres = if (heroBaseItem.genres.isNotEmpty()) heroBaseItem.genres else detail.genres,
+                genreIds = if (heroBaseItem.genreIds.isNotEmpty()) heroBaseItem.genreIds else detail.genreIds,
+                releaseDate = heroBaseItem.releaseDate?.takeIf { it.isNotBlank() } ?: detail.releaseDate,
+                status = heroBaseItem.status?.takeIf { it.isNotBlank() } ?: detail.status,
+                trailerKey = heroBaseItem.trailerKey?.takeIf { it.isNotBlank() } ?: detail.trailerKey,
+                tagline = heroBaseItem.tagline?.takeIf { it.isNotBlank() } ?: detail.tagline,
+                ratings = heroBaseItem.ratings ?: detail.ratings,
             )
         }
         if (!enriched.logoUrl.isNullOrBlank() || tmdbId == null) {
             enriched
         } else {
-            logoCache["${item.type}:$tmdbId"]?.let { logoUrl -> enriched.copy(logoUrl = logoUrl) } ?: enriched
+            logoCache["${heroBaseItem.type}:$tmdbId"]?.let { logoUrl -> enriched.copy(logoUrl = logoUrl) } ?: enriched
         }
     }
 
@@ -2088,8 +2128,6 @@ fun TvRoot(
                         pendingRailEntryRoute = null
                         pendingNavJob?.cancel()
                         pendingNavJob = null
-                        // Update highlightedTopRoute immediately so the hero background
-                        // responds to rail navigation without waiting for the debounce.
                         highlightedTopRoute = route
                         if (route == selectedTopRoute) return@TvNavRail
                         if (isSubRouteActive) return@TvNavRail
@@ -2223,8 +2261,20 @@ fun TvRoot(
                             railFocusRequester = railFocusRequester,
                             headerFocusRequester = heroPrimaryActionRequester,
                             onMediaClick = { item ->
-                                pushFocusReturnEntry(TvRoutes.HOME)
-                                navController.navigateToTvDetails(item)
+                                rootScope.launch {
+                                    val resolved = withContext(Dispatchers.IO) {
+                                        item.resolveForTvDetails(metadataRepo)
+                                    }
+                                    if (resolved == null) {
+                                        TvNotificationQueue.post(
+                                            "Could not open details for ${item.title}.",
+                                            NotificationType.ERROR,
+                                        )
+                                        return@launch
+                                    }
+                                    pushFocusReturnEntry(TvRoutes.HOME)
+                                    navController.navigateToTvDetails(resolved)
+                                }
                             },
                             onPlayLocalFile = { item, absolutePath ->
                                 // Single-OK path for downloaded items: jump
@@ -2418,7 +2468,15 @@ fun TvRoot(
                                         onFirstContentRequester = { firstContentFocusByRoute[TvRoutes.SEARCH] = it },
                                         onContentFocused = { markContentFocused(TvRoutes.SEARCH, it) },
                                         initialQuery = searchSeedQuery.orEmpty(),
-                                        shouldAutoFocus = pendingContentEntryRoute == TvRoutes.SEARCH,
+                                        shouldAutoFocus = pendingContentEntryRoute == TvRoutes.SEARCH &&
+                                            lastFocusedContentByRoute[TvRoutes.SEARCH] == null,
+                                        registerFocusHandle = { handle ->
+                                            if (handle == null) {
+                                                focusHandlesByRoute.remove(TvRoutes.SEARCH)
+                                            } else {
+                                                focusHandlesByRoute[TvRoutes.SEARCH] = handle
+                                            }
+                                        },
                                     )
 
                                     TvRoutes.IPTV -> {
@@ -2654,9 +2712,6 @@ fun TvRoot(
                                                 onNavigateToWatchStats = {
                                                     navController.navigate(TvRoutes.WATCH_STATS)
                                                 },
-                                                onNavigateToBetaProgram = {
-                                                    navController.navigate(TvRoutes.BETA_PROGRAM)
-                                                },
                                                 onNavigateToPairingSignIn = {
                                                     navController.navigate("pairing_signin_tv")
                                                 },
@@ -2848,6 +2903,17 @@ fun TvRoot(
                                 focusHandlesByRoute.remove(TvRoutes.SEE_ALL)
                             } else {
                                 focusHandlesByRoute[TvRoutes.SEE_ALL] = handle
+                                val pending = pendingFocusBackRestore
+                                val origin = pending?.origin
+                                if (
+                                    pending?.route == TvRoutes.SEE_ALL &&
+                                    origin != null &&
+                                    currentSubRoute?.startsWith("tv_see_all/") == true
+                                ) {
+                                    pendingContentEntryRoute = TvRoutes.SEE_ALL
+                                    handle.requestRestore(origin, "back_stack")
+                                    pendingFocusBackRestore = null
+                                }
                             }
                         },
                         homeLayoutEntryFocusRequester = homeLayoutEntryFocusRequester,

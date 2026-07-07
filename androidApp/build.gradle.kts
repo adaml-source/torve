@@ -43,14 +43,14 @@ android {
         }
     }
 
-    val baseVersionCode = 82
+    val baseVersionCode = 93
 
     defaultConfig {
         applicationId = "com.torve.app"
         minSdk = 24
         targetSdk = 36
         versionCode = baseVersionCode
-        versionName = "1.0.72"
+        versionName = "1.1.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         multiDexEnabled = true
         multiDexKeepProguard = file("multidex-config.pro")
@@ -74,27 +74,31 @@ android {
         buildConfigField("String", "SYNC_WS_URL", "\"wss://api.torve.app/ws\"")
         buildConfigField("String", "PANDA_BASE_URL", "\"${pandaBaseUrl.get()}\"")
         buildConfigField("String", "TORVE_DISCORD_INVITE_URL", torveDiscordInviteUrl.get().toBuildConfigStringLiteral())
+        buildConfigField("Boolean", "TORVE_SHOW_DONATION_LINKS", "false")
+        buildConfigField("String", "TORVE_DONATION_URL", "\"\"")
     }
 
     flavorDimensions += listOf("store", "formFactor")
     productFlavors {
         create("google") {
             dimension = "store"
-            buildConfigField("Boolean", "HAS_BILLING", "true")
-            buildConfigField("Boolean", "SUPPORTS_TV_BILLING", "true")
+            buildConfigField("Boolean", "HAS_BILLING", "false")
+            buildConfigField("Boolean", "SUPPORTS_TV_BILLING", "false")
         }
         create("amazon") {
             dimension = "store"
             // Different applicationId so it can coexist with Google Play version
             applicationIdSuffix = ".amazon"
-            buildConfigField("Boolean", "HAS_BILLING", "true")
+            buildConfigField("Boolean", "HAS_BILLING", "false")
             // Amazon TV is distributed as a sideloaded APK — no in-app purchase flow.
-            // TV paywall shows "buy via phone" instead of a purchase dialog.
+            // Fire TV uses the same free-access behavior as other store builds.
             buildConfigField("Boolean", "SUPPORTS_TV_BILLING", "false")
         }
         create("mobile") {
             dimension = "formFactor"
             versionCode = 10000 + baseVersionCode
+            buildConfigField("Boolean", "HAS_BILLING", "false")
+            buildConfigField("Boolean", "SUPPORTS_TV_BILLING", "false")
         }
         create("tv") {
             dimension = "formFactor"
@@ -276,14 +280,9 @@ dependencies {
     "googleImplementation"("com.google.firebase:firebase-analytics")
 
     // Google Play Billing — Google flavor only
-    "googleImplementation"("com.android.billingclient:billing-ktx:7.1.1")
     // Google Play Integrity — Google flavor only. Used as a backend-verifiable
     // trust signal; failures never grant or block access locally.
     "googleImplementation"("com.google.android.play:integrity:1.4.0")
-
-    // Amazon Appstore IAP - excluded from the sideloaded Fire TV variant
-    // below because that build uses Stripe checkout.
-    "amazonImplementation"("com.amazon.device:amazon-appstore-sdk:3.0.8")
 
     // Coroutines
     implementation(libs.kotlinx.coroutines.android)
@@ -300,10 +299,4 @@ dependencies {
     androidTestImplementation("androidx.compose.ui:ui-test-junit4")
     androidTestImplementation("androidx.test.ext:junit:1.2.1")
     androidTestImplementation("androidx.test.espresso:espresso-core:3.6.1")
-}
-
-configurations.configureEach {
-    if (name.startsWith("amazonTv", ignoreCase = true) && name.contains("RuntimeClasspath")) {
-        exclude(group = "com.amazon.device", module = "amazon-appstore-sdk")
-    }
 }

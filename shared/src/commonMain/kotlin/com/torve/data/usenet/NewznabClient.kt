@@ -57,7 +57,7 @@ class NewznabClient(
             ),
         )
         val xml = fetchOrNull(url) ?: return emptyList()
-        return parseItems(xml).sortedByPubDateDesc()
+        return parseItems(xml, baseUrl).sortedByPubDateDesc()
     }
 
     suspend fun search(
@@ -83,7 +83,7 @@ class NewznabClient(
             ),
         )
         val xml = fetchOrNull(url) ?: return emptyList()
-        return parseItems(xml).sortedByPubDateDesc()
+        return parseItems(xml, baseUrl).sortedByPubDateDesc()
     }
 
     /**
@@ -173,7 +173,7 @@ class NewznabClient(
         null
     }
 
-    private fun parseItems(xml: String): List<NewznabItem> {
+    private fun parseItems(xml: String, baseUrl: String): List<NewznabItem> {
         // Newznab error envelope:
         //   <error code="100" description="Incorrect user credentials"/>.
         // Surface as an exception so the page banner shows what the
@@ -196,8 +196,8 @@ class NewznabClient(
             val category = newznabAttr(body, "category")
             out += NewznabItem(
                 title = decodeEntities(title),
-                nzbUrl = link.trim(),
-                guid = guid?.trim(),
+                nzbUrl = normalizeNzbUrl(link, baseUrl),
+                guid = guid?.let(::decodeEntities)?.trim(),
                 pubDate = pubDate?.trim(),
                 sizeBytes = size,
                 fileCount = files,
@@ -236,6 +236,19 @@ class NewznabClient(
             .replace("&gt;", ">")
             .replace("&quot;", "\"")
             .replace("&#39;", "'")
+
+    private fun normalizeNzbUrl(raw: String, baseUrl: String): String {
+        val decoded = decodeEntities(raw).trim()
+        val absolute = when {
+            decoded.startsWith("http://", ignoreCase = true) ||
+                decoded.startsWith("https://", ignoreCase = true) -> decoded
+            decoded.startsWith("/") -> baseUrl.trimEnd('/') + decoded
+            else -> baseUrl.trimEnd('/') + "/" + decoded
+        }
+        return absolute
+            .replace("https://scenenzbs.com", "https://treasure-maps.com", ignoreCase = true)
+            .replace("http://scenenzbs.com", "https://treasure-maps.com", ignoreCase = true)
+    }
 
     companion object {
         private val ERROR_REGEX = Regex(
