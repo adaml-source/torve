@@ -5,8 +5,8 @@ package com.torve.data.auth
  * that needs to filter SQLDelight queries by user id without pulling in the full
  * AuthClient dependency graph.
  *
- * Signed-out reads use an empty string so they don't bleed per-user rows across
- * accounts — rows are written with the actual user id only while authenticated.
+ * Signed-out reads use a sentinel id so they don't bleed per-user rows across
+ * accounts while still allowing local-only state before authentication.
  *
  * The AuthClient is supplied via a lazy provider to break a Koin cycle:
  * AuthClient depends on DeviceLocalSettingsRepository (= PreferencesRepositoryImpl),

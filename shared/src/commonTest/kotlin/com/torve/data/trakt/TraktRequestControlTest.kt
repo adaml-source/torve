@@ -59,6 +59,25 @@ class TraktRequestControlTest {
     }
 
     @Test
+    fun forbidden_device_poll_is_reported_as_terminal_oauth_rejection() = runTest {
+        val client = client { respondJson("{}", HttpStatusCode.Forbidden) }
+
+        val result = client.pollDeviceToken("device-code")
+
+        assertTrue(result is TraktPollResult.Error)
+        assertTrue(result.message.contains("OAuth application"))
+    }
+
+    @Test
+    fun rate_limited_device_poll_requests_a_slower_interval() = runTest {
+        val client = client {
+            respondJson("{}", HttpStatusCode.TooManyRequests, retryAfter = "5")
+        }
+
+        assertEquals(TraktPollResult.SlowDown, client.pollDeviceToken("device-code"))
+    }
+
+    @Test
     fun retry_after_http_date_is_parsed() {
         val now = Instant.parse("2026-05-25T08:00:00Z").toEpochMilliseconds()
 

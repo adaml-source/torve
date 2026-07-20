@@ -18,6 +18,7 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import kotlinx.datetime.Clock
+import kotlin.math.abs
 
 class RatingsEnricher(
     private val api: MdbListApi,
@@ -41,7 +42,6 @@ class RatingsEnricher(
      * the flag for the whole session — a rate limit on one rail shouldn't wipe ratings
      * off every later rail.
      */
-    @Volatile
     private var rateLimitExpiresAt: Long = 0L
 
     private var loggedMdbListDisabled = false
@@ -91,7 +91,7 @@ class RatingsEnricher(
         // cache lookup, OMDB, MDBList and Trakt all bail → the card renders
         // with zero rating pills.
         val tmdbId = item.tmdbId ?: item.id.extractTmdbIdOrNull()
-        val existing = item.ratings
+        var trustedExisting = item.ratings?.withoutLegacyTraktImdbFallback()
 
         // Extract IMDB ID from item fields first (no network). Used as cache key
         // fallback when tmdbId is null (e.g. Stremio items arriving as "tt0403358").
@@ -107,10 +107,14 @@ class RatingsEnricher(
         cacheKey?.let {
             val cached = cacheRepo.getCached(it)
             if (cached != null) {
-                return item.copy(
-                    tmdbId = tmdbId,
-                    ratings = mergeRatings(existing, cached),
-                )
+                val trustedCached = cached.withoutLegacyTraktImdbFallback()
+                trustedExisting = mergeRatings(trustedExisting, trustedCached)
+                if (trustedCached.imdbScore != null && trustedCached.imdbVotes != null) {
+                    return item.copy(
+                        tmdbId = tmdbId,
+                        ratings = trustedExisting,
+                    )
+                }
             }
         }
 
@@ -119,8 +123,9 @@ class RatingsEnricher(
             ?: tmdbId?.let { resolveImdbIdForTmdb(item.type, it) }
 
         // Accumulate ratings from all tiers
-        var accumulated = MediaRatings(
-            tmdbScore = item.rating?.toFloat(), // TMDB baseline always available
+        var accumulated = mergeRatings(
+            trustedExisting,
+            MediaRatings(tmdbScore = item.rating?.toFloat()),
         )
 
         // 3. Tier 2: OMDB — IMDb + RT + Metacritic (free key, 1000 calls/day)
@@ -205,7 +210,6 @@ class RatingsEnricher(
                     // Trakt ratings are user-voted on an IMDB-aligned 0-10 scale.
                     // Use it as the IMDB-pill fallback when neither OMDB nor
                     // MDBList provided one.
-                    imdbScore = if (accumulated.imdbScore == null) traktRating.rating else null,
                 ))
             }
         }
@@ -239,7 +243,7 @@ class RatingsEnricher(
         return item.copy(
             tmdbId = tmdbId,
             imdbId = resolvedImdbId ?: item.imdbId,
-            ratings = mergeRatings(existing, accumulated),
+            ratings = mergeRatings(trustedExisting, accumulated),
         )
     }
 
@@ -254,6 +258,58 @@ class RatingsEnricher(
             }
         }.awaitAll()
         enriched
+        }
+    }
+
+    /** Fetch only the IMDb fields needed by search filters. */
+    suspend fun enrichImdbList(items: List<MediaItem>, apiKey: String): List<MediaItem> = withContext(Dispatchers.Default) {
+        if (items.isEmpty()) return@withContext items
+        coroutineScope {
+            items.map { item ->
+                async {
+                    globalSemaphore.withPermit {
+                        val hydrated = runCatching { hydrateFromCache(item) }.getOrDefault(item)
+                        val cached = hydrated.ratings
+                        if (cached?.imdbScore != null && cached.imdbVotes != null) {
+                            return@withPermit hydrated
+                        }
+                        if (!apiKey.isUsableMdbListApiKey() || rateLimited) {
+                            return@withPermit hydrated
+                        }
+
+                        val tmdbId = hydrated.tmdbId ?: hydrated.id.extractTmdbIdOrNull()
+                            ?: return@withPermit hydrated
+                        val response = try {
+                            when (hydrated.type) {
+                                MediaType.MOVIE -> api.getRatingsByTmdbMovie(tmdbId, apiKey)
+                                MediaType.SERIES -> api.getRatingsByTmdbShow(tmdbId, apiKey)
+                            }
+                        } catch (_: MdbListApi.RateLimitException) {
+                            markRateLimited()
+                            null
+                        } catch (_: Exception) {
+                            null
+                        } ?: return@withPermit hydrated
+
+                        val imdb = response.ratings.find { it.source == "imdb" }
+                            ?: return@withPermit hydrated
+                        val merged = mergeRatings(
+                            cached,
+                            MediaRatings(
+                                imdbScore = imdb.value,
+                                imdbVotes = imdb.votes,
+                                tmdbScore = response.ratings.find { it.source == "tmdb" }?.value,
+                            ),
+                        )
+                        cacheRepo.put("${hydrated.type.name}:$tmdbId", merged)
+                        hydrated.copy(
+                            tmdbId = tmdbId,
+                            imdbId = response.imdbId ?: hydrated.imdbId,
+                            ratings = merged,
+                        )
+                    }
+                }
+            }.awaitAll()
         }
     }
 
@@ -272,10 +328,10 @@ class RatingsEnricher(
         val cacheKey = tmdbId?.let { "${item.type.name}:$it" }
             ?: imdbId?.let { "${item.type.name}:$it" }
             ?: return item
-        val cached = cacheRepo.getCached(cacheKey) ?: return item
+        val cached = cacheRepo.getCached(cacheKey)?.withoutLegacyTraktImdbFallback() ?: return item
         return item.copy(
             tmdbId = tmdbId,
-            ratings = mergeRatings(item.ratings, cached),
+            ratings = mergeRatings(item.ratings?.withoutLegacyTraktImdbFallback(), cached),
         )
     }
 
@@ -348,4 +404,11 @@ class RatingsEnricher(
         loggedMdbListDisabled = true
         println("TORVE_RATINGS: MDBList disabled; configure MDBLIST_API_KEY to enable MDBList aggregate, RT audience, Letterboxd, MAL, and related provider ratings.")
     }
+}
+
+internal fun MediaRatings.withoutLegacyTraktImdbFallback(): MediaRatings {
+    val imdb = imdbScore ?: return this
+    val trakt = traktScore ?: return this
+    val isLegacyFallback = imdbVotes == null && abs(imdb - (trakt / 10f)) < 0.0001f
+    return if (isLegacyFallback) copy(imdbScore = null) else this
 }

@@ -133,6 +133,7 @@ import com.torve.android.ui.system.configureTorveEdgeToEdge
 import com.torve.data.addon.ParsedStream
 import com.torve.data.addon.StreamRuntimeTelemetry
 import com.torve.data.addon.StreamSelector
+import com.torve.data.addon.StreamSelectionContext
 import com.torve.data.addon.isAddonHostedUrl
 import com.torve.data.simkl.SimklClient
 import com.torve.data.simkl.SimklIds
@@ -152,6 +153,8 @@ import com.torve.data.trakt.TraktIds
 import com.torve.domain.model.ContentWarmupTrigger
 import com.torve.domain.model.DebridServiceType
 import com.torve.domain.model.MediaType
+import com.torve.domain.model.NextEpisodeMode
+import com.torve.domain.model.NextEpisodePreparationMode
 import com.torve.domain.model.Season
 import com.torve.domain.model.SourceAccelerationContext
 import com.torve.domain.model.SourceAccelerationRequest
@@ -188,6 +191,8 @@ import com.torve.presentation.channels.ChannelsViewModel
 import com.torve.presentation.player.TraktScrobbler
 import com.torve.presentation.settings.SettingsViewModel
 import com.torve.presentation.streampicker.StreamFallbackOrdering
+import com.torve.platform.NetworkMonitor
+import com.torve.platform.NetworkType
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -232,6 +237,7 @@ fun PlayerScreen(
     openSubtitlesClient: OpenSubtitlesClient = koinInject(),
     telemetry: TelemetryEmitter = koinInject(),
     watchSessionRecorder: WatchSessionRecorder = koinInject(),
+    networkMonitor: NetworkMonitor = koinInject(),
 ) {
     val context = LocalContext.current
     val voiceInputUnavailableFallback = context.getString(R.string.voice_input_unavailable)
@@ -319,6 +325,7 @@ fun PlayerScreen(
     var codecFallbackUsed by remember { mutableStateOf(false) }
     var codecFallbackInProgress by remember { mutableStateOf(false) }
     var playerExitInFlight by remember { mutableStateOf(false) }
+    var retainPlaybackOnExit by remember { mutableStateOf(false) }
     var exitSnapshotPositionMs by remember { mutableLongStateOf(-1L) }
     var exitSnapshotDurationMs by remember { mutableLongStateOf(-1L) }
     var audioDelayMs by remember { mutableIntStateOf(0) }
@@ -549,8 +556,12 @@ fun PlayerScreen(
     // Create the player engine once (not keyed on URL for in-place swaps).
     // On TV: always use ExoPlayer — MPV's vo_mediacodec_embed SIGABRTs when
     // the Compose AndroidView hasn't attached a surface yet (WinID == 0).
-    val engine = remember(forceExoPlayerOnMobile) {
-        if (isTv || forceExoPlayerOnMobile) {
+    val retainedEngine = remember(url) { ActivePlaybackState.takeRetainedEngine(url) }
+    val restoredRetainedPlayback = retainedEngine != null
+    val engine = remember(forceExoPlayerOnMobile, retainedEngine) {
+        if (retainedEngine != null) {
+            retainedEngine as PlayerEngine
+        } else if (isTv || forceExoPlayerOnMobile) {
             val exoEngine = ExoPlayerEngine(context)
             exoEngine.initialize()
             exoEngine as PlayerEngine
@@ -668,8 +679,8 @@ fun PlayerScreen(
         }
     }
 
-    suspend fun trySwitchToStableSource(reason: String): Boolean {
-        if (!autoSourceSelection || autoFallbackInProgress) return false
+    suspend fun trySwitchToStableSource(reason: String, force: Boolean = false): Boolean {
+        if ((!autoSourceSelection && !force) || autoFallbackInProgress) return false
         val imdbId = showImdbId?.trim().takeIf { !it.isNullOrBlank() } ?: return false
         android.util.Log.w("Player", "Auto stability fallback requested: $reason")
 
@@ -957,6 +968,30 @@ fun PlayerScreen(
         }
     }
 
+    fun retryPlaybackAfterError() {
+        val failedUrl = currentUrl
+        val resumePositionMs = maxOf(engine.state.positionMs, currentPosition).coerceAtLeast(0L)
+        errorMessage = null
+        attemptedAutoStreamKeys = emptySet()
+        scope.launch {
+            val switched = trySwitchToStableSource(reason = "user_retry", force = true)
+            if (switched) return@launch
+            if (failedUrl.isBlank()) {
+                errorMessage = "No playback URL available"
+                return@launch
+            }
+            if (resumePositionMs > 0L) {
+                pendingAutoFallbackResumePositionMs = resumePositionMs
+                pendingAutoFallbackResumeDeadlineMs = SystemClock.elapsedRealtime() + 30_000L
+            }
+            currentUrl = failedUrl
+            currentStreamHostKey = StreamRuntimeTelemetry.keyForUrl(failedUrl)
+            codecFallbackUsed = false
+            resetPlaybackHealthWindow()
+            requestPlayback(failedUrl)
+        }
+    }
+
     val togglePlayback: () -> Unit = {
         if (isPlaying) {
             engine.pause()
@@ -1178,10 +1213,7 @@ fun PlayerScreen(
                 true
             }
             showControls -> false
-            else -> {
-                showControls = true
-                true
-            }
+            else -> false
         }
     }
 
@@ -1191,6 +1223,29 @@ fun PlayerScreen(
         exitSnapshotPositionMs = maxOf(engine.state.positionMs, currentPosition).coerceAtLeast(0L)
         exitSnapshotDurationMs = duration.coerceAtLeast(0L)
         if (!useMpv) {
+            (engine as? ExoPlayerEngine)?.let { exoEngine ->
+                retainPlaybackOnExit = true
+                ActivePlaybackState.retain(
+                    engine = exoEngine,
+                    descriptor = ActivePlaybackSession(
+                        url = currentUrl,
+                        fallbackUrl = fallbackUrl,
+                        autoSourceSelection = autoSourceSelection,
+                        title = currentTitle,
+                        mediaId = mediaId,
+                        mediaType = mediaType,
+                        posterUrl = posterUrl,
+                        backdropUrl = backdropUrl,
+                        seasonNumber = currentSeasonNumber,
+                        episodeNumber = currentEpisodeNumber,
+                        showTmdbId = showTmdbId,
+                        showImdbId = showImdbId,
+                        positionMs = exitSnapshotPositionMs,
+                        durationMs = exitSnapshotDurationMs,
+                        isPlaying = engine.state.isPlaying,
+                    ),
+                )
+            }
             onBack()
             return
         }
@@ -1380,31 +1435,38 @@ fun PlayerScreen(
         } catch (_: Exception) { }
     }
 
-    // Detect near-completion for next-episode trigger
-    LaunchedEffect(currentPosition, duration, completionDetected) {
+    // Discover the next episode early enough to warm source candidates, but keep
+    // the interactive prompt out of the way until playback is genuinely ending.
+    LaunchedEffect(currentPosition, duration, completionDetected, activeSkipSegment) {
         if (currentSeasonNumber == null || currentEpisodeNumber == null) return@LaunchedEffect
-        if (duration <= 0 || completionDetected || nextEpisodeCancelled) return@LaunchedEffect
+        if (duration <= 0 || nextEpisodeCancelled) return@LaunchedEffect
 
         val prefs = settingsViewModel.buildStreamPreferences()
-        if (!prefs.autoPlayNextEpisodeEnabled) return@LaunchedEffect
+        if (prefs.nextEpisodeMode == NextEpisodeMode.OFF) return@LaunchedEffect
 
         val remainingMs = duration - currentPosition
         val progressPercent = currentPosition.toFloat() / duration
 
-        val nearComplete = progressPercent >= 0.95f || (remainingMs in 1..30_000)
-
-        if (nearComplete && !showNextEpisodeOverlay) {
-            val nextEp = NextEpisodeHelper.getNextEpisode(
+        val shouldPrepare = progressPercent >= 0.75f || remainingMs in 1..10 * 60_000L
+        if (shouldPrepare && nextEpisodeInfo == null) {
+            nextEpisodeInfo = NextEpisodeHelper.getNextEpisode(
                 currentSeason = currentSeasonNumber!!,
                 currentEpisode = currentEpisodeNumber!!,
                 seasons = loadedSeasons,
             )
-            if (nextEp != null) {
-                nextEpisodeInfo = nextEp
-                showNextEpisodeOverlay = true
-                completionDetected = true
-                nextEpisodeCountdown = 15
-            }
+        }
+
+        if (nextEpisodeInfo == null || completionDetected) return@LaunchedEffect
+        val creditsDetected = activeSkipSegment?.type == com.torve.domain.player.SkipType.OUTRO
+        val promptWindowMs = when (prefs.nextEpisodeMode) {
+            NextEpisodeMode.AT_CREDITS -> if (creditsDetected) 30_000L else 10_000L
+            NextEpisodeMode.AT_END -> 3_000L
+            NextEpisodeMode.OFF -> 0L
+        }
+        if (remainingMs in 1..promptWindowMs) {
+            showNextEpisodeOverlay = true
+            completionDetected = true
+            nextEpisodeCountdown = ((remainingMs + 999L) / 1_000L).toInt().coerceIn(1, 15)
         }
     }
 
@@ -1412,7 +1474,12 @@ fun PlayerScreen(
         val nextEp = nextEpisodeInfo ?: return@LaunchedEffect
         val imdbId = showImdbId?.takeIf { it.isNotBlank() } ?: return@LaunchedEffect
         val prefs = settingsViewModel.buildStreamPreferences()
-        if (!prefs.autoPlayNextEpisodeEnabled) return@LaunchedEffect
+        if (prefs.nextEpisodeMode == NextEpisodeMode.OFF ||
+            prefs.nextEpisodePreparationMode == NextEpisodePreparationMode.OFF
+        ) return@LaunchedEffect
+        if (prefs.nextEpisodePreloadWifiOnly &&
+            networkMonitor.currentNetworkType() !in setOf(NetworkType.WIFI, NetworkType.ETHERNET)
+        ) return@LaunchedEffect
 
         try {
             val addons = try { addonRepo.getInstalledAddons() } catch (_: Exception) { emptyList() }
@@ -1441,13 +1508,19 @@ fun PlayerScreen(
     // Countdown timer for next episode overlay
     LaunchedEffect(showNextEpisodeOverlay) {
         if (!showNextEpisodeOverlay) return@LaunchedEffect
-        for (i in 15 downTo 1) {
+        val initialCountdown = nextEpisodeCountdown.coerceIn(1, 15)
+        for (i in initialCountdown downTo 1) {
             nextEpisodeCountdown = i
             delay(1000)
             if (!showNextEpisodeOverlay) return@LaunchedEffect
         }
         nextEpisodeCountdown = 0
-        // Auto-trigger next episode
+        val nextEpisodePrefs = settingsViewModel.buildStreamPreferences()
+        // AT_END waits for ExoPlayer's ended state. Credits mode may advance at
+        // the end of the short, bounded countdown once credits are detected.
+        if (nextEpisodePrefs.nextEpisodeMode != NextEpisodeMode.AT_CREDITS) {
+            return@LaunchedEffect
+        }
         resolveAndPlayNextEpisode(
             nextEpisodeInfo = nextEpisodeInfo,
             showTmdbId = showTmdbId,
@@ -1468,6 +1541,7 @@ fun PlayerScreen(
             currentTitle = currentTitle,
             currentPosition = currentPosition,
             duration = duration,
+            activeAudioLanguage = audioTracks.firstOrNull { it.isSelected }?.language,
             currentSeasonNumber = currentSeasonNumber,
             currentEpisodeNumber = currentEpisodeNumber,
             requestPlayback = ::requestPlayback,
@@ -1636,6 +1710,7 @@ fun PlayerScreen(
                             currentTitle = currentTitle,
                             currentPosition = currentPosition,
                             duration = duration,
+                            activeAudioLanguage = audioTracks.firstOrNull { it.isSelected }?.language,
                             currentSeasonNumber = currentSeasonNumber,
                             currentEpisodeNumber = currentEpisodeNumber,
                             requestPlayback = ::requestPlayback,
@@ -1747,7 +1822,7 @@ fun PlayerScreen(
         resetPlaybackHealthWindow()
         if (currentUrl.isBlank()) {
             errorMessage = "No playback URL available"
-        } else if (!useMpv) {
+        } else if (!useMpv && !restoredRetainedPlayback) {
             engine.play(currentUrl, externalSubtitles)
         }
         // mpv playback is started by the LaunchedEffect(mpvSurfaceReady) below
@@ -1884,14 +1959,18 @@ fun PlayerScreen(
                     )
                 }
             }
-            ActivePlaybackState.isPlaying = false
+            if (!retainPlaybackOnExit) {
+                ActivePlaybackState.isPlaying = false
+            }
             engine.removeListener(listener)
-            audioEqualizer?.release()
             mpvView = null
             if (engine is ExoPlayerEngine) {
                 detachExoPlayerView()
             }
-            engine.release()
+            if (!retainPlaybackOnExit) {
+                audioEqualizer?.release()
+                engine.release()
+            }
         }
     }
 
@@ -1905,6 +1984,8 @@ fun PlayerScreen(
     // Position updates for ExoPlayer (MPV uses property observers)
     LaunchedEffect(isPlaying, useMpv) {
         if (useMpv) return@LaunchedEffect // MPV updates via callbacks
+        val positionUpdateIntervalMs = if (isTv) 1_000L else 500L
+        val progressSaveTickCount = (10_000L / positionUpdateIntervalMs).toInt()
         var saveCounter = 0
         while (isPlaying) {
             if (!isSeeking && engine is ExoPlayerEngine) {
@@ -1914,7 +1995,7 @@ fun PlayerScreen(
                 sliderPosition = if (duration > 0) currentPosition.toFloat() / duration else 0f
             }
             saveCounter++
-            if (saveCounter >= 20 && mediaId.isNotBlank() && duration > 0) {
+            if (saveCounter >= progressSaveTickCount && mediaId.isNotBlank() && duration > 0) {
                 saveCounter = 0
                 watchProgressRepo.saveProgress(
                     WatchProgress(
@@ -1938,7 +2019,7 @@ fun PlayerScreen(
                     )
                 }
             }
-            delay(500)
+            delay(positionUpdateIntervalMs)
         }
     }
 
@@ -2141,7 +2222,14 @@ fun PlayerScreen(
         withFrameNanos { }
         when (derivedUiMode) {
             is PlaybackUiMode.ChromeHidden -> {
-                runCatching { playerRootFocusRequester.requestFocus() }
+                // A focused control is removed when chrome auto-hides. Some
+                // Fire OS versions briefly leave the window without a focus
+                // owner, so retry across frames until the persistent surface
+                // owns remote input again.
+                repeat(4) {
+                    runCatching { playerRootFocusRequester.requestFocus() }
+                    withFrameNanos { }
+                }
             }
             is PlaybackUiMode.ControlsVisible -> {
                 val restored = focusCoordinator.restoreFocusForCurrentMode()
@@ -2399,9 +2487,15 @@ fun PlayerScreen(
                             // Released before long-press triggered → short press
                             job.cancel()
                             resetSeekAcceleration()
-                            if (!handleBackAction()) {
-                                if (showControls) showControls = false
-                                else requestExitPlayer()
+                            when (
+                                PlayerNavigationMath.tvBackAction(
+                                    overlayConsumed = handleBackAction(),
+                                    controlsVisible = showControls,
+                                )
+                            ) {
+                                PlayerNavigationMath.TvBackAction.CONSUMED -> Unit
+                                PlayerNavigationMath.TvBackAction.HIDE_CONTROLS -> showControls = false
+                                PlayerNavigationMath.TvBackAction.EXIT_PLAYER -> requestExitPlayer()
                             }
                         }
                         return@onPreviewKeyEvent true
@@ -2411,7 +2505,7 @@ fun PlayerScreen(
                 if (keyEvent.type != KeyEventType.KeyDown) {
                     return@onPreviewKeyEvent false
                 }
-                if ((showTrackDialog || showAudioDelayDialog || showPictureFormatPicker || showEqualizerSheet || showDevicePicker || showResumePrompt || showNextEpisodeOverlay || showSubtitleSearch) && keyEvent.key != Key.Back) {
+                if ((errorMessage != null || showTrackDialog || showAudioDelayDialog || showPictureFormatPicker || showEqualizerSheet || showDevicePicker || showResumePrompt || showNextEpisodeOverlay || showSubtitleSearch) && keyEvent.key != Key.Back) {
                     return@onPreviewKeyEvent false
                 }
 
@@ -2601,90 +2695,23 @@ fun PlayerScreen(
                 if (exoPlayerView === view) exoPlayerView = null
             },
         )
-        // Error overlay
-        errorMessage?.let { msg ->
-            if (isTv) {
-                TvPlaybackErrorBanner(
-                    message = msg,
-                    onRetry = {
-                        errorMessage = null
-                        requestPlayback(currentUrl)
-                    },
-                    onDismiss = {
-                        errorMessage = null
-                    },
-                    modifier = Modifier
-                        .align(Alignment.TopCenter)
-                        .padding(top = 72.dp),
-                )
-            } else {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .background(Color.Black.copy(alpha = 0.85f)),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        modifier = Modifier.padding(32.dp),
-                    ) {
-                        Icon(
-                            Icons.Default.ErrorOutline,
-                            contentDescription = null,
-                            tint = Color(0xFFE8A838),
-                            modifier = Modifier.size(48.dp),
-                        )
-                        Spacer(Modifier.height(16.dp))
-                        Text(
-                            text = stringResource(R.string.player_playback_error),
-                            style = MaterialTheme.typography.headlineSmall,
-                            color = Color.White,
-                        )
-                        Spacer(Modifier.height(8.dp))
-                        Text(
-                            text = msg,
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = Color.White.copy(alpha = 0.7f),
-                        )
-                        if (currentUrl.isNotBlank()) {
-                            Spacer(Modifier.height(4.dp))
-                            Text(
-                                text = currentUrl.take(80) + if (currentUrl.length > 80) "..." else "",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = Color.White.copy(alpha = 0.3f),
-                                maxLines = 2,
-                            )
-                        }
-                        Spacer(Modifier.height(24.dp))
-                        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                            Button(
-                                onClick = {
-                                    errorMessage = null
-                                    requestPlayback(currentUrl)
-                                },
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = Color(0xFFE8A838),
-                                    contentColor = Color.Black,
-                                ),
-                                shape = RoundedCornerShape(8.dp),
-                            ) {
-                                Text(stringResource(R.string.player_retry))
-                            }
-                            Button(
-                                onClick = ::requestExitPlayer,
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = Color(0xFF2E2E40),
-                                    contentColor = Color.White,
-                                ),
-                                shape = RoundedCornerShape(8.dp),
-                            ) {
-                                Text(stringResource(R.string.player_go_back))
-                            }
-                        }
-                    }
+        PlaybackErrorOverlay(
+            message = errorMessage,
+            isTv = isTv,
+            currentUrl = currentUrl,
+            onRetry = ::retryPlaybackAfterError,
+            onDismiss = {
+                errorMessage = null
+                scope.launch {
+                    withFrameNanos { }
+                    runCatching { playerRootFocusRequester.requestFocus() }
                 }
-            }
-        }
+            },
+            onExit = ::requestExitPlayer,
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .padding(top = 72.dp),
+        )
 
         // Subtitle search overlay (TV only)
         if (showSubtitleSearch && isTv) {
@@ -3056,6 +3083,7 @@ fun PlayerScreen(
                             currentTitle = currentTitle,
                             currentPosition = currentPosition,
                             duration = duration,
+                            activeAudioLanguage = audioTracks.firstOrNull { it.isSelected }?.language,
                             currentSeasonNumber = currentSeasonNumber,
                             currentEpisodeNumber = currentEpisodeNumber,
                             requestPlayback = ::requestPlayback,
@@ -3096,7 +3124,7 @@ fun PlayerScreen(
         if (showResumePrompt) {
             RegisterFocusRegion(focusCoordinator, PlaybackFocusRegion.ResumePromptOverlay) { true }
             val resumeTarget = if (duration > 0L) {
-                resumePromptInitialPositionMs.coerceAtMost(duration)
+                resumePromptInitialPositionMs.coerceAtMost((duration - 1_000L).coerceAtLeast(0L))
             } else {
                 resumePromptInitialPositionMs
             }
@@ -3816,7 +3844,7 @@ fun PlayerScreen(
                 seekPreviewPositionMs = seekPreviewPositionMs,
                 skipSegments = skipSegments,
                 voiceOverlayMessage = voiceOverlayMessage,
-                onBack = onBack,
+                onBack = ::requestExitPlayer,
                 onOpenPictureFormat = { showMobileSheet(MobilePlaybackSheet.Picker(MobilePlaybackPicker.PICTURE_FORMAT)) },
                 onRotateOrientation = { rotatePlayerOrientation() },
                 onOpenGuide = {
@@ -4169,6 +4197,7 @@ private suspend fun loadStartupPlaybackSelection(
     debridAccounts: Map<com.torve.domain.model.DebridServiceType, String>,
     preferences: com.torve.domain.model.StreamPreferences,
     deviceCaps: com.torve.domain.model.DeviceCodecCaps,
+    selectionContext: StreamSelectionContext = StreamSelectionContext(),
 ): PlayerStartupSelection {
     val request = SourceAccelerationRequest(
         mediaType = type,
@@ -4220,6 +4249,7 @@ private suspend fun loadStartupPlaybackSelection(
         streams = startupStreams,
         preferences = preferences,
         deviceCaps = deviceCaps,
+        selectionContext = selectionContext,
     )
     val highConfidenceKeys = StartupPlaybackPolicy.highConfidenceCandidateKeys(snapshot.candidates)
     val autoplayCandidates = if (highConfidenceKeys.isEmpty()) {
@@ -4320,6 +4350,7 @@ private suspend fun resolveAndPlayNextEpisode(
     currentTitle: String,
     currentPosition: Long,
     duration: Long,
+    activeAudioLanguage: String?,
     currentSeasonNumber: Int?,
     currentEpisodeNumber: Int?,
     requestPlayback: (String) -> Unit,
@@ -4356,6 +4387,11 @@ private suspend fun resolveAndPlayNextEpisode(
             debridAccounts = debridAccounts,
             preferences = preferences,
             deviceCaps = deviceCaps,
+            selectionContext = StreamSelectionContext(
+                durationMs = duration.takeIf { it > 0L },
+                activeAudioLanguage = activeAudioLanguage,
+                automatic = true,
+            ),
         )
         if (startupSelection.autoplayCandidates.isNotEmpty()) {
             android.util.Log.i(
@@ -4402,6 +4438,11 @@ private suspend fun resolveAndPlayNextEpisode(
                 streams = fullStreams,
                 preferences = preferences,
                 deviceCaps = deviceCaps,
+                selectionContext = StreamSelectionContext(
+                    durationMs = duration.takeIf { it > 0L },
+                    activeAudioLanguage = activeAudioLanguage,
+                    automatic = true,
+                ),
             )
             val ranked = StreamFallbackOrdering.streamsInTryOrder(
                 streams = rankedBySelector,
@@ -4437,19 +4478,30 @@ private suspend fun resolveAndPlayNextEpisode(
 
         // Save progress for the current episode before switching
         if (mediaId.isNotBlank() && duration > 0) {
-            watchProgressRepo.saveProgress(
-                WatchProgress(
-                    mediaId = mediaId,
-                    mediaType = MediaType.fromString(mediaType),
-                    title = currentTitle,
-                    posterUrl = posterUrl.takeIf { it.isNotBlank() },
-                    backdropUrl = backdropUrl.takeIf { it.isNotBlank() },
-                    positionMs = currentPosition,
-                    durationMs = duration,
-                    seasonNumber = currentSeasonNumber,
-                    episodeNumber = currentEpisodeNumber,
-                ),
+            val progress = WatchProgress(
+                mediaId = mediaId,
+                mediaType = MediaType.fromString(mediaType),
+                title = currentTitle,
+                posterUrl = posterUrl.takeIf { it.isNotBlank() },
+                backdropUrl = backdropUrl.takeIf { it.isNotBlank() },
+                positionMs = currentPosition,
+                durationMs = duration,
+                seasonNumber = currentSeasonNumber,
+                episodeNumber = currentEpisodeNumber,
+                showTitle = seriesTitle.takeIf { it.isNotBlank() },
             )
+            watchProgressRepo.saveProgress(progress)
+            val showLevelId = showTmdbId?.takeIf { it > 0 }?.toString()
+                ?: imdbId.takeIf { it.isNotBlank() }
+                ?: tmdbId.takeIf { it > 0 }?.toString()
+            if (!showLevelId.isNullOrBlank() && showLevelId != mediaId) {
+                watchProgressRepo.saveProgress(
+                    progress.copy(
+                        mediaId = showLevelId,
+                        title = seriesTitle.ifBlank { currentTitle },
+                    ),
+                )
+            }
         }
 
         // Build new title
@@ -5012,12 +5064,113 @@ private fun AudioDelayDialog(
 }
 
 @Composable
+private fun PlaybackErrorOverlay(
+    message: String?,
+    isTv: Boolean,
+    currentUrl: String,
+    onRetry: () -> Unit,
+    onDismiss: () -> Unit,
+    onExit: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val msg = message ?: return
+    if (isTv) {
+        TvPlaybackErrorBanner(
+            message = msg,
+            onRetry = onRetry,
+            onDismiss = onDismiss,
+            modifier = modifier,
+        )
+        return
+    }
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black.copy(alpha = 0.85f)),
+        contentAlignment = Alignment.Center,
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            modifier = Modifier.padding(32.dp),
+        ) {
+            Icon(
+                Icons.Default.ErrorOutline,
+                contentDescription = null,
+                tint = Color(0xFFE8A838),
+                modifier = Modifier.size(48.dp),
+            )
+            Spacer(Modifier.height(16.dp))
+            Text(
+                text = stringResource(R.string.player_playback_error),
+                style = MaterialTheme.typography.headlineSmall,
+                color = Color.White,
+            )
+            Spacer(Modifier.height(8.dp))
+            Text(
+                text = msg,
+                style = MaterialTheme.typography.bodyMedium,
+                color = Color.White.copy(alpha = 0.7f),
+            )
+            if (currentUrl.isNotBlank()) {
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    text = currentUrl.take(80) + if (currentUrl.length > 80) "..." else "",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Color.White.copy(alpha = 0.3f),
+                    maxLines = 2,
+                )
+            }
+            Spacer(Modifier.height(24.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Button(
+                    onClick = onRetry,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Color(0xFFE8A838),
+                        contentColor = Color.Black,
+                    ),
+                    shape = RoundedCornerShape(8.dp),
+                ) {
+                    Text(stringResource(R.string.player_retry))
+                }
+                Button(
+                    onClick = onExit,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Color(0xFF2E2E40),
+                        contentColor = Color.White,
+                    ),
+                    shape = RoundedCornerShape(8.dp),
+                ) {
+                    Text(stringResource(R.string.player_go_back))
+                }
+            }
+        }
+    }
+}
+
+@Composable
 private fun TvPlaybackErrorBanner(
     message: String,
     onRetry: () -> Unit,
     onDismiss: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val retryFocusRequester = remember(message) { FocusRequester() }
+    val closeFocusRequester = remember(message) { FocusRequester() }
+    var retryFocused by remember(message) { mutableStateOf(false) }
+    var closeFocused by remember(message) { mutableStateOf(false) }
+
+    LaunchedEffect(message) {
+        withFrameNanos { }
+        repeat(8) {
+            val focused = runCatching {
+                retryFocusRequester.requestFocus()
+                true
+            }.getOrDefault(false)
+            if (focused) return@LaunchedEffect
+            delay(40)
+        }
+    }
+
     Row(
         modifier = modifier
             .fillMaxWidth(0.88f)
@@ -5041,8 +5194,32 @@ private fun TvPlaybackErrorBanner(
             maxLines = 2,
             modifier = Modifier.weight(1f),
         )
-        TextButton(onClick = onRetry) { Text(stringResource(R.string.player_retry)) }
-        TextButton(onClick = onDismiss) { Text(stringResource(R.string.common_close)) }
+        TextButton(
+            onClick = onRetry,
+            modifier = Modifier
+                .focusRequester(retryFocusRequester)
+                .focusProperties { right = closeFocusRequester }
+                .onFocusChanged { retryFocused = it.isFocused },
+            colors = ButtonDefaults.textButtonColors(
+                containerColor = if (retryFocused) Color(0xFFE8A838) else Color.Transparent,
+                contentColor = if (retryFocused) Color.Black else Color(0xFFE8A838),
+            ),
+        ) {
+            Text(stringResource(R.string.player_retry))
+        }
+        TextButton(
+            onClick = onDismiss,
+            modifier = Modifier
+                .focusRequester(closeFocusRequester)
+                .focusProperties { left = retryFocusRequester }
+                .onFocusChanged { closeFocused = it.isFocused },
+            colors = ButtonDefaults.textButtonColors(
+                containerColor = if (closeFocused) Color(0xFFE8A838) else Color.Transparent,
+                contentColor = if (closeFocused) Color.Black else Color(0xFFE8A838),
+            ),
+        ) {
+            Text(stringResource(R.string.common_close))
+        }
     }
 }
 

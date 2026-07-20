@@ -13,6 +13,13 @@ plugins {
 fun String.toBuildConfigStringLiteral(): String =
     "\"" + replace("\\", "\\\\").replace("\"", "\\\"") + "\""
 
+val torveLocalProperties = Properties().apply {
+    val file = rootProject.file("local.properties")
+    if (file.exists()) {
+        FileInputStream(file).use(::load)
+    }
+}
+
 android {
     namespace = "com.torve.android"
     compileSdk = 36
@@ -22,6 +29,12 @@ android {
     val torveDiscordInviteUrl = providers.gradleProperty("torveDiscordInviteUrl")
         .orElse(providers.environmentVariable("TORVE_DISCORD_INVITE_URL"))
         .orElse("https://discord.gg/dVHFAh7Amx")
+    val traktClientId = providers.gradleProperty("TRAKT_CLIENT_ID")
+        .orElse(providers.environmentVariable("TRAKT_CLIENT_ID"))
+        .orElse(torveLocalProperties.getProperty("TRAKT_CLIENT_ID", ""))
+    val traktClientSecret = providers.gradleProperty("TRAKT_CLIENT_SECRET")
+        .orElse(providers.environmentVariable("TRAKT_CLIENT_SECRET"))
+        .orElse(torveLocalProperties.getProperty("TRAKT_CLIENT_SECRET", ""))
 
     signingConfigs {
         create("release") {
@@ -43,14 +56,14 @@ android {
         }
     }
 
-    val baseVersionCode = 93
+    val baseVersionCode = 96
 
     defaultConfig {
         applicationId = "com.torve.app"
         minSdk = 24
         targetSdk = 36
         versionCode = baseVersionCode
-        versionName = "1.1.0"
+        versionName = "1.1.3"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         multiDexEnabled = true
         multiDexKeepProguard = file("multidex-config.pro")
@@ -76,6 +89,8 @@ android {
         buildConfigField("String", "TORVE_DISCORD_INVITE_URL", torveDiscordInviteUrl.get().toBuildConfigStringLiteral())
         buildConfigField("Boolean", "TORVE_SHOW_DONATION_LINKS", "false")
         buildConfigField("String", "TORVE_DONATION_URL", "\"\"")
+        buildConfigField("String", "TRAKT_CLIENT_ID", traktClientId.get().toBuildConfigStringLiteral())
+        buildConfigField("String", "TRAKT_CLIENT_SECRET", traktClientSecret.get().toBuildConfigStringLiteral())
     }
 
     flavorDimensions += listOf("store", "formFactor")

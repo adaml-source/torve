@@ -3,6 +3,7 @@ package com.torve.data.addon
 import com.torve.data.debrid.DebridClient
 import com.torve.domain.model.DebridServiceType
 import com.torve.domain.model.InstalledAddon
+import com.torve.domain.model.canResolveStreams
 import com.torve.domain.model.MediaType
 import com.torve.domain.model.StreamFetchPolicy
 import com.torve.domain.model.StreamPreferences
@@ -320,10 +321,7 @@ internal fun resolveStreamAddonBaseUrls(
     debridAccounts: Map<DebridServiceType, String> = emptyMap(),
 ): List<String> {
     return addons
-        .filter { addon ->
-            addon.isEnabled &&
-                addon.supportsStreamResolution()
-        }
+        .filter { addon -> addon.canResolveStreams() }
         .flatMap { addon ->
             val baseUrl = addon.manifestUrl.removeSuffix("/manifest.json").removeSuffix("/")
             if (addon.isPlainTorrentio()) {
@@ -336,14 +334,7 @@ internal fun resolveStreamAddonBaseUrls(
         .distinct()
 }
 
-private fun InstalledAddon.supportsStreamResolution(): Boolean {
-    val resources = manifest.resources
-    return resources.isEmpty() || resources.any { resource ->
-        resource.equals("stream", ignoreCase = true)
-    }
-}
-
-private fun ParsedStream.requiresDebridVerification(): Boolean =
+internal fun ParsedStream.requiresDebridVerification(): Boolean =
     directUrl == null && (infoHash != null || magnetUrl != null)
 
 private fun List<ParsedStream>.addonCounts(): String {

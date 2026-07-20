@@ -8,8 +8,6 @@ internal fun RatingDisplayPrefs.tvExternalCardRatingPrefs(): RatingDisplayPrefs 
     val preferredOrder = listOf(
         RatingSource.IMDB,
         RatingSource.ROTTEN_TOMATOES,
-        RatingSource.RT_AUDIENCE,
-        RatingSource.TMDB,
     )
     return copy(
         enabledProviders = preferredOrder,

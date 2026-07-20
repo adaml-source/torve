@@ -459,7 +459,7 @@ struct PandaSetupScreen: View {
         switch id {
         case "none": return "None"
         case "nzbgeek": return "NZBgeek"
-        case "scenenzbs": return "SceneNZBs"
+        case "scenenzbs": return "Treasure Maps"
         case "dognzb": return "DogNZB"
         case "nzbplanet": return "NZBPlanet"
         case "custom": return "Custom URL"
@@ -661,7 +661,7 @@ struct PandaSetupScreen: View {
             Text(
                 wrapper.state.hasManagementToken
                 ? "Required for editing, deleting, or rotating this Panda config."
-                : "This device has no management token for this config. Paste an admin-issued token to unlock edits."
+                : "This device has no management token for this config. Paste an admin-issued token to enable edits."
             )
             .font(.caption)
             .foregroundColor(.secondary)

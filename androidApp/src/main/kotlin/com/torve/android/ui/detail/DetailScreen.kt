@@ -114,6 +114,7 @@ import com.torve.domain.model.DownloadStatus
 import com.torve.domain.model.MediaItem
 import com.torve.domain.model.MediaRatings
 import com.torve.domain.model.MediaType
+import com.torve.domain.model.canResolveStreams
 import com.torve.domain.model.favoriteMediaKey
 import com.torve.domain.model.AvailabilityOffer
 import com.torve.domain.model.AvailabilityOfferType
@@ -176,11 +177,16 @@ fun DetailScreen(
     val coroutineScope = rememberCoroutineScope()
     val state by viewModel.state.collectAsState()
     val settingsState by settingsViewModel.state.collectAsState()
-    val runtimeFilterFeedbackEnabled = accessTier != AccessTier.FREE
+    val runtimeFilterFeedbackEnabled = true
     val watchlistState by watchlistViewModel.state.collectAsState()
     val favoritesState by mediaFavoritesRepository.state.collectAsState()
     val addonState by addonViewModel.state.collectAsState()
-    val hasAnyAddon = addonState.addons.isNotEmpty()
+    val hasEnabledStreamAddon = remember(addonState.addons) {
+        addonState.addons.any { addon -> addon.canResolveStreams() }
+    }
+    // The addon VM is loaded on this screen and is the freshest local source
+    // of truth. Settings can initialize before startup addon sync completes.
+    val canPlayStreams = settingsState.debridConnected || hasEnabledStreamAddon
     val isLocked: (PremiumFeature) -> Boolean = remember(accessTier) {
         { feature -> PremiumAccess.isPremiumLocked(feature, accessTier) }
     }
@@ -381,11 +387,22 @@ fun DetailScreen(
             }
 
             state.error != null -> {
-                Text(
-                    text = com.torve.android.error.resolveErrorKey(androidx.compose.ui.platform.LocalContext.current, state.error) ?: stringResource(R.string.error_unknown),
-                    modifier = Modifier.align(Alignment.Center),
-                    color = MaterialTheme.colorScheme.error,
-                )
+                Column(
+                    modifier = Modifier.align(Alignment.Center).padding(24.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    Text(
+                        text = com.torve.android.error.resolveErrorKey(context, state.error) ?: stringResource(R.string.error_unknown),
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                    Button(onClick = { viewModel.loadDetail(type, id) }) {
+                        Text(stringResource(R.string.common_retry))
+                    }
+                    onSettingsClick?.let { openSettings ->
+                        TextButton(onClick = openSettings) { Text(stringResource(R.string.nav_settings)) }
+                    }
+                }
             }
 
             state.mediaItem != null -> {
@@ -543,7 +560,7 @@ fun DetailScreen(
                                 onClick = {
                                     if (streamPlaybackLocked) {
                                         onLockedFeatureClick(PremiumFeature.STREAM_PLAYBACK)
-                                    } else if (!settingsState.canPlayStreams) {
+                                    } else if (!canPlayStreams) {
                                         // No stream source (debrid or stream-providing addon) available.
                                         // Metadata-only addons like Cinemeta don't qualify. Send the user
                                         // to the addon catalog to install one (e.g. Panda). Predicate
@@ -597,7 +614,7 @@ fun DetailScreen(
                                     Spacer(Modifier.width(8.dp))
                                     val playLabel = when {
                                         streamPlaybackLocked -> stringResource(R.string.premium_unlock_with_lifetime)
-                                        !settingsState.canPlayStreams -> stringResource(R.string.detail_install_addon)
+                                        !canPlayStreams -> stringResource(R.string.detail_install_addon)
                                         item.type == MediaType.SERIES && state.streamContextSeason != null && state.streamContextEpisode != null ->
                                             "S${state.streamContextSeason.toString().padStart(2, '0')}E${state.streamContextEpisode.toString().padStart(2, '0')}"
                                         else -> state.primaryPlayLabel
@@ -817,13 +834,37 @@ fun DetailScreen(
                             state.resolveError?.let { error ->
                                 ErrorMessage(error, Modifier.padding(top = 8.dp))
                             }
+                            if (state.streamsError != null || state.resolveError != null) {
+                                Row(
+                                    modifier = Modifier.padding(top = 4.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                ) {
+                                    TextButton(
+                                        onClick = {
+                                            viewModel.fetchStreams(
+                                                season = state.streamContextSeason,
+                                                episode = state.streamContextEpisode,
+                                                forceManualPick = true,
+                                            )
+                                        },
+                                    ) {
+                                        Text(stringResource(R.string.common_retry), color = Amber)
+                                    }
+                                    onSettingsClick?.let { openSettings ->
+                                        TextButton(onClick = openSettings) {
+                                            Text(stringResource(R.string.nav_settings), color = Amber)
+                                        }
+                                    }
+                                }
+                            }
                         }
 
                         Spacer(Modifier.height(20.dp))
                         WhereToWatchSection(
                             offers = state.availability?.offers.orEmpty(),
                             isLoading = state.isLoadingAvailability,
-                            error = state.availabilityError,
+                            error = com.torve.android.error.resolveErrorKey(context, state.availabilityError)
+                                ?: state.availabilityError,
                             onOpenOffer = { offer ->
                                 val targetUrl = offer.deeplinkUrl ?: offer.webUrl
                                 if (!targetUrl.isNullOrBlank()) {
@@ -920,7 +961,7 @@ fun DetailScreen(
                                     }
                                 },
                                 onEpisodePlay = { season, episode ->
-                                    if (!hasAnyAddon) {
+                                    if (!canPlayStreams) {
                                         onOpenAddonCatalog?.invoke()
                                     } else {
                                         openSourcePickerOrProvider(season, episode)
@@ -1234,6 +1275,74 @@ fun DetailScreen(
                     .statusBarsPadding()
                     .padding(start = 12.dp, top = 10.dp),
             )
+
+            // Keep the primary action reachable on long mobile detail pages.
+            // The in-content button remains the explanatory first action; this
+            // compact duplicate only appears once that area has scrolled away.
+            val stickyPlayItem = state.mediaItem
+            if (
+                !isTvDevice &&
+                detailScrollState.value > compactBackThresholdPx &&
+                stickyPlayItem?.imdbId != null &&
+                !state.showStreamPicker &&
+                sourcePickerState == null &&
+                !showActionSheet
+            ) {
+                Button(
+                    onClick = {
+                        if (streamPlaybackLocked) {
+                            onLockedFeatureClick(PremiumFeature.STREAM_PLAYBACK)
+                        } else if (!canPlayStreams) {
+                            onOpenAddonCatalog?.invoke()
+                        } else if (stickyPlayItem.type == MediaType.SERIES) {
+                            val season = state.streamContextSeason
+                            val episode = state.streamContextEpisode
+                            if (season != null && episode != null) {
+                                openSourcePickerOrProvider(season, episode)
+                            } else {
+                                viewModel.playNextEpisode()
+                            }
+                        } else {
+                            openSourcePickerOrProvider()
+                        }
+                    },
+                    modifier = Modifier
+                        .zIndex(24f)
+                        .align(Alignment.BottomCenter)
+                        .navigationBarsPadding()
+                        .padding(horizontal = 16.dp, vertical = 12.dp)
+                        .fillMaxWidth()
+                        .height(52.dp),
+                    enabled = !state.isLoadingStreams && !state.isResolving,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Amber,
+                        contentColor = Obsidian,
+                        disabledContainerColor = Amber.copy(alpha = 0.45f),
+                    ),
+                    shape = RoundedCornerShape(12.dp),
+                ) {
+                    if (state.isLoadingStreams || state.isResolving) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(20.dp),
+                            strokeWidth = 2.dp,
+                            color = Obsidian,
+                        )
+                        Spacer(Modifier.width(8.dp))
+                    } else {
+                        Icon(Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(22.dp))
+                        Spacer(Modifier.width(8.dp))
+                    }
+                    val stickyLabel = when {
+                        state.isResolving -> stringResource(R.string.detail_resolving)
+                        state.isLoadingStreams -> stringResource(R.string.detail_finding_streams)
+                        stickyPlayItem.type == MediaType.SERIES &&
+                            state.streamContextSeason != null && state.streamContextEpisode != null ->
+                            "Resume S${state.streamContextSeason.toString().padStart(2, '0')}E${state.streamContextEpisode.toString().padStart(2, '0')}"
+                        else -> state.primaryPlayLabel
+                    }
+                    Text(stickyLabel, fontWeight = FontWeight.Bold)
+                }
+            }
 
             // Preparing-stream overlay: blocks the detail surface while a
             // Panda cloud-client stream is still warming up. Never open the

@@ -112,6 +112,9 @@ import com.torve.domain.model.withFallbackTmdbScore
 
 val LocalCardStyle = compositionLocalOf { CardStyle() }
 
+private fun String?.usableImageUrl(): String? =
+    this?.trim()?.takeIf { it.startsWith("https://") || it.startsWith("http://") }
+
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // Poster Card — The primary content card used everywhere.
 // Clean poster image with minimal overlay. Title below card,
@@ -247,13 +250,20 @@ fun PosterCard(
             // Content-policy hardening: locked/placeholder items get neutral art immediately.
             // This prevents any real poster/backdrop request and avoids brief leakage from
             // recycled rows, cache hits, or recomposition lag.
-            val imageModel = if (item.isContentPlaceholder || item.isStubDetail) {
+            val primaryImage = if (item.isContentPlaceholder || item.isStubDetail) {
                 null
             } else if (isLandscapeCard) {
-                item.backdropUrl ?: item.posterUrl
+                item.backdropUrl.usableImageUrl() ?: item.posterUrl.usableImageUrl()
             } else {
-                item.posterUrl
+                item.posterUrl.usableImageUrl() ?: item.backdropUrl.usableImageUrl()
             }
+            val fallbackImage = if (isLandscapeCard) {
+                item.posterUrl.usableImageUrl()?.takeIf { it != primaryImage }
+            } else {
+                item.backdropUrl.usableImageUrl()?.takeIf { it != primaryImage }
+            }
+            var useFallbackImage by remember(primaryImage, fallbackImage) { mutableStateOf(false) }
+            val imageModel = if (useFallbackImage) fallbackImage else primaryImage
 
             SubcomposeAsyncImage(
                 model = imageModel,
@@ -273,6 +283,11 @@ fun PosterCard(
                             style = MaterialTheme.typography.titleLarge,
                             color = Torve.colors.textTertiary,
                         )
+                    }
+                },
+                onError = {
+                    if (!useFallbackImage && fallbackImage != null) {
+                        useFallbackImage = true
                     }
                 },
             )
@@ -609,35 +624,28 @@ fun CastAvatar(
     onClick: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
+    val usableProfileUrl = profileUrl.usableImageUrl()
     Column(
         modifier = modifier
             .width(72.dp)
             .clickable(onClick = onClick),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        if (profileUrl != null) {
-            AsyncImage(
-                model = profileUrl,
+        if (usableProfileUrl != null) {
+            SubcomposeAsyncImage(
+                model = usableProfileUrl,
                 contentDescription = name,
                 modifier = Modifier
                     .size(60.dp)
                     .clip(CircleShape),
                 contentScale = ContentScale.Crop,
+                loading = { ShimmerBox(modifier = Modifier.fillMaxSize()) },
+                error = {
+                    PersonInitialsFallback(name = name, modifier = Modifier.fillMaxSize())
+                },
             )
         } else {
-            Box(
-                modifier = Modifier
-                    .size(60.dp)
-                    .clip(CircleShape)
-                    .background(Gunmetal),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text(
-                    text = name.split(" ").map { it.firstOrNull() ?: "" }.take(2).joinToString(""),
-                    style = MaterialTheme.typography.titleSmall,
-                    color = Torve.colors.textTertiary,
-                )
-            }
+            PersonInitialsFallback(name = name, modifier = Modifier.size(60.dp))
         }
         Spacer(Modifier.height(4.dp))
         Text(
@@ -656,6 +664,22 @@ fun CastAvatar(
                 overflow = TextOverflow.Ellipsis,
             )
         }
+    }
+}
+
+@Composable
+private fun PersonInitialsFallback(name: String, modifier: Modifier = Modifier) {
+    Box(
+        modifier = modifier
+            .clip(CircleShape)
+            .background(Gunmetal),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text = name.split(" ").mapNotNull { it.firstOrNull()?.toString() }.take(2).joinToString(""),
+            style = MaterialTheme.typography.titleSmall,
+            color = Torve.colors.textTertiary,
+        )
     }
 }
 

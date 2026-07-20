@@ -58,6 +58,7 @@ import com.torve.platform.torveVerboseLog
 import com.torve.presentation.contentpolicy.ContentPolicyFilter
 import com.torve.presentation.settings.SettingsViewModel
 import com.torve.presentation.settings.SettingsRefreshNotifier
+import com.torve.presentation.util.hydrateUpcomingScheduleArtwork
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -194,12 +195,12 @@ class HomeViewModel(
 
     init {
         scope.launch {
+            restoreHomeSnapshot()
             _sectionConfigs.value = loadSectionConfigs()
             _enabledServiceIds.value = loadEnabledServiceIds()
             _customSections.value = loadCustomSections()
             _addonShelfVisibility.value = loadAddonShelfVisibility()
             _homeLayoutOrder.value = ensureAllSectionsInLayoutOrder(loadHomeLayoutOrder())
-            restoreFreshHomeSnapshot()
             loadHomeScreen()
             scheduleUpcomingScheduleRefresh("startup")
         }
@@ -223,7 +224,13 @@ class HomeViewModel(
                 invalidationCoordinator.events
                     .debounce(500L)
                     .collectLatest {
-                        _state.value = HomeUiState(isLoading = true)
+                        _state.update { current ->
+                            if (current.hasRenderableContent()) {
+                                current.copy(isLoading = false, error = null)
+                            } else {
+                                HomeUiState(isLoading = true)
+                            }
+                        }
                         loadHomeScreen()
                     }
             }
@@ -557,7 +564,7 @@ class HomeViewModel(
         }
     }
 
-    private suspend fun restoreFreshHomeSnapshot(): Boolean {
+    private suspend fun restoreHomeSnapshot(): Boolean {
         val saved = try { prefsRepo.getString(HOME_SNAPSHOT_KEY) } catch (_: Exception) { null }
         if (saved.isNullOrBlank()) return false
         val snapshot = try {
@@ -565,7 +572,8 @@ class HomeViewModel(
         } catch (_: Exception) {
             return false
         }
-        if (currentTimeMillis() - snapshot.savedAtMs > HOME_SNAPSHOT_MAX_AGE_MS) return false
+        val snapshotAgeMs = (currentTimeMillis() - snapshot.savedAtMs).coerceAtLeast(0L)
+        if (snapshotAgeMs > HOME_SNAPSHOT_MAX_STALE_AGE_MS) return false
         val restoredAddonShelves = snapshot.addonShelves.withoutProviderOwnedHomeCatalogs()
         if (
             snapshot.shelves.isEmpty() &&
@@ -612,7 +620,9 @@ class HomeViewModel(
             isLoading = false,
             error = null,
         )
-        torveVerboseLog { "HOME_TAB restored persisted snapshot shelves=${snapshot.shelves.size}" }
+        torveVerboseLog {
+            "HOME_TAB restored persisted snapshot shelves=${snapshot.shelves.size} age_ms=$snapshotAgeMs"
+        }
         return true
     }
 
@@ -653,6 +663,55 @@ class HomeViewModel(
 
     private fun String.normalizedHomeCatalogLabel(): String =
         lowercase().filter { it.isLetterOrDigit() }
+
+    /**
+     * Publish essential discovery shelves as soon as TMDB returns. Optional
+     * account, add-on, schedule and ratings work continues in the same
+     * supervised load and replaces this state when complete.
+     */
+    private suspend fun publishInitialHomeShelves(
+        shelves: List<CatalogShelf>,
+        dedupe: Boolean,
+    ) {
+        if (shelves.isEmpty()) return
+
+        val shelfConfigs = try { shelfConfigRepo.getAllConfigs() } catch (_: Exception) { emptyList() }
+        val configMap = shelfConfigs.associateBy { it.shelfId }
+        val maxRating = try { profileRepo.getActiveProfile()?.maxContentRating } catch (_: Exception) { null }
+        val policy = currentPolicy()
+        val ordered = shelves
+            .filter { shelf -> configMap[shelf.id]?.isVisible != false }
+            .sortedBy { shelf -> configMap[shelf.id]?.sortOrder ?: Int.MAX_VALUE }
+            .map { shelf ->
+                val parentalItems = ParentalFilter.filter(shelf.items, maxRating)
+                shelf.copy(items = if (dedupe) parentalItems.dedupeByStableKey() else parentalItems)
+            }
+        val policyFiltered = filterShelves(
+            policy = policy,
+            context = ContentAccessContext.DEFAULT_DISCOVERY,
+            shelves = ordered,
+            sourceType = ContentSourceType.TMDB,
+        )
+        val visibleShelves = if (dedupe) {
+            policyFiltered.dedupeAcrossShelves(mutableSetOf())
+        } else {
+            policyFiltered
+        }.filter { it.items.isNotEmpty() }
+        val hydratedShelves = hydrateShelvesFromCache(visibleShelves)
+        if (hydratedShelves.isEmpty()) return
+
+        _state.update { current ->
+            current.copy(
+                shelves = hydratedShelves,
+                heroItem = hydratedShelves.firstOrNull()?.items?.firstOrNull() ?: current.heroItem,
+                isLoading = false,
+                error = null,
+            )
+        }
+        torveVerboseLog {
+            "HOME_TAB state_transition state=essential shelves=${hydratedShelves.size}"
+        }
+    }
 
     fun loadHomeScreen() {
         val keepContentVisible = _state.value.hasRenderableContent()
@@ -812,8 +871,10 @@ class HomeViewModel(
                             emptyList()
                         }
                     }
+                    val initialShelves = shelvesDeferred.await()
+                    publishInitialHomeShelves(initialShelves, dedupe)
                     HomeLoadInputs(
-                        shelves = shelvesDeferred.await(),
+                        shelves = initialShelves,
                         installedAddons = installedAddonsDeferred.await(),
                         continueWatching = continueWatchingDeferred.await(),
                         overlayContinue = overlayContinueDeferred.await(),
@@ -1526,7 +1587,11 @@ class HomeViewModel(
             }
             .take(24)
 
-        val items = distinctEpisodes.map { episode -> episode.toUpcomingScheduleItem() }
+        val items = hydrateUpcomingScheduleArtwork(
+            entries = distinctEpisodes.map { episode -> episode to episode.toUpcomingScheduleItem() },
+            metadataRepo = metadataRepo,
+            detailLookupLimit = 24,
+        )
         return UpcomingScheduleLoadResult(
             items = items,
             status = resolveUpcomingScheduleStatus(
@@ -1764,6 +1829,7 @@ class HomeViewModel(
             val enriched = ratingsEnricher.enrichList(shelf.items, apiKey)
             if (!ratingsChanged(shelf.items, enriched)) return@runCatching
             val updated = shelf.copy(items = enriched)
+                .sortTopRatedShelfByExternalRatings()
             _state.update { state ->
                 val next = applyToState(state, updated)
                 next.copy(
@@ -1794,13 +1860,37 @@ class HomeViewModel(
         return toMutableList().apply { this[idx] = updated }
     }
 
+    private fun CatalogShelf.sortTopRatedShelfByExternalRatings(): CatalogShelf {
+        if (id != "top-rated") return this
+        val sorted = items.sortedWith(
+            compareByDescending<MediaItem> { it.homeTopRatedExternalRating10() ?: -1.0 }
+                .thenByDescending { it.ratings?.imdbVotes ?: 0 }
+                .thenBy { it.title.lowercase() },
+        )
+        return if (sorted == items) this else copy(items = sorted)
+    }
+
+    private fun MediaItem.homeTopRatedExternalRating10(): Double? {
+        val ratings = ratings ?: return null
+        val imdb = ratings.imdbScore
+            ?.takeIf { it > 0f }
+            ?.toDouble()
+        val rt = ratings.rottenTomatoesScore
+            ?.takeIf { it in 1..100 }
+            ?.toDouble()
+            ?.div(10.0)
+        val values = listOfNotNull(imdb, rt)
+        if (values.isEmpty()) return null
+        return values.average()
+    }
+
     private fun Map<String, MediaRatings>.mergeRatingsFor(items: List<MediaItem>): Map<String, MediaRatings> {
         if (items.isEmpty()) return this
         val out = toMutableMap()
         items.forEach { item ->
             val r = item.ratings ?: return@forEach
             item.ratingEnrichmentLookupKeys().forEach { key ->
-                out.putIfAbsent(key, r)
+                if (key !in out) out[key] = r
             }
         }
         return out
@@ -1919,7 +2009,10 @@ class HomeViewModel(
     }
 
     private fun hydrateShelvesFromCache(shelves: List<CatalogShelf>): List<CatalogShelf> {
-        return shelves.map { shelf -> shelf.copy(items = hydrateItemsFromCache(shelf.items)) }
+        return shelves.map { shelf ->
+            shelf.copy(items = hydrateItemsFromCache(shelf.items))
+                .sortTopRatedShelfByExternalRatings()
+        }
     }
 
     private fun hydrateShelfFromCache(shelf: CatalogShelf?): CatalogShelf? {
@@ -1991,7 +2084,7 @@ class HomeViewModel(
         items.forEach { item ->
             val ratings = item.ratings ?: return@forEach
             item.ratingEnrichmentLookupKeys().forEach { key ->
-                ratingsMap.putIfAbsent(key, ratings)
+                if (key !in ratingsMap) ratingsMap[key] = ratings
             }
         }
         return ratingsMap
@@ -2083,7 +2176,7 @@ class HomeViewModel(
             "popular-tv" -> metadataRepo.getPopular("tv", page)
             "now-playing" -> metadataRepo.getNowPlaying(page)
             "upcoming" -> metadataRepo.getUpcoming(page).filterFutureHomeReleases()
-            "top-rated" -> metadataRepo.getTopRated("movie", page)
+            "top-rated" -> metadataRepo.getPopular("movie", page)
             "airing-today" -> metadataRepo.getAiringToday(page)
             else -> emptyList()
         }
@@ -2182,7 +2275,7 @@ class HomeViewModel(
 
     companion object {
         private const val HOME_SNAPSHOT_KEY = "home_snapshot_v2"
-        private const val HOME_SNAPSHOT_MAX_AGE_MS = 6L * 60L * 60L * 1000L
+        private const val HOME_SNAPSHOT_MAX_STALE_AGE_MS = 30L * 24L * 60L * 60L * 1000L
         private val HOME_LOAD_AUTO_RETRY_DELAYS_MS = longArrayOf(5_000L, 15_000L, 30_000L)
         private const val KEY_RATINGS_CACHE_VERSION = "ratings_cache_version"
         private const val TRAKT_SCHEDULE_REFRESH_THROTTLE_MS = 15_000L

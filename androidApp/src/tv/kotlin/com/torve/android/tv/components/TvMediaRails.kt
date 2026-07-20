@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -102,13 +103,8 @@ import com.torve.android.ui.theme.Obsidian
 import com.torve.android.ui.theme.Silver
 import com.torve.android.ui.theme.Snow
 import com.torve.android.ui.theme.Steel
-import com.torve.android.ui.components.PreferredRatingPills
 import com.torve.domain.model.MediaItem
-import com.torve.domain.model.RatingDisplayPrefs
-import com.torve.domain.model.RatingSource
 import com.torve.domain.model.allowsTmdbRatingProvider
-import com.torve.domain.model.bestDisplayRating
-import com.torve.domain.model.withFallbackTmdbScore
 import com.torve.presentation.seeall.SeeAllViewModel
 import com.torve.presentation.settings.SettingsViewModel
 import kotlinx.coroutines.launch
@@ -148,6 +144,7 @@ private fun TvContentRail.progressFor(item: MediaItem): Float? {
 }
 
 private const val TV_CARD_WATCHED_THRESHOLD = 0.9f
+private const val TV_MEDIA_FOCUS_PREVIEW_DELAY_MS = 140L
 
 private fun MediaItem.upcomingScheduleMetadata(): String? {
     if (!id.startsWith("trakt-calendar:")) return null
@@ -263,14 +260,19 @@ internal fun TvMediaRails(
     val tvPrefs = remember { context.getSharedPreferences("tv_prefs", Context.MODE_PRIVATE) }
     val showTitlesOnCards = tvPrefs.getBoolean("tv_show_poster_titles", true) &&
         browseLayout == TvBrowseLayout.POSTER_ONLY
+    val prefetchSignature = remember(rails) {
+        rails.take(4).joinToString("|") { rail ->
+            "${rail.key}:${rail.items.take(8).joinToString(",") { item -> item.id }}"
+        }
+    }
 
-    LaunchedEffect(rails) {
+    LaunchedEffect(prefetchSignature) {
         if (rails.isNotEmpty()) {
             TvImagePrefetcher.prefetchRails(
                 context = context,
                 screenName = screenId,
                 rails = rails,
-                maxItems = 36,
+                maxItems = if (catalogHeroMode) 18 else 24,
             )
         }
     }
@@ -290,6 +292,19 @@ internal fun TvMediaRails(
         mutableStateOf(focusMemory.lastFocusedRowKey)
     }
     var contentFocusSignal by remember(screenId) { mutableIntStateOf(0) }
+    var pendingMediaFocusItem by remember(screenId) { mutableStateOf<MediaItem?>(null) }
+
+    LaunchedEffect(pendingMediaFocusItem, onMediaFocused) {
+        val item = pendingMediaFocusItem ?: return@LaunchedEffect
+        kotlinx.coroutines.delay(TV_MEDIA_FOCUS_PREVIEW_DELAY_MS)
+        if (pendingMediaFocusItem == item) {
+            onMediaFocused?.invoke(item)
+        }
+    }
+
+    fun queueMediaFocus(item: MediaItem) {
+        if (onMediaFocused != null) pendingMediaFocusItem = item
+    }
 
     LaunchedEffect(signature, effectiveFocusExclusive) {
         if (!effectiveFocusExclusive) return@LaunchedEffect
@@ -310,7 +325,7 @@ internal fun TvMediaRails(
             ?.coerceIn(0, (targetRow.items.size - 1).coerceAtLeast(0))
             ?: 0
         targetRow.items.getOrNull(targetIndex)?.let { item ->
-            onMediaFocused?.invoke(item)
+            queueMediaFocus(item)
         }
         coroutineScope.launch {
             runCatching {
@@ -344,7 +359,7 @@ internal fun TvMediaRails(
             ?.coerceIn(0, (rails[targetRowIndex].items.size - 1).coerceAtLeast(0))
             ?: 0
         rails[targetRowIndex].items.getOrNull(targetIndex)?.let { item ->
-            onMediaFocused?.invoke(item)
+            queueMediaFocus(item)
         }
         coroutineScope.launch {
             runCatching {
@@ -862,7 +877,7 @@ internal fun TvMediaRails(
                                     focusMemory.lastFocusedIndexByRow[row.key] = itemIndex
                                     onContentFocused(focusRequester)
                                     contentFocusSignal += 1
-                                    onMediaFocused?.invoke(item)
+                                    queueMediaFocus(item)
                                     if (effectiveFocusExclusive && previousFocusedRowKey != row.key) {
                                         coroutineScope.launch {
                                             runCatching {
@@ -934,7 +949,6 @@ internal fun TvMediaRails(
                                                 progress = progress,
                                                 showTitles = showTitlesOnCards,
                                                 showTmdbRating = showTmdbRating,
-                                                ratingPrefs = tvCardRatingPrefs,
                                                 sourceAwareRatings = sourceAwareRatings,
                                                 onContextMenuRequested = { anchorBounds ->
                                                     openContextMenu(
@@ -1166,15 +1180,19 @@ private fun TvPosterCard(
     progress: Float? = null,
     showTitles: Boolean = true,
     showTmdbRating: Boolean = true,
-    ratingPrefs: RatingDisplayPrefs,
     sourceAwareRatings: Boolean = false,
     onContextMenuRequested: ((Rect?) -> Unit)? = null,
 ) {
     var focused by remember { mutableStateOf(false) }
     var anchorBounds by remember { mutableStateOf<Rect?>(null) }
-    val scale by animateFloatAsState(targetValue = if (focused) 1.052f else 1f, label = "posterScale")
+    val scale by animateFloatAsState(
+        targetValue = if (focused) 1.035f else 1f,
+        animationSpec = tween(durationMillis = 100),
+        label = "posterScale",
+    )
     val borderColor by animateColorAsState(
         targetValue = if (focused) AmberLight else Color.Transparent,
+        animationSpec = tween(durationMillis = 100),
         label = "posterBorder",
     )
     val cardShape = RoundedCornerShape(16.dp)
@@ -1340,25 +1358,6 @@ private fun TvPosterCard(
             }
         }
 
-        if (sourceAwareRatings) {
-            TvLibraryRatingPills(
-                item = item,
-                modifier = Modifier
-                    .align(Alignment.BottomEnd)
-                    .padding(7.dp),
-            )
-        } else {
-            item.ratings.withFallbackTmdbScore(item.rating)?.let { ratings ->
-                PreferredRatingPills(
-                    ratings = ratings,
-                    prefs = ratingPrefs.copy(maxRatingsOnCard = 2),
-                    modifier = Modifier
-                        .align(Alignment.BottomEnd)
-                        .padding(7.dp),
-                )
-            }
-        }
-
         if (isWatched) {
             TvPosterWatchedBadge(
                 modifier = Modifier
@@ -1388,116 +1387,6 @@ private fun TvPosterCard(
                 )
             }
         }
-    }
-}
-
-@Composable
-private fun TvLibraryRatingPills(
-    item: MediaItem,
-    modifier: Modifier = Modifier,
-) {
-    val primary = item.bestDisplayRating()
-    val rottenTomatoes = item.ratings?.rottenTomatoesScore?.takeIf { it in 1..100 }
-    if (primary == null && rottenTomatoes == null) return
-
-    Row(
-        modifier = modifier,
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(3.dp),
-    ) {
-        primary?.let { rating ->
-            TvSourceAwareRatingChip(
-                source = rating.source,
-                value = rating.value,
-            )
-        }
-        rottenTomatoes?.let { score ->
-            TvPercentRatingChip(
-                label = "RT",
-                value = score,
-                accent = if (score >= 60) Color(0xFF67B346) else Color(0xFFFA320A),
-            )
-        }
-    }
-}
-
-@Composable
-private fun TvSourceAwareRatingChip(
-    source: RatingSource,
-    value: Double,
-    modifier: Modifier = Modifier,
-) {
-    val sourceLabel = when (source) {
-        RatingSource.IMDB -> "IMDb"
-        RatingSource.MDBLIST -> "MDB"
-        RatingSource.TRAKT -> "Trakt"
-        RatingSource.TMDB -> "TMDB"
-        else -> source.displayName
-    }
-    val accent = when (source) {
-        RatingSource.IMDB -> Color(0xFFF5C518)
-        RatingSource.MDBLIST -> Color(0xFFFF6B00)
-        RatingSource.TRAKT -> Color(0xFFED1C24)
-        RatingSource.TMDB -> Color(0xFF01D277)
-        else -> Amber
-    }
-
-    Row(
-        modifier = modifier
-            .clip(RoundedCornerShape(999.dp))
-            .background(Obsidian.copy(alpha = 0.88f))
-            .border(1.dp, accent.copy(alpha = 0.58f), RoundedCornerShape(999.dp))
-            .padding(horizontal = 5.dp, vertical = 3.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(3.dp),
-    ) {
-        Text(
-            text = sourceLabel,
-            style = MaterialTheme.typography.labelSmall.copy(fontSize = 7.5.sp, letterSpacing = 0.sp),
-            color = accent,
-            fontWeight = FontWeight.Bold,
-            maxLines = 1,
-        )
-        Text(
-            text = String.format("%.1f", value),
-            style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp, letterSpacing = 0.sp),
-            color = Snow,
-            fontWeight = FontWeight.SemiBold,
-            maxLines = 1,
-        )
-    }
-}
-
-@Composable
-private fun TvPercentRatingChip(
-    label: String,
-    value: Int,
-    accent: Color,
-    modifier: Modifier = Modifier,
-) {
-    Row(
-        modifier = modifier
-            .clip(RoundedCornerShape(999.dp))
-            .background(Obsidian.copy(alpha = 0.88f))
-            .border(1.dp, accent.copy(alpha = 0.58f), RoundedCornerShape(999.dp))
-            .padding(horizontal = 5.dp, vertical = 3.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(3.dp),
-    ) {
-        Text(
-            text = label,
-            style = MaterialTheme.typography.labelSmall.copy(fontSize = 7.5.sp, letterSpacing = 0.sp),
-            color = accent,
-            fontWeight = FontWeight.Bold,
-            maxLines = 1,
-        )
-        Text(
-            text = "$value%",
-            style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp, letterSpacing = 0.sp),
-            color = Snow,
-            fontWeight = FontWeight.SemiBold,
-            maxLines = 1,
-        )
     }
 }
 

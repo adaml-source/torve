@@ -351,6 +351,7 @@ fun IntegrationsScreen(
                 if (!state.traktConnected) {
                     Button(
                         onClick = { viewModel.startTraktDeviceAuth() },
+                        enabled = !state.traktLoading && !state.isPollingTrakt,
                         colors = ButtonDefaults.buttonColors(containerColor = Amber, contentColor = Obsidian),
                     ) { Text(if (state.traktLoading) stringResource(R.string.integrations_connecting) else stringResource(R.string.common_connect)) }
                 } else {

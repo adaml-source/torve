@@ -3,11 +3,18 @@ package com.torve.android.tv.nav
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.focus.FocusRequester
 import androidx.navigation.NavHostController
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
+import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.navArgument
 import com.torve.android.tv.TvScreenCache
 import com.torve.android.tv.TvNotificationQueue
@@ -15,7 +22,6 @@ import com.torve.android.tv.focus.TvScreenFocusHandle
 import com.torve.android.tv.screens.TvDetailsScreen
 import com.torve.android.tv.screens.TvDeviceLimitReachedScreen
 import com.torve.android.tv.screens.TvBugReportScreen
-import com.torve.android.tv.screens.TvBetaProgramScreen
 import com.torve.android.tv.screens.TvHomeLayoutScreen
 import com.torve.android.tv.screens.TvLivePlayerScreen
 import com.torve.android.tv.screens.TvPandaSetupScreen
@@ -26,19 +32,37 @@ import com.torve.android.tv.screens.TvVodSeriesDetailsScreen
 import com.torve.android.tv.screens.stats.TvWatchStatsScreen
 import com.torve.android.tv.premium.TvEntitledFeature
 import com.torve.android.ui.player.PlayerScreen
+import com.torve.android.ui.player.ActivePlaybackState
+import com.torve.android.ui.navigation.PersistentPlaybackBar
 import com.torve.domain.model.MediaItem
 import com.torve.domain.model.MediaType
+import com.torve.domain.model.WatchProgress
 import com.torve.domain.model.extractTmdbIdOrNull
 import com.torve.domain.repository.WatchProgressRepository
 import kotlinx.coroutines.launch
 import org.koin.compose.koinInject
 
 private const val TV_STREAM_RESOLVING_NOTIFICATION_TAG = "tv_stream_resolving"
+private const val TV_RESUME_MIN_POSITION_MS = 20_000L
+private const val TV_RESUME_MAX_PROGRESS = 0.85
 
 private fun NavHostController.navigateToTvDetails(item: MediaItem, autoPlay: Boolean = false) {
-    val id = item.tmdbId ?: item.id.toIntOrNull() ?: return
+    val id = item.tmdbId ?: item.id.toIntOrNull() ?: item.id.extractTmdbIdOrNull() ?: return
     val type = if (item.type == MediaType.SERIES) "tv" else "movie"
     navigate(TvRoutes.details(type = type, id = id, autoPlay = autoPlay))
+}
+
+private fun WatchProgress.validTvResumePositionMs(
+    season: Int?,
+    episode: Int?,
+): Long {
+    if (positionMs < TV_RESUME_MIN_POSITION_MS || durationMs <= 0L) return 0L
+    if (positionMs.toDouble() / durationMs.toDouble() >= TV_RESUME_MAX_PROGRESS) return 0L
+    if (mediaType == MediaType.SERIES) {
+        if (season != null && seasonNumber != season) return 0L
+        if (episode != null && episodeNumber != episode) return 0L
+    }
+    return positionMs
 }
 
 /**
@@ -58,7 +82,6 @@ internal fun TvNavHost(
     // Focus state cleanup handled in TvRoot via isSubRouteActive LaunchedEffect
     onRatingsBack: () -> Unit = { navController.popBackStack() },
     onWatchStatsBack: () -> Unit = { navController.popBackStack() },
-    onBetaProgramBack: () -> Unit = { navController.popBackStack() },
     onPandaSetupBack: () -> Unit = { navController.popBackStack() },
     onSeeAllBack: () -> Unit = { navController.popBackStack() },
     onDetailsBack: () -> Unit = { navController.popBackStack() },
@@ -79,10 +102,12 @@ internal fun TvNavHost(
 ) {
     val watchProgressRepo: WatchProgressRepository = koinInject()
     val navScope = rememberCoroutineScope()
-    NavHost(
-        navController = navController,
-        startDestination = TvRoutes.SUB_NAV_START,
-    ) {
+    val currentBackStackEntry = navController.currentBackStackEntryAsState().value
+    Box(modifier = Modifier.fillMaxSize()) {
+        NavHost(
+            navController = navController,
+            startDestination = TvRoutes.SUB_NAV_START,
+        ) {
         /* Empty placeholder — visible when no sub-route is active */
         composable(TvRoutes.SUB_NAV_START) { /* nothing */ }
 
@@ -128,12 +153,6 @@ internal fun TvNavHost(
                 onFirstContentRequester = onFirstContentRequester,
                 onContentFocused = onContentFocused,
                 entryFocusRequester = entryFocusRequester,
-            )
-        }
-
-        composable(TvRoutes.BETA_PROGRAM) {
-            TvBetaProgramScreen(
-                onBack = onBetaProgramBack,
             )
         }
 
@@ -246,14 +265,15 @@ internal fun TvNavHost(
                             onRequestLifetimeUnlock(TvEntitledFeature.STREAM_PLAYBACK)
                         } else {
                             navScope.launch {
-                                val savedMs = runCatching {
-                                    watchProgressRepo.getProgress(episodeItem.id)
-                                        ?.positionMs
-                                        ?.takeIf { it >= 20_000L }
-                                        ?: 0L
-                                }.getOrDefault(0L)
                                 val season = episode.kodiProps["vod_season_number"]?.toIntOrNull()
                                 val episodeNumber = episode.kodiProps["vod_episode_number"]?.toIntOrNull()
+                                val progressMediaId = args.item.tmdbId?.takeIf { it > 0 }?.toString()
+                                    ?: episodeItem.id
+                                val savedMs = runCatching {
+                                    watchProgressRepo.getProgress(progressMediaId)
+                                        ?.validTvResumePositionMs(season, episodeNumber)
+                                        ?: 0L
+                                }.getOrDefault(0L)
                                 val episodeName = episode.tvgName?.takeIf { it.isNotBlank() }
                                     ?: episode.name
                                 navController.navigate(
@@ -261,7 +281,7 @@ internal fun TvNavHost(
                                         url = episode.url,
                                         fallbackUrl = "",
                                         title = args.item.title,
-                                        mediaId = episodeItem.id,
+                                        mediaId = progressMediaId,
                                         mediaType = "tv",
                                         posterUrl = episodeItem.posterUrl.orEmpty(),
                                         backdropUrl = episodeItem.backdropUrl.orEmpty(),
@@ -331,8 +351,7 @@ internal fun TvNavHost(
                         } else {
                             runCatching {
                                 watchProgressRepo.getProgress(mediaItem.id)
-                                    ?.positionMs
-                                    ?.takeIf { it >= 20_000L }
+                                    ?.validTvResumePositionMs(season, episode)
                                     ?: 0L
                             }.getOrDefault(0L)
                         }
@@ -436,6 +455,42 @@ internal fun TvNavHost(
                     },
                     // Focus state cleanup handled in TvRoot via isSubRouteActive LaunchedEffect
                     onBack = { navController.popBackStack() },
+                )
+            }
+        }
+        }
+
+        val activePlaybackSession = ActivePlaybackState.session
+        if (currentBackStackEntry?.destination?.route != TvRoutes.PLAYER && activePlaybackSession != null) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(24.dp),
+            ) {
+                PersistentPlaybackBar(
+                    session = activePlaybackSession,
+                    isTv = true,
+                    onResume = {
+                        navController.navigate(
+                            TvRoutes.player(
+                                url = activePlaybackSession.url,
+                                fallbackUrl = activePlaybackSession.fallbackUrl,
+                                title = activePlaybackSession.title,
+                                mediaId = activePlaybackSession.mediaId,
+                                mediaType = activePlaybackSession.mediaType,
+                                posterUrl = activePlaybackSession.posterUrl,
+                                backdropUrl = activePlaybackSession.backdropUrl,
+                                seasonNumber = activePlaybackSession.seasonNumber,
+                                episodeNumber = activePlaybackSession.episodeNumber,
+                                showTmdbId = activePlaybackSession.showTmdbId,
+                                showImdbId = activePlaybackSession.showImdbId,
+                                startPositionMs = activePlaybackSession.positionMs,
+                                autoSourceSelection = activePlaybackSession.autoSourceSelection,
+                            ),
+                        ) { launchSingleTop = true }
+                    },
+                    onTogglePlayback = ActivePlaybackState::togglePlayback,
+                    onStop = ActivePlaybackState::stopAndClear,
                 )
             }
         }

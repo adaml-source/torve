@@ -320,6 +320,40 @@ class SearchViewModelLatestQueryTest {
         assertTrue(viewModel.state.value.displayItems.isEmpty())
     }
 
+    @Test
+    fun discoveryMixesMoviesAndShowsAndAppendsRealPages() = runTest(dispatcher) {
+        val movie1 = mediaItem("tmdb-11", "Movie One")
+        val show1 = mediaItem("tmdb-21", "Show One").copy(type = MediaType.SERIES)
+        val movie2 = mediaItem("tmdb-12", "Movie Two")
+        val show2 = mediaItem("tmdb-22", "Show Two").copy(type = MediaType.SERIES)
+        val repo = QueryVaryingMetadataRepository(
+            results = emptyMap(),
+            discoverResults = mapOf(
+                ("movie" to 1) to listOf(movie1),
+                ("tv" to 1) to listOf(show1),
+                ("movie" to 2) to listOf(movie2),
+                ("tv" to 2) to listOf(show2),
+            ),
+            discoverTotalPages = 2,
+        )
+        val viewModel = SearchViewModel(
+            metadataRepo = repo,
+            prefsRepo = FakePreferencesRepository(),
+            contentPolicyRepository = FakeContentPolicyRepository(unrestrictedPolicy()),
+        )
+
+        viewModel.ensureDiscovery()
+        advanceUntilIdle()
+        assertEquals(listOf(movie1, show1), viewModel.state.value.displayItems)
+        assertTrue(viewModel.state.value.discoverHasMore)
+
+        viewModel.loadMore()
+        advanceUntilIdle()
+        assertEquals(listOf(movie1, show1, movie2, show2), viewModel.state.value.displayItems)
+        assertEquals(2, viewModel.state.value.discoverPage)
+        assertTrue(!viewModel.state.value.discoverHasMore)
+    }
+
     // ── helpers ──
 
     private fun lockedAdultPolicy() = ContentPolicyState(
@@ -366,6 +400,8 @@ class SearchViewModelLatestQueryTest {
      */
     private class QueryVaryingMetadataRepository(
         private val results: Map<String, List<MediaItem>>,
+        private val discoverResults: Map<Pair<String, Int>, List<MediaItem>> = emptyMap(),
+        private val discoverTotalPages: Int = 1,
     ) : MetadataRepository {
         private val queryGates = mutableMapOf<String, CompletableDeferred<Unit>>()
 
@@ -379,8 +415,11 @@ class SearchViewModelLatestQueryTest {
         }
 
         override suspend fun searchPerson(query: String, page: Int): List<PersonSummary> = emptyList()
-        override suspend fun searchMultiPaged(query: String, page: Int, type: String?): PagedResult =
-            PagedResult(items = results[query] ?: emptyList(), page = 1, totalPages = 1, totalResults = 0)
+        override suspend fun searchMultiPaged(query: String, page: Int, type: String?): PagedResult {
+            queryGates[query]?.await()
+            val items = results[query] ?: emptyList()
+            return PagedResult(items = items, page = 1, totalPages = 1, totalResults = items.size)
+        }
         override suspend fun getTrending(type: String, page: Int): List<MediaItem> = emptyList()
         override suspend fun getPopular(type: String, page: Int): List<MediaItem> = emptyList()
         override suspend fun getTopRated(type: String, page: Int): List<MediaItem> = emptyList()
@@ -422,7 +461,15 @@ class SearchViewModelLatestQueryTest {
             withWatchProviders: String?,
             watchRegion: String?,
             withKeywords: String?,
-        ): PagedResult = PagedResult(emptyList(), 1, 1, 0)
+        ): PagedResult {
+            val items = discoverResults[type to page].orEmpty()
+            return PagedResult(
+                items = items,
+                page = page,
+                totalPages = discoverTotalPages,
+                totalResults = discoverResults.values.sumOf { it.size },
+            )
+        }
         override suspend fun searchKeywords(query: String): List<TmdbKeyword> = emptyList()
         override suspend fun getPopularPeople(page: Int): List<PersonSummary> = emptyList()
         override suspend fun getWatchProviderLogos(type: String, region: String): Map<Int, String> = emptyMap()

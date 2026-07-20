@@ -10,6 +10,7 @@ import com.torve.domain.model.ContentAccessContext
 import com.torve.domain.model.ContentPolicyState
 import com.torve.domain.model.ContentSourceType
 import com.torve.domain.model.MediaItem
+import com.torve.domain.model.PagedResult
 import com.torve.domain.model.SensitiveClassification
 import com.torve.domain.model.dedupeByStableKey
 import com.torve.domain.model.calculateTorveScore
@@ -24,6 +25,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -117,8 +121,27 @@ class SearchViewModel(
     }
 
     fun updateQuery(query: String) {
+        val wasTextSearch = _state.value.query.length >= 2
         _state.update { it.copy(query = query) }
         queryFlow.value = query
+        if (wasTextSearch && query.length < 2) {
+            val generation = searchGeneration.updateAndGet { it + 1L }
+            _state.update { current ->
+                projectStateFor(
+                    current.copy(
+                        committedSearchSlice = CommittedSearchSlice(),
+                        peopleResults = emptyList(),
+                        userLists = emptyList(),
+                        searchPage = 1,
+                        searchHasMore = false,
+                        hasActiveSearch = false,
+                        generation = generation,
+                    ),
+                    currentPolicySnapshot(),
+                )
+            }
+            discoverWithFilters(_state.value.filter)
+        }
     }
 
     @OptIn(FlowPreview::class)
@@ -194,11 +217,8 @@ class SearchViewModel(
         }
         try {
             val filter = _state.value.filter
-            val results = if (filter.mediaType != null) {
-                metadataRepo.searchMultiPaged(query, 1, filter.mediaType).items
-            } else {
-                metadataRepo.searchMulti(query)
-            }
+            val resultPage = metadataRepo.searchMultiPaged(query, 1, filter.mediaType)
+            val results = resultPage.items
             val people = try {
                 metadataRepo.searchPerson(query, page = 1)
             } catch (_: Exception) {
@@ -243,6 +263,8 @@ class SearchViewModel(
                         peopleResults = people,
                         userLists = buildUserListPlaceholders(query),
                         isSearching = false,
+                        searchPage = resultPage.page,
+                        searchHasMore = resultPage.page < resultPage.totalPages,
                         hasActiveSearch = true,
                         generation = generation,
                     ),
@@ -347,8 +369,16 @@ class SearchViewModel(
         _state.update { it.copy(filter = filter, showFilterSheet = false) }
         if (_state.value.query.length >= 2) {
             scope.launch { performSearch(_state.value.query) }
-        } else if (filter.isActive) {
+        } else {
             discoverWithFilters(filter)
+        }
+    }
+
+    /** Populate the dedicated Search tab even before the user types. */
+    fun ensureDiscovery() {
+        val current = _state.value
+        if (current.query.length < 2 && current.discoverResults.isEmpty() && !current.isDiscovering) {
+            discoverWithFilters(current.filter)
         }
     }
 
@@ -356,38 +386,19 @@ class SearchViewModel(
         scope.launch {
             val generation = searchGeneration.updateAndGet { it + 1L }
             if (!updateIfLatest(generation) {
-                    it.copy(isDiscovering = true, error = null, generation = generation)
+                    it.copy(
+                        isDiscovering = true,
+                        isLoadingMore = false,
+                        error = null,
+                        discoverPage = 1,
+                        discoverHasMore = false,
+                        generation = generation,
+                    )
                 }
             ) return@launch
             try {
-                val type = filter.mediaType ?: "movie"
-                val genresParam = filter.genreIds.takeIf { it.isNotEmpty() }
-                    ?.joinToString(",")
-                val result = metadataRepo.discover(
-                    type = type,
-                    sortBy = filter.sortBy.apiValue,
-                    withGenres = genresParam,
-                    minRating = filter.minRating,
-                    year = filter.yearFrom,
-                    yearTo = filter.yearTo,
-                    runtimeGte = filter.runtimeFilter?.minMinutes,
-                    runtimeLte = filter.runtimeFilter?.maxMinutes,
-                )
-                val preFiltered = result.items.filter { item ->
-                    val imdbMatch = filter.minImdbScore == null || ((item.ratings?.imdbScore ?: 0f) >= filter.minImdbScore)
-                    val tmdbMatch = filter.minTmdbScore == null || ((item.ratings?.tmdbScore ?: 0f) >= filter.minTmdbScore)
-                    val torveMatch = filter.minTorveScore == null || (
-                        (item.ratings?.let { calculateTorveScore(it, defaultTorveWeights()) } ?: 0f) >= filter.minTorveScore
-                    )
-                    imdbMatch && tmdbMatch && torveMatch
-                }
-                val deduped = if (shouldDedupe()) preFiltered.dedupeByStableKey() else preFiltered
-                val sortedResults = when (filter.sortBy) {
-                    SortOption.TORVE_SCORE_DESC -> deduped.sortedByDescending { item ->
-                        item.ratings?.let { calculateTorveScore(it, defaultTorveWeights()) } ?: Float.MIN_VALUE
-                    }
-                    else -> deduped
-                }
+                val result = fetchDiscoverPage(filter, page = 1)
+                val sortedResults = filterAndSort(result.items, filter)
                 val policy = currentPolicySnapshot()
                 val slice = buildSlice(sortedResults, policy)
                 val committed = updateIfLatest(generation) { current ->
@@ -395,7 +406,9 @@ class SearchViewModel(
                         current.copy(
                             committedDiscoverSlice = slice,
                             isDiscovering = false,
-                            hasActiveSearch = true,
+                            discoverPage = result.page,
+                            discoverHasMore = result.page < result.totalPages,
+                            hasActiveSearch = false,
                             generation = generation,
                         ),
                         currentPolicySnapshot(),
@@ -417,6 +430,127 @@ class SearchViewModel(
         }
     }
 
+    /** Load the next real API page for the visible Search/discovery grid. */
+    fun loadMore() {
+        val snapshot = _state.value
+        if (snapshot.isLoadingMore || snapshot.isSearching || snapshot.isDiscovering) return
+        val isTextSearch = snapshot.query.length >= 2
+        if (isTextSearch && !snapshot.searchHasMore) return
+        if (!isTextSearch && !snapshot.discoverHasMore) return
+
+        val generation = searchGeneration.value
+        val query = snapshot.query
+        val filter = snapshot.filter
+        val nextPage = if (isTextSearch) snapshot.searchPage + 1 else snapshot.discoverPage + 1
+        _state.update { it.copy(isLoadingMore = true) }
+        scope.launch {
+            try {
+                val page = if (isTextSearch) {
+                    metadataRepo.searchMultiPaged(query, nextPage, filter.mediaType)
+                } else {
+                    fetchDiscoverPage(filter, nextPage)
+                }
+                if (generation != searchGeneration.value || query != _state.value.query) return@launch
+                val newItems = filterAndSort(page.items, filter)
+                val currentSlice = if (isTextSearch) {
+                    _state.value.committedSearchSlice
+                } else {
+                    _state.value.committedDiscoverSlice
+                }
+                val combined = filterAndSort(
+                    currentSlice.ordered.map { it.item } + newItems,
+                    filter,
+                )
+                val slice = buildSlice(combined, currentPolicySnapshot())
+                val committed = updateIfLatest(generation) { current ->
+                    projectStateFor(
+                        if (isTextSearch) {
+                            current.copy(
+                                committedSearchSlice = slice,
+                                searchPage = page.page,
+                                searchHasMore = page.page < page.totalPages,
+                                isLoadingMore = false,
+                            )
+                        } else {
+                            current.copy(
+                                committedDiscoverSlice = slice,
+                                discoverPage = page.page,
+                                discoverHasMore = page.page < page.totalPages,
+                                isLoadingMore = false,
+                            )
+                        },
+                        currentPolicySnapshot(),
+                    )
+                }
+                if (committed) {
+                    if (isTextSearch) enrichResults(slice.ordered.map { it.item }, generation)
+                    else enrichDiscover(slice.ordered.map { it.item }, generation)
+                }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                updateIfLatest(generation) { it.copy(isLoadingMore = false) }
+            }
+        }
+    }
+
+    private suspend fun fetchDiscoverPage(filter: SearchFilter, page: Int): PagedResult {
+        suspend fun fetch(type: String): PagedResult = metadataRepo.discover(
+            type = type,
+            page = page,
+            sortBy = filter.sortBy.apiValue,
+            withGenres = filter.genreIds.takeIf { it.isNotEmpty() }?.joinToString(","),
+            minRating = filter.minRating,
+            year = filter.yearFrom,
+            yearTo = filter.yearTo,
+            runtimeGte = filter.runtimeFilter?.minMinutes,
+            runtimeLte = filter.runtimeFilter?.maxMinutes,
+        )
+        filter.mediaType?.let { return fetch(it) }
+
+        val (movies, shows) = coroutineScope {
+            listOf(
+                async { fetch("movie") },
+                async { fetch("tv") },
+            ).awaitAll()
+        }
+        val mixed = buildList {
+            val count = maxOf(movies.items.size, shows.items.size)
+            repeat(count) { index ->
+                movies.items.getOrNull(index)?.let(::add)
+                shows.items.getOrNull(index)?.let(::add)
+            }
+        }
+        return PagedResult(
+            items = mixed,
+            page = page,
+            totalPages = maxOf(movies.totalPages, shows.totalPages),
+            totalResults = movies.totalResults + shows.totalResults,
+        )
+    }
+
+    private suspend fun filterAndSort(items: List<MediaItem>, filter: SearchFilter): List<MediaItem> {
+        val filtered = items.filter { item ->
+            val genreMatch = filter.genreIds.isEmpty() || filter.genreIds.any { it in item.genreIds }
+            val ratingMatch = filter.minRating == null || (item.rating ?: 0.0) >= filter.minRating
+            val imdbMatch = filter.minImdbScore == null || ((item.ratings?.imdbScore ?: 0f) >= filter.minImdbScore)
+            val tmdbMatch = filter.minTmdbScore == null || ((item.ratings?.tmdbScore ?: 0f) >= filter.minTmdbScore)
+            val torveMatch = filter.minTorveScore == null || (
+                (item.ratings?.let { calculateTorveScore(it, defaultTorveWeights()) } ?: 0f) >= filter.minTorveScore
+            )
+            val yearFromMatch = filter.yearFrom == null || (item.year ?: 0) >= filter.yearFrom
+            val yearToMatch = filter.yearTo == null || (item.year ?: Int.MAX_VALUE) <= filter.yearTo
+            genreMatch && ratingMatch && imdbMatch && tmdbMatch && torveMatch && yearFromMatch && yearToMatch
+        }
+        val deduped = if (shouldDedupe()) filtered.dedupeByStableKey() else filtered
+        return when (filter.sortBy) {
+            SortOption.TORVE_SCORE_DESC -> deduped.sortedByDescending { item ->
+                item.ratings?.let { calculateTorveScore(it, defaultTorveWeights()) } ?: Float.MIN_VALUE
+            }
+            else -> deduped
+        }
+    }
+
     fun toggleFilterSheet() {
         _state.update { it.copy(showFilterSheet = !it.showFilterSheet) }
     }
@@ -426,15 +560,12 @@ class SearchViewModel(
     }
 
     fun clearFilters() {
-        _state.update {
-            it.copy(
-                filter = SearchFilter(),
-                discoverResults = emptyList(),
-                committedDiscoverSlice = CommittedSearchSlice(),
-            )
-        }
+        val cleared = SearchFilter()
+        _state.update { it.copy(filter = cleared) }
         if (_state.value.query.length >= 2) {
             scope.launch { performSearch(_state.value.query) }
+        } else {
+            discoverWithFilters(cleared)
         }
     }
 
@@ -442,8 +573,10 @@ class SearchViewModel(
         // Advance generation so any in-flight search's late writes are
         // dropped before they can repopulate the cleared state.
         val generation = searchGeneration.updateAndGet { it + 1L }
-        _state.update { SearchUiState(generation = generation) }
+        val filter = _state.value.filter
+        _state.update { SearchUiState(filter = filter, generation = generation) }
         queryFlow.value = ""
+        discoverWithFilters(filter)
     }
 
     private suspend fun shouldDedupe(): Boolean {
@@ -544,7 +677,7 @@ class SearchViewModel(
             isDiscovering = current.isDiscovering,
             hasError = current.error != null,
             filterActive = current.filter.isActive,
-            hasFilteredResults = if (current.query.length >= 2 || current.hasActiveSearch) {
+            hasFilteredResults = if (current.query.length >= 2) {
                 searchVisible.isNotEmpty()
             } else discoverVisible.isNotEmpty(),
         )

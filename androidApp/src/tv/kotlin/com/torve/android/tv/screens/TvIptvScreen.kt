@@ -37,6 +37,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -93,6 +94,8 @@ import com.torve.domain.model.stableChannelId
 import com.torve.domain.repository.DeviceLocalSettingsRepository
 import com.torve.presentation.channels.EpgState
 import com.torve.presentation.channels.ChannelsViewModel
+import com.torve.presentation.tvhome.TvHomeOutcomeViewModel
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -139,6 +142,60 @@ private data class TvIptvScreenCacheState(
     val windowPageOffset: Int = 0,
 )
 
+private data class UnifiedIptvSearchResult(
+    val query: String,
+    val playlistNameMatches: Boolean,
+    val channels: List<EnrichedChannel>,
+)
+
+private fun unifiedIptvSearch(
+    query: String,
+    selectedPlaylistId: String?,
+    playlists: List<com.torve.domain.model.ChannelPlaylist>,
+    channels: List<EnrichedChannel>,
+    repositoryMatches: List<Channel>,
+    programmesByChannelKey: Map<String, List<EpgProgramme>>,
+): UnifiedIptvSearchResult {
+    val needle = query.trim()
+    val activeChannels = (channels + repositoryMatches.map { channel -> EnrichedChannel(channel = channel) })
+        .filter { enriched ->
+            val playlistId = enriched.channel.playlistId
+            selectedPlaylistId.isNullOrBlank() || playlistId.isBlank() || playlistId == selectedPlaylistId
+        }
+        .filter { isPlayableIptvChannel(it.channel) }
+        .distinctBy { stableChannelId(it.channel) }
+    if (needle.isBlank()) {
+        return UnifiedIptvSearchResult(needle, playlistNameMatches = false, channels = activeChannels)
+    }
+
+    val playlistNameMatches = playlists
+        .firstOrNull { it.id == selectedPlaylistId }
+        ?.name
+        ?.contains(needle, ignoreCase = true) == true
+    if (playlistNameMatches) {
+        return UnifiedIptvSearchResult(needle, playlistNameMatches = true, channels = activeChannels)
+    }
+
+    val matches = activeChannels.filter { enriched ->
+        val channel = enriched.channel
+        channel.name.contains(needle, ignoreCase = true) ||
+            channel.tvgName?.contains(needle, ignoreCase = true) == true ||
+            channel.groupTitle?.contains(needle, ignoreCase = true) == true ||
+            programmesForEpgChannel(
+                programmesByChannelKey = programmesByChannelKey,
+                playlistId = channel.playlistId.ifBlank { selectedPlaylistId.orEmpty() },
+                channel = channel,
+            ).any { programme -> programme.matchesIptvSearch(needle) }
+    }
+    return UnifiedIptvSearchResult(needle, playlistNameMatches = false, channels = matches)
+}
+
+private fun EpgProgramme.matchesIptvSearch(query: String): Boolean =
+    title.contains(query, ignoreCase = true) ||
+        subTitle?.contains(query, ignoreCase = true) == true ||
+        description?.contains(query, ignoreCase = true) == true ||
+        category?.contains(query, ignoreCase = true) == true
+
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
 fun TvIptvScreen(
@@ -149,6 +206,7 @@ fun TvIptvScreen(
     onFirstContentRequester: (FocusRequester) -> Unit,
     onContentFocused: (FocusRequester) -> Unit,
     viewModel: ChannelsViewModel = koinInject(),
+    outcomeViewModel: TvHomeOutcomeViewModel = koinInject(),
     localSettingsRepo: DeviceLocalSettingsRepository = koinInject(),
     shouldAutoFocus: Boolean = true,
     isActive: Boolean = true,
@@ -160,6 +218,11 @@ fun TvIptvScreen(
 ) {
     val state by viewModel.state.collectAsState()
     val scope = rememberCoroutineScope()
+
+    LaunchedEffect(viewModel, outcomeViewModel) {
+        outcomeViewModel.attachChannels(viewModel)
+    }
+
     val cachedScreenState = remember {
         TvScreenCache.get<TvIptvScreenCacheState>(IPTV_SCREEN_CACHE_KEY) ?: TvIptvScreenCacheState()
     }
@@ -326,12 +389,18 @@ fun TvIptvScreen(
     // through.
     var iptvSearchQuery by rememberSaveable { mutableStateOf("") }
 
-    val displayCategories = remember(
+    LaunchedEffect(iptvSearchQuery) {
+        viewModel.updateSearchQuery(iptvSearchQuery)
+    }
+
+    val baseDisplayCategories = remember(
         state.categories,
         state.favorites,
         state.recentlyViewedChannels,
         state.selectedCountries,
-        iptvSearchQuery,
+        allChannelsLabel,
+        favoritesLabel,
+        recentlyViewedLabel,
     ) {
         val actualCategories = state.categories
             .filter { it.channels.isNotEmpty() || it.channelCount > 0 }
@@ -377,16 +446,89 @@ fun TvIptvScreen(
                 )
             }
             addAll(actualCategories)
-        }.let { built ->
-            // Apply the search filter after the buildList. Match
-            // category names AND any contained channel names so a
-            // search like "ESPN" surfaces the category whose
-            // channels match even if the category is named "Sports".
-            val needle = iptvSearchQuery.trim().lowercase()
-            if (needle.isBlank()) built
-            else built.filter { cat ->
-                cat.name.lowercase().contains(needle) ||
-                    cat.channels.any { it.channel.name.lowercase().contains(needle) }
+        }
+    }
+
+    // Provider playlists can contain tens of thousands of channels. Building
+    // the cross-category/EPG projection on the Compose thread made each remote
+    // keystroke concatenate, hash, deduplicate and scan the complete catalog
+    // before a frame could be drawn. Keep cached categories immediate and do
+    // the cancellable projection away from the UI thread.
+    val displayCategories by produceState(
+        initialValue = baseDisplayCategories,
+        iptvSearchQuery,
+        baseDisplayCategories,
+        state.searchQuery,
+        state.searchResults,
+        state.playlists,
+        state.selectedPlaylistId,
+        state.channels,
+        state.guideChannels,
+        state.categories,
+        state.guideProgrammes,
+        loadedShelvesByCategory,
+    ) {
+        val requestedQuery = iptvSearchQuery.trim()
+        if (requestedQuery.isBlank()) {
+            value = baseDisplayCategories
+            return@produceState
+        }
+
+        delay(120L)
+        val repositoryMatches = if (state.searchQuery.trim() == requestedQuery) {
+            state.searchResults
+        } else {
+            emptyList()
+        }
+        value = withContext(Dispatchers.Default) {
+            val search = unifiedIptvSearch(
+                query = requestedQuery,
+                selectedPlaylistId = state.selectedPlaylistId,
+                playlists = state.playlists,
+                channels = state.channels +
+                    state.guideChannels +
+                    state.categories.flatMap { it.channels } +
+                    loadedShelvesByCategory.values.flatMap { it.channels },
+                repositoryMatches = repositoryMatches,
+                programmesByChannelKey = state.guideProgrammes,
+            )
+            if (search.query.isBlank()) {
+                baseDisplayCategories
+            } else if (search.playlistNameMatches) {
+                baseDisplayCategories
+            } else {
+                val matchingIds = search.channels.mapTo(mutableSetOf()) { stableChannelId(it.channel) }
+                val matchedCategories = baseDisplayCategories.mapNotNull { category ->
+                    val groupMatches = category.name.contains(search.query, ignoreCase = true)
+                    val matchingChannels = category.channels.filter {
+                        stableChannelId(it.channel) in matchingIds
+                    }
+                    when {
+                        groupMatches -> category
+                        matchingChannels.isNotEmpty() -> category.copy(
+                            channelCount = matchingChannels.size,
+                            channels = matchingChannels,
+                        )
+                        else -> null
+                    }
+                }
+                val representedIds = matchedCategories
+                    .flatMap { it.channels }
+                    .mapTo(mutableSetOf()) { stableChannelId(it.channel) }
+                val unmatched = search.channels.filter {
+                    stableChannelId(it.channel) !in representedIds
+                }
+                if (unmatched.isEmpty()) {
+                    matchedCategories
+                } else {
+                    listOf(
+                        ChannelCategory(
+                            name = "Search results",
+                            channelCount = unmatched.size,
+                            channels = unmatched,
+                        ),
+                    ) + matchedCategories
+                }
             }
         }
     }
@@ -478,10 +620,11 @@ fun TvIptvScreen(
         return categoryRequesterAt(targetIndex)
     }
 
-    fun leftEntryRequester(): FocusRequester = when (lastLeftFocusTarget) {
-        LeftFocusTarget.SEARCH -> searchFocusRequester
-        LeftFocusTarget.MANAGE -> manageFocusRequester
-        LeftFocusTarget.CATEGORY -> focusedCategoryRequester()
+    fun leftEntryRequester(): FocusRequester = when {
+        displayCategories.isEmpty() -> searchFocusRequester
+        lastLeftFocusTarget == LeftFocusTarget.SEARCH -> searchFocusRequester
+        lastLeftFocusTarget == LeftFocusTarget.MANAGE -> manageFocusRequester
+        else -> focusedCategoryRequester()
     }
 
     LaunchedEffect(state.selectedPlaylistId) {
@@ -491,10 +634,15 @@ fun TvIptvScreen(
     }
 
     LaunchedEffect(displayCategories, focusedGroupIndex, lastLeftFocusTarget) {
-        if (displayCategories.isNotEmpty()) {
-            onFirstContentRequester(leftEntryRequester())
+        if (displayCategories.isEmpty()) {
+            lastLeftFocusTarget = LeftFocusTarget.SEARCH
+            onFirstContentRequester(searchFocusRequester)
+            if (isActive && !isRailFocused && !iptvSearchFieldFocused) {
+                delay(32)
+                runCatching { searchFocusRequester.requestFocus() }
+            }
         } else {
-            onFirstContentRequester(sidebarFocusRequester)
+            onFirstContentRequester(leftEntryRequester())
         }
     }
 
@@ -554,6 +702,7 @@ fun TvIptvScreen(
     }
 
     suspend fun requestListFocus(reason: String = "unspecified") {
+        if (isRailFocused) return
         if (displayCategories.isEmpty()) return
         val itemIndex = (focusedGroupIndex.takeIf { it >= 0 } ?: focusedChannelIndex).coerceIn(0, maxCategoryIndex)
         val targetCategory = displayCategories.getOrNull(itemIndex)
@@ -583,6 +732,7 @@ fun TvIptvScreen(
     }
 
     suspend fun requestLeftPanelFocus(reason: String = "unspecified") {
+        if (isRailFocused) return
         when (lastLeftFocusTarget) {
             LeftFocusTarget.SEARCH -> {
                 delay(32)
@@ -594,11 +744,21 @@ fun TvIptvScreen(
                 runCatching { manageFocusRequester.requestFocus() }
                     .onFailure { Log.w("TvIptvFocus", "requestManageFocus failed reason=$reason: ${it.message}") }
             }
-            LeftFocusTarget.CATEGORY -> requestListFocus(reason)
+            LeftFocusTarget.CATEGORY -> {
+                if (displayCategories.isEmpty()) {
+                    lastLeftFocusTarget = LeftFocusTarget.SEARCH
+                    delay(32)
+                    runCatching { searchFocusRequester.requestFocus() }
+                } else {
+                    requestListFocus(reason)
+                }
+            }
         }
     }
 
-    LaunchedEffect(focusedZone, lastLeftFocusTarget) {
+    LaunchedEffect(focusedZone, lastLeftFocusTarget, shouldAutoFocus) {
+        if (!isActive || isRailFocused) return@LaunchedEffect
+        if (!shouldAutoFocus) return@LaunchedEffect
         if (focusedZone == FocusZone.CHANNEL_LIST && lastLeftFocusTarget == LeftFocusTarget.CATEGORY) {
             requestListFocus("group_mode_visible")
         }
@@ -719,11 +879,12 @@ fun TvIptvScreen(
         focusGridZone()
     }
 
-    LaunchedEffect(isActive, isRailFocused, state.selectedPlaylistId, displayCategories.size, focusedZone) {
+    LaunchedEffect(isActive, isRailFocused, state.selectedPlaylistId, displayCategories.size, focusedZone, shouldAutoFocus) {
         val focusKey = "${state.selectedPlaylistId.orEmpty()}:${displayCategories.size}"
         if (
             isActive &&
             !isRailFocused &&
+            shouldAutoFocus &&
             displayCategories.isNotEmpty() &&
             focusedZone == FocusZone.CHANNEL_LIST &&
             requestedListFocusCatalogKey != focusKey
@@ -854,11 +1015,11 @@ fun TvIptvScreen(
             return@LaunchedEffect
         }
 
-        if (!wasActive && !isRailFocused) {
+        if (!wasActive && !isRailFocused && shouldAutoFocus) {
             delay(60)
             if (focusedZone == FocusZone.EPG_GRID && channelsInGroup.isNotEmpty()) {
                 gridFocusRequestToken += 1
-            } else if (shouldAutoFocus || focusedZone == FocusZone.CHANNEL_LIST) {
+            } else if (focusedZone == FocusZone.CHANNEL_LIST) {
                 focusedZone = FocusZone.CHANNEL_LIST
                 requestLeftPanelFocus("screen_active")
             }
@@ -1012,7 +1173,7 @@ fun TvIptvScreen(
                         .focusProperties {
                             left = railFocusRequester
                             up = searchFocusRequester
-                            down = categoryRequesterAt(0)
+                            down = categoryFocusRequesters.firstOrNull() ?: searchFocusRequester
                             right = manageFocusRequester
                             canFocus = focusedZone == FocusZone.CHANNEL_LIST
                         },

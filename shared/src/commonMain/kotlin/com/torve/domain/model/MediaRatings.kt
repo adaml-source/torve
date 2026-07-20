@@ -240,15 +240,15 @@ fun defaultTorveWeights(): Map<RatingSource, Int> = mapOf(
 
 fun MediaRatings.hasValueFor(source: RatingSource): Boolean = when (source) {
     RatingSource.TORVE -> false
-    RatingSource.IMDB -> imdbScore != null
-    RatingSource.ROTTEN_TOMATOES -> rottenTomatoesScore != null
-    RatingSource.RT_AUDIENCE -> rtAudienceScore != null
-    RatingSource.TMDB -> tmdbScore != null
-    RatingSource.METACRITIC -> metacriticScore != null
-    RatingSource.LETTERBOXD -> letterboxdScore != null
-    RatingSource.TRAKT -> traktScore != null
-    RatingSource.MDBLIST -> mdblistScore != null
-    RatingSource.MAL -> malScore != null
+    RatingSource.IMDB -> imdbScore?.let { it > 0f && it <= 10f } == true
+    RatingSource.ROTTEN_TOMATOES -> rottenTomatoesScore in 1..100
+    RatingSource.RT_AUDIENCE -> rtAudienceScore in 1..100
+    RatingSource.TMDB -> tmdbScore?.let { it > 0f && it <= 10f } == true
+    RatingSource.METACRITIC -> metacriticScore in 1..100
+    RatingSource.LETTERBOXD -> letterboxdScore?.let { it > 0f && it <= 5f } == true
+    RatingSource.TRAKT -> traktScore?.let { it > 0f && it <= 100f } == true
+    RatingSource.MDBLIST -> mdblistScore?.let { it > 0f && it <= 100f } == true
+    RatingSource.MAL -> malScore?.let { it > 0f && it <= 10f } == true
 }
 
 fun MediaRatings.hasAnyEnabledDisplayValue(

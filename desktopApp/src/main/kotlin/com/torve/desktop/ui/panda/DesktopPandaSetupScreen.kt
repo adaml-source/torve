@@ -829,7 +829,7 @@ private fun desktopLabelForUsenetProvider(id: String): String = when (id) {
 private fun desktopLabelForNzbIndexer(id: String): String = when (id) {
     "none" -> ds("None")
     "nzbgeek" -> "NZBgeek"
-    "scenenzbs" -> "SceneNZBs"
+    "scenenzbs" -> "Treasure Maps"
     "dognzb" -> "DogNZB"
     "nzbplanet" -> "NZBPlanet"
     "custom" -> ds("Custom URL")

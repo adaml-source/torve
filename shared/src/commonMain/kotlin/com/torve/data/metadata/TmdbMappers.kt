@@ -11,17 +11,27 @@ import com.torve.domain.model.Season
 
 object TmdbMappers {
 
+    private fun imageUrl(path: String?, size: String): String? {
+        val normalized = path?.trim()?.takeIf { it.isNotEmpty() } ?: return null
+        return if (normalized.startsWith("http://") || normalized.startsWith("https://")) {
+            normalized
+        } else {
+            val rootedPath = if (normalized.startsWith('/')) normalized else "/$normalized"
+            "${TmdbApiClient.IMAGE_BASE}/$size$rootedPath"
+        }
+    }
+
     fun posterUrl(path: String?, size: String = "w500"): String? =
-        path?.let { "${TmdbApiClient.IMAGE_BASE}/$size$it" }
+        imageUrl(path, size)
 
     fun backdropUrl(path: String?, size: String = "w1280"): String? =
-        path?.let { "${TmdbApiClient.IMAGE_BASE}/$size$it" }
+        imageUrl(path, size)
 
     fun profileUrl(path: String?, size: String = "w185"): String? =
-        path?.let { "${TmdbApiClient.IMAGE_BASE}/$size$it" }
+        imageUrl(path, size)
 
     fun logoUrl(path: String?, size: String = "w500"): String? =
-        path?.let { "${TmdbApiClient.IMAGE_BASE}/$size$it" }
+        imageUrl(path, size)
 
     /** Pick the best title logo from a TMDB images response. */
     fun bestLogoPath(images: TmdbImages?): String? {

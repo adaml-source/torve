@@ -8,8 +8,9 @@ import com.torve.domain.integrations.IntegrationSecretStore
 import com.torve.domain.model.AddonPolicyFlags
 import com.torve.domain.repository.AddonRepository
 import com.torve.presentation.settings.SettingsRefreshNotifier
+import com.torve.util.ioDispatcher
+import com.torve.util.mainDispatcher
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.debounce
@@ -27,7 +28,7 @@ class AddonViewModel(
     private val pandaClient: PandaApiClient? = null,
     private val integrationSecretStore: IntegrationSecretStore? = null,
 ) {
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+    private val scope = CoroutineScope(SupervisorJob() + mainDispatcher)
     private val _state = MutableStateFlow(AddonUiState())
     val state: StateFlow<AddonUiState> = _state.asStateFlow()
 
@@ -128,7 +129,7 @@ class AddonViewModel(
                         policyFlagsByUrl = flags,
                     )
                 }
-                scope.launch(Dispatchers.IO) {
+                scope.launch(ioDispatcher) {
                     addonSyncService.onAddonInstalled(installedAddon)
                 }
                 pokeSettingsRefresh()
@@ -150,7 +151,7 @@ class AddonViewModel(
                 val addons = addonRepo.getInstalledAddons()
                 _state.update { it.copy(addons = addons) }
                 pokeSettingsRefresh()
-                scope.launch(Dispatchers.IO) {
+                scope.launch(ioDispatcher) {
                     addonSyncService.onAddonRemoved(existingAddon)
                     // If the user uninstalled Panda, also purge the per-user config on
                     // panda.torve.app and the cached PANDA_TOKEN. Otherwise the next
@@ -199,7 +200,8 @@ class AddonViewModel(
                 addonRepo.toggleAddon(manifestUrl, enabled)
                 val addons = addonRepo.getInstalledAddons()
                 _state.update { it.copy(addons = addons) }
-                scope.launch(Dispatchers.IO) {
+                pokeSettingsRefresh()
+                scope.launch(ioDispatcher) {
                     addonSyncService.onAddonStateChanged(manifestUrl)
                 }
             } catch (e: Exception) {
@@ -214,7 +216,7 @@ class AddonViewModel(
                 addonRepo.reorderAddons(orderedUrls)
                 val addons = addonRepo.getInstalledAddons()
                 _state.update { it.copy(addons = addons) }
-                scope.launch(Dispatchers.IO) {
+                scope.launch(ioDispatcher) {
                     addonSyncService.onAddonOrderChanged(orderedUrls)
                 }
             } catch (e: Exception) {

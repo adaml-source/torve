@@ -37,8 +37,10 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.itemsIndexed
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -48,8 +50,10 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -90,7 +94,10 @@ import com.torve.android.tv.TV_PAGE_TOP_GUTTER
 import com.torve.android.tv.TvImagePrefetcher
 import com.torve.android.tv.TvScreenCache
 import com.torve.android.tv.components.tvExternalCardRatingPrefs
-import com.torve.android.ui.components.PreferredRatingPills
+import com.torve.android.tv.focus.TvFocusTargetId
+import com.torve.android.tv.focus.TvScreenFocusHandle
+import com.torve.android.tv.focus.rememberRegisteredTvFocusRequester
+import com.torve.android.tv.focus.rememberTvModalFocusRestoreController
 import com.torve.android.ui.theme.*
 import com.torve.data.ai.KeywordSearchService
 import com.torve.data.mdblist.MdbListApi
@@ -100,12 +107,12 @@ import com.torve.domain.integrations.IntegrationSecretStore
 import com.torve.domain.model.MediaItem
 import com.torve.domain.model.MediaType
 import com.torve.domain.model.RatingDisplayPrefs
-import com.torve.domain.model.bestDisplayRating
-import com.torve.domain.model.hasAnyEnabledDisplayValue
 import com.torve.domain.model.needsExternalRatingEnrichment
 import com.torve.domain.model.withFallbackTmdbScore
 import com.torve.domain.repository.MetadataRepository
 import com.torve.domain.repository.PreferencesRepository
+import com.torve.domain.sourceavailability.SourceAvailabilityAggregator
+import com.torve.domain.sourceavailability.SourceAvailabilityRecord
 import com.torve.presentation.settings.SettingsViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -121,6 +128,18 @@ private enum class TvSearchDensity(val columns: Int, val label: String) {
     RELAXED(4, "4"),
     BALANCED(5, "5"),
     COMPACT(6, "6"),
+}
+
+private enum class TvSearchSort(val label: String) {
+    RELEVANCE("Best match"),
+    RATING_DESC("Rating high"),
+    RATING_ASC("Rating low"),
+    VOTES_DESC("Votes high"),
+    VOTES_ASC("Votes low"),
+    POPULARITY_DESC("Popular"),
+    POPULARITY_ASC("Least popular"),
+    TITLE_ASC("A-Z"),
+    TITLE_DESC("Z-A"),
 }
 
 private data class TvSearchFilterGroup(
@@ -140,14 +159,48 @@ private data class TvSearchFilterVisualRow(
     val chipIndices: List<Int>,
 )
 
+private const val TV_SEARCH_DISCOVER_PAGE_COUNT = 2
+private const val TV_SEARCH_RATING_DISCOVER_PAGE_COUNT = 6
+private const val TV_SEARCH_MAX_RESULTS = 300
+private const val TV_SEARCH_PREFETCH_RESULT_COUNT = 96
+private const val TV_SEARCH_RATING_CACHE_COUNT = 180
+private const val TV_SEARCH_RATING_ENRICH_COUNT = 40
+private const val TV_SEARCH_DETAIL_HYDRATE_COUNT = 12
+private const val TV_SEARCH_LOAD_AHEAD_ROWS = 2
+private const val TV_SEARCH_TOP_RATED_LOAD_AHEAD_ROWS = 4
+private const val TV_SEARCH_RESULT_PAGE_SIZE = 40
+private const val TV_SEARCH_VERIFIED_INITIAL_RESULT_COUNT = 12
+private const val TV_SEARCH_VERIFIED_RESULT_INCREMENT = 12
+private const val TV_SEARCH_VERIFIED_MAX_CANDIDATE_PAGES_PER_BATCH = 1
+private const val TV_SEARCH_MAX_CANDIDATES = 10_000
+internal const val TV_SEARCH_TOP_RATED_FILTER = -1.0
+internal const val TV_SEARCH_TOP_RATED_MIN_SCORE = 7.0
+internal const val TV_SEARCH_TOP_RATED_MIN_VOTES = 500
+private val TV_SEARCH_IMDB_VOTE_THRESHOLDS = listOf(1_000, 5_000, 10_000, 25_000, 50_000, 100_000)
+
+private data class TvSearchCandidatePage(
+    val items: List<MediaItem>,
+    val page: Int,
+    val totalPages: Int,
+)
+
+private data class TvSearchVerifiedBrowseBatch(
+    val candidates: List<MediaItem>,
+    val results: List<MediaItem>,
+    val nextPage: Int,
+    val totalPages: Int,
+    val canLoadMore: Boolean,
+)
+
 @Composable
-fun TvSearchScreen(
+internal fun TvSearchScreen(
     railFocusRequester: FocusRequester,
     onMediaClick: (MediaItem) -> Unit,
     onFirstContentRequester: (FocusRequester) -> Unit,
     onContentFocused: (FocusRequester) -> Unit,
     initialQuery: String = "",
     shouldAutoFocus: Boolean = true,
+    registerFocusHandle: ((TvScreenFocusHandle?) -> Unit)? = null,
 ) {
     val metadataRepo: MetadataRepository = koinInject()
     val settingsViewModel: SettingsViewModel = koinInject()
@@ -155,8 +208,11 @@ fun TvSearchScreen(
     val ratingsEnricher: RatingsEnricher = koinInject()
     val prefsRepo: PreferencesRepository = koinInject()
     val secretStore: IntegrationSecretStore = koinInject()
+    val availabilityAggregator: SourceAvailabilityAggregator = koinInject()
     val settingsState by settingsViewModel.state.collectAsState()
     val context = LocalContext.current
+    val screenId = remember { "tv_search" }
+    val focusRestoreController = rememberTvModalFocusRestoreController(key = screenId)
     val restoredRouteCache = remember {
         TvScreenCache.get<TvSearchRouteCacheState>(TV_SEARCH_ROUTE_CACHE_KEY)
             ?.takeIf { it.isFresh() }
@@ -167,36 +223,54 @@ fun TvSearchScreen(
                 )
             }
     }
+    val restoredContentCache = restoredRouteCache?.takeIf { it.results.isNotEmpty() }
 
-    var query by rememberSaveable { mutableStateOf(restoredRouteCache?.query ?: initialQuery) }
-    var baseResults by remember { mutableStateOf(restoredRouteCache?.baseResults.orEmpty()) }
-    var results by remember { mutableStateOf(restoredRouteCache?.results.orEmpty()) }
+    var query by rememberSaveable { mutableStateOf(restoredContentCache?.query ?: initialQuery) }
+    var baseResults by remember { mutableStateOf(restoredContentCache?.baseResults.orEmpty()) }
+    var results by remember { mutableStateOf(restoredContentCache?.results.orEmpty()) }
     var loading by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
-    var searchMode by rememberSaveable { mutableStateOf(restoredRouteCache?.searchMode ?: SearchMode.STANDARD) }
-    var filterType by rememberSaveable { mutableStateOf<String?>(restoredRouteCache?.filterType) } // "movie", "tv", or null (all)
-    var selectedGenreIds by remember { mutableStateOf(restoredRouteCache?.selectedGenreIds.orEmpty()) }
-    var selectedStudioIds by remember { mutableStateOf(restoredRouteCache?.selectedStudioIds.orEmpty()) }
-    var selectedYear by remember { mutableStateOf(restoredRouteCache?.selectedYear) }
-    var selectedMinRating by remember { mutableStateOf(restoredRouteCache?.selectedMinRating) }
-    var aiResultTitle by remember { mutableStateOf(restoredRouteCache?.aiResultTitle) }
-    var aiFallback by remember { mutableStateOf(restoredRouteCache?.aiFallback ?: false) }
-    var filtersVisible by rememberSaveable { mutableStateOf(restoredRouteCache?.filtersVisible ?: true) }
+    var searchMode by rememberSaveable { mutableStateOf(restoredContentCache?.searchMode ?: SearchMode.STANDARD) }
+    var filterType by rememberSaveable { mutableStateOf<String?>(restoredContentCache?.filterType) } // "movie", "tv", or null (all)
+    var selectedGenreIds by remember { mutableStateOf(restoredContentCache?.selectedGenreIds.orEmpty()) }
+    var selectedStudioIds by remember { mutableStateOf(restoredContentCache?.selectedStudioIds.orEmpty()) }
+    var selectedYear by remember { mutableStateOf(restoredContentCache?.selectedYear) }
+    var selectedMinRating by remember { mutableStateOf(restoredContentCache?.selectedMinRating) }
+    var selectedMinImdbVotes by remember { mutableStateOf(restoredContentCache?.selectedMinImdbVotes) }
+    var selectedRuntimeFilter by remember { mutableStateOf(restoredContentCache?.selectedRuntimeFilter) }
+    var selectedLanguageFilter by remember { mutableStateOf(restoredContentCache?.selectedLanguageFilter) }
+    var selectedAvailabilityFilter by remember { mutableStateOf(restoredContentCache?.selectedAvailabilityFilter) }
+    var sourceAvailabilityByTmdbId by remember { mutableStateOf<Map<Int, SourceAvailabilityRecord>>(emptyMap()) }
+    var selectedSort by remember { mutableStateOf(restoredContentCache?.selectedSort ?: TvSearchSort.RELEVANCE) }
+    var aiResultTitle by remember { mutableStateOf(restoredContentCache?.aiResultTitle) }
+    var aiFallback by remember { mutableStateOf(restoredContentCache?.aiFallback ?: false) }
+    var filtersVisible by rememberSaveable { mutableStateOf(restoredContentCache?.filtersVisible ?: false) }
     var showFilters by rememberSaveable { mutableStateOf(false) }
-    var density by rememberSaveable { mutableStateOf(restoredRouteCache?.density ?: TvSearchDensity.BALANCED) }
+    var density by rememberSaveable { mutableStateOf(restoredContentCache?.density ?: TvSearchDensity.BALANCED) }
+    var browseRefreshNonce by remember { mutableStateOf(0) }
     var focusResultsAfterClosingFilters by remember { mutableStateOf(false) }
     var focusCompactFiltersAfterHide by remember { mutableStateOf(false) }
     var focusFirstFilterAfterShow by remember { mutableStateOf(false) }
     var restoreAiFocusAfterToggle by remember { mutableStateOf(false) }
-    var selectedResultKey by remember { mutableStateOf(restoredRouteCache?.selectedMediaKey) }
+    var selectedResultKey by remember { mutableStateOf(restoredContentCache?.selectedMediaKey) }
     var selectedResult by remember {
         mutableStateOf(
-            restoredRouteCache?.selectedMediaKey?.let { key ->
-                restoredRouteCache.results.firstOrNull { it.tvSearchStableKey() == key }
-            } ?: restoredRouteCache?.results?.firstOrNull(),
+            restoredContentCache?.selectedMediaKey?.let { key ->
+                restoredContentCache.results.firstOrNull { it.tvSearchStableKey() == key }
+            } ?: restoredContentCache?.results?.firstOrNull(),
         )
     }
-    var lastLoadedSearchStateKey by remember { mutableStateOf(restoredRouteCache?.loadStateKey) }
+    var lastLoadedSearchStateKey by remember { mutableStateOf(restoredContentCache?.loadStateKey) }
+    var nextSearchPage by remember { mutableStateOf(restoredContentCache?.nextSearchPage ?: 2) }
+    var searchTotalPages by remember { mutableStateOf(restoredContentCache?.searchTotalPages ?: 1) }
+    var searchCanLoadMore by remember { mutableStateOf(restoredContentCache?.searchCanLoadMore ?: false) }
+    var loadingMoreResults by remember { mutableStateOf(false) }
+    var pagingRetryBlockedResultKey by remember { mutableStateOf<String?>(null) }
+    var loadMoreRequestNonce by remember { mutableStateOf(0) }
+    var handledLoadMoreRequestNonce by remember { mutableStateOf(0) }
+    var loadMoreRequestPending by remember { mutableStateOf(false) }
+    var resultFocusRequestNonce by remember { mutableStateOf(0) }
+    var focusedResultKey by remember { mutableStateOf<String?>(null) }
     val inputFocusRequester = remember { FocusRequester() }
     val filterToggleRequester = remember { FocusRequester() }
     val advancedFiltersRequester = remember { FocusRequester() }
@@ -208,28 +282,59 @@ fun TvSearchScreen(
     val tvTypeRequester = remember { FocusRequester() }
     val firstFilterRequester = remember { FocusRequester() }
     val firstResultRequester = remember { FocusRequester() }
+    val resultRequesters = remember { mutableMapOf<String, FocusRequester>() }
+    val resultsGridState = rememberLazyGridState()
+    val lastVisibleResultIndex by remember {
+        derivedStateOf {
+            resultsGridState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1
+        }
+    }
     val densityRequesters = remember {
         TvSearchDensity.entries.associateWith { FocusRequester() }
     }
     val activeDensityRequester = densityRequesters.getValue(density)
     var lastVisibleFilterRequester by remember { mutableStateOf<FocusRequester?>(null) }
+    var lastDrawerFocusRequester by remember { mutableStateOf<FocusRequester?>(null) }
+
+    DisposableEffect(registerFocusHandle, focusRestoreController, screenId) {
+        registerFocusHandle?.invoke(
+            TvScreenFocusHandle(
+                captureFocusedOrigin = {
+                    focusRestoreController.captureFocusedOrigin(screenId = screenId)
+                },
+                requestRestore = { origin, reason ->
+                    focusRestoreController.requestRestore(origin = origin, reason = reason)
+                },
+            ),
+        )
+        onDispose {
+            registerFocusHandle?.invoke(null)
+        }
+    }
 
     fun requestSearchBodyFocus(): Boolean {
+        if (!showFilters && results.isNotEmpty()) {
+            focusedResultKey = null
+            resultFocusRequestNonce += 1
+            return true
+        }
         val candidates = buildList {
             if (showFilters) {
                 add(closeFiltersRequester)
                 add(firstFilterRequester)
             } else if (filtersVisible) {
+                selectedResultKey?.let { key -> resultRequesters[key]?.let(::add) }
+                if (results.isNotEmpty()) add(firstResultRequester)
                 lastVisibleFilterRequester?.let(::add)
                 add(advancedFiltersRequester)
                 add(allTypeRequester)
                 add(filterToggleRequester)
                 add(activeDensityRequester)
-                if (results.isNotEmpty()) add(firstResultRequester)
             } else {
+                selectedResultKey?.let { key -> resultRequesters[key]?.let(::add) }
+                if (results.isNotEmpty()) add(firstResultRequester)
                 add(filterToggleRequester)
                 add(activeDensityRequester)
-                if (results.isNotEmpty()) add(firstResultRequester)
             }
         }.distinct()
 
@@ -241,6 +346,33 @@ fun TvSearchScreen(
             }
         }
         return false
+    }
+
+    LaunchedEffect(resultFocusRequestNonce, results.size, density.columns) {
+        if (resultFocusRequestNonce == 0 || results.isEmpty()) return@LaunchedEffect
+
+        repeat(8) {
+            val visibleResultIndices = resultsGridState.layoutInfo.visibleItemsInfo
+                .map { it.index }
+                .filter { it in results.indices }
+                .distinct()
+                .ifEmpty { listOf(0) }
+            for (index in visibleResultIndices) {
+                val itemKey = results[index].tvSearchStableKey()
+                val requester = resultRequesters[itemKey]
+                    ?: firstResultRequester.takeIf { index == 0 }
+                    ?: continue
+                val requested = runCatching { requester.requestFocus() }.isSuccess
+                if (requested) {
+                    delay(32)
+                }
+                if (focusedResultKey == itemKey) {
+                    onContentFocused(requester)
+                    return@LaunchedEffect
+                }
+            }
+            delay(32)
+        }
     }
 
     val hasAiKey = settingsState.activeAiApiKey.isNotBlank()
@@ -268,6 +400,8 @@ fun TvSearchScreen(
     }
 
     LaunchedEffect(results) {
+        val resultKeys = results.map { it.tvSearchStableKey() }.toSet()
+        resultRequesters.keys.retainAll(resultKeys)
         val preferredKey = selectedResultKey ?: selectedResult?.tvSearchStableKey()
         selectedResult = preferredKey?.let { key ->
             results.firstOrNull { it.tvSearchStableKey() == key }
@@ -275,10 +409,25 @@ fun TvSearchScreen(
         selectedResultKey = selectedResult?.tvSearchStableKey()
     }
 
+    LaunchedEffect(results, selectedSort) {
+        val sorted = results.sortedForTvSearch(selectedSort)
+        if (sorted != results) results = sorted
+    }
+
+    LaunchedEffect(focusRestoreController.pendingRestore?.restoreToken, results.size) {
+        if (results.isEmpty()) return@LaunchedEffect
+        focusRestoreController.restorePendingFocus(
+            screenId = screenId,
+            isScreenActive = { results.isNotEmpty() },
+            maxAttempts = 12,
+        )
+    }
+
     LaunchedEffect(showFilters, focusResultsAfterClosingFilters, results.size) {
         if (showFilters || !focusResultsAfterClosingFilters) return@LaunchedEffect
         kotlinx.coroutines.delay(80)
-        val restoreRequester = if (filtersVisible) advancedFiltersRequester else filterToggleRequester
+        val restoreRequester = firstResultRequester.takeIf { results.isNotEmpty() }
+            ?: if (filtersVisible) advancedFiltersRequester else filterToggleRequester
         runCatching { restoreRequester.requestFocus() }
         onContentFocused(restoreRequester)
         focusResultsAfterClosingFilters = false
@@ -313,15 +462,48 @@ fun TvSearchScreen(
         }
     }
 
-    val resultHydrationKey = remember(results) {
-        results.take(36).joinToString("|") { it.tvSearchStableKey() }
+    LaunchedEffect(
+        showFilters,
+        results.isEmpty(),
+        selectedGenreIds,
+        selectedStudioIds,
+        selectedYear,
+        selectedMinRating,
+        selectedMinImdbVotes,
+        selectedRuntimeFilter,
+        selectedLanguageFilter,
+        selectedAvailabilityFilter,
+        filterType,
+    ) {
+        if (!showFilters) return@LaunchedEffect
+        kotlinx.coroutines.delay(60)
+        val requester = lastDrawerFocusRequester ?: firstFilterRequester
+        val restored = runCatching { requester.requestFocus() }.isSuccess
+        if (!restored) {
+            runCatching { closeFiltersRequester.requestFocus() }
+        }
     }
 
-    LaunchedEffect(resultHydrationKey) {
-        if (results.isEmpty()) return@LaunchedEffect
-        var workingResults = results
+    val requiresImdbFilterData =
+        (selectedMinRating != null && selectedMinRating != TV_SEARCH_TOP_RATED_FILTER) ||
+            selectedMinImdbVotes != null
+    val resultHydrationKey = remember(baseResults, results, selectedMinRating, selectedMinImdbVotes) {
+        val candidates = if (requiresImdbFilterData) baseResults else results
+        buildString {
+            append(candidates.size)
+            append('|')
+            append(candidates.lastOrNull()?.tvSearchStableKey().orEmpty())
+            append('|')
+            append(candidates.take(TV_SEARCH_PREFETCH_RESULT_COUNT).joinToString("|") { it.tvSearchStableKey() })
+        }
+    }
+
+    LaunchedEffect(resultHydrationKey, selectedMinRating, selectedMinImdbVotes) {
+        if (selectedMinRating == TV_SEARCH_TOP_RATED_FILTER) return@LaunchedEffect
+        if (results.isEmpty() && (!requiresImdbFilterData || baseResults.isEmpty())) return@LaunchedEffect
+        var workingResults = if (requiresImdbFilterData) baseResults else results
         val cachedRatings = withContext(Dispatchers.IO) {
-            ratingsEnricher.hydrateListFromCache(workingResults.take(80))
+            ratingsEnricher.hydrateListFromCache(workingResults.take(TV_SEARCH_RATING_CACHE_COUNT))
         }
         if (cachedRatings.zip(workingResults).any { (cached, current) -> cached.ratings != current.ratings }) {
             val cachedByKey = cachedRatings.associateBy { it.tvSearchStableKey() }
@@ -332,11 +514,15 @@ fun TvSearchScreen(
                 studioIds = selectedStudioIds,
                 year = selectedYear,
                 minRating = selectedMinRating,
+                minImdbVotes = selectedMinImdbVotes,
+                runtimeFilter = selectedRuntimeFilter,
+                availabilityFilter = selectedAvailabilityFilter,
+                sourceAvailabilityByTmdbId = sourceAvailabilityByTmdbId,
             )
         }
         val targets = workingResults
             .filter { it.tmdbId != null && (it.genres.isEmpty() || it.studios.isEmpty()) }
-            .take(48)
+            .take(TV_SEARCH_DETAIL_HYDRATE_COUNT)
         if (targets.isEmpty()) return@LaunchedEffect
         launch(Dispatchers.IO) {
             val hydrated = targets.mapNotNull { item ->
@@ -353,9 +539,12 @@ fun TvSearchScreen(
                     ratings = item.ratings ?: detail.ratings,
                     year = item.year ?: detail.year,
                     releaseDate = item.releaseDate ?: detail.releaseDate,
-                    posterUrl = item.posterUrl ?: detail.posterUrl,
-                    backdropUrl = item.backdropUrl ?: detail.backdropUrl,
-                    logoUrl = item.logoUrl ?: detail.logoUrl,
+                    posterUrl = item.posterUrl?.takeIf { it.isNotBlank() }
+                        ?: detail.posterUrl?.takeIf { it.isNotBlank() },
+                    backdropUrl = item.backdropUrl?.takeIf { it.isNotBlank() }
+                        ?: detail.backdropUrl?.takeIf { it.isNotBlank() },
+                    logoUrl = item.logoUrl?.takeIf { it.isNotBlank() }
+                        ?: detail.logoUrl?.takeIf { it.isNotBlank() },
                 )
             }.toMap()
             if (hydrated.isEmpty()) return@launch
@@ -366,15 +555,30 @@ fun TvSearchScreen(
                     studioIds = selectedStudioIds,
                     year = selectedYear,
                     minRating = selectedMinRating,
+                    minImdbVotes = selectedMinImdbVotes,
+                    runtimeFilter = selectedRuntimeFilter,
+                    availabilityFilter = selectedAvailabilityFilter,
+                    sourceAvailabilityByTmdbId = sourceAvailabilityByTmdbId,
                 )
             }
         }
     }
 
-    LaunchedEffect(resultHydrationKey) {
-        if (results.isEmpty()) return@LaunchedEffect
-        val snapshot = results.take(60)
-        if (!snapshot.needsTvSearchRatingEnrichment()) return@LaunchedEffect
+    LaunchedEffect(resultHydrationKey, selectedMinRating, selectedMinImdbVotes) {
+        if (selectedMinRating == TV_SEARCH_TOP_RATED_FILTER) return@LaunchedEffect
+        if (results.isEmpty() && (!requiresImdbFilterData || baseResults.isEmpty())) return@LaunchedEffect
+        val snapshot = (if (requiresImdbFilterData) baseResults else results).take(TV_SEARCH_RATING_ENRICH_COUNT)
+        val needsRatingEnrichment = if (
+            selectedMinRating == TV_SEARCH_TOP_RATED_FILTER || selectedMinImdbVotes != null
+        ) {
+            snapshot.any { item ->
+                item.ratings?.imdbVotes == null ||
+                    (selectedMinRating == TV_SEARCH_TOP_RATED_FILTER && item.ratings?.imdbScore == null)
+            }
+        } else {
+            snapshot.needsTvSearchRatingEnrichment()
+        }
+        if (!needsRatingEnrichment) return@LaunchedEffect
 
         val apiKey = withContext(Dispatchers.IO) {
             runCatching {
@@ -395,12 +599,15 @@ fun TvSearchScreen(
                 }
                 current = current.map { enrichedByKey[it.tvSearchStableKey()] ?: it }
                 baseResults = baseResults.map { enrichedByKey[it.tvSearchStableKey()] ?: it }
-                results = results.map { enrichedByKey[it.tvSearchStableKey()] ?: it }
-                    .filterTvSearchItems(
+                results = baseResults.filterTvSearchItems(
                         genreIds = selectedGenreIds,
                         studioIds = selectedStudioIds,
                         year = selectedYear,
                         minRating = selectedMinRating,
+                        minImdbVotes = selectedMinImdbVotes,
+                        runtimeFilter = selectedRuntimeFilter,
+                        availabilityFilter = selectedAvailabilityFilter,
+                        sourceAvailabilityByTmdbId = sourceAvailabilityByTmdbId,
                     )
             }
             val remainingMs = ratingsEnricher.rateLimitRemainingMs()
@@ -431,17 +638,72 @@ fun TvSearchScreen(
         }
     }
 
-    LaunchedEffect(baseResults, selectedGenreIds, selectedStudioIds, selectedYear, selectedMinRating) {
-        results = baseResults.filterTvSearchItems(
+    LaunchedEffect(
+        baseResults,
+        selectedGenreIds,
+        selectedStudioIds,
+        selectedYear,
+        selectedMinRating,
+        selectedMinImdbVotes,
+        selectedRuntimeFilter,
+        selectedAvailabilityFilter,
+        sourceAvailabilityByTmdbId,
+    ) {
+        val filtered = baseResults.filterTvSearchItems(
             genreIds = selectedGenreIds,
             studioIds = selectedStudioIds,
             year = selectedYear,
             minRating = selectedMinRating,
+            minImdbVotes = selectedMinImdbVotes,
+            runtimeFilter = selectedRuntimeFilter,
+            availabilityFilter = selectedAvailabilityFilter,
+            sourceAvailabilityByTmdbId = sourceAvailabilityByTmdbId,
         )
+        results = if (selectedMinRating == TV_SEARCH_TOP_RATED_FILTER) {
+            val visibleLimit = maxOf(
+                TV_SEARCH_RESULT_PAGE_SIZE,
+                ((results.size + TV_SEARCH_RESULT_PAGE_SIZE - 1) / TV_SEARCH_RESULT_PAGE_SIZE) *
+                    TV_SEARCH_RESULT_PAGE_SIZE,
+            ).coerceAtMost(TV_SEARCH_MAX_RESULTS)
+            stableTvSearchProjection(results, filtered, visibleLimit)
+        } else {
+            stableTvSearchProjection(results, filtered, TV_SEARCH_MAX_RESULTS)
+        }
+    }
+
+    LaunchedEffect(baseResults, selectedAvailabilityFilter) {
+        if (selectedAvailabilityFilter != TvSearchAvailabilityFilter.READY || baseResults.isEmpty()) {
+            return@LaunchedEffect
+        }
+        val lookupItems = baseResults
+            .mapNotNull { item -> item.tmdbId?.let { it to item.type } }
+            .distinctBy { it.first }
+            .filterNot { (tmdbId, _) -> tmdbId in sourceAvailabilityByTmdbId }
+            .take(80)
+        if (lookupItems.isEmpty()) return@LaunchedEffect
+        val records = withContext(Dispatchers.IO) {
+            runCatching { availabilityAggregator.lookupBatch(lookupItems) }.getOrDefault(emptyMap())
+        }
+        if (records.isNotEmpty()) {
+            sourceAvailabilityByTmdbId = sourceAvailabilityByTmdbId + records
+        }
     }
 
     // Standard search
-    LaunchedEffect(query, searchMode, filterType, selectedGenreIds, selectedYear, selectedMinRating) {
+    LaunchedEffect(
+        query,
+        searchMode,
+        filterType,
+        selectedGenreIds,
+        selectedStudioIds,
+        selectedYear,
+        selectedMinRating,
+        selectedMinImdbVotes,
+        selectedRuntimeFilter,
+        selectedLanguageFilter,
+        selectedAvailabilityFilter,
+        browseRefreshNonce,
+    ) {
         if (searchMode != SearchMode.STANDARD) return@LaunchedEffect
         aiResultTitle = null
         aiFallback = false
@@ -454,6 +716,10 @@ fun TvSearchScreen(
             selectedStudioIds = selectedStudioIds,
             selectedYear = selectedYear,
             selectedMinRating = selectedMinRating,
+            selectedMinImdbVotes = selectedMinImdbVotes,
+            selectedRuntimeFilter = selectedRuntimeFilter,
+            selectedLanguageFilter = selectedLanguageFilter,
+            selectedAvailabilityFilter = selectedAvailabilityFilter,
         )
         if (lastLoadedSearchStateKey == loadStateKey && (baseResults.isNotEmpty() || results.isNotEmpty())) {
             Log.d("TvSearchCache", "search_cache_restore loadKey=$loadStateKey results=${results.size}")
@@ -462,36 +728,96 @@ fun TvSearchScreen(
             return@LaunchedEffect
         }
         Log.d("TvSearchCache", "search_cache_miss loadKey=$loadStateKey")
+        pagingRetryBlockedResultKey = null
         loading = true
         error = null
         try {
             delay(if (trimmedQuery.length >= 2) 250 else 80)
-            val raw = if (trimmedQuery.length >= 2) {
-                metadataRepo.searchMulti(trimmedQuery, 1).take(60)
-            } else {
-                metadataRepo.loadTvSearchBrowseResults(
+            val isBrowseRequest = trimmedQuery.length < 2 || selectedMinRating == TV_SEARCH_TOP_RATED_FILTER
+            if (isBrowseRequest && requiresImdbFilterData) {
+                val apiKey = withContext(Dispatchers.IO) {
+                    runCatching {
+                        secretStore.get(IntegrationSecretKey.MDBLIST_API_KEY)
+                            ?: prefsRepo.getString(SettingsViewModel.KEY_MDBLIST_API_KEY)
+                            ?: MdbListApi.DEFAULT_API_KEY
+                    }.getOrDefault(MdbListApi.DEFAULT_API_KEY)
+                }
+                val batch = metadataRepo.loadVerifiedBrowseBatch(
+                    ratingsEnricher = ratingsEnricher,
+                    apiKey = apiKey,
+                    existingCandidates = emptyList(),
+                    existingResults = emptyList(),
+                    startPage = 1,
+                    targetResultCount = TV_SEARCH_VERIFIED_INITIAL_RESULT_COUNT,
                     filterType = filterType,
                     genreIds = selectedGenreIds,
+                    studioIds = selectedStudioIds,
                     year = selectedYear,
                     minRating = selectedMinRating,
+                    minImdbVotes = selectedMinImdbVotes,
+                    runtimeFilter = selectedRuntimeFilter,
+                    languageFilter = selectedLanguageFilter,
+                    availabilityFilter = selectedAvailabilityFilter,
+                    regionCode = settingsState.regionCode,
+                    sourceAvailabilityByTmdbId = sourceAvailabilityByTmdbId,
                 )
-            }
-            val typed = if (filterType != null) {
-                raw.filter {
-                    when (filterType) {
-                        "movie" -> it.type == MediaType.MOVIE
-                        "tv" -> it.type == MediaType.SERIES
-                        else -> true
-                    }
+                baseResults = batch.candidates
+                results = batch.results
+                nextSearchPage = batch.nextPage
+                searchTotalPages = batch.totalPages
+                searchCanLoadMore = batch.canLoadMore
+            } else {
+                val raw = if (trimmedQuery.length >= 2) {
+                    val page = metadataRepo.searchMultiPaged(
+                        tvSearchEffectiveQuery(trimmedQuery, selectedAvailabilityFilter),
+                        1,
+                        filterType,
+                    )
+                    nextSearchPage = page.page + 1
+                    searchTotalPages = page.totalPages
+                    searchCanLoadMore = page.page < page.totalPages &&
+                        page.items.isNotEmpty() &&
+                        page.items.size < TV_SEARCH_MAX_RESULTS
+                    page.items
+                } else {
+                    val page = metadataRepo.loadTvSearchBrowsePage(
+                        filterType = filterType,
+                        genreIds = selectedGenreIds,
+                        year = selectedYear,
+                        minRating = selectedMinRating,
+                        minImdbVotes = selectedMinImdbVotes,
+                        runtimeFilter = selectedRuntimeFilter,
+                        languageFilter = selectedLanguageFilter,
+                        availabilityFilter = selectedAvailabilityFilter,
+                        regionCode = settingsState.regionCode,
+                        page = 1,
+                    )
+                    nextSearchPage = page.page + 1
+                    searchTotalPages = page.totalPages
+                    searchCanLoadMore = page.page < page.totalPages && page.items.isNotEmpty()
+                    page.items
                 }
-            } else raw
-            baseResults = typed
-            results = typed.filterTvSearchItems(
-                genreIds = selectedGenreIds,
-                studioIds = selectedStudioIds,
-                year = selectedYear,
-                minRating = selectedMinRating,
-            )
+                val typed = if (filterType != null) {
+                    raw.filter {
+                        when (filterType) {
+                            "movie" -> it.type == MediaType.MOVIE
+                            "tv" -> it.type == MediaType.SERIES
+                            else -> true
+                        }
+                    }
+                } else raw
+                baseResults = typed
+                results = typed.filterTvSearchItems(
+                    genreIds = selectedGenreIds,
+                    studioIds = selectedStudioIds,
+                    year = selectedYear,
+                    minRating = selectedMinRating,
+                    minImdbVotes = selectedMinImdbVotes,
+                    runtimeFilter = selectedRuntimeFilter,
+                    availabilityFilter = selectedAvailabilityFilter,
+                    sourceAvailabilityByTmdbId = sourceAvailabilityByTmdbId,
+                ).take(TV_SEARCH_MAX_RESULTS)
+            }
             lastLoadedSearchStateKey = loadStateKey
         } catch (t: Throwable) {
             baseResults = emptyList()
@@ -514,6 +840,10 @@ fun TvSearchScreen(
             selectedStudioIds = selectedStudioIds,
             selectedYear = selectedYear,
             selectedMinRating = selectedMinRating,
+            selectedMinImdbVotes = selectedMinImdbVotes,
+            selectedRuntimeFilter = selectedRuntimeFilter,
+            selectedLanguageFilter = selectedLanguageFilter,
+            selectedAvailabilityFilter = selectedAvailabilityFilter,
         )
         if (lastLoadedSearchStateKey == loadStateKey && (baseResults.isNotEmpty() || results.isNotEmpty())) {
             Log.d("TvSearchCache", "search_cache_restore loadKey=$loadStateKey results=${results.size}")
@@ -570,7 +900,7 @@ fun TvSearchScreen(
                         yearTo = aiResult.yearTo,
                         withCast = castParam,
                         withCrew = crewParam,
-                    ).items.take(60)
+                    ).items.take(TV_SEARCH_MAX_RESULTS)
                 }
                 else -> { // "discover"
                     val type = aiResult.mediaType ?: "movie"
@@ -582,7 +912,7 @@ fun TvSearchScreen(
                         minRating = aiResult.minRating,
                         year = aiResult.yearFrom,
                         yearTo = aiResult.yearTo,
-                    ).items.take(60)
+                    ).items.take(TV_SEARCH_MAX_RESULTS)
                 }
             }
 
@@ -590,20 +920,38 @@ fun TvSearchScreen(
             if (resolvedItems.isEmpty()) {
                 aiFallback = true
                 aiResultTitle = null
-                baseResults = metadataRepo.searchMulti(query, 1).take(60)
+                val fallbackPage = metadataRepo.searchMultiPaged(
+                    tvSearchEffectiveQuery(query, selectedAvailabilityFilter),
+                    1,
+                    filterType,
+                )
+                nextSearchPage = fallbackPage.page + 1
+                searchTotalPages = fallbackPage.totalPages
+                searchCanLoadMore = fallbackPage.page < fallbackPage.totalPages &&
+                    fallbackPage.items.isNotEmpty() &&
+                    fallbackPage.items.size < TV_SEARCH_MAX_RESULTS
+                baseResults = fallbackPage.items
                 results = baseResults.filterTvSearchItems(
                     genreIds = selectedGenreIds,
                     studioIds = selectedStudioIds,
                     year = selectedYear,
                     minRating = selectedMinRating,
+                    minImdbVotes = selectedMinImdbVotes,
+                    runtimeFilter = selectedRuntimeFilter,
+                    availabilityFilter = selectedAvailabilityFilter,
+                    sourceAvailabilityByTmdbId = sourceAvailabilityByTmdbId,
                 )
             } else {
-                baseResults = resolvedItems.take(60)
+                baseResults = resolvedItems.take(TV_SEARCH_MAX_RESULTS)
                 results = baseResults.filterTvSearchItems(
                     genreIds = selectedGenreIds,
                     studioIds = selectedStudioIds,
                     year = selectedYear,
                     minRating = selectedMinRating,
+                    minImdbVotes = selectedMinImdbVotes,
+                    runtimeFilter = selectedRuntimeFilter,
+                    availabilityFilter = selectedAvailabilityFilter,
+                    sourceAvailabilityByTmdbId = sourceAvailabilityByTmdbId,
                 )
             }
             lastLoadedSearchStateKey = loadStateKey
@@ -612,18 +960,36 @@ fun TvSearchScreen(
             aiFallback = true
             aiResultTitle = null
             try {
-                baseResults = metadataRepo.searchMulti(query, 1).take(60)
+                val fallbackPage = metadataRepo.searchMultiPaged(
+                    tvSearchEffectiveQuery(query, selectedAvailabilityFilter),
+                    1,
+                    filterType,
+                )
+                nextSearchPage = fallbackPage.page + 1
+                searchTotalPages = fallbackPage.totalPages
+                searchCanLoadMore = fallbackPage.page < fallbackPage.totalPages &&
+                    fallbackPage.items.isNotEmpty() &&
+                    fallbackPage.items.size < TV_SEARCH_MAX_RESULTS
+                baseResults = fallbackPage.items
                 results = baseResults.filterTvSearchItems(
                     genreIds = selectedGenreIds,
                     studioIds = selectedStudioIds,
                     year = selectedYear,
                     minRating = selectedMinRating,
+                    minImdbVotes = selectedMinImdbVotes,
+                    runtimeFilter = selectedRuntimeFilter,
+                    availabilityFilter = selectedAvailabilityFilter,
+                    sourceAvailabilityByTmdbId = sourceAvailabilityByTmdbId,
                 )
-                lastLoadedSearchStateKey = loadStateKey
-            } catch (t: Throwable) {
-                baseResults = emptyList()
-                results = emptyList()
-                error = tvSearchSafeError(t)
+            lastLoadedSearchStateKey = loadStateKey
+        } catch (t: Throwable) {
+            Log.w("TvSearchInitial", "search_initial_failed loadKey=$loadStateKey", t)
+            nextSearchPage = 2
+            searchTotalPages = 1
+            searchCanLoadMore = false
+            baseResults = emptyList()
+            results = emptyList()
+            error = tvSearchSafeError(t)
             }
         } finally {
             loading = false
@@ -634,7 +1000,251 @@ fun TvSearchScreen(
         selectedStudioIds.size +
         (if (selectedYear != null) 1 else 0) +
         (if (selectedMinRating != null) 1 else 0) +
+        (if (selectedMinImdbVotes != null) 1 else 0) +
+        (if (selectedRuntimeFilter != null) 1 else 0) +
+        (if (selectedLanguageFilter != null) 1 else 0) +
+        (if (selectedAvailabilityFilter != null) 1 else 0) +
         (if (filterType != null) 1 else 0)
+
+    LaunchedEffect(
+        selectedResultKey,
+        lastVisibleResultIndex,
+        results.size,
+        baseResults.size,
+        searchCanLoadMore,
+        loading,
+        loadingMoreResults,
+        loadMoreRequestPending,
+        searchMode,
+        query,
+        filterType,
+        selectedGenreIds,
+        selectedStudioIds,
+        selectedYear,
+        selectedMinRating,
+        selectedMinImdbVotes,
+        selectedRuntimeFilter,
+        selectedLanguageFilter,
+        selectedAvailabilityFilter,
+        density,
+    ) {
+        if (searchMode != SearchMode.STANDARD) return@LaunchedEffect
+        if (loading || loadingMoreResults || loadMoreRequestPending || !searchCanLoadMore) return@LaunchedEffect
+        if (results.size >= TV_SEARCH_MAX_RESULTS || baseResults.size >= TV_SEARCH_MAX_CANDIDATES) return@LaunchedEffect
+        val trimmedQuery = query.trim()
+        val isTopRated = selectedMinRating == TV_SEARCH_TOP_RATED_FILTER
+        val isBrowseRequest = trimmedQuery.length < 2 || isTopRated
+        val focusedIndex = selectedResultKey?.let { key ->
+            results.indexOfFirst { it.tvSearchStableKey() == key }
+        } ?: -1
+        val loadAheadRows = if (isBrowseRequest) TV_SEARCH_TOP_RATED_LOAD_AHEAD_ROWS else TV_SEARCH_LOAD_AHEAD_ROWS
+        val furthestVisibleIndex = maxOf(focusedIndex, lastVisibleResultIndex)
+        val nearLoadedEnd = furthestVisibleIndex >= 0 &&
+            furthestVisibleIndex >= results.size - (density.columns * loadAheadRows)
+        val needsFirstBrowsePage = isBrowseRequest && results.size < TV_SEARCH_RESULT_PAGE_SIZE
+        val filteredToEmpty = results.isEmpty() && activeFilterCount > 0 && baseResults.isNotEmpty()
+        if (!nearLoadedEnd && !needsFirstBrowsePage && !filteredToEmpty) return@LaunchedEffect
+        if (pagingRetryBlockedResultKey != null && pagingRetryBlockedResultKey == selectedResultKey) {
+            return@LaunchedEffect
+        }
+
+        loadMoreRequestPending = true
+        loadMoreRequestNonce += 1
+    }
+
+    LaunchedEffect(
+        loadMoreRequestNonce,
+        searchMode,
+        query,
+        filterType,
+        selectedGenreIds,
+        selectedStudioIds,
+        selectedYear,
+        selectedMinRating,
+        selectedMinImdbVotes,
+        selectedRuntimeFilter,
+        selectedLanguageFilter,
+        selectedAvailabilityFilter,
+    ) {
+        if (loadMoreRequestNonce <= handledLoadMoreRequestNonce) return@LaunchedEffect
+        handledLoadMoreRequestNonce = loadMoreRequestNonce
+        if (searchMode != SearchMode.STANDARD || loading) {
+            loadMoreRequestPending = false
+            return@LaunchedEffect
+        }
+        if (results.size >= TV_SEARCH_MAX_RESULTS || baseResults.size >= TV_SEARCH_MAX_CANDIDATES) {
+            loadMoreRequestPending = false
+            return@LaunchedEffect
+        }
+        val trimmedQuery = query.trim()
+        val isTopRated = selectedMinRating == TV_SEARCH_TOP_RATED_FILTER
+        val isBrowseRequest = trimmedQuery.length < 2 || isTopRated
+        val usesVerifiedBrowse = isBrowseRequest && requiresImdbFilterData
+        loadingMoreResults = true
+        try {
+            if (usesVerifiedBrowse) {
+                val apiKey = withContext(Dispatchers.IO) {
+                    runCatching {
+                        secretStore.get(IntegrationSecretKey.MDBLIST_API_KEY)
+                            ?: prefsRepo.getString(SettingsViewModel.KEY_MDBLIST_API_KEY)
+                            ?: MdbListApi.DEFAULT_API_KEY
+                    }.getOrDefault(MdbListApi.DEFAULT_API_KEY)
+                }
+                val targetSize = (results.size + TV_SEARCH_VERIFIED_RESULT_INCREMENT)
+                    .coerceAtMost(TV_SEARCH_MAX_RESULTS)
+                val batch = metadataRepo.loadVerifiedBrowseBatch(
+                    ratingsEnricher = ratingsEnricher,
+                    apiKey = apiKey,
+                    existingCandidates = baseResults,
+                    existingResults = results,
+                    startPage = nextSearchPage,
+                    targetResultCount = targetSize,
+                    filterType = filterType,
+                    genreIds = selectedGenreIds,
+                    studioIds = selectedStudioIds,
+                    year = selectedYear,
+                    minRating = selectedMinRating,
+                    minImdbVotes = selectedMinImdbVotes,
+                    runtimeFilter = selectedRuntimeFilter,
+                    languageFilter = selectedLanguageFilter,
+                    availabilityFilter = selectedAvailabilityFilter,
+                    regionCode = settingsState.regionCode,
+                    sourceAvailabilityByTmdbId = sourceAvailabilityByTmdbId,
+                )
+                baseResults = batch.candidates
+                results = batch.results
+                nextSearchPage = batch.nextPage
+                searchTotalPages = batch.totalPages
+                searchCanLoadMore = batch.canLoadMore
+            } else if (isBrowseRequest) {
+                val page = withContext(Dispatchers.IO) {
+                    runCatching {
+                        metadataRepo.loadTvSearchBrowsePage(
+                            filterType = filterType,
+                            genreIds = selectedGenreIds,
+                            year = selectedYear,
+                            minRating = selectedMinRating,
+                            minImdbVotes = selectedMinImdbVotes,
+                            runtimeFilter = selectedRuntimeFilter,
+                            languageFilter = selectedLanguageFilter,
+                            availabilityFilter = selectedAvailabilityFilter,
+                            regionCode = settingsState.regionCode,
+                            page = nextSearchPage,
+                        )
+                    }.getOrElse {
+                        delay(350)
+                        runCatching {
+                            metadataRepo.loadTvSearchBrowsePage(
+                                filterType = filterType,
+                                genreIds = selectedGenreIds,
+                                year = selectedYear,
+                                minRating = selectedMinRating,
+                                minImdbVotes = selectedMinImdbVotes,
+                                runtimeFilter = selectedRuntimeFilter,
+                                languageFilter = selectedLanguageFilter,
+                                availabilityFilter = selectedAvailabilityFilter,
+                                regionCode = settingsState.regionCode,
+                                page = nextSearchPage,
+                            )
+                        }.getOrElse {
+                            delay(700)
+                            metadataRepo.loadTvSearchBrowsePage(
+                                filterType = filterType,
+                                genreIds = selectedGenreIds,
+                                year = selectedYear,
+                                minRating = selectedMinRating,
+                                minImdbVotes = selectedMinImdbVotes,
+                                runtimeFilter = selectedRuntimeFilter,
+                                languageFilter = selectedLanguageFilter,
+                                availabilityFilter = selectedAvailabilityFilter,
+                                regionCode = settingsState.regionCode,
+                                page = nextSearchPage,
+                            )
+                        }
+                    }
+                }
+                val merged = (baseResults + page.items)
+                    .dedupeTvSearchResults()
+                    .take(TV_SEARCH_MAX_CANDIDATES)
+                val filtered = merged.filterTvSearchItems(
+                    genreIds = selectedGenreIds,
+                    studioIds = selectedStudioIds,
+                    year = selectedYear,
+                    minRating = selectedMinRating,
+                    minImdbVotes = selectedMinImdbVotes,
+                    runtimeFilter = selectedRuntimeFilter,
+                    availabilityFilter = selectedAvailabilityFilter,
+                    sourceAvailabilityByTmdbId = sourceAvailabilityByTmdbId,
+                )
+                baseResults = merged
+                results = stableTvSearchProjection(results, filtered, TV_SEARCH_MAX_RESULTS)
+                nextSearchPage = page.page + 1
+                searchTotalPages = page.totalPages
+                searchCanLoadMore = page.page < page.totalPages &&
+                    page.items.isNotEmpty() &&
+                    merged.size < TV_SEARCH_MAX_CANDIDATES &&
+                    results.size < TV_SEARCH_MAX_RESULTS
+            } else {
+                val page = withContext(Dispatchers.IO) {
+                    runCatching {
+                        metadataRepo.searchMultiPaged(
+                            tvSearchEffectiveQuery(trimmedQuery, selectedAvailabilityFilter),
+                            nextSearchPage,
+                            filterType,
+                        )
+                    }.getOrElse {
+                        delay(350)
+                        runCatching {
+                            metadataRepo.searchMultiPaged(
+                                tvSearchEffectiveQuery(trimmedQuery, selectedAvailabilityFilter),
+                                nextSearchPage,
+                                filterType,
+                            )
+                        }.getOrElse {
+                            delay(700)
+                            metadataRepo.searchMultiPaged(
+                                tvSearchEffectiveQuery(trimmedQuery, selectedAvailabilityFilter),
+                                nextSearchPage,
+                                filterType,
+                            )
+                        }
+                    }
+                }
+                val merged = (baseResults + page.items)
+                    .dedupeTvSearchResults()
+                    .take(TV_SEARCH_MAX_CANDIDATES)
+                baseResults = merged
+                val filtered = merged.filterTvSearchItems(
+                    genreIds = selectedGenreIds,
+                    studioIds = selectedStudioIds,
+                    year = selectedYear,
+                    minRating = selectedMinRating,
+                    minImdbVotes = selectedMinImdbVotes,
+                    runtimeFilter = selectedRuntimeFilter,
+                    availabilityFilter = selectedAvailabilityFilter,
+                    sourceAvailabilityByTmdbId = sourceAvailabilityByTmdbId,
+                )
+                results = stableTvSearchProjection(results, filtered, TV_SEARCH_MAX_RESULTS)
+                nextSearchPage = page.page + 1
+                searchTotalPages = page.totalPages
+                searchCanLoadMore = page.page < page.totalPages &&
+                    page.items.isNotEmpty() &&
+                    merged.size < TV_SEARCH_MAX_CANDIDATES &&
+                    results.size < TV_SEARCH_MAX_RESULTS
+            }
+            pagingRetryBlockedResultKey = null
+        } catch (t: Throwable) {
+            Log.w("TvSearchPaging", "search_next_page_failed page=$nextSearchPage", t)
+            // Keep the server's has-more state. Moving focus to another item
+            // retries this page instead of turning one transient failure into
+            // a permanent 40-result ceiling.
+            pagingRetryBlockedResultKey = selectedResultKey
+        } finally {
+            loadingMoreResults = false
+            loadMoreRequestPending = false
+        }
+    }
+
     val selectedBackdrop = selectedResult?.backdropUrl?.takeIf { it.isNotBlank() }
         ?: selectedResult?.posterUrl?.takeIf { it.isNotBlank() }
 
@@ -643,9 +1253,9 @@ fun TvSearchScreen(
             TvImagePrefetcher.prefetchMediaItems(
                 context = context,
                 screenName = "tv_search",
-                items = results.take(density.columns * 2),
-                maxImages = 32,
-                includeHeroCandidates = true,
+                items = results.take(TV_SEARCH_PREFETCH_RESULT_COUNT),
+                maxImages = TV_SEARCH_PREFETCH_RESULT_COUNT,
+                includeHeroCandidates = false,
             )
         }
     }
@@ -658,6 +1268,11 @@ fun TvSearchScreen(
         selectedStudioIds,
         selectedYear,
         selectedMinRating,
+        selectedMinImdbVotes,
+        selectedRuntimeFilter,
+        selectedLanguageFilter,
+        selectedAvailabilityFilter,
+        selectedSort,
         filtersVisible,
         density,
         baseResults,
@@ -666,6 +1281,9 @@ fun TvSearchScreen(
         aiResultTitle,
         aiFallback,
         lastLoadedSearchStateKey,
+        nextSearchPage,
+        searchTotalPages,
+        searchCanLoadMore,
         loading,
         error,
     ) {
@@ -681,6 +1299,11 @@ fun TvSearchScreen(
                 selectedStudioIds = selectedStudioIds,
                 selectedYear = selectedYear,
                 selectedMinRating = selectedMinRating,
+                selectedMinImdbVotes = selectedMinImdbVotes,
+                selectedRuntimeFilter = selectedRuntimeFilter,
+                selectedLanguageFilter = selectedLanguageFilter,
+                selectedAvailabilityFilter = selectedAvailabilityFilter,
+                selectedSort = selectedSort,
                 filtersVisible = filtersVisible,
                 density = density,
                 baseResults = baseResults,
@@ -689,6 +1312,9 @@ fun TvSearchScreen(
                 aiResultTitle = aiResultTitle,
                 aiFallback = aiFallback,
                 loadStateKey = lastLoadedSearchStateKey,
+                nextSearchPage = nextSearchPage,
+                searchTotalPages = searchTotalPages,
+                searchCanLoadMore = searchCanLoadMore,
                 storedAtMs = System.currentTimeMillis(),
             ),
         )
@@ -747,7 +1373,17 @@ fun TvSearchScreen(
         ) {
             TvSearchHeader(
                 query = query,
-                onQueryChange = { query = it },
+                onQueryChange = { value ->
+                    query = value
+                    when {
+                        value.trim().equals("top rated", ignoreCase = true) -> {
+                            selectedMinRating = TV_SEARCH_TOP_RATED_FILTER
+                        }
+                        selectedMinRating == TV_SEARCH_TOP_RATED_FILTER && value.isNotBlank() -> {
+                            selectedMinRating = null
+                        }
+                    }
+                },
                 searchMode = searchMode,
                 hasAiKey = hasAiKey,
                 onToggleAi = {
@@ -770,7 +1406,12 @@ fun TvSearchScreen(
 
             TvSearchRefinementArea(
                 filterType = filterType,
-                onFilterTypeChange = { filterType = it },
+                onFilterTypeChange = {
+                    filterType = it
+                    selectedStudioIds = emptySet()
+                    lastLoadedSearchStateKey = null
+                    browseRefreshNonce += 1
+                },
                 selectedGenreIds = selectedGenreIds,
                 selectedYear = selectedYear,
                 selectedMinRating = selectedMinRating,
@@ -779,30 +1420,53 @@ fun TvSearchScreen(
                         "trending" -> {
                             query = ""
                             selectedGenreIds = emptySet()
+                            selectedStudioIds = emptySet()
                             selectedYear = null
                             selectedMinRating = null
+                            lastLoadedSearchStateKey = null
+                            browseRefreshNonce += 1
                         }
-                        "popular" -> {
+                        "top_rated" -> {
                             query = ""
+                            selectedStudioIds = emptySet()
                             selectedYear = null
-                            selectedMinRating = 7.0
+                            selectedMinRating = if (selectedMinRating == TV_SEARCH_TOP_RATED_FILTER) {
+                                null
+                            } else {
+                                TV_SEARCH_TOP_RATED_FILTER
+                            }
+                            lastLoadedSearchStateKey = null
+                            browseRefreshNonce += 1
                         }
                         "new" -> {
                             query = ""
-                            selectedYear = Calendar.getInstance().get(Calendar.YEAR)
+                            selectedStudioIds = emptySet()
+                            val currentYear = Calendar.getInstance().get(Calendar.YEAR)
+                            selectedYear = if (selectedYear == currentYear) null else currentYear
+                            lastLoadedSearchStateKey = null
+                            browseRefreshNonce += 1
                         }
-                        "4k" -> query = "4K"
                         "family" -> {
                             query = ""
-                            selectedGenreIds = setOf(10751)
+                            selectedStudioIds = emptySet()
+                            selectedGenreIds = if (10751 in selectedGenreIds) emptySet() else setOf(10751)
+                            lastLoadedSearchStateKey = null
+                            browseRefreshNonce += 1
                         }
                         "action" -> {
                             query = ""
-                            selectedGenreIds = setOf(if (filterType == "tv") 10759 else 28)
+                            selectedStudioIds = emptySet()
+                            val actionGenre = if (filterType == "tv") 10759 else 28
+                            selectedGenreIds = if (actionGenre in selectedGenreIds) emptySet() else setOf(actionGenre)
+                            lastLoadedSearchStateKey = null
+                            browseRefreshNonce += 1
                         }
                         "comedy" -> {
                             query = ""
-                            selectedGenreIds = setOf(35)
+                            selectedStudioIds = emptySet()
+                            selectedGenreIds = if (35 in selectedGenreIds) emptySet() else setOf(35)
+                            lastLoadedSearchStateKey = null
+                            browseRefreshNonce += 1
                         }
                     }
                 },
@@ -826,6 +1490,11 @@ fun TvSearchScreen(
                 inputFocusRequester = inputFocusRequester,
                 bodyTopRequester = activeDensityRequester,
                 railFocusRequester = railFocusRequester,
+                onMoveDown = if (results.isNotEmpty()) {
+                    { requestSearchBodyFocus() }
+                } else {
+                    null
+                },
                 onFilterFocused = { lastVisibleFilterRequester = it },
                 onContentFocused = onContentFocused,
             )
@@ -893,6 +1562,7 @@ fun TvSearchScreen(
                             upRequester = if (filtersVisible) advancedFiltersRequester else filterToggleRequester,
                             downRequester = firstResultRequester.takeIf { results.isNotEmpty() }
                                 ?: activeDensityRequester,
+                            onMoveDown = { requestSearchBodyFocus() },
                             onContentFocused = onContentFocused,
                         )
                     }
@@ -911,6 +1581,7 @@ fun TvSearchScreen(
                         )
                         else -> LazyVerticalGrid(
                             columns = GridCells.Fixed(density.columns),
+                            state = resultsGridState,
                             verticalArrangement = Arrangement.spacedBy(18.dp),
                             horizontalArrangement = Arrangement.spacedBy(12.dp),
                             contentPadding = PaddingValues(top = 4.dp, bottom = 28.dp, start = 2.dp, end = 4.dp),
@@ -920,15 +1591,65 @@ fun TvSearchScreen(
                                 results,
                                 key = { _, item -> item.tvSearchStableKey() },
                             ) { index, item ->
-                                val requester = remember(item.tvSearchStableKey()) { FocusRequester() }
-                                val activeRequester = if (index == 0) firstResultRequester else requester
+                                val itemKey = item.tvSearchStableKey()
+                                val activeRequester = if (index == 0) {
+                                    firstResultRequester.also { resultRequesters[itemKey] = it }
+                                } else {
+                                    resultRequesters.getOrPut(itemKey) { FocusRequester() }
+                                }
+                                val focusTarget = remember(screenId, itemKey, index, density.columns) {
+                                    TvFocusTargetId(
+                                        screenId = screenId,
+                                        rowKey = "results",
+                                        itemKey = itemKey,
+                                        rowIndex = index / density.columns,
+                                        itemIndex = index,
+                                        targetType = "result",
+                                    )
+                                }
+                                val registeredRequester = rememberRegisteredTvFocusRequester(
+                                    controller = focusRestoreController,
+                                    target = focusTarget,
+                                    externalRequester = activeRequester,
+                                )
+                                val isLastResultRow = index / density.columns == results.lastIndex / density.columns
+                                val isRightEdge = index % density.columns == density.columns - 1 || index == results.lastIndex
                                 TvSearchResultCard(
                                     item = item,
                                     density = density,
-                                    ratingPrefs = settingsState.ratingPrefs.tvExternalCardRatingPrefs(),
                                     modifier = Modifier
-                                        .focusRequester(activeRequester)
+                                        .focusRequester(registeredRequester)
                                         .aspectRatio(2f / 3f)
+                                        .onPreviewKeyEvent { event ->
+                                            when {
+                                                isLastResultRow && event.key == Key.DirectionDown -> {
+                                                    if (event.type == KeyEventType.KeyDown &&
+                                                        !loading &&
+                                                        !loadingMoreResults &&
+                                                        !loadMoreRequestPending
+                                                    ) {
+                                                        pagingRetryBlockedResultKey = null
+                                                        loadMoreRequestPending = true
+                                                        loadMoreRequestNonce += 1
+                                                    }
+                                                    true
+                                                }
+                                                isRightEdge && event.key == Key.DirectionRight -> {
+                                                    if (event.type == KeyEventType.KeyDown &&
+                                                        index == results.lastIndex &&
+                                                        !loading &&
+                                                        !loadingMoreResults &&
+                                                        !loadMoreRequestPending
+                                                    ) {
+                                                        pagingRetryBlockedResultKey = null
+                                                        loadMoreRequestPending = true
+                                                        loadMoreRequestNonce += 1
+                                                    }
+                                                    true
+                                                }
+                                                else -> false
+                                            }
+                                        }
                                         .focusProperties {
                                             if (index % density.columns == 0) {
                                                 left = railFocusRequester
@@ -936,14 +1657,46 @@ fun TvSearchScreen(
                                             if (index < density.columns) {
                                                 up = activeDensityRequester
                                             }
+                                            if (isLastResultRow) {
+                                                down = registeredRequester
+                                            }
+                                            if (isRightEdge) {
+                                                right = registeredRequester
+                                            }
                                         },
                                     onFocused = {
+                                        focusRestoreController.markFocused(focusTarget)
+                                        focusedResultKey = itemKey
                                         selectedResult = item
-                                        selectedResultKey = item.tvSearchStableKey()
-                                        onContentFocused(activeRequester)
+                                        selectedResultKey = itemKey
+                                        onContentFocused(registeredRequester)
                                     },
                                     onClick = { onMediaClick(item) },
                                 )
+                            }
+                            if (loadingMoreResults) {
+                                item(span = { GridItemSpan(maxLineSpan) }) {
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(vertical = 18.dp),
+                                        horizontalArrangement = Arrangement.Center,
+                                        verticalAlignment = Alignment.CenterVertically,
+                                    ) {
+                                        CircularProgressIndicator(
+                                            modifier = Modifier.size(18.dp),
+                                            strokeWidth = 2.dp,
+                                            color = Amber,
+                                        )
+                                        Spacer(modifier = Modifier.width(10.dp))
+                                        Text(
+                                            text = "Loading more",
+                                            style = MaterialTheme.typography.labelMedium,
+                                            color = Silver,
+                                            maxLines = 1,
+                                        )
+                                    }
+                                }
                             }
                         }
                     }
@@ -963,6 +1716,11 @@ fun TvSearchScreen(
                 selectedStudioIds = selectedStudioIds,
                 selectedYear = selectedYear,
                 selectedMinRating = selectedMinRating,
+                selectedMinImdbVotes = selectedMinImdbVotes,
+                selectedRuntimeFilter = selectedRuntimeFilter,
+                selectedLanguageFilter = selectedLanguageFilter,
+                selectedAvailabilityFilter = selectedAvailabilityFilter,
+                selectedSort = selectedSort,
                 activeFilterCount = activeFilterCount,
                 closeFiltersRequester = closeFiltersRequester,
                 clearFiltersRequester = clearFiltersRequester,
@@ -975,20 +1733,47 @@ fun TvSearchScreen(
                 },
                 onSelectYear = { year -> selectedYear = if (selectedYear == year) null else year },
                 onSelectRating = { rating -> selectedMinRating = if (selectedMinRating == rating) null else rating },
+                onSelectMinImdbVotes = { votes -> selectedMinImdbVotes = votes },
+                onSelectRuntime = { filter ->
+                    selectedRuntimeFilter = if (selectedRuntimeFilter == filter) null else filter
+                    lastLoadedSearchStateKey = null
+                    browseRefreshNonce += 1
+                },
+                onSelectLanguage = { filter ->
+                    selectedLanguageFilter = if (selectedLanguageFilter == filter) null else filter
+                    lastLoadedSearchStateKey = null
+                    browseRefreshNonce += 1
+                },
+                onSelectAvailability = { filter ->
+                    selectedAvailabilityFilter = if (selectedAvailabilityFilter == filter) null else filter
+                    lastLoadedSearchStateKey = null
+                    browseRefreshNonce += 1
+                },
+                onSelectSort = { selectedSort = it },
                 onClearAll = {
                     selectedGenreIds = emptySet()
                     selectedStudioIds = emptySet()
                     selectedYear = null
                     selectedMinRating = null
+                    selectedMinImdbVotes = null
+                    selectedRuntimeFilter = null
+                    selectedLanguageFilter = null
+                    selectedAvailabilityFilter = null
+                    selectedSort = TvSearchSort.RELEVANCE
                     filterType = null
                     searchMode = SearchMode.STANDARD
+                    lastLoadedSearchStateKey = null
+                    browseRefreshNonce += 1
                 },
                 onClose = {
                     lastVisibleFilterRequester = advancedFiltersRequester
                     showFilters = false
                     focusResultsAfterClosingFilters = true
                 },
-                onContentFocused = onContentFocused,
+                onContentFocused = { requester ->
+                    lastDrawerFocusRequester = requester
+                    onContentFocused(requester)
+                },
                 modifier = Modifier
                     .align(Alignment.TopStart)
                     .padding(start = TV_PAGE_CONTENT_GUTTER, top = 148.dp),
@@ -1336,7 +2121,7 @@ fun TvSearchScreen(
                         horizontalArrangement = Arrangement.spacedBy(10.dp),
                         contentPadding = PaddingValues(top = 8.dp),
                     ) {
-                        items(listOf("Recently added", "4K movies", "Anime", "New episodes")) { term ->
+                        items(listOf("Recently added", "Anime", "New episodes")) { term ->
                             val requester = remember(term) { FocusRequester() }
                             TvSearchChip(
                                 text = term,
@@ -1480,7 +2265,27 @@ private fun TvSearchHeader(
     }
 }
 
-private const val TV_SEARCH_ROUTE_CACHE_KEY = "tv_search_route_cache_v2"
+private enum class TvSearchRuntimeFilter(val label: String, val minMinutes: Int?, val maxMinutes: Int?) {
+    UNDER_90("Under 90m", null, 89),
+    BETWEEN_90_120("90-120m", 90, 120),
+    OVER_120("2h+", 121, null),
+}
+
+private enum class TvSearchLanguageFilter(val label: String, val code: String) {
+    ENGLISH("English", "en"),
+    GERMAN("German", "de"),
+    SPANISH("Spanish", "es"),
+    FRENCH("French", "fr"),
+    JAPANESE("Japanese", "ja"),
+    KOREAN("Korean", "ko"),
+}
+
+private enum class TvSearchAvailabilityFilter(val label: String) {
+    READY("Ready"),
+    STREAMING("Streaming"),
+}
+
+private const val TV_SEARCH_ROUTE_CACHE_KEY = "tv_search_route_cache_v3"
 private const val TV_SEARCH_ROUTE_CACHE_TTL_MS = 30 * 60 * 1000L
 
 private data class TvSearchRouteCacheState(
@@ -1491,6 +2296,11 @@ private data class TvSearchRouteCacheState(
     val selectedStudioIds: Set<Int>,
     val selectedYear: Int?,
     val selectedMinRating: Double?,
+    val selectedMinImdbVotes: Int?,
+    val selectedRuntimeFilter: TvSearchRuntimeFilter?,
+    val selectedLanguageFilter: TvSearchLanguageFilter?,
+    val selectedAvailabilityFilter: TvSearchAvailabilityFilter?,
+    val selectedSort: TvSearchSort,
     val filtersVisible: Boolean,
     val density: TvSearchDensity,
     val baseResults: List<MediaItem>,
@@ -1499,6 +2309,9 @@ private data class TvSearchRouteCacheState(
     val aiResultTitle: String?,
     val aiFallback: Boolean,
     val loadStateKey: String?,
+    val nextSearchPage: Int,
+    val searchTotalPages: Int,
+    val searchCanLoadMore: Boolean,
     val storedAtMs: Long,
 ) {
     fun isFresh(nowMs: Long = System.currentTimeMillis()): Boolean =
@@ -1778,6 +2591,7 @@ private fun TvSearchRefinementArea(
     inputFocusRequester: FocusRequester,
     bodyTopRequester: FocusRequester,
     railFocusRequester: FocusRequester,
+    onMoveDown: (() -> Unit)?,
     onFilterFocused: (FocusRequester) -> Unit,
     onContentFocused: (FocusRequester) -> Unit,
 ) {
@@ -1811,7 +2625,22 @@ private fun TvSearchRefinementArea(
             horizontalArrangement = Arrangement.spacedBy(9.dp),
             verticalAlignment = Alignment.CenterVertically,
             contentPadding = PaddingValues(end = TV_FILTER_ROW_NESTED_END_GUTTER),
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .onPreviewKeyEvent { event ->
+                    when {
+                        onMoveDown != null &&
+                            event.key == Key.DirectionDown &&
+                            event.type == KeyEventType.KeyDown -> {
+                            onMoveDown()
+                            true
+                        }
+                        onMoveDown != null &&
+                            event.key == Key.DirectionDown &&
+                            event.type == KeyEventType.KeyUp -> true
+                        else -> false
+                    }
+                },
         ) {
             item("all") {
             TvSearchChip(
@@ -1848,7 +2677,7 @@ private fun TvSearchRefinementArea(
                     onFilterFocused(movieTypeRequester)
                     onContentFocused(movieTypeRequester)
                 },
-                onClick = { onFilterTypeChange("movie") },
+                onClick = { onFilterTypeChange(if (filterType == "movie") null else "movie") },
             )
             }
             item("tv") {
@@ -1866,7 +2695,7 @@ private fun TvSearchRefinementArea(
                     onFilterFocused(tvTypeRequester)
                     onContentFocused(tvTypeRequester)
                 },
-                onClick = { onFilterTypeChange("tv") },
+                onClick = { onFilterTypeChange(if (filterType == "tv") null else "tv") },
             )
             }
             item("separator") {
@@ -1879,21 +2708,14 @@ private fun TvSearchRefinementArea(
             }
             val quicks = listOf(
                 "trending" to "Trending",
-                "popular" to "Popular",
+                "top_rated" to "Top Rated",
                 "new" to "New",
-                "4k" to "4K",
-                "family" to "Family",
-                "action" to "Action",
-                "comedy" to "Comedy",
             )
             items(quicks, key = { it.first }) { (key, label) ->
                 val requester = remember(key) { FocusRequester() }
                 val selected = when (key) {
-                    "popular" -> selectedMinRating == 7.0
+                    "top_rated" -> selectedMinRating == TV_SEARCH_TOP_RATED_FILTER
                     "new" -> selectedYear == Calendar.getInstance().get(Calendar.YEAR)
-                    "family" -> 10751 in selectedGenreIds
-                    "action" -> 28 in selectedGenreIds || 10759 in selectedGenreIds
-                    "comedy" -> 35 in selectedGenreIds
                     else -> false
                 }
                 TvSearchChip(
@@ -1975,6 +2797,7 @@ private fun TvSearchDensityControl(
     densityRequesters: Map<TvSearchDensity, FocusRequester>,
     upRequester: FocusRequester,
     downRequester: FocusRequester,
+    onMoveDown: () -> Unit,
     onContentFocused: (FocusRequester) -> Unit,
 ) {
     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -1996,8 +2819,7 @@ private fun TvSearchDensityControl(
                             }
                             event.key == Key.DirectionUp && event.type == KeyEventType.KeyUp -> true
                             event.key == Key.DirectionDown && event.type == KeyEventType.KeyDown -> {
-                                runCatching { downRequester.requestFocus() }
-                                onContentFocused(downRequester)
+                                onMoveDown()
                                 true
                             }
                             event.key == Key.DirectionDown && event.type == KeyEventType.KeyUp -> true
@@ -2025,6 +2847,11 @@ private fun TvSearchAdvancedFilterDrawer(
     selectedStudioIds: Set<Int>,
     selectedYear: Int?,
     selectedMinRating: Double?,
+    selectedMinImdbVotes: Int?,
+    selectedRuntimeFilter: TvSearchRuntimeFilter?,
+    selectedLanguageFilter: TvSearchLanguageFilter?,
+    selectedAvailabilityFilter: TvSearchAvailabilityFilter?,
+    selectedSort: TvSearchSort,
     activeFilterCount: Int,
     closeFiltersRequester: FocusRequester,
     clearFiltersRequester: FocusRequester,
@@ -2033,12 +2860,23 @@ private fun TvSearchAdvancedFilterDrawer(
     onToggleStudio: (Int) -> Unit,
     onSelectYear: (Int) -> Unit,
     onSelectRating: (Double) -> Unit,
+    onSelectMinImdbVotes: (Int?) -> Unit,
+    onSelectRuntime: (TvSearchRuntimeFilter?) -> Unit,
+    onSelectLanguage: (TvSearchLanguageFilter?) -> Unit,
+    onSelectAvailability: (TvSearchAvailabilityFilter?) -> Unit,
+    onSelectSort: (TvSearchSort) -> Unit,
     onClearAll: () -> Unit,
     onClose: () -> Unit,
     onContentFocused: (FocusRequester) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val drawerScrollState = rememberScrollState()
+    val ratingFirstRequester = remember { FocusRequester() }
+    val sortFirstRequester = remember { FocusRequester() }
+    val votesFirstRequester = remember { FocusRequester() }
+    val runtimeFirstRequester = remember { FocusRequester() }
+    val languageFirstRequester = remember { FocusRequester() }
+    val availabilityFirstRequester = remember { FocusRequester() }
     Column(
         modifier = modifier
             .width(720.dp)
@@ -2064,7 +2902,7 @@ private fun TvSearchAdvancedFilterDrawer(
                     maxLines = 1,
                 )
                 Text(
-                    text = if (activeFilterCount > 0) "$activeFilterCount active filters" else "Genre, year, rating, runtime, availability",
+                    text = if (activeFilterCount > 0) "$activeFilterCount active filters" else "Genre, year, rating, sorting, IMDb votes, runtime, availability",
                     style = MaterialTheme.typography.labelMedium,
                     color = Silver,
                     maxLines = 1,
@@ -2122,11 +2960,70 @@ private fun TvSearchAdvancedFilterDrawer(
                     firstFilterRequester = firstFilterRequester,
                     upRequester = closeFiltersRequester,
                     resultsRequester = null,
+                    lastFilterRowRequester = ratingFirstRequester,
+                    bottomRequester = sortFirstRequester,
                     onContentFocused = onContentFocused,
                 )
-                TvSearchDrawerStaticSection("Runtime", listOf("Any", "Under 90m", "90-120m", "2h+"))
-                TvSearchDrawerStaticSection("Language", listOf("Any", "English", "Original", "Dubbed", "Subbed"))
-                TvSearchDrawerStaticSection("Availability", listOf("Any source", "Ready", "Premium", "4K / HDR"))
+                TvSearchDrawerChoiceSection(
+                    title = "Sort by",
+                    labels = TvSearchSort.entries.map { it.label },
+                    selectedIndex = TvSearchSort.entries.indexOf(selectedSort),
+                    firstRequester = sortFirstRequester,
+                    upRequester = ratingFirstRequester,
+                    downRequester = votesFirstRequester,
+                    onContentFocused = onContentFocused,
+                    onSelectIndex = { index ->
+                        TvSearchSort.entries.getOrNull(index)?.let(onSelectSort)
+                    },
+                )
+                TvSearchDrawerChoiceSection(
+                    title = "Minimum IMDb votes",
+                    labels = listOf("Default") + TV_SEARCH_IMDB_VOTE_THRESHOLDS.map { it.tvSearchCompactCount() + "+" },
+                    selectedIndex = selectedMinImdbVotes?.let { TV_SEARCH_IMDB_VOTE_THRESHOLDS.indexOf(it) + 1 } ?: 0,
+                    firstRequester = votesFirstRequester,
+                    upRequester = sortFirstRequester,
+                    downRequester = runtimeFirstRequester,
+                    onContentFocused = onContentFocused,
+                    onSelectIndex = { index ->
+                        onSelectMinImdbVotes(TV_SEARCH_IMDB_VOTE_THRESHOLDS.getOrNull(index - 1))
+                    },
+                )
+                TvSearchDrawerChoiceSection(
+                    title = "Runtime",
+                    labels = listOf("Any") + TvSearchRuntimeFilter.entries.map { it.label },
+                    selectedIndex = selectedRuntimeFilter?.let { TvSearchRuntimeFilter.entries.indexOf(it) + 1 } ?: 0,
+                    firstRequester = runtimeFirstRequester,
+                    upRequester = votesFirstRequester,
+                    downRequester = languageFirstRequester,
+                    onContentFocused = onContentFocused,
+                    onSelectIndex = { index ->
+                        onSelectRuntime(TvSearchRuntimeFilter.entries.getOrNull(index - 1))
+                    },
+                )
+                TvSearchDrawerChoiceSection(
+                    title = "Language",
+                    labels = listOf("Any") + TvSearchLanguageFilter.entries.map { it.label },
+                    selectedIndex = selectedLanguageFilter?.let { TvSearchLanguageFilter.entries.indexOf(it) + 1 } ?: 0,
+                    firstRequester = languageFirstRequester,
+                    upRequester = runtimeFirstRequester,
+                    downRequester = availabilityFirstRequester,
+                    onContentFocused = onContentFocused,
+                    onSelectIndex = { index ->
+                        onSelectLanguage(TvSearchLanguageFilter.entries.getOrNull(index - 1))
+                    },
+                )
+                TvSearchDrawerChoiceSection(
+                    title = "Availability",
+                    labels = listOf("Any source") + TvSearchAvailabilityFilter.entries.map { it.label },
+                    selectedIndex = selectedAvailabilityFilter?.let { TvSearchAvailabilityFilter.entries.indexOf(it) + 1 } ?: 0,
+                    firstRequester = availabilityFirstRequester,
+                    upRequester = languageFirstRequester,
+                    downRequester = closeFiltersRequester,
+                    onContentFocused = onContentFocused,
+                    onSelectIndex = { index ->
+                        onSelectAvailability(TvSearchAvailabilityFilter.entries.getOrNull(index - 1))
+                    },
+                )
             }
             Box(
                 modifier = Modifier
@@ -2144,9 +3041,15 @@ private fun TvSearchAdvancedFilterDrawer(
 }
 
 @Composable
-private fun TvSearchDrawerStaticSection(
+private fun TvSearchDrawerChoiceSection(
     title: String,
     labels: List<String>,
+    selectedIndex: Int,
+    firstRequester: FocusRequester,
+    upRequester: FocusRequester,
+    downRequester: FocusRequester,
+    onContentFocused: (FocusRequester) -> Unit,
+    onSelectIndex: (Int) -> Unit,
 ) {
     Text(
         text = title,
@@ -2154,9 +3057,27 @@ private fun TvSearchDrawerStaticSection(
         color = Silver,
         modifier = Modifier.padding(top = 4.dp),
     )
+    val chipRequesters = remember(title, labels, firstRequester) {
+        labels.mapIndexed { index, _ -> if (index == 0) firstRequester else FocusRequester() }
+    }
     LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        items(labels, key = { it }) { label ->
-            TvSearchMetaBadge(label)
+        items(count = labels.size, key = { index -> labels[index] }) { index ->
+            val label = labels[index]
+            val requester = chipRequesters[index]
+            TvSearchChip(
+                text = label,
+                selected = index == selectedIndex,
+                modifier = Modifier
+                    .focusRequester(requester)
+                    .focusProperties {
+                        left = chipRequesters.getOrNull(index - 1) ?: requester
+                        right = chipRequesters.getOrNull(index + 1) ?: requester
+                        up = upRequester
+                        down = downRequester
+                    },
+                onFocused = { onContentFocused(requester) },
+                onClick = { onSelectIndex(index) },
+            )
         }
     }
 }
@@ -2318,41 +3239,17 @@ private fun TvSearchSelectedPreviewV2(
                     TvSearchProviderRatingCards(item)
                     TvSearchPreviewGenreRow(item)
                     val description = item.overview?.takeIf { it.isNotBlank() } ?: "No description available yet."
-                    val hasRealDescription = item.overview?.isNotBlank() == true
-                    val descriptionScroll = rememberScrollState()
-                    LaunchedEffect(item.tvSearchStableKey(), description) {
-                        descriptionScroll.scrollTo(0)
-                        if (!hasRealDescription) return@LaunchedEffect
-                        delay(1_600L)
-                        while (true) {
-                            val maxScroll = descriptionScroll.maxValue
-                            if (maxScroll > 0) {
-                                descriptionScroll.animateScrollTo(
-                                    value = maxScroll,
-                                    animationSpec = tween(
-                                        durationMillis = (maxScroll * 54).coerceIn(7_000, 20_000),
-                                        easing = LinearEasing,
-                                    ),
-                                )
-                                delay(1_300L)
-                                descriptionScroll.scrollTo(0)
-                                delay(1_500L)
-                            } else {
-                                delay(900L)
-                            }
-                        }
-                    }
                     Text(
                         text = description,
                         style = MaterialTheme.typography.bodyMedium.copy(fontSize = 13.sp, lineHeight = 19.sp),
                         color = Snow.copy(alpha = 0.84f),
+                        maxLines = 6,
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(top = 3.dp)
                             .heightIn(min = 88.dp)
-                            .weight(1f)
-                            .verticalScroll(descriptionScroll),
+                            .weight(1f),
                     )
                 }
             }
@@ -2670,9 +3567,7 @@ private fun TvSearchSelectedPreview(
 @Composable
 private fun TvSearchBadgeRow(item: MediaItem) {
     val badges = buildList {
-        item.bestDisplayRating()?.let { rating ->
-            add("${rating.source.displayName} ${"%.1f".format(rating.value)}")
-        }
+        item.tvSearchPreferredRatingLabel()?.let { add(it) }
         item.runtime?.takeIf { it > 0 }?.let { add("${it}m") }
         if (item.type == MediaType.SERIES && item.seasons.isNotEmpty()) {
             add("${item.seasons.size} season${if (item.seasons.size == 1) "" else "s"}")
@@ -2905,6 +3800,17 @@ private fun TvSearchChip(
                 focused = it.isFocused
                 if (it.isFocused) onFocused()
             }
+            .onPreviewKeyEvent { event ->
+                if (
+                    event.type == KeyEventType.KeyUp &&
+                    (event.key == Key.DirectionCenter || event.key == Key.Enter || event.key == Key.NumPadEnter)
+                ) {
+                    onClick()
+                    true
+                } else {
+                    false
+                }
+            }
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null,
@@ -2942,6 +3848,8 @@ private fun TvSearchFilterRows(
     firstFilterRequester: FocusRequester,
     upRequester: FocusRequester,
     resultsRequester: FocusRequester?,
+    lastFilterRowRequester: FocusRequester? = null,
+    bottomRequester: FocusRequester? = resultsRequester,
     onContentFocused: (FocusRequester) -> Unit,
 ) {
     val columns = 5
@@ -2974,8 +3882,15 @@ private fun TvSearchFilterRows(
             rows
         }
         val chipKeys = remember(chips) { chips.map { "${it.groupKey}:${it.id}" } }
-        val chipRequesters = remember(chipKeys, firstFilterRequester) {
-            List(chipKeys.size) { index -> if (index == 0) firstFilterRequester else FocusRequester() }
+        val chipRequesters = remember(chipKeys, firstFilterRequester, lastFilterRowRequester) {
+            List(chipKeys.size) { index ->
+                when {
+                    index == 0 -> firstFilterRequester
+                    chips[index].groupKey == "rating" && chips.getOrNull(index - 1)?.groupKey != "rating" ->
+                        lastFilterRowRequester ?: FocusRequester()
+                    else -> FocusRequester()
+                }
+            }
         }
 
         visualRows.forEachIndexed { rowIndex, row ->
@@ -3017,7 +3932,7 @@ private fun TvSearchFilterRows(
                             left = previousInRow ?: requester
                             right = nextInRow ?: requester
                             up = previousRow ?: upRequester
-                            down = nextRow ?: requester
+                            down = nextRow ?: bottomRequester ?: requester
                         },
                     onFocused = { onContentFocused(requester) },
                     onClick = {
@@ -3039,7 +3954,6 @@ private fun TvSearchFilterRows(
 private fun TvSearchResultCard(
     item: MediaItem,
     density: TvSearchDensity,
-    ratingPrefs: RatingDisplayPrefs,
     modifier: Modifier,
     onFocused: () -> Unit,
     onClick: () -> Unit,
@@ -3091,16 +4005,6 @@ private fun TvSearchResultCard(
                 modifier = Modifier.fillMaxSize(),
             )
         }
-        val ratings = item.ratings.withFallbackTmdbScore(item.rating)
-        if (ratings != null && ratings.hasAnyEnabledDisplayValue(ratingPrefs)) {
-            PreferredRatingPills(
-                ratings = ratings,
-                prefs = ratingPrefs.copy(maxRatingsOnCard = 1),
-                modifier = Modifier
-                    .align(Alignment.TopStart)
-                    .padding(6.dp),
-            )
-        }
         if (density.columns <= 4) {
             Box(
                 modifier = Modifier
@@ -3143,6 +4047,10 @@ private fun tvSearchLoadStateKey(
     selectedStudioIds: Set<Int>,
     selectedYear: Int?,
     selectedMinRating: Double?,
+    selectedMinImdbVotes: Int?,
+    selectedRuntimeFilter: TvSearchRuntimeFilter?,
+    selectedLanguageFilter: TvSearchLanguageFilter?,
+    selectedAvailabilityFilter: TvSearchAvailabilityFilter?,
 ): String = listOf(
     "mode=${searchMode.name}",
     "query=${query.trim().lowercase()}",
@@ -3151,7 +4059,18 @@ private fun tvSearchLoadStateKey(
     "studios=${selectedStudioIds.sorted().joinToString(",")}",
     "year=${selectedYear ?: "-"}",
     "rating=${selectedMinRating ?: "-"}",
+    "imdbVotes=${selectedMinImdbVotes ?: "-"}",
+    "runtime=${selectedRuntimeFilter?.name ?: "-"}",
+    "language=${selectedLanguageFilter?.name ?: "-"}",
+    "availability=${selectedAvailabilityFilter?.name ?: "-"}",
 ).joinToString("|")
+
+private fun tvSearchEffectiveQuery(
+    query: String,
+    availabilityFilter: TvSearchAvailabilityFilter?,
+): String {
+    return query.trim()
+}
 
 private fun List<MediaItem>.needsTvSearchRatingEnrichment(): Boolean =
     any { item -> item.needsExternalRatingEnrichment() }
@@ -3203,20 +4122,33 @@ private fun MediaItem.tvSearchShortMetadata(): String {
     val parts = buildList {
         year?.let { add(it.toString()) }
         add(if (type == MediaType.SERIES) "Series" else "Movie")
-        bestDisplayRating()?.let { add("${it.source.displayName} ${"%.1f".format(it.value)}") }
+        tvSearchPreferredRatingLabel()?.let { add(it) }
     }
     return parts.joinToString(" · ")
 }
 
-private fun mergeTvSearchDuplicate(primary: MediaItem, other: MediaItem): MediaItem =
+private fun MediaItem.tvSearchPreferredRatingLabel(): String? {
+    ratings?.imdbScore?.takeIf { it > 0f }?.let { score ->
+        return "IMDb ${"%.1f".format(score)}"
+    }
+    ratings?.rottenTomatoesScore?.takeIf { it in 1..100 }?.let { score ->
+        return "RT $score%"
+    }
+    return null
+}
+
+internal fun mergeTvSearchDuplicate(primary: MediaItem, other: MediaItem): MediaItem =
     primary.copy(
         tmdbId = primary.tmdbId ?: other.tmdbId,
         imdbId = primary.imdbId ?: other.imdbId,
         year = primary.year ?: other.year,
         overview = primary.overview ?: other.overview,
-        posterUrl = primary.posterUrl ?: other.posterUrl,
-        backdropUrl = primary.backdropUrl ?: other.backdropUrl,
-        logoUrl = primary.logoUrl ?: other.logoUrl,
+        posterUrl = primary.posterUrl?.takeIf { it.isNotBlank() }
+            ?: other.posterUrl?.takeIf { it.isNotBlank() },
+        backdropUrl = primary.backdropUrl?.takeIf { it.isNotBlank() }
+            ?: other.backdropUrl?.takeIf { it.isNotBlank() },
+        logoUrl = primary.logoUrl?.takeIf { it.isNotBlank() }
+            ?: other.logoUrl?.takeIf { it.isNotBlank() },
         rating = primary.rating ?: other.rating,
         voteCount = primary.voteCount ?: other.voteCount,
         runtime = primary.runtime ?: other.runtime,
@@ -3238,37 +4170,254 @@ private fun List<MediaItem>.dedupeTvSearchResults(): List<MediaItem> {
     return byKey.values.toList()
 }
 
-private suspend fun MetadataRepository.loadTvSearchBrowseResults(
+private fun stableTvSearchProjection(
+    existing: List<MediaItem>,
+    available: List<MediaItem>,
+    limit: Int,
+): List<MediaItem> {
+    val availableByKey = available.associateByTo(LinkedHashMap()) { it.tvSearchStableKey() }
+    val retained = existing.mapNotNull { item ->
+        availableByKey.remove(item.tvSearchStableKey())
+    }
+    return (retained + availableByKey.values).take(limit)
+}
+
+private suspend fun MetadataRepository.loadTvSearchBrowsePage(
     filterType: String?,
     genreIds: Set<Int>,
     year: Int?,
     minRating: Double?,
-): List<MediaItem> {
+    minImdbVotes: Int?,
+    runtimeFilter: TvSearchRuntimeFilter?,
+    languageFilter: TvSearchLanguageFilter?,
+    availabilityFilter: TvSearchAvailabilityFilter?,
+    regionCode: String,
+    page: Int,
+): TvSearchCandidatePage {
     val types = when (filterType) {
         "movie" -> listOf("movie")
         "tv" -> listOf("tv")
         else -> listOf("movie", "tv")
     }
     val genres = genreIds.takeIf { it.isNotEmpty() }?.joinToString(",")
-    val sortBy = if (minRating != null) "vote_average.desc" else "popularity.desc"
-    return types
-        .flatMap { type ->
-            (1..2).flatMap { page ->
-                runCatching {
-                    discover(
-                        type = type,
-                        page = page,
-                        sortBy = sortBy,
-                        withGenres = genres,
-                        minRating = minRating?.toFloat(),
-                        year = year,
-                    ).items
-                }.getOrDefault(emptyList())
-            }
+    val hasRatingCriteria = minRating != null || minImdbVotes != null
+    val sortBy = if (hasRatingCriteria) "vote_average.desc" else "popularity.desc"
+    val watchProviders = tvSearchWatchProvidersFor(availabilityFilter)
+    val useTopRatedEndpoint = minRating == TV_SEARCH_TOP_RATED_FILTER &&
+        genres == null && year == null && runtimeFilter == null &&
+        languageFilter == null && watchProviders == null
+    val pages = types.map { type ->
+        if (useTopRatedEndpoint) {
+            getTopRatedPaged(type, page)
+        } else {
+            discover(
+                type = type,
+                page = page,
+                sortBy = sortBy,
+                withGenres = genres,
+                minRating = null,
+                year = year,
+                yearTo = year,
+                runtimeGte = runtimeFilter?.minMinutes,
+                runtimeLte = runtimeFilter?.maxMinutes,
+                originalLanguage = languageFilter?.code,
+                withWatchProviders = watchProviders,
+                watchRegion = watchProviders?.let { regionCode },
+            )
+        }
+    }
+    return TvSearchCandidatePage(
+        items = pages.flatMap { it.items }.dedupeTvSearchResults(),
+        page = page,
+        totalPages = pages.maxOfOrNull { it.totalPages } ?: page,
+    )
+}
+
+private suspend fun MetadataRepository.loadTvSearchBrowseResults(
+    filterType: String?,
+    genreIds: Set<Int>,
+    year: Int?,
+    minRating: Double?,
+    minImdbVotes: Int?,
+    runtimeFilter: TvSearchRuntimeFilter?,
+    languageFilter: TvSearchLanguageFilter?,
+    availabilityFilter: TvSearchAvailabilityFilter?,
+    regionCode: String,
+): List<MediaItem> {
+    val hasRatingCriteria = minRating != null || minImdbVotes != null
+    val pageRange = 1..if (hasRatingCriteria) {
+        TV_SEARCH_RATING_DISCOVER_PAGE_COUNT
+    } else {
+        TV_SEARCH_DISCOVER_PAGE_COUNT
+    }
+    return pageRange
+        .flatMap { page ->
+            runCatching {
+                loadTvSearchBrowsePage(
+                    filterType = filterType,
+                    genreIds = genreIds,
+                    year = year,
+                    minRating = minRating,
+                    minImdbVotes = minImdbVotes,
+                    runtimeFilter = runtimeFilter,
+                    languageFilter = languageFilter,
+                    availabilityFilter = availabilityFilter,
+                    regionCode = regionCode,
+                    page = page,
+                ).items
+            }.getOrDefault(emptyList())
         }
         .distinctBy { it.tvSearchStableKey() }
-        .take(80)
+        .take(TV_SEARCH_MAX_RESULTS)
 }
+
+private suspend fun MetadataRepository.loadVerifiedBrowseBatch(
+    ratingsEnricher: RatingsEnricher,
+    apiKey: String,
+    existingCandidates: List<MediaItem>,
+    existingResults: List<MediaItem>,
+    startPage: Int,
+    targetResultCount: Int,
+    filterType: String?,
+    genreIds: Set<Int>,
+    studioIds: Set<Int>,
+    year: Int?,
+    minRating: Double?,
+    minImdbVotes: Int?,
+    runtimeFilter: TvSearchRuntimeFilter?,
+    languageFilter: TvSearchLanguageFilter?,
+    availabilityFilter: TvSearchAvailabilityFilter?,
+    regionCode: String,
+    sourceAvailabilityByTmdbId: Map<Int, SourceAvailabilityRecord>,
+): TvSearchVerifiedBrowseBatch {
+    var candidates = existingCandidates
+    var verified = candidates.filterTvSearchItems(
+        genreIds = genreIds,
+        studioIds = studioIds,
+        year = year,
+        minRating = minRating,
+        minImdbVotes = minImdbVotes,
+        runtimeFilter = runtimeFilter,
+        availabilityFilter = availabilityFilter,
+        sourceAvailabilityByTmdbId = sourceAvailabilityByTmdbId,
+    ).take(TV_SEARCH_MAX_RESULTS)
+    var page = startPage.coerceAtLeast(1)
+    var totalPages = Int.MAX_VALUE
+    var lastPageHadItems = true
+    var pageLoadFailed = false
+    var candidatePagesLoaded = 0
+    val target = targetResultCount.coerceIn(1, TV_SEARCH_MAX_RESULTS)
+    var visible = stableTvSearchProjection(existingResults, verified, target)
+
+    while (
+        visible.size < target &&
+        page <= totalPages &&
+        candidates.size < TV_SEARCH_MAX_CANDIDATES &&
+        candidatePagesLoaded < TV_SEARCH_VERIFIED_MAX_CANDIDATE_PAGES_PER_BATCH
+    ) {
+        val candidatePageAttempt = runCatching {
+            runCatching {
+                loadTvSearchBrowsePage(
+                    filterType = filterType,
+                    genreIds = genreIds,
+                    year = year,
+                    minRating = minRating,
+                    minImdbVotes = minImdbVotes,
+                    runtimeFilter = runtimeFilter,
+                    languageFilter = languageFilter,
+                    availabilityFilter = availabilityFilter,
+                    regionCode = regionCode,
+                    page = page,
+                )
+            }.getOrElse {
+                delay(350)
+                runCatching {
+                    loadTvSearchBrowsePage(
+                        filterType = filterType,
+                        genreIds = genreIds,
+                        year = year,
+                        minRating = minRating,
+                        minImdbVotes = minImdbVotes,
+                        runtimeFilter = runtimeFilter,
+                        languageFilter = languageFilter,
+                        availabilityFilter = availabilityFilter,
+                        regionCode = regionCode,
+                        page = page,
+                    )
+                }.getOrElse {
+                    delay(700)
+                    loadTvSearchBrowsePage(
+                        filterType = filterType,
+                        genreIds = genreIds,
+                        year = year,
+                        minRating = minRating,
+                        minImdbVotes = minImdbVotes,
+                        runtimeFilter = runtimeFilter,
+                        languageFilter = languageFilter,
+                        availabilityFilter = availabilityFilter,
+                        regionCode = regionCode,
+                        page = page,
+                    )
+                }
+            }
+        }
+        val candidatePage = candidatePageAttempt.getOrNull()
+        if (candidatePage == null) {
+            pageLoadFailed = true
+            Log.w(
+                "TvSearchPaging",
+                "verified_candidate_page_failed page=$page; returning ${visible.size} partial results",
+                candidatePageAttempt.exceptionOrNull(),
+            )
+            break
+        }
+        totalPages = candidatePage.totalPages
+        lastPageHadItems = candidatePage.items.isNotEmpty()
+        if (!lastPageHadItems) break
+        candidatePagesLoaded += 1
+
+        val cached = withContext(Dispatchers.IO) {
+            ratingsEnricher.hydrateListFromCache(candidatePage.items)
+        }
+        val enriched = ratingsEnricher.enrichImdbList(cached, apiKey)
+        candidates = (candidates + enriched)
+            .dedupeTvSearchResults()
+            .take(TV_SEARCH_MAX_CANDIDATES)
+        verified = candidates.filterTvSearchItems(
+            genreIds = genreIds,
+            studioIds = studioIds,
+            year = year,
+            minRating = minRating,
+            minImdbVotes = minImdbVotes,
+            runtimeFilter = runtimeFilter,
+            availabilityFilter = availabilityFilter,
+            sourceAvailabilityByTmdbId = sourceAvailabilityByTmdbId,
+        ).take(TV_SEARCH_MAX_RESULTS)
+        visible = stableTvSearchProjection(existingResults, verified, target)
+        page = candidatePage.page + 1
+    }
+
+    val visibleKeys = visible.mapTo(mutableSetOf()) { it.tvSearchStableKey() }
+
+    return TvSearchVerifiedBrowseBatch(
+        candidates = candidates,
+        results = visible,
+        nextPage = page,
+        totalPages = if (totalPages == Int.MAX_VALUE) page else totalPages,
+        canLoadMore = !pageLoadFailed &&
+            (verified.any { it.tvSearchStableKey() !in visibleKeys } ||
+            (lastPageHadItems &&
+                page <= totalPages &&
+                candidates.size < TV_SEARCH_MAX_CANDIDATES &&
+                verified.size < TV_SEARCH_MAX_RESULTS)),
+    )
+}
+
+private fun tvSearchWatchProvidersFor(availabilityFilter: TvSearchAvailabilityFilter?): String? =
+    when (availabilityFilter) {
+        TvSearchAvailabilityFilter.STREAMING -> "8|9|337|350|15|384|531|1899"
+        else -> null
+    }
 
 private fun tvSearchSafeError(error: Throwable): String {
     val message = error.message.orEmpty().lowercase()
@@ -3343,24 +4492,94 @@ private fun List<MediaItem>.availableTvSearchStudios(): List<Pair<Int, String>> 
         .sortedByDescending { it.value }
         .map { it.key }
 
+private fun List<MediaItem>.sortedForTvSearch(sort: TvSearchSort): List<MediaItem> = when (sort) {
+    TvSearchSort.RELEVANCE -> this
+    TvSearchSort.RATING_DESC -> sortedByDescending { it.tvSearchSortRating() ?: -1.0 }
+    TvSearchSort.RATING_ASC -> sortedBy { it.tvSearchSortRating() ?: Double.MAX_VALUE }
+    TvSearchSort.VOTES_DESC -> sortedByDescending { it.ratings?.imdbVotes ?: it.voteCount ?: -1 }
+    TvSearchSort.VOTES_ASC -> sortedBy { it.ratings?.imdbVotes ?: it.voteCount ?: Int.MAX_VALUE }
+    TvSearchSort.POPULARITY_DESC -> sortedByDescending { it.popularity ?: -1.0 }
+    TvSearchSort.POPULARITY_ASC -> sortedBy { it.popularity ?: Double.MAX_VALUE }
+    TvSearchSort.TITLE_ASC -> sortedBy { it.title.lowercase() }
+    TvSearchSort.TITLE_DESC -> sortedByDescending { it.title.lowercase() }
+}
+
+private fun MediaItem.tvSearchSortRating(): Double? =
+    ratings?.imdbScore?.takeIf { it > 0f }?.toDouble()
+        ?: ratings?.tmdbScore?.takeIf { it > 0f }?.toDouble()
+        ?: rating?.takeIf { it > 0.0 }
+
 private fun List<MediaItem>.filterTvSearchItems(
     genreIds: Set<Int>,
     studioIds: Set<Int>,
     year: Int?,
     minRating: Double?,
+    minImdbVotes: Int?,
+    runtimeFilter: TvSearchRuntimeFilter?,
+    availabilityFilter: TvSearchAvailabilityFilter?,
+    sourceAvailabilityByTmdbId: Map<Int, SourceAvailabilityRecord>,
 ): List<MediaItem> =
     filter { item ->
-        (genreIds.isEmpty() || item.genreIds.any { it in genreIds } || item.genres.any { it.id in genreIds }) &&
+            (genreIds.isEmpty() || item.genreIds.any { it in genreIds } || item.genres.any { it.id in genreIds }) &&
             (studioIds.isEmpty() || item.studios.any { it.id in studioIds }) &&
             (year == null || item.year == year) &&
-            (minRating == null || (item.ratings?.imdbScore?.toDouble() ?: item.rating ?: 0.0) >= minRating)
-    }
+            item.matchesTvSearchMinRating(minRating, minImdbVotes) &&
+            item.matchesTvSearchRuntime(runtimeFilter) &&
+            item.matchesTvSearchAvailability(availabilityFilter, sourceAvailabilityByTmdbId)
+        }
         .dedupeTvSearchResults()
         .sortedWith(
-            compareByDescending<MediaItem> { it.popularity ?: 0.0 }
-                .thenByDescending { it.ratings?.imdbScore?.toDouble() ?: it.rating ?: 0.0 }
-                .thenByDescending { it.year ?: 0 },
+            if (minRating == TV_SEARCH_TOP_RATED_FILTER) {
+                compareByDescending<MediaItem> { it.tvSearchSortRating() ?: -1.0 }
+                    .thenByDescending { it.ratings?.imdbVotes ?: it.voteCount ?: 0 }
+                    .thenByDescending { it.popularity ?: 0.0 }
+            } else {
+                compareByDescending<MediaItem> { it.popularity ?: 0.0 }
+                    .thenByDescending { it.ratings?.imdbScore?.toDouble() ?: it.rating ?: 0.0 }
+                    .thenByDescending { it.year ?: 0 }
+            },
         )
+
+internal fun MediaItem.matchesTvSearchMinRating(minRating: Double?, minImdbVotes: Int?): Boolean {
+    if (minRating == TV_SEARCH_TOP_RATED_FILTER) {
+        val score = tvSearchSortRating() ?: return false
+        val votes = ratings?.imdbVotes ?: voteCount ?: return false
+        return score >= TV_SEARCH_TOP_RATED_MIN_SCORE && votes >= TV_SEARCH_TOP_RATED_MIN_VOTES
+    }
+    val imdbVotes = ratings?.imdbVotes
+    val requiredVotes = minImdbVotes
+    if (requiredVotes != null && (imdbVotes == null || imdbVotes < requiredVotes)) return false
+    minRating ?: return true
+    val imdbRating = ratings?.imdbScore?.takeIf { it > 0f }?.toDouble()
+    if (minRating >= 9.0) return imdbRating?.let { it >= minRating } ?: false
+    val externalRating = imdbRating
+        ?: ratings?.tmdbScore?.takeIf { it > 0f }?.toDouble()
+        ?: ratings?.letterboxdScore?.takeIf { it > 0f }?.times(2f)?.toDouble()
+    if (externalRating != null) return externalRating >= minRating
+    return minRating < 9.0 && (rating ?: 0.0) >= minRating
+}
+
+private fun MediaItem.matchesTvSearchRuntime(filter: TvSearchRuntimeFilter?): Boolean {
+    filter ?: return true
+    val value = runtime ?: return true
+    val min = filter.minMinutes
+    val max = filter.maxMinutes
+    return (min == null || value >= min) && (max == null || value <= max)
+}
+
+private fun MediaItem.matchesTvSearchAvailability(
+    filter: TvSearchAvailabilityFilter?,
+    sourceAvailabilityByTmdbId: Map<Int, SourceAvailabilityRecord>,
+): Boolean {
+    return when (filter) {
+        null,
+        TvSearchAvailabilityFilter.STREAMING,
+        TvSearchAvailabilityFilter.READY -> {
+            val tmdb = tmdbId ?: return false
+            sourceAvailabilityByTmdbId[tmdb]?.isAvailable ?: sourceAvailabilityByTmdbId.isEmpty()
+        }
+    }
+}
 
 private fun tvSearchGenreLabel(id: Int): String? = when (id) {
     28 -> "Action"

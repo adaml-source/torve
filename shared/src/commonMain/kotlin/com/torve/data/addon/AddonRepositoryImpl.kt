@@ -18,7 +18,6 @@ class AddonRepositoryImpl(
 ) : AddonRepository {
 
     private fun userId(): String = userIdProvider.currentUserId()
-    private fun isSignedIn(): Boolean = userIdProvider.isSignedIn()
 
     override suspend fun installAddon(
         url: String,
@@ -85,7 +84,6 @@ class AddonRepositoryImpl(
     }
 
     override suspend fun setAddonConfigId(manifestUrl: String, configId: String?) {
-        if (!isSignedIn()) return
         database.torveQueries.updateAddonConfigId(
             configId = configId,
             userId = userId(),
@@ -94,22 +92,18 @@ class AddonRepositoryImpl(
     }
 
     override suspend fun removeAddon(manifestUrl: String) {
-        if (!isSignedIn()) return
         database.torveQueries.deleteAddon(userId = userId(), manifestUrl = manifestUrl)
     }
 
     override suspend fun getInstalledAddons(): List<InstalledAddon> {
-        if (!isSignedIn()) return emptyList()
         return database.torveQueries.getAllAddons(userId = userId()).executeAsList().map(::mapRow)
     }
 
     override suspend fun getEnabledAddons(): List<InstalledAddon> {
-        if (!isSignedIn()) return emptyList()
         return database.torveQueries.getEnabledAddons(userId = userId()).executeAsList().map(::mapRow)
     }
 
     override suspend fun toggleAddon(manifestUrl: String, enabled: Boolean) {
-        if (!isSignedIn()) return
         database.torveQueries.updateAddonEnabled(
             isEnabled = if (enabled) 1 else 0,
             userId = userId(),
@@ -118,7 +112,6 @@ class AddonRepositoryImpl(
     }
 
     override suspend fun reorderAddons(orderedUrls: List<String>) {
-        if (!isSignedIn()) return
         val uid = userId()
         orderedUrls.forEachIndexed { index, url ->
             database.torveQueries.updateAddonPriority(
@@ -138,7 +131,6 @@ class AddonRepositoryImpl(
     }
 
     override suspend fun getAddon(manifestUrl: String): InstalledAddon? {
-        if (!isSignedIn()) return null
         return database.torveQueries.getAddonByUrl(
             userId = userId(),
             manifestUrl = manifestUrl,
@@ -151,7 +143,6 @@ class AddonRepositoryImpl(
         syncedAt: Long?,
         installedFrom: String,
     ) {
-        if (!isSignedIn()) return
         database.torveQueries.markAddonSynced(
             serverId = serverId,
             syncedAt = syncedAt,
@@ -169,7 +160,6 @@ class AddonRepositoryImpl(
         syncedAt: Long,
         installedFrom: String,
     ) {
-        if (!isSignedIn()) return
         database.torveQueries.syncAddonWithServer(
             serverId = serverId,
             syncedAt = syncedAt,
@@ -182,7 +172,6 @@ class AddonRepositoryImpl(
     }
 
     override suspend fun clearSyncMetadata() {
-        if (!isSignedIn()) return
         database.torveQueries.clearAddonSyncMetadata(userId = userId())
     }
 

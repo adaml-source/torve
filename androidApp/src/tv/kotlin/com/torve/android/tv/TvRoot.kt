@@ -118,6 +118,8 @@ import com.torve.android.ui.theme.Ruby
 import com.torve.android.ui.theme.Snow
 import com.torve.domain.model.MediaItem
 import com.torve.domain.model.MediaType
+import com.torve.domain.model.ratingEnrichmentLookupKeys
+import com.torve.domain.model.withEnrichedRatingsFrom
 import com.torve.domain.model.extractTmdbIdOrNull
 import com.torve.domain.model.favoriteMediaKey
 import com.torve.domain.model.toMediaItem
@@ -402,11 +404,11 @@ fun TvRoot(
 
     /* ── Tab state ─────────────────────────────────────────────────────────────────────── */
     /** The tab currently highlighted by D-pad focus on the rail. Changes on Up/Down. */
-    var highlightedTopRoute by rememberSaveable { mutableStateOf(TvRoutes.HOME) }
+    var highlightedTopRoute by remember { mutableStateOf(TvRoutes.HOME) }
     /** The tab whose content is currently being shown. Changes when user enters content or presses select. */
-    var selectedTopRoute by rememberSaveable { mutableStateOf(TvRoutes.HOME) }
+    var selectedTopRoute by remember { mutableStateOf(TvRoutes.HOME) }
     /** The tab confirmed for content display. Updated when user navigates into content. */
-    var confirmedTopRoute by rememberSaveable { mutableStateOf(TvRoutes.HOME) }
+    var confirmedTopRoute by remember { mutableStateOf(TvRoutes.HOME) }
 
     LaunchedEffect(selectedTopRoute, currentSubRoute) {
         AndroidDiagnosticsRecorder.recordScreen(currentSubRoute ?: selectedTopRoute)
@@ -567,7 +569,19 @@ fun TvRoot(
             val tmdbId = item.tmdbId ?: item.id.extractTmdbIdOrNull()
             val focusItem = if (tmdbId != null && item.tmdbId == null) item.copy(tmdbId = tmdbId) else item
             val focusKey = tmdbId?.let { "${focusItem.type}:$it" } ?: "${focusItem.type}:${focusItem.id}"
-            if (focusKey == lastBrowseFocusKey) return@onFocus
+            if (focusKey == lastBrowseFocusKey) {
+                val current = focusedMediaItem ?: return@onFocus
+                val ratingsByKey = focusItem.ratings?.let { ratings ->
+                    focusItem.ratingEnrichmentLookupKeys().associateWith { ratings }
+                }.orEmpty()
+                val refreshed = current.withEnrichedRatingsFrom(ratingsByKey).copy(
+                    tmdbId = current.tmdbId ?: focusItem.tmdbId,
+                    imdbId = current.imdbId ?: focusItem.imdbId,
+                    rating = current.rating ?: focusItem.rating,
+                )
+                if (refreshed != current) focusedMediaItem = refreshed
+                return@onFocus
+            }
             lastBrowseFocusKey = focusKey
             if (tmdbId == null) {
                 focusedMediaItem = focusItem
@@ -2378,29 +2392,46 @@ fun TvRoot(
                     }
                 }
 
-                /* ── Layer 1b: Other tabs — composed only when active ───────── */
-                if (activeTabRoute != TvRoutes.HOME) {
-                    stateHolder.SaveableStateProvider(activeTabRoute) {
+                /* ── Layer 1b: Catalog tabs stay composed after first visit ─── */
+                val retainedContentRoutes = remember(visitedTabs, activeTabRoute) {
+                    buildList {
+                        addAll(
+                            visitedTabs.filter { route ->
+                                route == TvRoutes.MOVIES || route == TvRoutes.SHOWS
+                            },
+                        )
+                        if (activeTabRoute != TvRoutes.HOME && activeTabRoute !in this) {
+                            add(activeTabRoute)
+                        }
+                    }
+                }
+                retainedContentRoutes.forEach { tabRoute ->
+                    val isTabVisible = tabRoute == activeTabRoute && tabContentVisible
+                    stateHolder.SaveableStateProvider(tabRoute) {
                         Box(
                             modifier = Modifier
                                 .fillMaxSize()
-                                .zIndex(1f)
-                                .graphicsLayer { alpha = if (tabContentVisible) 1f else 0f }
+                                .zIndex(if (isTabVisible) 1f else 0f)
+                                .graphicsLayer { alpha = if (isTabVisible) 1f else 0f }
+                                .offset(x = if (isTabVisible) 0.dp else 10000.dp)
                                 .focusGroup()
                                 .focusProperties {
-                                    if (!tabContentVisible) {
+                                    if (!isTabVisible) {
                                         canFocus = false
                                         enter = { FocusRequester.Cancel }
                                     }
-                                    if (showHero && activeTabRoute in heroRoutes) {
+                                    if (showHero && tabRoute in heroRoutes) {
                                         heroPrimaryActionRequester?.let { up = it }
                                     }
-                                },
+                                }
+                                .then(
+                                    if (!isTabVisible) Modifier.clearAndSetSemantics {} else Modifier,
+                                ),
                         ) {
                             val tabHeroOverlay: (@Composable () -> Unit)? =
-                                if (showHero && activeTabRoute in heroRoutes) heroOverlayContent else null
+                                if (isTabVisible && showHero && tabRoute in heroRoutes) heroOverlayContent else null
 
-                            when (activeTabRoute) {
+                            when (tabRoute) {
                                     TvRoutes.MOVIES -> TvMoviesScreen(
                                         railFocusRequester = railFocusRequester,
                                         headerFocusRequester = heroPrimaryActionRequester,
@@ -2418,15 +2449,19 @@ fun TvRoot(
                                                 focusHandlesByRoute[TvRoutes.MOVIES] = handle
                                             }
                                         },
-                                        onMediaFocused = onBrowseMediaFocused,
-                                        onClearMediaFocus = { focusedMediaItem = null },
+                                        onMediaFocused = { item ->
+                                            if (isTabVisible) onBrowseMediaFocused(item)
+                                        },
+                                        onClearMediaFocus = {
+                                            if (isTabVisible) focusedMediaItem = null
+                                        },
                                         progressResolver = ::resolvedProgress,
                                         contextMenuActionsForItem = contextMenuActionsForItem,
                                         onContextMenuAction = onContextMenuAction,
                                         onSeeAll = { railKey, title -> navigateToSeeAll(railKey, title, "movie") },
                                         initialSearchQuery = searchSeedQuery.takeIf { selectedTopRoute == TvRoutes.MOVIES },
                                         browseLayout = TvBrowseLayout.POSTER_ONLY,
-                                        shouldAutoFocus = pendingContentEntryRoute == TvRoutes.MOVIES,
+                                        shouldAutoFocus = isTabVisible && pendingContentEntryRoute == TvRoutes.MOVIES,
                                         autoFocusRequestNonce = contentEntryRequestNonce,
                                     )
 
@@ -2447,15 +2482,19 @@ fun TvRoot(
                                                 focusHandlesByRoute[TvRoutes.SHOWS] = handle
                                             }
                                         },
-                                        onMediaFocused = onBrowseMediaFocused,
-                                        onClearMediaFocus = { focusedMediaItem = null },
+                                        onMediaFocused = { item ->
+                                            if (isTabVisible) onBrowseMediaFocused(item)
+                                        },
+                                        onClearMediaFocus = {
+                                            if (isTabVisible) focusedMediaItem = null
+                                        },
                                         progressResolver = ::resolvedProgress,
                                         contextMenuActionsForItem = contextMenuActionsForItem,
                                         onContextMenuAction = onContextMenuAction,
                                         onSeeAll = { railKey, title -> navigateToSeeAll(railKey, title, "tv") },
                                         initialSearchQuery = searchSeedQuery.takeIf { selectedTopRoute == TvRoutes.SHOWS },
                                         browseLayout = TvBrowseLayout.POSTER_ONLY,
-                                        shouldAutoFocus = pendingContentEntryRoute == TvRoutes.SHOWS,
+                                        shouldAutoFocus = isTabVisible && pendingContentEntryRoute == TvRoutes.SHOWS,
                                         autoFocusRequestNonce = contentEntryRequestNonce,
                                     )
 

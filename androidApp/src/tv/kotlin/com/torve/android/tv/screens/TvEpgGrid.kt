@@ -116,6 +116,21 @@ internal fun TvEpgGrid(
     val timelineWidth = (slotCount * EPG_SLOT_WIDTH_DP).dp
     val listState = rememberLazyListState()
     var nowMs by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    val guideCoverageCount = remember(channels, guideProgrammes, playlistId) {
+        channels.count { enriched ->
+            val lookupPlaylistId = enriched.channel.playlistId
+                .takeIf { it.isNotBlank() }
+                ?: playlistId.orEmpty()
+            programmesForEpgChannel(
+                programmesByChannelKey = guideProgrammes,
+                playlistId = lookupPlaylistId,
+                channel = enriched.channel,
+            ).isNotEmpty()
+        }
+    }
+    val useChannelListLayout = !isGuideLoading &&
+        channels.isNotEmpty() &&
+        guideCoverageCount * 5 < channels.size
 
     LaunchedEffect(Unit) {
         while (true) {
@@ -182,12 +197,30 @@ internal fun TvEpgGrid(
             }
             .focusGroup(),
     ) {
-        EpgTimeHeader(
-            windowStartMs = windowStartMs,
-            slotCount = slotCount,
-            slotMillis = slotMillis,
-            channelColumnWidth = channelColumnWidth,
-        )
+        if (useChannelListLayout) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(34.dp)
+                    .background(Obsidian.copy(alpha = 0.78f))
+                    .padding(horizontal = 18.dp),
+                contentAlignment = Alignment.CenterStart,
+            ) {
+                Text(
+                    text = stringResource(R.string.tv_live_channels_list),
+                    color = Snow,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.SemiBold,
+                )
+            }
+        } else {
+            EpgTimeHeader(
+                windowStartMs = windowStartMs,
+                slotCount = slotCount,
+                slotMillis = slotMillis,
+                channelColumnWidth = channelColumnWidth,
+            )
+        }
 
         if (channels.isEmpty()) {
             Box(
@@ -222,41 +255,59 @@ internal fun TvEpgGrid(
                             channel = enriched.channel,
                         )
                     }
-                    val cells = remember(programmes, windowStartMs, windowEndMs) {
-                        buildWindowCells(
-                            programmes = programmes,
+                    if (useChannelListLayout) {
+                        val currentProgramme = programmes.firstOrNull {
+                            nowMs >= it.startTime && nowMs < it.endTime
+                        }
+                        CompactChannelRow(
+                            rowNumber = rowIndex + 1,
+                            channel = enriched,
+                            programme = currentProgramme,
+                            rowIndex = rowIndex,
+                            focusTargetRow = targetRow,
+                            focusRequestToken = focusRequestToken,
+                            isFocusEnabled = isFocusEnabled,
+                            onFocused = { onChannelFocused(enriched, currentProgramme) },
+                            onGridCellFocused = { onGridCellFocused(rowIndex, 0) },
+                            onPlay = { onChannelPlay(enriched.channel) },
+                        )
+                    } else {
+                        val cells = remember(programmes, windowStartMs, windowEndMs) {
+                            buildWindowCells(
+                                programmes = programmes,
+                                windowStartMs = windowStartMs,
+                                windowEndMs = windowEndMs,
+                            )
+                        }
+                        EpgChannelRow(
+                            rowNumber = rowIndex + 1,
+                            channel = enriched,
+                            cells = cells,
+                            channelColumnWidth = channelColumnWidth,
                             windowStartMs = windowStartMs,
                             windowEndMs = windowEndMs,
+                            timelineWidth = timelineWidth,
+                            canPageBackward = canPageBackward,
+                            canPageForward = canPageForward,
+                            rowIndex = rowIndex,
+                            focusTargetRow = targetRow,
+                            focusTargetCol = targetCol,
+                            focusRequestToken = focusRequestToken,
+                            isFocusEnabled = isFocusEnabled,
+                            isGuideLoading = isGuideLoading,
+                            nowMs = nowMs,
+                            onChannelFocused = { programme -> onChannelFocused(enriched, programme) },
+                            onGridCellFocused = { colIndex ->
+                                onGridCellFocused(rowIndex, colIndex)
+                            },
+                            onChannelPlay = { onChannelPlay(enriched.channel) },
+                            onTimeForward = onTimeForward,
                         )
                     }
-                    EpgChannelRow(
-                        rowNumber = rowIndex + 1,
-                        channel = enriched,
-                        cells = cells,
-                        channelColumnWidth = channelColumnWidth,
-                        windowStartMs = windowStartMs,
-                        windowEndMs = windowEndMs,
-                        timelineWidth = timelineWidth,
-                        canPageBackward = canPageBackward,
-                        canPageForward = canPageForward,
-                        rowIndex = rowIndex,
-                        focusTargetRow = targetRow,
-                        focusTargetCol = targetCol,
-                        focusRequestToken = focusRequestToken,
-                        isFocusEnabled = isFocusEnabled,
-                        isGuideLoading = isGuideLoading,
-                        nowMs = nowMs,
-                        onChannelFocused = { programme -> onChannelFocused(enriched, programme) },
-                        onGridCellFocused = { colIndex ->
-                            onGridCellFocused(rowIndex, colIndex)
-                        },
-                        onChannelPlay = { onChannelPlay(enriched.channel) },
-                        onTimeForward = onTimeForward,
-                    )
                 }
             }
 
-            if (nowMs in windowStartMs..windowEndMs) {
+            if (!useChannelListLayout && nowMs in windowStartMs..windowEndMs) {
                 val nowFraction = ((nowMs - windowStartMs).toFloat() / (windowEndMs - windowStartMs).toFloat())
                     .coerceIn(0f, 1f)
                 val nowOffsetDp = timelineWidth * nowFraction
@@ -289,6 +340,111 @@ internal fun TvEpgGrid(
                             .background(Amber.copy(alpha = 0.86f)),
                     )
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun CompactChannelRow(
+    rowNumber: Int,
+    channel: EnrichedChannel,
+    programme: EpgProgramme?,
+    rowIndex: Int,
+    focusTargetRow: Int,
+    focusRequestToken: Int,
+    isFocusEnabled: Boolean,
+    onFocused: () -> Unit,
+    onGridCellFocused: () -> Unit,
+    onPlay: () -> Unit,
+) {
+    val focusRequester = remember { FocusRequester() }
+    var isFocused by remember { mutableStateOf(false) }
+
+    LaunchedEffect(focusRequestToken, focusTargetRow, rowIndex, isFocusEnabled) {
+        if (!isFocusEnabled || rowIndex != focusTargetRow) return@LaunchedEffect
+        delay(FOCUS_SETTLE_MS)
+        runCatching { focusRequester.requestFocus() }
+    }
+
+    Surface(
+        onClick = onPlay,
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(64.dp)
+            .padding(horizontal = 5.dp, vertical = 3.dp)
+            .focusRequester(focusRequester)
+            .focusProperties { canFocus = isFocusEnabled }
+            .onFocusChanged {
+                isFocused = it.isFocused
+                if (it.isFocused) {
+                    onFocused()
+                    onGridCellFocused()
+                }
+            }
+            .onPreviewKeyEvent { event ->
+                if (event.type == KeyEventType.KeyDown &&
+                    event.key in listOf(Key.DirectionCenter, Key.Enter, Key.NumPadEnter)
+                ) {
+                    onPlay()
+                    true
+                } else {
+                    false
+                }
+            },
+        shape = ClickableSurfaceDefaults.shape(RoundedCornerShape(14.dp)),
+        colors = ClickableSurfaceDefaults.colors(
+            containerColor = Graphite.copy(alpha = 0.42f),
+            focusedContainerColor = Amber.copy(alpha = 0.22f),
+        ),
+        scale = ClickableSurfaceDefaults.scale(focusedScale = 1f),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxSize()
+                .border(
+                    width = if (isFocused) 2.dp else 1.dp,
+                    color = if (isFocused) Amber else Steel.copy(alpha = 0.16f),
+                    shape = RoundedCornerShape(14.dp),
+                )
+                .padding(horizontal = 14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Text(
+                text = (channel.channel.channelNumber ?: rowNumber).toString(),
+                color = Ash,
+                fontSize = 11.sp,
+                modifier = Modifier.width(36.dp),
+            )
+            channel.channel.tvgLogo?.takeIf { it.isNotBlank() }?.let { logo ->
+                AsyncImage(
+                    model = logo,
+                    contentDescription = null,
+                    contentScale = ContentScale.Fit,
+                    modifier = Modifier
+                        .width(58.dp)
+                        .height(30.dp),
+                )
+            }
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = channel.channel.name,
+                    color = Snow,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    text = programme?.title?.takeIf { it.isNotBlank() }
+                        ?: channel.channel.groupTitle?.takeIf { it.isNotBlank() }
+                        ?: stringResource(R.string.tv_live_no_programme_data),
+                    color = Silver,
+                    fontSize = 11.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
             }
         }
     }

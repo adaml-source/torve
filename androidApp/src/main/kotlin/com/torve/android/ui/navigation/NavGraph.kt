@@ -32,12 +32,17 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.LiveTv
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Tv
 import androidx.compose.material.icons.outlined.BookmarkBorder
 import androidx.compose.material.icons.outlined.Home
 import androidx.compose.material.icons.outlined.LiveTv
+import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.Movie
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.Tv
@@ -79,7 +84,6 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.torve.android.ui.auth.LoginScreen
-import com.torve.android.ui.beta.BetaProgramScreen
 import com.torve.android.ui.calendar.CalendarScreen
 import com.torve.android.ui.catalog.CatalogScreen
 import com.torve.android.ui.detail.DetailScreen
@@ -95,6 +99,8 @@ import com.torve.android.ui.legal.LegalScreen
 import com.torve.android.ui.legal.PrivacyPolicyScreen
 import com.torve.android.ui.mood.MoodMatcherScreen
 import com.torve.android.ui.player.PlayerScreen
+import com.torve.android.ui.player.ActivePlaybackSession
+import com.torve.android.ui.player.ActivePlaybackState
 import com.torve.android.ui.profile.ProfileScreen
 
 import com.torve.android.ui.search.SearchScreen
@@ -184,6 +190,20 @@ private fun NavHostController.navigateToDetail(item: com.torve.domain.model.Medi
 private fun NavHostController.navigateToLifetimeUnlock(feature: PremiumFeature) {
     navigate("paywall?feature=${Uri.encode(feature.name)}")
 }
+
+private fun ActivePlaybackSession.playerRoute(): String =
+    "player?url=${Uri.encode(url)}" +
+        "&title=${Uri.encode(title)}" +
+        "&mediaId=${Uri.encode(mediaId)}" +
+        "&mediaType=${Uri.encode(mediaType)}" +
+        "&posterUrl=${Uri.encode(posterUrl)}" +
+        "&backdropUrl=${Uri.encode(backdropUrl)}" +
+        "&seasonNumber=${seasonNumber ?: -1}" +
+        "&episodeNumber=${episodeNumber ?: -1}" +
+        "&showTmdbId=${showTmdbId ?: -1}" +
+        "&showImdbId=${Uri.encode(showImdbId.orEmpty())}" +
+        "&fallbackUrl=${Uri.encode(fallbackUrl)}" +
+        "&autoSourceSelection=$autoSourceSelection"
 
 @Composable
 private fun ResolveExternalDetailRoute(
@@ -352,10 +372,19 @@ fun TorveNavGraph(
     isTvMode: Boolean = false,
     appLink: TorveAppLink? = null,
     onAppLinkConsumed: () -> Unit = {},
+    resetMobileHomeScrollOnLaunch: Boolean = false,
 ) {
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = navBackStackEntry?.destination?.route
     var mobileSelectedTab by rememberSaveable { mutableStateOf(MOBILE_HOME_ROUTE) }
+    var pendingMobileHomeScrollReset by remember(resetMobileHomeScrollOnLaunch) {
+        mutableStateOf(resetMobileHomeScrollOnLaunch)
+    }
+    LaunchedEffect(resetMobileHomeScrollOnLaunch, isTvMode) {
+        if (resetMobileHomeScrollOnLaunch && !isTvMode) {
+            mobileSelectedTab = MOBILE_HOME_ROUTE
+        }
+    }
 
     val showBottomBar = !isTvMode && currentRoute == MOBILE_ROOT_ROUTE
     val showTvNavRail = isTvMode && currentRoute in tvNavTabDefs.map { it.route }
@@ -430,21 +459,20 @@ fun TorveNavGraph(
             when {
                 // Fresh-install race: the very first /me/access-state call
                 // beat device registration to the backend, so we cached
-                // device_not_registered for an account that genuinely has
-                // an entitlement. Refreshing now will pick up the post-
-                // registration state and the gate will lift on the next
-                // tap. Routing to the paywall here is misleading — the
-                // user is already premium.
+                // device_not_registered for an account that has normal
+                // access. Refreshing now will pick up the post-registration
+                // state and the technical block will lift on the next tap.
+                // Routing to the compatibility info screen here is misleading.
                 state.hasEntitlement && state.deviceBlockReason == "device_not_registered" -> {
                     subscriptionViewModel.refreshAccess()
                 }
-                // User has the entitlement but their device-cap is full —
-                // managing devices is the actual path forward, not buying.
+                // User has normal access but their technical device limit is
+                // full; managing devices is the actual path forward.
                 state.hasEntitlement && state.deviceCapReached -> {
                     navController.navigate("device_limit_reached")
                 }
-                // User has entitlement but this device isn't activated for
-                // any other reason (e.g. activation_slot_exhausted) — send
+                // User has normal access but this device isn't activated for
+                // any other reason (e.g. activation_slot_exhausted); send
                 // them to the device manager.
                 state.hasEntitlement &&
                     !state.isDeviceActivated &&
@@ -454,7 +482,7 @@ fun TorveNavGraph(
                 state.hasEntitlement && !state.isDeviceActivated -> {
                     subscriptionViewModel.refreshAccess()
                 }
-                // Genuinely no entitlement — paywall is the right surface.
+                // Legacy fallback: show the free-software compatibility surface.
                 else -> {
                     navController.navigateToLifetimeUnlock(feature)
                 }
@@ -836,22 +864,46 @@ fun TorveNavGraph(
                     ),
                     shape = RoundedCornerShape(10.dp),
                 ) {
-                    Row(
+                    Column(
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(horizontal = 12.dp, vertical = 10.dp),
-                        verticalAlignment = Alignment.CenterVertically,
+                        verticalArrangement = Arrangement.spacedBy(6.dp),
                     ) {
                         Text(
                             text = restoreProgress.message,
                             style = androidx.compose.material3.MaterialTheme.typography.bodySmall,
                             color = com.torve.android.ui.theme.Snow,
-                            modifier = Modifier.weight(1f),
                         )
+                        restoreProgress.issues.forEach { issue ->
+                            Text(
+                                text = "• $issue",
+                                style = androidx.compose.material3.MaterialTheme.typography.bodySmall,
+                                color = com.torve.android.ui.theme.Silver,
+                            )
+                        }
+                        if (restoreProgress.phase == com.torve.presentation.session.RestorePhase.COMPLETED_WITH_ERRORS) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.End,
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                androidx.compose.material3.TextButton(
+                                    onClick = accountSessionCoordinator::dismissRestoreProgress,
+                                ) {
+                                    Text("Dismiss")
+                                }
+                                androidx.compose.material3.TextButton(
+                                    onClick = accountSessionCoordinator::retryAccountRestore,
+                                ) {
+                                    Text("Retry restore")
+                                }
+                            }
+                        }
                     }
                 }
                 LaunchedEffect(restoreProgress.phase) {
-                    if (restoreProgress.phase != com.torve.presentation.session.RestorePhase.RUNNING) {
+                    if (restoreProgress.phase == com.torve.presentation.session.RestorePhase.COMPLETED) {
                         kotlinx.coroutines.delay(3000)
                         accountSessionCoordinator.dismissRestoreProgress()
                     }
@@ -1052,6 +1104,8 @@ fun TorveNavGraph(
                             },
                             accessTier = accessTier,
                             onLockedFeatureClick = requestLifetimeUnlock,
+                            resetScrollToTop = pendingMobileHomeScrollReset,
+                            onScrollReset = { pendingMobileHomeScrollReset = false },
                         )
                     }
                     PersistentMobileTabPane(visible = mobileSelectedTab == "movies") {
@@ -1214,7 +1268,6 @@ fun TorveNavGraph(
                             onTransferDiagnosticsClick = { navController.navigate("transfer_diagnostics") },
                             onStartSetupClick = { navController.navigate(SETUP_CHOICE_ROUTE) },
                             onStatusRepairClick = { navController.navigate("status_repair") },
-                            onBetaProgramClick = { navController.navigate("beta_program") },
                         )
                     }
                 }
@@ -1406,6 +1459,16 @@ fun TorveNavGraph(
                 }
             }
 
+            composable("more") {
+                LaunchedEffect(Unit) {
+                    mobileSelectedTab = "profile_tab"
+                    navController.navigate(MOBILE_ROOT_ROUTE) {
+                        popUpTo("more") { inclusive = true }
+                        launchSingleTop = true
+                    }
+                }
+            }
+
             // Settings (accessible from Profile, not in bottom nav)
             composable("settings") {
                 SettingsScreen(
@@ -1495,14 +1558,6 @@ fun TorveNavGraph(
                     onTransferDiagnosticsClick = { navController.navigate("transfer_diagnostics") },
                     onStartSetupClick = { navController.navigate(SETUP_CHOICE_ROUTE) },
                     onStatusRepairClick = { navController.navigate("status_repair") },
-                    onBetaProgramClick = { navController.navigate("beta_program") },
-                )
-            }
-
-            composable("beta_program") {
-                BetaProgramScreen(
-                    onBack = { navController.popBackStack() },
-                    onSignIn = { navController.navigate("login") },
                 )
             }
 
@@ -2129,6 +2184,33 @@ fun TorveNavGraph(
         // ── Custom Bottom Navigation Bar ──
         // Floating above content with a subtle top gradient scrim.
         // Not using stock NavigationBar — custom design for the cinematic feel.
+        val activePlaybackSession = ActivePlaybackState.session
+        AnimatedVisibility(
+            visible = currentRoute?.startsWith("player") != true && activePlaybackSession != null,
+            modifier = Modifier
+                .align(if (isTvMode) Alignment.BottomEnd else Alignment.BottomCenter)
+                .padding(
+                    start = if (isTvMode) 144.dp else 8.dp,
+                    end = if (isTvMode) 24.dp else 8.dp,
+                    bottom = if (showBottomBar) 72.dp else 18.dp,
+                )
+                .zIndex(4f),
+            enter = slideInVertically { it },
+            exit = slideOutVertically { it },
+        ) {
+            activePlaybackSession?.let { session ->
+                PersistentPlaybackBar(
+                    session = session,
+                    isTv = isTvMode,
+                    onResume = {
+                        navController.navigate(session.playerRoute()) { launchSingleTop = true }
+                    },
+                    onTogglePlayback = ActivePlaybackState::togglePlayback,
+                    onStop = ActivePlaybackState::stopAndClear,
+                )
+            }
+        }
+
         AnimatedVisibility(
             visible = showTvNavRail,
             modifier = Modifier.align(Alignment.CenterStart),
@@ -2194,6 +2276,82 @@ fun TorveNavGraph(
                 }
             }
         }
+    }
+}
+
+@Composable
+internal fun PersistentPlaybackBar(
+    session: ActivePlaybackSession,
+    isTv: Boolean,
+    onResume: () -> Unit,
+    onTogglePlayback: () -> Unit,
+    onStop: () -> Unit,
+) {
+    var focused by remember { mutableStateOf(false) }
+    val progress = if (session.durationMs > 0L) {
+        (session.positionMs.toFloat() / session.durationMs).coerceIn(0f, 1f)
+    } else {
+        0f
+    }
+    val widthModifier = if (isTv) Modifier.width(440.dp) else Modifier.fillMaxWidth()
+
+    Column(
+        modifier = widthModifier
+            .clip(RoundedCornerShape(14.dp))
+            .background(Color(0xF2181C25))
+            .then(if (focused) Modifier.background(Amber.copy(alpha = 0.16f)) else Modifier),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .onFocusChanged { focused = it.isFocused }
+                .focusable()
+                .clickable(onClick = onResume)
+                .padding(horizontal = 14.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = session.title.ifBlank { "Now playing" },
+                    color = Color.White,
+                    style = MaterialTheme.typography.titleSmall,
+                    maxLines = 1,
+                )
+                Text(
+                    text = if (session.isPlaying) "Playing in background · Open player" else "Paused · Open player",
+                    color = Color.White.copy(alpha = 0.68f),
+                    style = MaterialTheme.typography.labelSmall,
+                    maxLines = 1,
+                )
+            }
+            Icon(
+                imageVector = if (session.isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
+                contentDescription = if (session.isPlaying) "Pause" else "Play",
+                tint = Color.White,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(50))
+                    .clickable(onClick = onTogglePlayback)
+                    .padding(8.dp)
+                    .size(22.dp),
+            )
+            Icon(
+                imageVector = Icons.Filled.Close,
+                contentDescription = "Stop playback",
+                tint = Color.White.copy(alpha = 0.82f),
+                modifier = Modifier
+                    .clip(RoundedCornerShape(50))
+                    .clickable(onClick = onStop)
+                    .padding(8.dp)
+                    .size(20.dp),
+            )
+        }
+        LinearProgressIndicator(
+            progress = { progress },
+            modifier = Modifier.fillMaxWidth().height(3.dp),
+            color = Amber,
+            trackColor = Color.White.copy(alpha = 0.12f),
+        )
     }
 }
 

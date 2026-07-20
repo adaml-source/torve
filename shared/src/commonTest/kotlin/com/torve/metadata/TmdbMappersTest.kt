@@ -28,6 +28,19 @@ class TmdbMappersTest {
     }
 
     @Test
+    fun imageUrls_rejectBlankPathsInsteadOfCreatingBrokenRequests() {
+        assertNull(TmdbMappers.posterUrl(""))
+        assertNull(TmdbMappers.backdropUrl("   "))
+        assertNull(TmdbMappers.profileUrl("\t"))
+    }
+
+    @Test
+    fun imageUrls_preserveAbsoluteUrlsAndNormalizeRelativePaths() {
+        assertEquals("https://cdn.example/poster.jpg", TmdbMappers.posterUrl("https://cdn.example/poster.jpg"))
+        assertEquals("${TmdbApiClient.IMAGE_BASE}/w185/profile.jpg", TmdbMappers.profileUrl("profile.jpg"))
+    }
+
+    @Test
     fun movieToMediaItem_basic() {
         val movie = TmdbMovie(
             id = 123,

@@ -19,6 +19,9 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.CloudDone
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -174,6 +177,29 @@ fun StreamPickerSheet(
             }
 
             Spacer(Modifier.height(10.dp))
+
+            filteredStreams.firstOrNull()?.let { recommended ->
+                Button(
+                    onClick = { onStreamSelected(recommended) },
+                    modifier = Modifier.fillMaxWidth().height(48.dp),
+                    enabled = !isResolving,
+                    shape = RoundedCornerShape(10.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Amber,
+                        contentColor = Obsidian,
+                    ),
+                ) {
+                    Icon(Icons.Filled.PlayArrow, contentDescription = null, modifier = Modifier.size(20.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text("Play recommended", fontWeight = FontWeight.Bold)
+                }
+                Text(
+                    text = "Best match for your quality, language, size, cache, and device settings. Other sources remain below.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Torve.colors.textSecondary,
+                    modifier = Modifier.padding(top = 6.dp, bottom = 8.dp),
+                )
+            }
 
             DetailPlaybackReadinessCard(
                 streams = streams,

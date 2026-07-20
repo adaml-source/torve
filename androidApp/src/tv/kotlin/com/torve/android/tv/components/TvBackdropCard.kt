@@ -190,7 +190,7 @@ fun TvBackdropCard(
         item.ratings.withFallbackTmdbScore(item.rating)?.let { ratings ->
             PreferredRatingPills(
                 ratings = ratings,
-                prefs = ratingPrefs.copy(maxRatingsOnCard = 2),
+                prefs = ratingPrefs.tvExternalCardRatingPrefs(),
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
                     .padding(10.dp),

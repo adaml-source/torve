@@ -39,6 +39,7 @@ fun ChannelGridCard(
     modifier: Modifier = Modifier,
 ) {
     val channel = enriched.channel
+    val displayName = channel.iptvDisplayName()
 
     Surface(
         modifier = modifier
@@ -62,13 +63,13 @@ fun ChannelGridCard(
                 if (channel.tvgLogo != null) {
                     AsyncImage(
                         model = channel.tvgLogo,
-                        contentDescription = channel.name,
+                        contentDescription = displayName,
                         modifier = Modifier.size(64.dp),
                         contentScale = ContentScale.Fit,
                     )
                 } else {
                     Text(
-                        text = channel.name.take(2).uppercase(),
+                        text = displayName.take(2).uppercase(),
                         style = MaterialTheme.typography.titleMedium,
                         color = Amber,
                         fontWeight = FontWeight.Bold,
@@ -93,7 +94,7 @@ fun ChannelGridCard(
 
             // Channel name
             Text(
-                text = channel.name,
+                text = displayName,
                 style = MaterialTheme.typography.labelMedium,
                 color = Torve.colors.textPrimary,
                 fontWeight = FontWeight.Medium,

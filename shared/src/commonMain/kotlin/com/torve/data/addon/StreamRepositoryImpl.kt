@@ -393,7 +393,12 @@ class StreamRepositoryImpl(
     }
 
     private fun isNzbDownloadLink(url: String): Boolean {
-        return url.contains("/getnzb/") || url.endsWith(".nzb") || url.contains("nzbindex") || url.contains("nzbgeek") || url.contains("scenenzbs")
+        return url.contains("/getnzb/") ||
+            url.endsWith(".nzb") ||
+            url.contains("nzbindex") ||
+            url.contains("nzbgeek") ||
+            url.contains("scenenzbs") ||
+            url.contains("treasure-maps")
     }
 
     override suspend fun resolveStream(
@@ -448,7 +453,12 @@ class StreamRepositoryImpl(
                 // a preparing UI while we wait.
                 ResolvedStream(url = stream.directUrl, service = null)
             } else if (magnetUrl == null && stream.directUrl != null) {
-                if (isNzbDownloadLink(stream.directUrl)) {
+                if (stream.hasPreResolvedAddonPlaybackUrl()) {
+                    // Configured Torrentio already returned the provider's
+                    // playback URL. Wrapping it through WebDL again creates a
+                    // nested temporary URL which can expire during playback.
+                    ResolvedStream(url = stream.directUrl, service = provider)
+                } else if (isNzbDownloadLink(stream.directUrl)) {
                     // Raw .nzb link from a non-Panda addon — can't be played
                     // without a download client resolving it first.
                     throw Exception("NZB files require a download client (NZBget/SABnzbd). Configure one in Panda settings.")

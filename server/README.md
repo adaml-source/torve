@@ -15,7 +15,7 @@ This is **Option B** from `docs/server-sync-strategy.md`, picked on
 - FastAPI + SQLAlchemy (sync) + psycopg2-binary
 - Postgres (owner `torve_user`, db `torve` on prod)
 - Alembic for migrations (current head: see `alembic/versions/`)
-- Sentry, Paddle (billing), Resend (email), Google Play (verification)
+- Sentry, Resend (email), and historical billing/provider compatibility code
 - Tests: pytest (sync)
 
 ## Layout
@@ -27,7 +27,7 @@ server/
 │   ├── models.py                  # SQLAlchemy models
 │   ├── schemas.py                 # Pydantic request/response shapes
 │   ├── crypto.py                  # Secret wrap/unwrap (INTEGRATION_SECRET_KEY)
-│   ├── billing.py                 # Paddle webhook + entitlement reconciliation
+│   ├── billing.py                 # Historical billing/provider compatibility
 │   ├── routers/                   # 29 route modules (auth, account, devices, ...)
 │   └── nzbdav/                    # NZB-DAV integration internals
 ├── alembic/
@@ -110,6 +110,14 @@ The deploy script:
 Required PR-side secrets: none — CI uses dummy values for
 `JWT_SECRET`, `INTEGRATION_SECRET_KEY`, etc. Real secrets stay on the
 VPS in `/opt/torve-backend/.env`.
+
+## Free-Software Access Model
+
+Torve is free software. There are no subscriptions, no paid tiers, no premium features, and no purchase required. Donations are optional and never unlock features.
+
+Backend product access is free/default for authenticated active accounts. Historical payment tables, provider webhooks, purchase verification endpoints, checkout records, rebates, beta grants, lifetime ledgers, and donation records remain only for compatibility, reconciliation, refunds, or audit context. They must not unlock or remove product features.
+
+Remaining backend restrictions are authentication, account status, ownership, privacy, device security, abuse prevention, backend availability, and technical stability.
 
 ## Hotfix-on-prod escape hatch
 

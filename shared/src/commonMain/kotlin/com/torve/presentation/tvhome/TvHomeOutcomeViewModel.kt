@@ -7,6 +7,7 @@ import com.torve.domain.providerhealth.ProviderHealthEntry
 import com.torve.domain.sourceavailability.SourceAvailabilityAggregator
 import com.torve.domain.sourceavailability.SourceAvailabilityRecord
 import com.torve.presentation.channels.ChannelsViewModel
+import com.torve.presentation.channels.ChannelsUiState
 import com.torve.presentation.home.HomeUiState
 import com.torve.presentation.home.HomeViewModel
 import com.torve.presentation.lanlibrary.LanLibraryConsumer
@@ -18,6 +19,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 
 /**
@@ -53,7 +55,6 @@ class TvHomeOutcomeViewModel(
     private val availabilityAggregator: SourceAvailabilityAggregator,
     private val lanLibraryConsumer: LanLibraryConsumer,
     private val providerHealthCoordinator: ProviderHealthCoordinator,
-    private val channelsViewModel: ChannelsViewModel,
     private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
     private val maxAvailable: Int = 24,
     private val maxLan: Int = 24,
@@ -62,6 +63,8 @@ class TvHomeOutcomeViewModel(
 
     private val _state = MutableStateFlow(TvHomeOutcomeUiState())
     val state: StateFlow<TvHomeOutcomeUiState> = _state.asStateFlow()
+    private var latestChannelsState = ChannelsUiState()
+    private var channelsJob: Job? = null
 
     init {
         // Single combine over every upstream so a tick in any one
@@ -72,10 +75,20 @@ class TvHomeOutcomeViewModel(
                 homeViewModel.state,
                 lanLibraryConsumer.entries,
                 providerHealthCoordinator.entries,
-                channelsViewModel.state,
-            ) { home, lanEntries, healthRows, channelsState ->
-                ComposedInputs(home, lanEntries, healthRows, channelsState)
+            ) { home, lanEntries, healthRows ->
+                ComposedInputs(home, lanEntries, healthRows, latestChannelsState)
             }.collect { inputs -> recompute(inputs) }
+        }
+    }
+
+    /** Attach IPTV outcomes after the user opens Channels for the first time. */
+    fun attachChannels(channelsViewModel: ChannelsViewModel) {
+        if (channelsJob?.isActive == true) return
+        channelsJob = scope.launch {
+            channelsViewModel.state.collect { channelsState ->
+                latestChannelsState = channelsState
+                recompute(snapshot())
+            }
         }
     }
 
@@ -87,7 +100,7 @@ class TvHomeOutcomeViewModel(
         home = homeViewModel.state.value,
         lanEntries = lanLibraryConsumer.entries.value,
         healthRows = providerHealthCoordinator.entries.value,
-        channelsState = channelsViewModel.state.value,
+        channelsState = latestChannelsState,
     )
 
     private suspend fun recompute(inputs: ComposedInputs) {
@@ -144,16 +157,16 @@ class TvHomeOutcomeViewModel(
         // continueWatching is List<WatchProgress>; convert to MediaItem.
         for (cw in home.continueWatching) {
             val item = cw.toMediaItemOrNullForOutcome() ?: continue
-            out.putIfAbsent(item.id, item)
+            if (item.id !in out) out[item.id] = item
         }
         for (item in home.watchlistItems) {
-            out.putIfAbsent(item.id, item)
+            if (item.id !in out) out[item.id] = item
         }
         for (scored in home.recommendedItems) {
-            out.putIfAbsent(scored.item.id, scored.item)
+            if (scored.item.id !in out) out[scored.item.id] = scored.item
         }
         for (item in home.recentlyWatched) {
-            out.putIfAbsent(item.id, item)
+            if (item.id !in out) out[item.id] = item
         }
         return out.values.toList()
     }

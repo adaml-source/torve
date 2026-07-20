@@ -26,9 +26,13 @@ import com.torve.domain.integrations.IntegrationSecretKey
 import com.torve.domain.integrations.IntegrationSecretStore
 import com.torve.presentation.contentpolicy.ContentPolicyFilter
 import com.torve.presentation.settings.SettingsViewModel
+import com.torve.presentation.util.hydrateUpcomingScheduleArtwork
+import com.torve.util.ioDispatcher
+import com.torve.util.mainDispatcher
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -210,10 +214,11 @@ class SeeAllViewModel(
         /** Temporary holder for shelf items that can't be paginated from an API. */
         val pendingItems: MutableMap<String, Pair<String, List<MediaItem>>> = mutableMapOf()
     }
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+    private val scope = CoroutineScope(SupervisorJob() + mainDispatcher)
     private val _state = MutableStateFlow(SeeAllUiState())
     val state: StateFlow<SeeAllUiState> = _state.asStateFlow()
     private val json = Json { ignoreUnknownKeys = true }
+    private var filterBackfillJob: Job? = null
 
     init {
         if (invalidationCoordinator != null) {
@@ -227,10 +232,12 @@ class SeeAllViewModel(
 
     fun setSortMode(mode: SeeAllSortMode) {
         _state.update { it.copy(sortMode = mode) }
+        if (mode != SeeAllSortMode.DEFAULT) requestFilterBackfill()
     }
 
     fun setYearRange(from: Int?, to: Int?) {
         _state.update { it.copy(filterYearFrom = from, filterYearTo = to) }
+        requestFilterBackfill()
     }
 
     fun toggleGenre(genreId: Int) {
@@ -239,6 +246,7 @@ class SeeAllViewModel(
             else it.filterGenreIds + genreId
             it.copy(filterGenreIds = next)
         }
+        requestFilterBackfill()
     }
 
     fun clearGenres() {
@@ -251,6 +259,7 @@ class SeeAllViewModel(
             else it.filterStudioIds + studioId
             it.copy(filterStudioIds = next)
         }
+        requestFilterBackfill()
     }
 
     fun clearStudios() {
@@ -337,7 +346,7 @@ class SeeAllViewModel(
         scope.launch {
             val hydrated = coroutineScope {
                 targets.map { item ->
-                    async(Dispatchers.IO) {
+                    async(ioDispatcher) {
                         val detail = runCatching { metadataRepo.getDetail("tv", item.tmdbId!!) }.getOrNull()
                             ?: return@async null
                         item.id to item.copy(
@@ -360,29 +369,56 @@ class SeeAllViewModel(
     }
 
     fun loadMore() {
-        val s = _state.value
-        if (!s.hasMore || s.isLoading) return
-        _state.update { it.copy(isLoading = true) }
         scope.launch {
-            try {
-                val result = fetchSection(s.sectionId, s.page)
-                val filteredItems = applyContentPolicy(s.sectionId, result.items)
-                val existingIds = _state.value.items.map { it.id }.toSet()
-                val newItems = filteredItems.filter { it.id !in existingIds }
-                _state.update {
-                    it.copy(
-                        items = it.items + newItems,
-                        isLoading = false,
-                        page = it.page + 1,
-                        hasMore = result.hasMore,
-                        totalResults = result.totalResults.takeIf { total -> total > 0 } ?: it.totalResults,
-                    )
-                }
-                enrichPillsAsync(newItems)
-                hydrateTvMetadataAsync(newItems)
-            } catch (_: Exception) {
-                _state.update { it.copy(isLoading = false) }
+            appendNextPage()
+        }
+    }
+
+    /**
+     * A filter must explore the backing catalogue, not only hide cards from
+     * the first page already in memory. Load a bounded number of subsequent
+     * API pages until the filtered grid is useful or the source is exhausted.
+     */
+    private fun requestFilterBackfill() {
+        filterBackfillJob?.cancel()
+        filterBackfillJob = scope.launch {
+            delay(150L)
+            var fetchedPages = 0
+            while (
+                fetchedPages < 4 &&
+                _state.value.hasMore &&
+                _state.value.displayedItems.size < 30
+            ) {
+                if (!appendNextPage()) break
+                fetchedPages += 1
             }
+        }
+    }
+
+    private suspend fun appendNextPage(): Boolean {
+        val snapshot = _state.value
+        if (!snapshot.hasMore || snapshot.isLoading || snapshot.sectionId.isBlank()) return false
+        _state.update { it.copy(isLoading = true) }
+        return try {
+            val result = fetchSection(snapshot.sectionId, snapshot.page)
+            val filteredItems = applyContentPolicy(snapshot.sectionId, result.items)
+            val existingKeys = _state.value.items.map { "${it.type}:${it.tmdbId ?: it.id}" }.toSet()
+            val newItems = filteredItems.filter { "${it.type}:${it.tmdbId ?: it.id}" !in existingKeys }
+            _state.update {
+                it.copy(
+                    items = it.items + newItems,
+                    isLoading = false,
+                    page = it.page + 1,
+                    hasMore = result.hasMore,
+                    totalResults = result.totalResults.takeIf { total -> total > 0 } ?: it.totalResults,
+                )
+            }
+            enrichPillsAsync(newItems)
+            hydrateTvMetadataAsync(newItems)
+            result.hasMore || newItems.isNotEmpty()
+        } catch (_: Exception) {
+            _state.update { it.copy(isLoading = false) }
+            false
         }
     }
 
@@ -452,11 +488,11 @@ class SeeAllViewModel(
                 SeeAllFetchPage("Now Playing", result.items, result.page < result.totalPages, result.totalResults)
             }
             "TOP_RATED", "TOP_RATED_MOVIES" -> {
-                val result = metadataRepo.getTopRatedPaged("movie", page)
+                val result = metadataRepo.getPopularPaged("movie", page)
                 SeeAllFetchPage("Top Rated Movies", result.items, result.page < result.totalPages, result.totalResults)
             }
             "TOP_RATED_TV" -> {
-                val result = metadataRepo.getTopRatedPaged("tv", page)
+                val result = metadataRepo.getPopularPaged("tv", page)
                 SeeAllFetchPage("Top Rated TV Shows", result.items, result.page < result.totalPages, result.totalResults)
             }
             "NEW_RELEASES", "UPCOMING" -> {
@@ -538,12 +574,16 @@ class SeeAllViewModel(
             emptyList()
         }
         if (episodes.isEmpty()) return emptyList()
-        return episodes
+        val distinctEpisodes = episodes
             .sortedBy { it.firstAired }
             .distinctBy { episode ->
                 "${episode.showTmdbId ?: episode.showTitle}:${episode.season}:${episode.episode}:${episode.firstAired}"
             }
-            .map { it.toUpcomingScheduleItem() }
+        return hydrateUpcomingScheduleArtwork(
+            entries = distinctEpisodes.map { episode -> episode to episode.toUpcomingScheduleItem() },
+            metadataRepo = metadataRepo,
+            detailLookupLimit = 40,
+        )
     }
 
     private fun TraktCalendarEpisode.toUpcomingScheduleItem(): MediaItem {

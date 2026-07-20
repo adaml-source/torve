@@ -47,6 +47,7 @@ fun ChannelRow(
     modifier: Modifier = Modifier,
 ) {
     val channel = enriched.channel
+    val displayName = channel.iptvDisplayName()
     val hasProgramme = enriched.currentProgramme != null
 
     Row(
@@ -67,13 +68,13 @@ fun ChannelRow(
             if (channel.tvgLogo != null) {
                 AsyncImage(
                     model = channel.tvgLogo,
-                    contentDescription = channel.name,
+                    contentDescription = displayName,
                     modifier = Modifier.size(52.dp),
                     contentScale = ContentScale.Fit,
                 )
             } else {
                 Text(
-                    text = channel.name.take(2).uppercase(),
+                    text = displayName.take(2).uppercase(),
                     style = MaterialTheme.typography.titleSmall,
                     color = Amber,
                     fontWeight = FontWeight.Bold,
@@ -97,7 +98,7 @@ fun ChannelRow(
                     Spacer(Modifier.width(6.dp))
                 }
                 Text(
-                    text = channel.name,
+                    text = displayName,
                     style = MaterialTheme.typography.titleSmall,
                     fontWeight = FontWeight.Medium,
                     color = Torve.colors.textPrimary,
@@ -164,4 +165,20 @@ fun ChannelRow(
             )
         }
     }
+}
+
+internal fun com.torve.domain.model.Channel.iptvDisplayName(): String {
+    val trimmedName = name.trim()
+    val separator = trimmedName.indexOf(':')
+    if (separator !in 2..3) return trimmedName
+    val prefix = trimmedName.substring(0, separator).trim().uppercase()
+    val country = tvgCountry?.trim()?.uppercase()?.takeIf { it.isNotEmpty() }
+    val unambiguousTwoLetterPrefix = separator == 2 &&
+        prefix.length == 2 &&
+        prefix.all { it in 'A'..'Z' }
+    val matchesCountryMetadata = country != null &&
+        prefix.all { it.isLetter() } &&
+        (country.startsWith(prefix) || prefix.startsWith(country.take(2)))
+    val isCountryPrefix = unambiguousTwoLetterPrefix || matchesCountryMetadata
+    return if (isCountryPrefix) trimmedName.substring(separator + 1).trim().ifEmpty { trimmedName } else trimmedName
 }

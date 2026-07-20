@@ -36,6 +36,12 @@ import com.torve.domain.model.defaultTorveWeights
 import com.torve.domain.diagnostics.DiagnosticsRedactor
 import com.torve.domain.model.StreamPreferences
 import com.torve.domain.model.StreamQuality
+import com.torve.domain.model.NextEpisodeMode
+import com.torve.domain.model.NextEpisodePreparationMode
+import com.torve.domain.model.SourceFallbackPolicy
+import com.torve.domain.model.SourceLanguageMatchMode
+import com.torve.domain.model.UnknownSourceMetadataPolicy
+import com.torve.domain.model.canResolveStreams
 import com.torve.domain.player.DesktopPlaybackHotkeys
 import com.torve.domain.repository.AddonRepository
 import com.torve.domain.repository.PreferencesRepository
@@ -69,6 +75,19 @@ import kotlinx.coroutines.launch
 import kotlinx.datetime.Clock
 import kotlin.random.Random
 
+private data class SmartPlaybackSavedSettings(
+    val minSourceSizePerHourMb: Int,
+    val nextEpisodeMode: NextEpisodeMode,
+    val preparationMode: NextEpisodePreparationMode,
+    val preloadBufferSeconds: Int,
+    val preloadMaxMb: Int,
+    val preloadWifiOnly: Boolean,
+    val languageMatchMode: SourceLanguageMatchMode,
+    val unknownSizePolicy: UnknownSourceMetadataPolicy,
+    val unknownLanguagePolicy: UnknownSourceMetadataPolicy,
+    val fallbackPolicy: SourceFallbackPolicy,
+)
+
 class SettingsViewModel(
     private val debridClient: DebridClient,
     private val traktClient: TraktClient,
@@ -97,6 +116,7 @@ class SettingsViewModel(
     val state: StateFlow<SettingsUiState> = _state.asStateFlow()
 
     private var debridPollJob: Job? = null
+    private var traktAuthRequestJob: Job? = null
     private var traktPollJob: Job? = null
     private var rdStartupRefreshDone = false
     private var simklValidationRunning = false
@@ -129,6 +149,7 @@ class SettingsViewModel(
         const val KEY_MAX_QUALITY = "stream_max_quality"
         const val KEY_MIN_QUALITY = "stream_min_quality"
         const val KEY_MAX_FILE_SIZE_MB = "stream_max_file_size_mb"
+        const val KEY_MIN_SOURCE_SIZE_PER_HOUR_MB = "stream_min_source_size_per_hour_mb"
         const val KEY_CACHED_ONLY = "stream_cached_only"
         const val KEY_HDR_ENABLED = "stream_hdr_enabled"
         const val KEY_TRAKT_SCROBBLE = "trakt_scrobble_enabled"
@@ -141,6 +162,15 @@ class SettingsViewModel(
         const val KEY_CODEC_PREFERENCE = "codec_preference"
         const val KEY_HDR_MODE = "hdr_mode"
         const val KEY_AUTO_PLAY_NEXT_EPISODE = "auto_play_next_episode"
+        const val KEY_NEXT_EPISODE_MODE = "next_episode_mode"
+        const val KEY_NEXT_EPISODE_PREPARATION_MODE = "next_episode_preparation_mode"
+        const val KEY_NEXT_EPISODE_PRELOAD_BUFFER_SECONDS = "next_episode_preload_buffer_seconds"
+        const val KEY_NEXT_EPISODE_PRELOAD_MAX_MB = "next_episode_preload_max_mb"
+        const val KEY_NEXT_EPISODE_PRELOAD_WIFI_ONLY = "next_episode_preload_wifi_only"
+        const val KEY_SOURCE_LANGUAGE_MATCH_MODE = "source_language_match_mode"
+        const val KEY_UNKNOWN_SOURCE_SIZE_POLICY = "unknown_source_size_policy"
+        const val KEY_UNKNOWN_SOURCE_LANGUAGE_POLICY = "unknown_source_language_policy"
+        const val KEY_SOURCE_FALLBACK_POLICY = "source_fallback_policy"
         const val KEY_AUTO_SOURCE_MODE = "auto_source_mode"
         const val KEY_ALLOW_4K_AUTO = "allow_4k_auto"
         const val KEY_PREFER_COMPATIBLE_CODECS = "prefer_compatible_codecs"
@@ -341,7 +371,16 @@ class SettingsViewModel(
 
             val apiKey = allDebridKeys[provider] ?: ""
             torveVerboseLog { "[SettingsLoad] Debrid provider=$provider hasCredential=${apiKey.isNotBlank()} providers=${allDebridKeys.keys}" }
-            // Trakt: secure store is authoritative. Migrate legacy pref keys once.
+            // Trakt: apply a complete configured OAuth app identity when one was
+            // transferred or saved during setup. Incomplete pairs fall back to
+            // the bundled identity so the code and token requests never use
+            // different clients.
+            migrateSecretPref(KEY_TRAKT_CLIENT_SECRET, IntegrationSecretKey.TRAKT_CLIENT_SECRET)
+            val traktClientId = prefsRepo.getString(KEY_TRAKT_CLIENT_ID) ?: ""
+            val traktClientSecret = integrationSecretStore.get(IntegrationSecretKey.TRAKT_CLIENT_SECRET) ?: ""
+            traktClient.setCredentials(traktClientId, traktClientSecret)
+
+            // Trakt tokens: secure store is authoritative. Migrate legacy pref keys once.
             val traktTokens = traktTokenStore.read()
             migrateSecretPref(KEY_TRAKT_ACCESS_TOKEN, IntegrationSecretKey.TRAKT_ACCESS_TOKEN)
             migrateSecretPref(KEY_TRAKT_REFRESH_TOKEN, IntegrationSecretKey.TRAKT_REFRESH_TOKEN)
@@ -400,6 +439,7 @@ class SettingsViewModel(
 
             val autoPlayEnabled = prefsRepo.getString(KEY_AUTO_PLAY_ENABLED)?.toBooleanStrictOrNull() ?: true
             val autoPlayNextEpisodeEnabled = prefsRepo.getString(KEY_AUTO_PLAY_NEXT_EPISODE)?.toBooleanStrictOrNull() ?: true
+            val smartPlayback = loadSmartPlaybackSettings(autoPlayNextEpisodeEnabled)
             val autoSourceMode = prefsRepo.getString(KEY_AUTO_SOURCE_MODE)?.let {
                 try { AutoSourceMode.valueOf(it) } catch (_: Exception) { null }
             } ?: AutoSourceMode.BALANCED
@@ -510,10 +550,7 @@ class SettingsViewModel(
             // endpoints. Empty resources list is treated as a full-service
             // addon (mirrors StreamAggregator.supportsStreamResolution).
             val hasStreamAddon = runCatching {
-                addonRepo.getEnabledAddons().any { addon ->
-                    val resources = addon.manifest.resources
-                    resources.isEmpty() || resources.any { it.equals("stream", ignoreCase = true) }
-                }
+                addonRepo.getEnabledAddons().any { addon -> addon.canResolveStreams() }
             }.getOrDefault(false)
 
             _state.update {
@@ -527,6 +564,7 @@ class SettingsViewModel(
                     // After logout, secrets are empty → connected=false → profiles/users gone.
                     debridUser = if (apiKey.isNotBlank()) it.debridUser else null,
                     debridLoading = false,
+                    traktClientId = traktClientId,
                     traktAccessToken = traktAccessToken,
                     traktRefreshToken = traktRefreshToken,
                     traktConnected = traktAccessToken.isNotBlank(),
@@ -543,6 +581,7 @@ class SettingsViewModel(
                     maxQuality = maxQuality,
                     minQuality = minQuality,
                     maxFileSizeMb = maxFileSizeMb,
+                    minSourceSizePerHourMb = smartPlayback.minSourceSizePerHourMb,
                     cachedOnly = cachedOnly,
                     hdrEnabled = hdrEnabled,
                     kodiHosts = kodiHosts,
@@ -554,6 +593,15 @@ class SettingsViewModel(
                     lanPlaybackWifiOnly = lanPlaybackWifiOnly,
                     autoPlayEnabled = autoPlayEnabled,
                     autoPlayNextEpisodeEnabled = autoPlayNextEpisodeEnabled,
+                    nextEpisodeMode = smartPlayback.nextEpisodeMode,
+                    nextEpisodePreparationMode = smartPlayback.preparationMode,
+                    nextEpisodePreloadBufferSeconds = smartPlayback.preloadBufferSeconds,
+                    nextEpisodePreloadMaxMb = smartPlayback.preloadMaxMb,
+                    nextEpisodePreloadWifiOnly = smartPlayback.preloadWifiOnly,
+                    sourceLanguageMatchMode = smartPlayback.languageMatchMode,
+                    unknownSourceSizePolicy = smartPlayback.unknownSizePolicy,
+                    unknownSourceLanguagePolicy = smartPlayback.unknownLanguagePolicy,
+                    sourceFallbackPolicy = smartPlayback.fallbackPolicy,
                     autoSourceMode = autoSourceMode,
                     allow4kAuto = allow4kAuto,
                     preferCompatibleCodecs = preferCompatibleCodecs,
@@ -622,6 +670,36 @@ class SettingsViewModel(
             }
         }
     }
+
+    private suspend fun loadSmartPlaybackSettings(legacyAutoPlayNext: Boolean): SmartPlaybackSavedSettings =
+        SmartPlaybackSavedSettings(
+            minSourceSizePerHourMb = prefsRepo.getString(KEY_MIN_SOURCE_SIZE_PER_HOUR_MB)
+                ?.toIntOrNull()?.coerceIn(0, 64 * 1024) ?: 0,
+            nextEpisodeMode = prefsRepo.getString(KEY_NEXT_EPISODE_MODE)?.let {
+                runCatching { NextEpisodeMode.valueOf(it) }.getOrNull()
+            } ?: if (legacyAutoPlayNext) NextEpisodeMode.AT_END else NextEpisodeMode.OFF,
+            preparationMode = prefsRepo.getString(KEY_NEXT_EPISODE_PREPARATION_MODE)?.let {
+                runCatching { NextEpisodePreparationMode.valueOf(it) }.getOrNull()
+            } ?: NextEpisodePreparationMode.RESOLVE_ONLY,
+            preloadBufferSeconds = prefsRepo.getString(KEY_NEXT_EPISODE_PRELOAD_BUFFER_SECONDS)
+                ?.toIntOrNull()?.coerceIn(0, 120) ?: 30,
+            preloadMaxMb = prefsRepo.getString(KEY_NEXT_EPISODE_PRELOAD_MAX_MB)
+                ?.toIntOrNull()?.coerceIn(16, 1024) ?: 128,
+            preloadWifiOnly = prefsRepo.getString(KEY_NEXT_EPISODE_PRELOAD_WIFI_ONLY)
+                ?.toBooleanStrictOrNull() ?: true,
+            languageMatchMode = prefsRepo.getString(KEY_SOURCE_LANGUAGE_MATCH_MODE)?.let {
+                runCatching { SourceLanguageMatchMode.valueOf(it) }.getOrNull()
+            } ?: SourceLanguageMatchMode.PREFER,
+            unknownSizePolicy = prefsRepo.getString(KEY_UNKNOWN_SOURCE_SIZE_POLICY)?.let {
+                runCatching { UnknownSourceMetadataPolicy.valueOf(it) }.getOrNull()
+            } ?: UnknownSourceMetadataPolicy.ALLOW_WITH_PENALTY,
+            unknownLanguagePolicy = prefsRepo.getString(KEY_UNKNOWN_SOURCE_LANGUAGE_POLICY)?.let {
+                runCatching { UnknownSourceMetadataPolicy.valueOf(it) }.getOrNull()
+            } ?: UnknownSourceMetadataPolicy.ALLOW_WITH_PENALTY,
+            fallbackPolicy = prefsRepo.getString(KEY_SOURCE_FALLBACK_POLICY)?.let {
+                runCatching { SourceFallbackPolicy.valueOf(it) }.getOrNull()
+            } ?: SourceFallbackPolicy.ASK,
+        )
 
     // -------------------------------------------------------------------------
     // Debrid
@@ -826,8 +904,19 @@ class SettingsViewModel(
     // -------------------------------------------------------------------------
 
     fun startTraktDeviceAuth() {
-        scope.launch {
-            _state.update { it.copy(traktLoading = true, traktError = null) }
+        if (_state.value.traktLoading || _state.value.isPollingTrakt) return
+
+        traktAuthRequestJob?.cancel()
+        traktPollJob?.cancel()
+        val requestJob = scope.launch {
+            _state.update {
+                it.copy(
+                    traktLoading = true,
+                    traktError = null,
+                    traktDeviceCode = null,
+                    isPollingTrakt = false,
+                )
+            }
             try {
                 val code = traktClient.getDeviceCode()
                 _state.update { it.copy(traktDeviceCode = code, traktLoading = false) }
@@ -837,6 +926,12 @@ class SettingsViewModel(
                 val detail = e.message?.takeIf { it.isNotBlank() }
                     ?: com.torve.presentation.error.UserFacingError.INTEGRATION_CONNECT_FAILED.defaultMessage()
                 _state.update { it.copy(traktLoading = false, traktError = "Trakt: $detail") }
+            }
+        }
+        traktAuthRequestJob = requestJob
+        requestJob.invokeOnCompletion {
+            if (traktAuthRequestJob === requestJob) {
+                traktAuthRequestJob = null
             }
         }
     }
@@ -1172,6 +1267,7 @@ class SettingsViewModel(
     }
 
     fun disconnectTrakt() {
+        traktAuthRequestJob?.cancel()
         traktPollJob?.cancel()
         val token = _state.value.traktAccessToken
         scope.launch {
@@ -1190,6 +1286,7 @@ class SettingsViewModel(
                 traktConnected = false,
                 traktUser = null,
                 traktDeviceCode = null,
+                traktLoading = false,
                 isPollingTrakt = false,
                 traktError = null,
                 traktApiStatus = "Not connected",
@@ -1913,8 +2010,59 @@ class SettingsViewModel(
     }
 
     fun setAutoPlayNextEpisodeEnabled(enabled: Boolean) {
-        _state.update { it.copy(autoPlayNextEpisodeEnabled = enabled) }
-        scope.launch { prefsRepo.setString(KEY_AUTO_PLAY_NEXT_EPISODE, enabled.toString()) }
+        setNextEpisodeMode(if (enabled) NextEpisodeMode.AT_END else NextEpisodeMode.OFF)
+    }
+
+    fun setNextEpisodeMode(mode: NextEpisodeMode) {
+        _state.update {
+            it.copy(nextEpisodeMode = mode, autoPlayNextEpisodeEnabled = mode != NextEpisodeMode.OFF)
+        }
+        scope.launch {
+            prefsRepo.setString(KEY_NEXT_EPISODE_MODE, mode.name)
+            prefsRepo.setString(KEY_AUTO_PLAY_NEXT_EPISODE, (mode != NextEpisodeMode.OFF).toString())
+        }
+    }
+
+    fun setNextEpisodePreparationMode(mode: NextEpisodePreparationMode) {
+        _state.update { it.copy(nextEpisodePreparationMode = mode) }
+        scope.launch { prefsRepo.setString(KEY_NEXT_EPISODE_PREPARATION_MODE, mode.name) }
+    }
+
+    fun setNextEpisodePreloadBufferSeconds(seconds: Int) {
+        val sanitized = seconds.coerceIn(0, 120)
+        _state.update { it.copy(nextEpisodePreloadBufferSeconds = sanitized) }
+        scope.launch { prefsRepo.setString(KEY_NEXT_EPISODE_PRELOAD_BUFFER_SECONDS, sanitized.toString()) }
+    }
+
+    fun setNextEpisodePreloadMaxMb(sizeMb: Int) {
+        val sanitized = sizeMb.coerceIn(16, 1024)
+        _state.update { it.copy(nextEpisodePreloadMaxMb = sanitized) }
+        scope.launch { prefsRepo.setString(KEY_NEXT_EPISODE_PRELOAD_MAX_MB, sanitized.toString()) }
+    }
+
+    fun setNextEpisodePreloadWifiOnly(enabled: Boolean) {
+        _state.update { it.copy(nextEpisodePreloadWifiOnly = enabled) }
+        scope.launch { prefsRepo.setString(KEY_NEXT_EPISODE_PRELOAD_WIFI_ONLY, enabled.toString()) }
+    }
+
+    fun setSourceLanguageMatchMode(mode: SourceLanguageMatchMode) {
+        _state.update { it.copy(sourceLanguageMatchMode = mode) }
+        scope.launch { prefsRepo.setString(KEY_SOURCE_LANGUAGE_MATCH_MODE, mode.name) }
+    }
+
+    fun setUnknownSourceSizePolicy(policy: UnknownSourceMetadataPolicy) {
+        _state.update { it.copy(unknownSourceSizePolicy = policy) }
+        scope.launch { prefsRepo.setString(KEY_UNKNOWN_SOURCE_SIZE_POLICY, policy.name) }
+    }
+
+    fun setUnknownSourceLanguagePolicy(policy: UnknownSourceMetadataPolicy) {
+        _state.update { it.copy(unknownSourceLanguagePolicy = policy) }
+        scope.launch { prefsRepo.setString(KEY_UNKNOWN_SOURCE_LANGUAGE_POLICY, policy.name) }
+    }
+
+    fun setSourceFallbackPolicy(policy: SourceFallbackPolicy) {
+        _state.update { it.copy(sourceFallbackPolicy = policy) }
+        scope.launch { prefsRepo.setString(KEY_SOURCE_FALLBACK_POLICY, policy.name) }
     }
 
     fun setAutoSourceMode(mode: AutoSourceMode) {
@@ -2060,8 +2208,22 @@ class SettingsViewModel(
             hdrEnabled = s.hdrEnabled,
             cachedOnly = s.cachedOnly,
             maxFileSizeBytes = s.maxFileSizeMb?.let { it.toLong() * 1024 * 1024 },
+            minSourceSizePerHourBytes = s.minSourceSizePerHourMb.toLong() * 1024L * 1024L,
             autoPlayEnabled = s.autoPlayEnabled,
             autoPlayNextEpisodeEnabled = s.autoPlayNextEpisodeEnabled,
+            preferredAudioLanguages = s.preferredAudioLanguage
+                .split(',', ';')
+                .map(String::trim)
+                .filter(String::isNotBlank),
+            sourceLanguageMatchMode = s.sourceLanguageMatchMode,
+            unknownSourceSizePolicy = s.unknownSourceSizePolicy,
+            unknownSourceLanguagePolicy = s.unknownSourceLanguagePolicy,
+            sourceFallbackPolicy = s.sourceFallbackPolicy,
+            nextEpisodeMode = s.nextEpisodeMode,
+            nextEpisodePreparationMode = s.nextEpisodePreparationMode,
+            nextEpisodePreloadBufferSeconds = s.nextEpisodePreloadBufferSeconds,
+            nextEpisodePreloadMaxBytes = s.nextEpisodePreloadMaxMb.toLong() * 1024L * 1024L,
+            nextEpisodePreloadWifiOnly = s.nextEpisodePreloadWifiOnly,
             codecPreference = s.codecPreference,
             hdrMode = s.hdrMode,
             autoSourceMode = s.autoSourceMode,
@@ -2095,6 +2257,12 @@ class SettingsViewModel(
         } else {
             emptyMap()
         }
+    }
+
+    fun setMinSourceSizePerHourMb(sizeMb: Int) {
+        val sanitized = sizeMb.coerceIn(0, 64 * 1024)
+        _state.update { it.copy(minSourceSizePerHourMb = sanitized) }
+        scope.launch { prefsRepo.setString(KEY_MIN_SOURCE_SIZE_PER_HOUR_MB, sanitized.toString()) }
     }
 
     // -------------------------------------------------------------------------

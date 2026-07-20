@@ -43,6 +43,7 @@ import com.torve.presentation.channels.CategoryNameCleaner
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import org.koin.java.KoinJavaComponent.getKoin
 import java.util.concurrent.TimeUnit
@@ -311,17 +312,36 @@ class CatalogWarmupWorker(
             }
         }
         if (rails.isEmpty()) return
+        val cacheKey = catalogRailsBootstrapKey(userId, mediaType)
+        val existingRails = localSettingsRepo.getString(cacheKey)
+            ?.let { encoded ->
+                runCatching {
+                    CatalogRailsBootstrapJson.decodeFromString<CatalogRailsBootstrapPayload>(encoded)
+                }.getOrNull()
+            }
+            ?.rails
+            .orEmpty()
+        val refreshedByKey = rails.associateByTo(linkedMapOf()) { it.key }
+        val mergedRails = buildList {
+            existingRails.forEach { existing ->
+                add(refreshedByKey.remove(existing.key) ?: existing)
+            }
+            addAll(refreshedByKey.values)
+        }
         localSettingsRepo.setString(
-            catalogRailsBootstrapKey(userId, mediaType),
+            cacheKey,
             CatalogRailsBootstrapJson.encodeToString(
                 CatalogRailsBootstrapPayload(
                     savedAtMs = System.currentTimeMillis(),
                     mediaType = mediaType,
-                    rails = rails,
+                    rails = mergedRails,
                 ),
             ),
         )
-        warmupLog { "CATALOG_WARMUP: catalog rails saved mediaType=$mediaType rails=${rails.size}" }
+        warmupLog {
+            "CATALOG_WARMUP: catalog rails saved mediaType=$mediaType " +
+                "refreshed=${rails.size} total=${mergedRails.size}"
+        }
     }
 
     private suspend fun publishProgress(label: String, progress: Float, blockNavigation: Boolean = true) {
@@ -780,6 +800,7 @@ class CatalogWarmupWorker(
         private const val IMMEDIATE_VOD_PROVIDER_CATEGORIES = 8
         private const val FULL_VOD_PROVIDER_CATEGORIES = 16
         private const val WORK_YIELD_DELAY_MS = 35L
+        private const val STARTUP_LIGHTWEIGHT_DELAY_SECONDS = 15L
         private const val MAX_CATEGORY_ITEMS = 160
         private const val MAX_ALL_ITEMS = 180
         private const val LIGHTWEIGHT_WARMUP_FRESH_MS = 6L * 60L * 60L * 1000L
@@ -806,6 +827,9 @@ class CatalogWarmupWorker(
                 .build()
             val immediate = OneTimeWorkRequestBuilder<CatalogWarmupWorker>()
                 .setConstraints(immediateConstraints)
+                // Give the foreground Home request priority during first paint.
+                // Explicit user refreshes use refreshNow() and remain immediate.
+                .setInitialDelay(STARTUP_LIGHTWEIGHT_DELAY_SECONDS, TimeUnit.SECONDS)
                 .setInputData(
                     workDataOf(
                         KEY_LIGHTWEIGHT to true,

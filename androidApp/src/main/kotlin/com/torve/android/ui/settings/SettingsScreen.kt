@@ -97,6 +97,11 @@ import com.torve.android.ui.subscription.NeedsVerificationBanner
 import com.torve.android.ui.subscription.NeedsVerificationToastEffect
 import com.torve.domain.model.CodecPreference
 import com.torve.domain.model.HdrMode
+import com.torve.domain.model.NextEpisodeMode
+import com.torve.domain.model.NextEpisodePreparationMode
+import com.torve.domain.model.SourceFallbackPolicy
+import com.torve.domain.model.SourceLanguageMatchMode
+import com.torve.domain.model.UnknownSourceMetadataPolicy
 import com.torve.android.ui.theme.Amber
 import com.torve.android.ui.theme.Charcoal
 import com.torve.android.ui.theme.Emerald
@@ -111,10 +116,6 @@ import com.torve.android.ui.transfer.RestoreSetupRecoveryCard
 import com.torve.data.account.AccountSettingsRepository
 import com.torve.android.sync.SyncCoordinator
 import com.torve.presentation.addon.AddonViewModel
-import com.torve.presentation.beta.BetaProgramCopy
-import com.torve.presentation.beta.BetaProgramViewModel
-import com.torve.presentation.beta.shouldShowBetaProgramSettingsEntry
-import com.torve.presentation.beta.toSettingsCardState
 import com.torve.presentation.channels.ChannelsViewModel
 import com.torve.presentation.settings.AppLanguage
 import com.torve.presentation.settings.SettingsViewModel
@@ -169,7 +170,6 @@ fun SettingsScreen(
     onStartSetupClick: () -> Unit = {},
     onSetupPandaClick: () -> Unit = {},
     onStatusRepairClick: () -> Unit = {},
-    onBetaProgramClick: () -> Unit = {},
     viewModel: SettingsViewModel = koinInject(),
     syncCoordinator: SyncCoordinator = koinInject(),
     authClient: AuthClient = koinInject(),
@@ -177,13 +177,11 @@ fun SettingsScreen(
     accountSessionCoordinator: AccountSessionCoordinator = koinInject(),
     channelsViewModel: ChannelsViewModel = koinInject(),
     subscriptionViewModel: SubscriptionViewModel = koinInject(),
-    betaProgramViewModel: BetaProgramViewModel = koinInject(),
 ) {
     val state by viewModel.state.collectAsState()
     val syncState by syncCoordinator.state.collectAsState()
     val accountSettingsState by accountSettingsRepository.state.collectAsState()
     val subscriptionState by subscriptionViewModel.state.collectAsState()
-    val betaProgramState by betaProgramViewModel.state.collectAsState()
     val subscriptionAccess = remember(
         subscriptionState.subscription,
         subscriptionState.isPro,
@@ -252,7 +250,6 @@ fun SettingsScreen(
         if (BuildConfig.HAS_BILLING) {
             subscriptionViewModel.refreshAccess()
         }
-        betaProgramViewModel.onOpenBetaProgram()
     }
 
     val scope = rememberCoroutineScope()
@@ -353,8 +350,7 @@ fun SettingsScreen(
         // unverified, or free-tier users would be told to set up
         // something they can't complete.
         val pandaNudgeEligible = authUser != null &&
-            authUser?.isVerified == true &&
-            accessTier != AccessTier.FREE
+            authUser?.isVerified == true
         PandaSetupNudgeCard(
             onSetupClick = onSetupPandaClick,
             eligible = pandaNudgeEligible,
@@ -423,87 +419,6 @@ fun SettingsScreen(
                 }
             }
             Spacer(Modifier.height(12.dp))
-        }
-
-        val hasExistingPremiumAccess = subscriptionState.hasEntitlement || subscriptionState.isPro
-        val showBetaProgramCard = shouldShowBetaProgramSettingsEntry(
-            state = betaProgramState,
-            hasPremiumAccess = hasExistingPremiumAccess,
-        )
-        if (showBetaProgramCard) {
-        val betaCard = betaProgramState.run {
-            com.torve.domain.beta.BetaProgramStatus(
-                signedIn = isSignedIn,
-                applicationStatus = applicationStatus,
-                betaAccess = com.torve.domain.beta.BetaAccessState(
-                    active = betaAccessActive,
-                    expiresAt = betaAccessExpiresAt,
-                    status = betaGrantStatus,
-                ),
-                daysRemaining = daysRemaining,
-                eligibility = com.torve.domain.beta.BetaEligibilityState(
-                    canApply = canApply,
-                    blockedReason = blockedReason,
-                    isEmailVerificationRequired = isEmailVerificationRequired,
-                ),
-                signupCloseAt = signupCloseAt,
-                freeAccessEndAt = freeAccessEndAt,
-                discordInviteUrl = discordInviteUrl,
-            ).toSettingsCardState()
-        }
-        val betaSubtitle = when {
-            hasExistingPremiumAccess &&
-                betaProgramState.isSignedIn &&
-                !betaProgramState.isEmailVerificationRequired &&
-                !betaProgramState.betaAccessActive &&
-                betaProgramState.blockedReason != com.torve.domain.beta.BetaBlockedReason.BETA_SIGNUP_CLOSED &&
-                betaProgramState.blockedReason != com.torve.domain.beta.BetaBlockedReason.BETA_ACCESS_ENDED ->
-                BetaProgramCopy.PREMIUM_TESTER_APPLICATION
-            else -> betaCard.subtitle
-        }
-        Card(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clickable(onClick = onBetaProgramClick),
-            colors = CardDefaults.cardColors(containerColor = Charcoal),
-        ) {
-            Column(modifier = Modifier.padding(16.dp)) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(
-                        text = betaCard.title,
-                        style = MaterialTheme.typography.titleMedium,
-                        color = Snow,
-                        fontWeight = FontWeight.Bold,
-                    )
-                    betaCard.badge?.let {
-                        Text(
-                            text = it,
-                            style = MaterialTheme.typography.labelSmall,
-                            color = Amber,
-                        )
-                    }
-                }
-                Spacer(Modifier.height(4.dp))
-                Text(
-                    text = betaSubtitle,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = Torve.colors.textSecondary,
-                )
-                Spacer(Modifier.height(10.dp))
-                OutlinedButton(
-                    onClick = onBetaProgramClick,
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Amber),
-                ) {
-                    ButtonLabel("Open Beta Program")
-                }
-            }
-        }
-        Spacer(Modifier.height(12.dp))
         }
 
         // Account & Sync card (top of settings)
@@ -740,7 +655,7 @@ fun SettingsScreen(
         // shown for signed-in users on billing-enabled builds — the top
         // Subscription card already exposes Manage Subscription / Upgrade
         // to Premium. For signed-out users we still surface a path into
-        // the paywall here so they can browse plans without signing in.
+        // the account access surface here without requiring sign-in.
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -812,42 +727,44 @@ fun SettingsScreen(
                     }
                 }
             }
-            if (subscriptionState.isLoggedIn) {
-                Spacer(Modifier.height(8.dp))
-                OutlinedButton(
-                    onClick = {
-                        refreshAllQueued = true
-                        refreshAllStatus = RefreshAllUiStatus(
-                            label = "Syncing account data...",
-                            progress = 0f,
-                            complete = false,
-                            failed = false,
-                        )
-                        scope.launch {
-                            runCatching {
-                                accountSessionCoordinator.refreshAccountDataAfterCredentialTransfer(
-                                    initialMessage = "Refreshing account data...",
-                                )
-                            }
-                            viewModel.refreshSettings()
-                            subscriptionViewModel.refreshAccess()
-                            syncCoordinator.refreshDevices()
-                            channelsViewModel.loadPlaylists(recoverEmptyCatalog = true)
-                            channelsViewModel.loadFavorites()
-                            PostSignInRefresh.enqueueFullRefreshAfterCredentialImport(settingsContext)
-                            refreshAllRunId += 1
+        }
+        // Account restore is part of the free product contract. Keep the
+        // recovery action independent of the optional billing surface.
+        if (subscriptionState.isLoggedIn) {
+            Spacer(Modifier.height(8.dp))
+            OutlinedButton(
+                onClick = {
+                    refreshAllQueued = true
+                    refreshAllStatus = RefreshAllUiStatus(
+                        label = "Syncing account data...",
+                        progress = 0f,
+                        complete = false,
+                        failed = false,
+                    )
+                    scope.launch {
+                        runCatching {
+                            accountSessionCoordinator.refreshAccountDataAfterCredentialTransfer(
+                                initialMessage = "Refreshing account data...",
+                            )
                         }
-                    },
-                    enabled = !refreshAllQueued,
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Amber),
-                ) {
-                    ButtonLabel(stringResource(R.string.settings_refresh_all))
-                }
-                if (refreshAllQueued) {
-                    Spacer(Modifier.height(6.dp))
-                    RefreshAllStatusView(refreshAllStatus)
-                }
+                        viewModel.refreshSettings()
+                        subscriptionViewModel.refreshAccess()
+                        syncCoordinator.refreshDevices()
+                        channelsViewModel.loadPlaylists(recoverEmptyCatalog = true)
+                        channelsViewModel.loadFavorites()
+                        PostSignInRefresh.enqueueFullRefreshAfterCredentialImport(settingsContext)
+                        refreshAllRunId += 1
+                    }
+                },
+                enabled = !refreshAllQueued,
+                modifier = Modifier.fillMaxWidth(),
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = Amber),
+            ) {
+                ButtonLabel(stringResource(R.string.settings_refresh_all))
+            }
+            if (refreshAllQueued) {
+                Spacer(Modifier.height(6.dp))
+                RefreshAllStatusView(refreshAllStatus)
             }
         }
         Spacer(Modifier.height(8.dp))
@@ -1040,6 +957,57 @@ fun SettingsScreen(
 
                 Spacer(Modifier.height(12.dp))
 
+                var minSizePerHourText by remember(state.minSourceSizePerHourMb) {
+                    mutableStateOf(state.minSourceSizePerHourMb.takeIf { it > 0 }?.toString().orEmpty())
+                }
+                SettingsTextField(
+                    value = minSizePerHourText,
+                    onValueChange = { text ->
+                        minSizePerHourText = text.filter(Char::isDigit)
+                        viewModel.setMinSourceSizePerHourMb(minSizePerHourText.toIntOrNull() ?: 0)
+                    },
+                    label = stringResource(R.string.settings_min_size_per_hour),
+                    placeholder = stringResource(R.string.settings_min_size_per_hour_hint),
+                )
+
+                Spacer(Modifier.height(12.dp))
+
+                SettingsTextField(
+                    value = state.preferredAudioLanguage,
+                    onValueChange = viewModel::setPreferredAudioLanguage,
+                    label = stringResource(R.string.settings_preferred_audio_languages),
+                    placeholder = stringResource(R.string.settings_preferred_audio_languages_hint),
+                )
+
+                Spacer(Modifier.height(12.dp))
+
+                SettingsChoiceField(
+                    label = stringResource(R.string.settings_source_language_match),
+                    value = state.sourceLanguageMatchMode.label,
+                    choices = SourceLanguageMatchMode.entries.map { it.name to it.label },
+                    onSelected = { viewModel.setSourceLanguageMatchMode(SourceLanguageMatchMode.valueOf(it)) },
+                )
+
+                Spacer(Modifier.height(12.dp))
+
+                SettingsChoiceField(
+                    label = stringResource(R.string.settings_unknown_source_size),
+                    value = state.unknownSourceSizePolicy.label,
+                    choices = UnknownSourceMetadataPolicy.entries.map { it.name to it.label },
+                    onSelected = { viewModel.setUnknownSourceSizePolicy(UnknownSourceMetadataPolicy.valueOf(it)) },
+                )
+
+                Spacer(Modifier.height(12.dp))
+
+                SettingsChoiceField(
+                    label = stringResource(R.string.settings_source_fallback),
+                    value = state.sourceFallbackPolicy.label,
+                    choices = SourceFallbackPolicy.entries.map { it.name to it.label },
+                    onSelected = { viewModel.setSourceFallbackPolicy(SourceFallbackPolicy.valueOf(it)) },
+                )
+
+                Spacer(Modifier.height(12.dp))
+
                 // Cached only toggle
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -1161,22 +1129,65 @@ fun SettingsScreen(
 
                 Spacer(Modifier.height(12.dp))
 
-                // Auto-Play Next Episode toggle
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
+                SettingsChoiceField(
+                    label = stringResource(R.string.settings_next_episode_timing),
+                    value = state.nextEpisodeMode.label,
+                    choices = NextEpisodeMode.entries.map { it.name to it.label },
+                    onSelected = { viewModel.setNextEpisodeMode(NextEpisodeMode.valueOf(it)) },
+                )
+
+                Spacer(Modifier.height(12.dp))
+
+                SettingsChoiceField(
+                    label = stringResource(R.string.settings_next_episode_preparation),
+                    value = state.nextEpisodePreparationMode.label,
+                    choices = NextEpisodePreparationMode.entries.map { it.name to it.label },
+                    onSelected = {
+                        viewModel.setNextEpisodePreparationMode(NextEpisodePreparationMode.valueOf(it))
+                    },
+                )
+
+                if (state.nextEpisodePreparationMode == NextEpisodePreparationMode.RESOLVE_AND_BUFFER) {
+                    Spacer(Modifier.height(12.dp))
+                    var preloadSecondsText by remember(state.nextEpisodePreloadBufferSeconds) {
+                        mutableStateOf(state.nextEpisodePreloadBufferSeconds.toString())
+                    }
+                    SettingsTextField(
+                        value = preloadSecondsText,
+                        onValueChange = { text ->
+                            preloadSecondsText = text.filter(Char::isDigit)
+                            preloadSecondsText.toIntOrNull()?.let(viewModel::setNextEpisodePreloadBufferSeconds)
+                        },
+                        label = stringResource(R.string.settings_preload_buffer_seconds),
+                    )
+                    Spacer(Modifier.height(12.dp))
+                    var preloadMaxText by remember(state.nextEpisodePreloadMaxMb) {
+                        mutableStateOf(state.nextEpisodePreloadMaxMb.toString())
+                    }
+                    SettingsTextField(
+                        value = preloadMaxText,
+                        onValueChange = { text ->
+                            preloadMaxText = text.filter(Char::isDigit)
+                            preloadMaxText.toIntOrNull()?.let(viewModel::setNextEpisodePreloadMaxMb)
+                        },
+                        label = stringResource(R.string.settings_preload_max_mb),
+                    )
+                }
+
+                Spacer(Modifier.height(12.dp))
+
+                Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     Column(modifier = Modifier.weight(1f)) {
-                        Text(stringResource(R.string.settings_auto_play_next), style = MaterialTheme.typography.bodyMedium)
+                        Text(stringResource(R.string.settings_preload_wifi_only), style = MaterialTheme.typography.bodyMedium)
                         Text(
-                            stringResource(R.string.settings_auto_play_next_desc),
+                            stringResource(R.string.settings_preload_wifi_only_desc),
                             style = MaterialTheme.typography.bodySmall,
                             color = Torve.colors.textSecondary,
                         )
                     }
                     Switch(
-                        checked = state.autoPlayNextEpisodeEnabled,
-                        onCheckedChange = { viewModel.setAutoPlayNextEpisodeEnabled(it) },
+                        checked = state.nextEpisodePreloadWifiOnly,
+                        onCheckedChange = viewModel::setNextEpisodePreloadWifiOnly,
                         colors = SwitchDefaults.colors(
                             checkedThumbColor = Amber,
                             checkedTrackColor = Amber.copy(alpha = 0.3f),
@@ -2323,6 +2334,54 @@ private fun SettingsTextField(
                 }
             },
         )
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun SettingsChoiceField(
+    label: String,
+    value: String,
+    choices: List<Pair<String, String>>,
+    onSelected: (String) -> Unit,
+) {
+    var expanded by remember { mutableStateOf(false) }
+    ExposedDropdownMenuBox(
+        expanded = expanded,
+        onExpandedChange = { expanded = !expanded },
+    ) {
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth()
+                .menuAnchor(MenuAnchorType.PrimaryNotEditable),
+            shape = RoundedCornerShape(8.dp),
+            color = Gunmetal,
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 14.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(label, style = MaterialTheme.typography.bodySmall, color = Torve.colors.textSecondary)
+                    Spacer(Modifier.height(2.dp))
+                    Text(value, style = MaterialTheme.typography.bodyMedium, color = Snow)
+                }
+                Icon(Icons.Default.ArrowDropDown, contentDescription = null, tint = Torve.colors.textSecondary)
+            }
+        }
+        ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            choices.forEach { (key, display) ->
+                DropdownMenuItem(
+                    text = { MenuItemLabel(display) },
+                    onClick = {
+                        onSelected(key)
+                        expanded = false
+                    },
+                )
+            }
+        }
     }
 }
 

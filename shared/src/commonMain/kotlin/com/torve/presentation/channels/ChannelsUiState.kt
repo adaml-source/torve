@@ -31,6 +31,17 @@ sealed interface EpgState {
     ) : EpgState
 }
 
+/** Lightweight bridge that exposes channel state only after Channels is opened. */
+class ChannelsStateRelay {
+    private var source: kotlinx.coroutines.flow.StateFlow<ChannelsUiState>? = null
+
+    fun attach(source: kotlinx.coroutines.flow.StateFlow<ChannelsUiState>) {
+        this.source = source
+    }
+
+    fun snapshot(): ChannelsUiState = source?.value ?: ChannelsUiState()
+}
+
 data class ChannelsUiState(
     val playlists: List<ChannelPlaylist> = emptyList(),
     val selectedPlaylistId: String? = null,

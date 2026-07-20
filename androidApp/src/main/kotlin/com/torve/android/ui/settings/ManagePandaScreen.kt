@@ -233,7 +233,7 @@ fun ManagePandaScreen(
                         )
                         Spacer(Modifier.height(4.dp))
                         Text(
-                            "Your debrid token may have expired. Go to Settings â†’ Integrations â†’ Debrid to reconnect, then tap Reconfigure below to sync.",
+                            "Your debrid token may have expired. Go to Settings → Integrations → Debrid to reconnect, then tap Reconfigure below to sync.",
                             style = MaterialTheme.typography.bodySmall,
                             color = Silver,
                         )

@@ -34,12 +34,17 @@ class StreamSelector(
         preferences: StreamPreferences,
         deviceCaps: DeviceCodecCaps,
         h264Only: Boolean = false,
+        selectionContext: StreamSelectionContext = StreamSelectionContext(),
     ): List<ParsedStream> {
         if (streams.isEmpty()) return emptyList()
 
         val maxHeight = effectiveMaxHeight(preferences)
+        val policyDecisions = streams.associateWith { stream ->
+            StreamAutoSelectionPolicy.evaluate(stream, preferences, selectionContext)
+        }
         val eligible = streams.filter { stream ->
-            passesQualityCap(stream, maxHeight) &&
+            policyDecisions.getValue(stream).eligible &&
+                passesQualityCap(stream, maxHeight) &&
                 passesCodecFilter(stream, deviceCaps) &&
                 passesH264OnlyFilter(stream, h264Only)
         }
@@ -62,7 +67,8 @@ class StreamSelector(
                     stream.directUrl != null -> 14
                     else -> 0
                 }
-                stream.copy(score = (base + qualityBias + hostAdj + directPlayableBonus).coerceIn(0, 100))
+                val policyAdjustment = policyDecisions.getValue(stream).scoreAdjustment
+                stream.copy(score = (base + qualityBias + hostAdj + directPlayableBonus + policyAdjustment).coerceIn(0, 100))
             }
             .sortedByDescending { it.score }
     }

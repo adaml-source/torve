@@ -22,6 +22,7 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -50,7 +51,9 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -111,6 +114,7 @@ fun SearchScreen(
     syncCoordinator: SyncCoordinator = koinInject(),
 ) {
     val state by viewModel.state.collectAsState()
+    LaunchedEffect(viewModel) { viewModel.ensureDiscovery() }
     val syncState by syncCoordinator.state.collectAsState()
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -122,6 +126,7 @@ fun SearchScreen(
         presetId = null,
         globalDefaultPresetId = settingsState.globalDefaultPresetId,
     )
+    val advancedFilter = state.filter.copy(mediaType = null)
 
     CompositionLocalProvider(
         LocalCardStyle provides defaultCardStyle,
@@ -224,7 +229,7 @@ fun SearchScreen(
             }
 
             // Filter button with active indicator
-            val activeCount = state.filter.activeCount
+            val activeCount = advancedFilter.activeCount
             BadgedBox(
                 badge = {
                     if (activeCount > 0) {
@@ -277,8 +282,35 @@ fun SearchScreen(
             VoiceInputPhase.Idle -> Unit
         }
 
+        // Search is also the mobile discovery hub. These persistent scopes
+        // make Movies and TV browseable without requiring a typed query or
+        // hiding the choice inside the advanced filter sheet.
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 6.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            listOf(
+                null to stringResource(R.string.catalog_all),
+                "movie" to stringResource(R.string.nav_movies),
+                "tv" to stringResource(R.string.nav_tv_shows),
+            ).forEach { (type, label) ->
+                FilterChip(
+                    selected = state.filter.mediaType == type,
+                    onClick = { viewModel.applyFilter(state.filter.copy(mediaType = type)) },
+                    label = { Text(label) },
+                    colors = FilterChipDefaults.filterChipColors(
+                        selectedContainerColor = Amber,
+                        selectedLabelColor = Obsidian,
+                    ),
+                    shape = RoundedCornerShape(20.dp),
+                )
+            }
+        }
+
         // ── Active Filter Chips ──
-        if (state.filter.isActive) {
+        if (advancedFilter.isActive) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -286,18 +318,6 @@ fun SearchScreen(
                     .horizontalScroll(rememberScrollState()),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                state.filter.mediaType?.let { type ->
-                    FilterChip(
-                        selected = true,
-                        onClick = { viewModel.applyFilter(state.filter.copy(mediaType = null)) },
-                        label = { Text(if (type == "movie") stringResource(R.string.nav_movies) else stringResource(R.string.nav_tv_shows)) },
-                        colors = FilterChipDefaults.filterChipColors(
-                            selectedContainerColor = AmberSubtle,
-                            selectedLabelColor = Amber,
-                        ),
-                        shape = RoundedCornerShape(20.dp),
-                    )
-                }
                 if (state.filter.genreIds.isNotEmpty()) {
                     val names = state.filter.genreIds.mapNotNull { id ->
                         genreOptions.find { it.first == id }?.second
@@ -511,6 +531,9 @@ fun SearchScreen(
                         SearchResultsGrid(
                             items = displayItems,
                             onMediaClick = onMediaClick,
+                            hasMore = if (state.query.length >= 2) state.searchHasMore else state.discoverHasMore,
+                            isLoadingMore = state.isLoadingMore,
+                            onLoadMore = viewModel::loadMore,
                         )
                     } else {
                         CircularProgressIndicator(
@@ -527,6 +550,9 @@ fun SearchScreen(
                     SearchResultsGrid(
                         items = displayItems,
                         onMediaClick = onMediaClick,
+                        hasMore = if (state.query.length >= 2) state.searchHasMore else state.discoverHasMore,
+                        isLoadingMore = state.isLoadingMore,
+                        onLoadMore = viewModel::loadMore,
                     )
                 }
 
@@ -633,9 +659,23 @@ fun SearchScreen(
 private fun SearchResultsGrid(
     items: List<com.torve.domain.model.MediaItem>,
     onMediaClick: (com.torve.domain.model.MediaItem) -> Unit,
+    hasMore: Boolean,
+    isLoadingMore: Boolean,
+    onLoadMore: () -> Unit,
 ) {
+    val gridState = rememberLazyGridState()
+    val shouldLoadMore by remember(items.size, hasMore, isLoadingMore) {
+        derivedStateOf {
+            val lastVisible = gridState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1
+            items.isNotEmpty() && lastVisible >= items.lastIndex - 6 && hasMore && !isLoadingMore
+        }
+    }
+    LaunchedEffect(shouldLoadMore) {
+        if (shouldLoadMore) onLoadMore()
+    }
     LazyVerticalGrid(
         columns = GridCells.Adaptive(minSize = 130.dp),
+        state = gridState,
         contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
         horizontalArrangement = Arrangement.spacedBy(12.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
@@ -652,6 +692,18 @@ private fun SearchResultsGrid(
                 sizeOverride = CardSize.MEDIUM,
                 onClick = { onMediaClick(item) },
             )
+        }
+        if (isLoadingMore) {
+            item(key = "search_loading_more", span = { androidx.compose.foundation.lazy.grid.GridItemSpan(maxLineSpan) }) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(20.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    CircularProgressIndicator(color = Amber, modifier = Modifier.size(24.dp), strokeWidth = 2.dp)
+                }
+            }
         }
     }
 }

@@ -47,13 +47,15 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import coil3.compose.AsyncImage
+import coil3.compose.SubcomposeAsyncImage
 import com.torve.android.ui.components.CardSize
 import com.torve.android.ui.components.LocalCardStyle
 import com.torve.android.ui.components.LocalRatingPrefs
 import com.torve.android.ui.components.PosterCard
+import com.torve.android.ui.components.ShimmerBox
 import com.torve.android.ui.components.mediaItemLazyKey
 import com.torve.android.ui.theme.Amber
+import com.torve.android.ui.theme.Gunmetal
 import com.torve.android.ui.theme.Torve
 import com.torve.domain.model.MediaItem
 import com.torve.domain.model.resolveCardStyle
@@ -134,14 +136,34 @@ fun PersonScreen(
                             .padding(horizontal = 20.dp, vertical = 8.dp),
                         horizontalAlignment = Alignment.CenterHorizontally,
                     ) {
-                        state.profileUrl?.let { url ->
-                            AsyncImage(
+                        state.profileUrl?.trim()?.takeIf {
+                            it.startsWith("https://") || it.startsWith("http://")
+                        }?.let { url ->
+                            SubcomposeAsyncImage(
                                 model = url,
                                 contentDescription = state.personName,
                                 modifier = Modifier
                                     .size(100.dp)
                                     .clip(CircleShape),
                                 contentScale = ContentScale.Crop,
+                                loading = { ShimmerBox(modifier = Modifier.fillMaxSize()) },
+                                error = {
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxSize()
+                                            .background(Gunmetal),
+                                        contentAlignment = Alignment.Center,
+                                    ) {
+                                        Text(
+                                            state.personName.split(" ")
+                                                .mapNotNull { it.firstOrNull()?.toString() }
+                                                .take(2)
+                                                .joinToString(""),
+                                            color = Torve.colors.textTertiary,
+                                            style = MaterialTheme.typography.titleLarge,
+                                        )
+                                    }
+                                },
                             )
                             Spacer(Modifier.height(8.dp))
                         }

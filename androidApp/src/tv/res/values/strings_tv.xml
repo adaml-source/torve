@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="utf-8"?>
+﻿<?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="tv_nav_iptv">Channels</string>
     <string name="tv_nav_search">Search</string>
@@ -28,7 +28,7 @@
 
     <string name="tv_action_play">Play</string>
     <string name="tv_streams_pick">Pick a stream</string>
-    <string name="tv_watchlist_add_to">Add to…</string>
+    <string name="tv_watchlist_add_to">Add to&#8230;</string>
     <string name="tv_watchlist_local_only">Watchlist only (local)</string>
     <string name="tv_action_details">Details</string>
     <string name="tv_action_add_watchlist">Add to Watchlist</string>
@@ -88,8 +88,8 @@
     <string name="tv_settings_sync_status">Sync Status</string>
 
     <!-- Voice search -->
-    <string name="tv_voice_listening">Listening…</string>
-    <string name="tv_voice_processing">Processing voice input…</string>
+    <string name="tv_voice_listening">Listening&#8230;</string>
+    <string name="tv_voice_processing">Processing voice input&#8230;</string>
     <string name="tv_voice_unavailable">Voice input is not available on this device</string>
 
     <!-- IPTV -->
@@ -102,7 +102,7 @@
     <string name="tv_iptv_channels_count">%d channels</string>
     <string name="tv_iptv_now_playing">Now Playing</string>
     <string name="tv_iptv_no_channels_in_group">No channels in this group</string>
-    <string name="tv_iptv_search_hint">Search channels…</string>
+    <string name="tv_iptv_search_hint">Search channels&#8230;</string>
     <string name="tv_iptv_filter_all">All</string>
     <string name="tv_iptv_filter_hd">HD</string>
     <string name="tv_iptv_filter_fhd">FHD</string>
@@ -119,7 +119,7 @@
     <string name="tv_settings_pair_first">Pair a phone first to sync</string>
     <string name="tv_settings_region">Content Region</string>
     <string name="tv_settings_streaming_services">Availability Services</string>
-    <string name="tv_settings_home_layout_note">To customize your Home tab layout, card styles, rating sources, and availability services — configure them on the Torve mobile app and tap \"Sync Settings from Phone\" above.</string>
+    <string name="tv_settings_home_layout_note">To customize your Home tab layout, card styles, rating sources, and availability services &#8212; configure them on the Torve mobile app and tap \"Sync Settings from Phone\" above.</string>
 
     <!-- Setup mode -->
     <string name="tv_settings_setup_prompt">How do you use Torve?</string>
@@ -129,11 +129,11 @@
     <string name="tv_settings_mode_android_desc">Pair your phone to sync all settings instantly</string>
     <string name="tv_settings_mode_ios">I have Torve on iOS</string>
     <string name="tv_settings_mode_ios_desc">Pair your iPhone to sync settings</string>
-    <string name="tv_settings_mode_tv_only">TV only — no phone app</string>
+    <string name="tv_settings_mode_tv_only">TV only &#8212; no phone app</string>
     <string name="tv_settings_mode_tv_only_desc">Set up everything directly on your TV</string>
     <string name="tv_settings_simkl">SIMKL</string>
     <string name="tv_settings_change_provider">Cloud Provider</string>
-    <string name="tv_settings_sync_note">To customize Home layout, card styles, and rating sources — configure on the mobile app and tap Sync.</string>
+    <string name="tv_settings_sync_note">To customize Home layout, card styles, and rating sources &#8212; configure on the mobile app and tap Sync.</string>
 
     <!-- Detail screen -->
     <string name="tv_detail_director">Director</string>
@@ -141,8 +141,8 @@
     <string name="tv_detail_more_like_this">More Like This</string>
     <string name="tv_detail_connect_cloud">Connect Cloud</string>
     <string name="tv_detail_select_manually">Select Manually</string>
-    <string name="tv_detail_finding_streams">Finding Streams…</string>
-    <string name="tv_detail_resolving">Resolving…</string>
+    <string name="tv_detail_finding_streams">Finding Streams&#8230;</string>
+    <string name="tv_detail_resolving">Resolving&#8230;</string>
     <string name="tv_detail_watched">Watched</string>
     <string name="tv_detail_unwatched">Unwatched</string>
     <string name="tv_detail_rate">Rate</string>
@@ -157,7 +157,7 @@
     <string name="tv_notification_search_query">Search: %1$s</string>
     <string name="tv_notification_trailer_unavailable">Trailer unavailable</string>
     <string name="tv_notification_welcome">Welcome to Torve TV! Use the left rail to navigate.</string>
-    <string name="tv_restore_account_data">Restoring your account data…</string>
+    <string name="tv_restore_account_data">Restoring your account data&#8230;</string>
     <string name="tv_restore_playlists_count">%1$d/%2$d playlists</string>
     <string name="tv_action_resume">Resume</string>
     <string name="tv_action_start_over">Start Over</string>
@@ -218,7 +218,7 @@
     <string name="tv_settings_kodi_test">Test</string>
     <string name="tv_settings_test_success">Connected</string>
     <string name="tv_settings_test_failed">Connection failed</string>
-    <string name="tv_settings_validating">Validating…</string>
+    <string name="tv_settings_validating">Validating&#8230;</string>
     <string name="tv_settings_valid">Valid</string>
     <string name="tv_settings_invalid">Invalid</string>
     <string name="tv_settings_not_set">Not set</string>
@@ -233,8 +233,8 @@
 
     <!-- App section additions -->
     <string name="tv_settings_dedupe">Deduplicate Streams</string>
-    <string name="tv_settings_dedupe_on">Enabled — duplicate streams hidden</string>
-    <string name="tv_settings_dedupe_off">Disabled — all streams shown</string>
+    <string name="tv_settings_dedupe_on">Enabled &#8212; duplicate streams hidden</string>
+    <string name="tv_settings_dedupe_off">Disabled &#8212; all streams shown</string>
     <string name="tv_settings_home_layout">Home Layout</string>
     <string name="tv_settings_home_layout_subtitle">Customize sections on your Home tab</string>
     <string name="tv_settings_ratings">Rating Providers</string>
@@ -266,7 +266,7 @@
     <string name="tv_settings_no_addons">No addons installed</string>
     <string name="tv_settings_addon_install_url">Addon Manifest URL</string>
     <string name="tv_settings_addon_install">Install Addon</string>
-    <string name="tv_settings_addon_installing">Installing…</string>
+    <string name="tv_settings_addon_installing">Installing&#8230;</string>
     <string name="tv_settings_addon_enabled">Enabled</string>
     <string name="tv_settings_addon_disabled">Disabled</string>
     <string name="tv_settings_addon_remove">Remove</string>
@@ -276,7 +276,7 @@
     <string name="tv_settings_mdblist_browse">Browse MDBList</string>
     <string name="tv_settings_mdblist_popular">Popular Lists</string>
     <string name="tv_settings_mdblist_search">Search Lists</string>
-    <string name="tv_settings_mdblist_search_hint">Search community lists…</string>
+    <string name="tv_settings_mdblist_search_hint">Search community lists&#8230;</string>
     <string name="tv_settings_mdblist_no_results">No results</string>
     <string name="tv_settings_mdblist_items">%d items</string>
     <string name="tv_settings_mdblist_by">by %s</string>
@@ -285,15 +285,15 @@
     <string name="tv_settings_mdblist_add">Add</string>
     <string name="tv_settings_mdblist_added">Added</string>
     <string name="tv_settings_mdblist_no_api_key">Set MDBList API key above first</string>
-    <string name="tv_settings_mdblist_loading">Loading lists…</string>
+    <string name="tv_settings_mdblist_loading">Loading lists&#8230;</string>
 
     <!-- Custom section AI -->
     <string name="tv_home_layout_ai_prompt">Describe what you want</string>
-    <string name="tv_home_layout_ai_hint">e.g. cozy winter movies, dark sci-fi thrillers…</string>
+    <string name="tv_home_layout_ai_hint">e.g. cozy winter movies, dark sci-fi thrillers&#8230;</string>
     <string name="tv_home_layout_ai_search">Find with AI</string>
-    <string name="tv_home_layout_ai_searching">Searching…</string>
+    <string name="tv_home_layout_ai_searching">Searching&#8230;</string>
     <string name="tv_home_layout_ai_found">AI filled: %s</string>
-    <string name="tv_home_layout_ai_error">AI search failed — try again</string>
+    <string name="tv_home_layout_ai_error">AI search failed &#8212; try again</string>
     <string name="tv_home_layout_save">Save Section</string>
     <string name="tv_home_layout_media_type">Media Type</string>
 
@@ -331,7 +331,7 @@
     <string name="tv_settings_show_all">Show All</string>
     <string name="tv_settings_hide_all">Hide All</string>
     <string name="tv_settings_channels_visible">%1$d / %2$d visible</string>
-    <string name="tv_settings_no_categories">No channel groups loaded — select a playlist first</string>
+    <string name="tv_settings_no_categories">No channel groups loaded &#8212; select a playlist first</string>
 
     <string name="tv_settings_refresh_epg_title">Refresh EPG</string>
     <string name="tv_settings_refresh_epg_subtitle">Download fresh programme guide data for the selected playlist</string>
@@ -345,11 +345,11 @@
     <string name="tv_settings_section_language_region">Language &amp; Region</string>
     <string name="tv_settings_section_content">Content Management</string>
     <string name="tv_settings_autoplay">Auto-play Best Stream</string>
-    <string name="tv_settings_autoplay_on">Enabled — plays top stream automatically</string>
-    <string name="tv_settings_autoplay_off">Disabled — shows stream picker</string>
+    <string name="tv_settings_autoplay_on">Enabled &#8212; plays top stream automatically</string>
+    <string name="tv_settings_autoplay_off">Disabled &#8212; shows stream picker</string>
     <string name="tv_settings_autoplay_next">Auto-play Next Episode</string>
-    <string name="tv_settings_autoplay_next_on">Enabled — next episode plays automatically</string>
-    <string name="tv_settings_autoplay_next_off">Disabled — returns to detail screen</string>
+    <string name="tv_settings_autoplay_next_on">Enabled &#8212; next episode plays automatically</string>
+    <string name="tv_settings_autoplay_next_off">Disabled &#8212; returns to detail screen</string>
     <string name="tv_settings_min_quality">Minimum Quality</string>
     <string name="tv_settings_max_quality">Maximum Quality</string>
     <string name="tv_settings_select_quality">Select Quality</string>
@@ -360,7 +360,7 @@
     <string name="tv_library_tab_vod">VOD</string>
     <string name="tv_library_tab_downloads">Downloads</string>
     <string name="tv_library_tab_recordings">Recordings</string>
-    <string name="tv_library_recordings_coming_soon">Live TV recordings — coming soon</string>
+    <string name="tv_library_recordings_coming_soon">Live TV recordings &#8212; coming soon</string>
     <string name="tv_library_no_downloads">No downloads yet</string>
 
     <!-- Download actions -->
@@ -434,7 +434,7 @@
     <string name="tv_settings_realdebrid_managed_connected_as">Managed by Panda. Connected as %1$s.</string>
     <string name="tv_settings_realdebrid_managed_reconnect">Managed by Panda. Needs reconnect: %1$s</string>
     <string name="tv_settings_realdebrid_managed_not_connected">Managed by Panda. Not connected.</string>
-    <string name="tv_settings_auth_waiting_authorization">Waiting for authorization…</string>
+    <string name="tv_settings_auth_waiting_authorization">Waiting for authorization&#8230;</string>
     <string name="tv_settings_auth_open_url_code">Open the URL on another device and enter the code.</string>
     <string name="tv_settings_panda_health_monitor">Panda health monitor</string>
     <string name="tv_settings_panda_health_monitor_desc">Check whether streaming services need repair before playback fails.</string>
@@ -443,10 +443,11 @@
     <string name="tv_settings_open_credential_transfer">Open credential transfer</string>
     <string name="tv_settings_open_diagnostics">Open diagnostics</string>
     <string name="tv_notification_device_removed_data_cleared">This TV was removed from your active devices. Local Torve data was cleared.</string>
-    <string name="tv_notification_setup_sync_premium_verify_failed">Setup sync could not verify Premium on this TV.</string>
-    <string name="tv_notification_setup_sync_premium_device_blocked">Setup sync is blocked until this TV has an active Premium device slot.</string>
-    <string name="tv_notification_setup_sync_premium_required">Premium is required before this TV can receive setup sync.</string>
-    <string name="tv_notification_setup_sync_premium_offline">Connect to Torve to verify Premium before receiving setup sync.</string>
+    <string name="tv_notification_setup_sync_premium_verify_failed">Setup sync could not refresh account access on this TV.</string>
+    <string name="tv_notification_setup_sync_premium_device_blocked">Setup sync is waiting for this TV device registration.</string>
+    <string name="tv_notification_setup_sync_premium_required">This TV needs account setup before receiving setup sync.</string>
+    <string name="tv_notification_setup_sync_premium_offline">Connect to Torve before receiving setup sync.</string>
+    <string name="tv_notification_setup_sync_refresh_failed">Setup sync could not refresh account state. Continuing with the received setup.</string>
     <string name="tv_notification_invalid_settings_data">Invalid settings data: %1$s</string>
     <string name="tv_notification_sync_import_failed">Sync import failed: %1$s</string>
     <string name="tv_notification_settings_synced">Settings synced: %1$s</string>
@@ -459,11 +460,11 @@
     <string name="tv_notification_sync_summary_progress">%1$d progress entries</string>
     <string name="tv_notification_sync_error">Sync error: %1$s</string>
     <string name="tv_notification_downloads_completed">%1$d downloads completed</string>
-    <string name="tv_unlock_purchase_phone_title">Purchase options</string>
-    <string name="tv_unlock_purchase_phone_body">You can upgrade on the website from a phone or desktop: https://torve.app\n\nYou can also buy through Google Play in Torve on a phone or tablet, or use Stripe checkout from this TV. Stripe opens in the browser; the purchase is not completed inside the TV app.\n\nAfter purchasing, refresh access or sign in again so Premium is confirmed by your account.</string>
-    <string name="tv_unlock_purchase_options_title">Purchase options</string>
-    <string name="tv_unlock_purchase_options_body">Website on phone or desktop: https://torve.app\n\nGoogle Play on phone or tablet: open Torve and go to Settings &gt; Subscription.\n\nStripe on this TV: go to the Premium card in Settings. Stripe opens secure checkout in the browser; the purchase is not completed inside the TV app.</string>
-    <string name="tv_unlock_go_to_premium">Go to Premium</string>
+    <string name="tv_unlock_purchase_phone_title">Torve is free software</string>
+    <string name="tv_unlock_purchase_phone_body">Torve is free software. No subscriptions. No paid tiers.</string>
+    <string name="tv_unlock_purchase_options_title">Torve is free software</string>
+    <string name="tv_unlock_purchase_options_body">Torve is free software. No subscriptions. No paid tiers.</string>
+    <string name="tv_unlock_go_to_premium">Continue</string>
     <string name="tv_action_got_it">Got it</string>
     <string name="tv_home_on_now">On Now</string>
     <string name="tv_home_available_now">Available Now</string>
@@ -501,12 +502,12 @@
     <string name="tv_auth_sign_out_second_press_hint">Requires a second press to avoid accidental sign-out.</string>
     <string name="tv_settings_pair_phone_title">Sign in with your phone</string>
     <string name="tv_settings_pair_phone_subtitle">Scan a QR with the Torve app on your phone - no typing required.</string>
-    <string name="tv_purchase_verifying_premium">Purchase received. Verifying Premium...</string>
-    <string name="tv_purchase_restore_started">Restore started. Checking Premium access...</string>
-    <string name="tv_purchase_cancelled">Purchase cancelled.</string>
-    <string name="tv_purchase_verification_pending">Verification is already pending. Choose Retry Verification or Restore Purchase.</string>
-    <string name="tv_purchase_billing_managed_by">Billing is managed by %1$s.</string>
-    <string name="tv_purchase_choose_billing_store">Choose monthly or lifetime access. Billing is handled by %1$s.</string>
+    <string name="tv_purchase_verifying_premium">Access refresh received.</string>
+    <string name="tv_purchase_restore_started">Access refresh started.</string>
+    <string name="tv_purchase_cancelled">No purchase required.</string>
+    <string name="tv_purchase_verification_pending">Account access refresh is already pending.</string>
+    <string name="tv_purchase_billing_managed_by">No billing is required.</string>
+    <string name="tv_purchase_choose_billing_store">Torve is free software. No billing is required.</string>
     <string name="tv_settings_receive_credentials_import_desc">Show a one-time pairing code to import debrid, Plex, and Panda secrets without typing.</string>
     <string name="tv_settings_receive_credentials_tv_desc">Show a one-time pairing code so a desktop or phone can send debrid, Plex, and Panda credentials without typing on the remote.</string>
     <string name="tv_settings_open_transfer_arrow">Open Transfer &gt;</string>

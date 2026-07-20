@@ -80,8 +80,6 @@ import com.torve.android.tv.TV_PAGE_TOP_GUTTER
 import com.torve.android.tv.TvImagePrefetcher
 import com.torve.android.tv.components.TvBrowsePreviewPanel
 import com.torve.android.tv.components.cacheTvBrowsePreviewEnrichedItem
-import com.torve.android.tv.components.tvExternalCardRatingPrefs
-import com.torve.android.ui.components.PreferredRatingPills
 import com.torve.android.tv.settings.TV_SEE_ALL_POSTER_COLUMN_OPTIONS
 import com.torve.android.tv.settings.rememberTvSeeAllPosterColumnsPreference
 import com.torve.android.tv.settings.setTvSeeAllPosterColumns
@@ -95,10 +93,8 @@ import com.torve.domain.model.MediaRatings
 import com.torve.domain.model.PagedResult
 import com.torve.domain.repository.PreferencesRepository
 import com.torve.presentation.settings.SettingsViewModel
-import com.torve.domain.model.RatingDisplayPrefs
 import com.torve.domain.model.hasRichExternalRating
 import com.torve.domain.model.needsExternalRatingEnrichment
-import com.torve.domain.model.withFallbackTmdbScore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -219,11 +215,6 @@ internal fun TvSeeAllScreen(
     val ratingsEnricher: RatingsEnricher = koinInject()
     val prefsRepo: PreferencesRepository = koinInject()
     val secretStore: IntegrationSecretStore = koinInject()
-    val settingsViewModel: SettingsViewModel = koinInject()
-    val settingsState by settingsViewModel.state.collectAsState()
-    val tvCardRatingPrefs = remember(settingsState.ratingPrefs) {
-        settingsState.ratingPrefs.tvExternalCardRatingPrefs()
-    }
     val isPersonCreditsRail = railKey.startsWith("person_credits_")
     val items = remember { mutableStateListOf<MediaItem>() }
     val filterOptionItems = remember(railKey, mediaType) { mutableStateListOf<MediaItem>() }
@@ -314,7 +305,10 @@ internal fun TvSeeAllScreen(
     var focusedMediaItem by remember { mutableStateOf<MediaItem?>(null) }
     val enrichedSeeAllItemsByKey = remember(railKey, mediaType) { mutableStateMapOf<String, MediaItem>() }
     var lastFocusedIndex by remember { mutableIntStateOf(-1) }
-    val focusRequesters = remember { mutableMapOf<Int, FocusRequester>() }
+    var lastFocusedKey by remember { mutableStateOf<String?>(null) }
+    var pendingGridRestoreKey by remember { mutableStateOf<String?>(null) }
+    var pendingGridRestoreNonce by remember { mutableIntStateOf(0) }
+    val focusRequesters = remember { mutableMapOf<String, FocusRequester>() }
     var ratingEnrichmentAttemptedKeys by remember(railKey, mediaType) { mutableStateOf<Set<String>>(emptySet()) }
     val screenId = remember(railKey, mediaType) { "see_all:$railKey:$mediaType" }
     val filterSignature = remember(selectedGenreIds, selectedStudioIds, selectedYear, selectedMinRating, selectedSortKey) {
@@ -333,6 +327,8 @@ internal fun TvSeeAllScreen(
                     )
                 },
                 requestRestore = { origin, reason ->
+                    pendingGridRestoreKey = origin.itemKey
+                    pendingGridRestoreNonce += 1
                     focusRestoreController.requestRestore(origin = origin, reason = reason)
                 },
             ),
@@ -349,6 +345,8 @@ internal fun TvSeeAllScreen(
             return@BackHandler
         }
         lastFocusedIndex = -1  // Clear so we don't restore when exiting See All itself
+        lastFocusedKey = null
+        pendingGridRestoreKey = null
         focusedMediaItem = null
         onBack()
     })
@@ -420,10 +418,10 @@ internal fun TvSeeAllScreen(
                 railKey == "trending-tv" -> metadataRepo.getTrendingPaged("tv", page)
                 railKey == "popular-movies" -> metadataRepo.getPopularPaged("movie", page)
                 railKey == "popular-tv" -> metadataRepo.getPopularPaged("tv", page)
-                railKey == "top-rated" -> metadataRepo.getTopRatedPaged("movie", page)
+                railKey == "top-rated" -> metadataRepo.getPopularPaged("movie", page)
                 railKey.startsWith("trending_") -> metadataRepo.getTrendingPaged(queryType, page)
                 railKey.startsWith("popular_") -> metadataRepo.getPopularPaged(queryType, page)
-                railKey.startsWith("top_rated_") -> metadataRepo.getTopRatedPaged(queryType, page)
+                railKey.startsWith("top_rated_") -> metadataRepo.getPopularPaged(queryType, page)
                 railKey.startsWith("genre_") -> {
                     val genreId = railKey.substringAfterLast("_")
                     metadataRepo.discover(type = queryType, page = page, withGenres = genreId)
@@ -853,7 +851,7 @@ internal fun TvSeeAllScreen(
 
     LaunchedEffect(sortOptions, selectedSortIndex) {
         if (sortOptions.isNotEmpty()) {
-            onFirstContentRequester(sortRequesters[selectedSortIndex])
+            onFirstContentRequester(firstItemFocusRequester)
         }
     }
 
@@ -869,6 +867,29 @@ internal fun TvSeeAllScreen(
         )
     }
 
+    LaunchedEffect(pendingGridRestoreNonce, renderedItems.size, posterColumns) {
+        val restoreKey = pendingGridRestoreKey ?: return@LaunchedEffect
+        if (pendingGridRestoreNonce <= 0) return@LaunchedEffect
+        val targetIndex = renderedItems.indexOfFirst { it.seeAllStableKey() == restoreKey }
+        if (targetIndex < 0) return@LaunchedEffect
+
+        repeat(12) {
+            runCatching { gridState.scrollToItem(targetIndex) }
+            withFrameNanos { }
+            delay(40L)
+
+            val requester = focusRequesters[restoreKey]
+            if (requester != null) {
+                runCatching { requester.requestFocus() }
+                withFrameNanos { }
+                if (lastFocusedKey == restoreKey) {
+                    pendingGridRestoreKey = null
+                    return@LaunchedEffect
+                }
+            }
+        }
+    }
+
     // Restore focus to last focused item when returning from Details sub-route.
     // Uses Lifecycle ON_RESUME to detect when this composable's NavBackStackEntry
     // becomes the active destination again after Details is popped.
@@ -876,7 +897,8 @@ internal fun TvSeeAllScreen(
     androidx.compose.runtime.DisposableEffect(lifecycleOwner) {
         val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
             if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME && lastFocusedIndex >= 0) {
-                val requester = focusRequesters[lastFocusedIndex]
+                val restoreKey = lastFocusedKey ?: renderedItems.getOrNull(lastFocusedIndex)?.seeAllStableKey()
+                val requester = restoreKey?.let { focusRequesters[it] }
                 if (requester != null) {
                     try { requester.requestFocus() } catch (_: Throwable) { }
                 }
@@ -890,10 +912,10 @@ internal fun TvSeeAllScreen(
     LaunchedEffect(initialLoad, renderedItems.size, sortOptions.size, selectedSortIndex) {
         if (!initialLoad && !initialFocusHandled && (sortOptions.isNotEmpty() || renderedItems.isNotEmpty())) {
             try {
-                if (sortOptions.isNotEmpty()) {
-                    sortRequesters[selectedSortIndex].requestFocus()
-                } else {
+                if (renderedItems.isNotEmpty()) {
                     firstItemFocusRequester.requestFocus()
+                } else if (sortOptions.isNotEmpty()) {
+                    sortRequesters[selectedSortIndex].requestFocus()
                 }
                 initialFocusHandled = true
             } catch (_: IllegalStateException) { /* not yet attached */ }
@@ -981,8 +1003,8 @@ internal fun TvSeeAllScreen(
         val clearRequester = remember(screenId, "clear_filters") { FocusRequester() }
         val posterColumnsRequester = remember(screenId, "poster_columns") { FocusRequester() }
         val afterFiltersRequester = when {
-            sortOptions.isNotEmpty() -> sortRequesters[selectedSortIndex]
             renderedItems.isNotEmpty() -> firstItemFocusRequester
+            sortOptions.isNotEmpty() -> sortRequesters[selectedSortIndex]
             else -> null
         }
         val filterExitRequester = when {
@@ -1258,14 +1280,17 @@ internal fun TvSeeAllScreen(
                             renderedItems,
                             key = { _, item -> "sa_${item.seeAllStableKey()}" },
                         ) { index, item ->
-                            val baseRequester = focusRequesters.getOrPut(index) {
-                                if (index == 0) firstItemFocusRequester else FocusRequester()
+                            val itemKey = item.seeAllStableKey()
+                            val baseRequester = if (index == 0) {
+                                firstItemFocusRequester.also { focusRequesters[itemKey] = it }
+                            } else {
+                                focusRequesters.getOrPut(itemKey) { FocusRequester() }
                             }
-                            val target = remember(screenId, index, item.id, item.tmdbId) {
+                            val target = remember(screenId, index, posterColumns, itemKey) {
                                 TvFocusTargetId(
                                     screenId = screenId,
                                     rowKey = "grid",
-                                    itemKey = item.seeAllStableKey(),
+                                    itemKey = itemKey,
                                     rowIndex = index / posterColumns,
                                     itemIndex = index,
                                     targetType = "card",
@@ -1276,13 +1301,12 @@ internal fun TvSeeAllScreen(
                                 target = target,
                                 externalRequester = baseRequester,
                             )
-                            if (index == 0 && sortOptions.isEmpty()) {
+                            if (index == 0) {
                                 onFirstContentRequester(requester)
                             }
 
                             SeeAllPosterCard(
                                 item = item,
-                                ratingPrefs = tvCardRatingPrefs,
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .aspectRatio(2f / 3f)
@@ -1306,11 +1330,17 @@ internal fun TvSeeAllScreen(
                                         ?.let { item.mergeSeeAllEnrichedItem(it) }
                                         ?: item
                                     lastFocusedIndex = index
+                                    lastFocusedKey = itemKey
                                     if (showFilters) {
                                         showFilters = false
                                     }
                                 },
-                                onClick = { onMediaClick(item) },
+                                onClick = {
+                                    focusRestoreController.markFocused(target)
+                                    lastFocusedIndex = index
+                                    lastFocusedKey = itemKey
+                                    onMediaClick(item)
+                                },
                             )
                         }
 
@@ -1524,10 +1554,10 @@ private fun defaultSortKeyForRail(
     railKey: String,
     sortOptions: List<TvSeeAllSortOption>,
 ): TvSeeAllSortKey =
-    if (railKey.startsWith("upcoming_schedule")) {
-        TvSeeAllSortKey.OLDEST_RELEASE
-    } else {
-        sortOptions.firstOrNull()?.key ?: TvSeeAllSortKey.DEFAULT
+    when {
+        railKey.startsWith("upcoming_schedule") -> TvSeeAllSortKey.OLDEST_RELEASE
+        railKey == "top-rated" || railKey.startsWith("top_rated_") -> TvSeeAllSortKey.RATING_DESC
+        else -> sortOptions.firstOrNull()?.key ?: TvSeeAllSortKey.DEFAULT
     }
 
 private fun shouldUsePendingItemsForTvSeeAll(railKey: String): Boolean =
@@ -1580,9 +1610,9 @@ private fun sortSeeAllItems(
         TvSeeAllSortKey.DEFAULT -> items
         TvSeeAllSortKey.RATING_DESC -> items.sortedWith(
             compareByDescending<MediaItem> {
-                it.ratings?.imdbScore != null
+                it.seeAllExternalRating10() != null
             }.thenByDescending {
-                it.ratings?.imdbScore ?: -1f
+                it.seeAllExternalRating10() ?: -1.0
             }.thenBy { it.normalizedTitle() },
         )
         TvSeeAllSortKey.TITLE_ASC -> items.sortedWith(compareBy<MediaItem> { it.normalizedTitle() }.thenBy { it.id })
@@ -1660,11 +1690,25 @@ private fun List<MediaItem>.filterSeeAllItems(
     minRating: Double?,
 ): List<MediaItem> =
     filter { item ->
-        (genreIds.isEmpty() || item.genreIds.any { it in genreIds } || item.genres.any { it.id in genreIds }) &&
+            (genreIds.isEmpty() || item.genreIds.any { it in genreIds } || item.genres.any { it.id in genreIds }) &&
             (studioIds.isEmpty() || item.studios.any { it.id in studioIds }) &&
             (year == null || item.year == year) &&
-            (minRating == null || (item.ratings?.imdbScore?.toDouble() ?: item.rating ?: 0.0) >= minRating)
+            (minRating == null || (item.seeAllExternalRating10() ?: 0.0) >= minRating)
     }
+
+private fun MediaItem.seeAllExternalRating10(): Double? {
+    val ratings = ratings ?: return null
+    val imdb = ratings.imdbScore
+        ?.takeIf { it > 0f }
+        ?.toDouble()
+    val rt = ratings.rottenTomatoesScore
+        ?.takeIf { it in 1..100 }
+        ?.toDouble()
+        ?.div(10.0)
+    val values = listOfNotNull(imdb, rt)
+    if (values.isEmpty()) return null
+    return values.average()
+}
 
 @Composable
 private fun TvSeeAllFilterRows(
@@ -1962,7 +2006,6 @@ private fun TvSeeAllSortButton(
 @Composable
 private fun SeeAllPosterCard(
     item: MediaItem,
-    ratingPrefs: RatingDisplayPrefs,
     modifier: Modifier,
     onFocused: () -> Unit,
     onClick: () -> Unit,
@@ -2023,14 +2066,5 @@ private fun SeeAllPosterCard(
             )
         }
 
-        item.ratings.withFallbackTmdbScore(item.rating)?.let { ratings ->
-            PreferredRatingPills(
-                ratings = ratings,
-                prefs = ratingPrefs,
-                modifier = Modifier
-                    .align(Alignment.BottomEnd)
-                    .padding(8.dp),
-            )
-        }
     }
 }

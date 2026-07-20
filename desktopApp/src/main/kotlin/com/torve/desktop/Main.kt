@@ -252,7 +252,7 @@ fun main() {
     // Splash BEFORE application { ... } starts composing. The Compose
     // Window won't become visible for ~350ms, and even then the
     // iconify dance briefly minimizes/restores it -- showing the
-    // splash up front means the user sees a premium Torve loading
+    // splash up front means the user sees the Torve loading
     // surface for the entire launch race instead of a black window.
     // The launch guard disposes this splash after iconify completes.
     if (System.getProperty("os.name", "").lowercase().contains("win")) {
@@ -387,7 +387,7 @@ fun main() {
         },
         title = "${releaseInfo.appName} ${releaseInfo.versionLabel}",
         state = windowState,
-        undecorated = false,
+        undecorated = windowState.placement == WindowPlacement.Fullscreen,
         resizable = windowState.placement != WindowPlacement.Fullscreen,
         visible = windowVisible,
     ) {
@@ -407,6 +407,20 @@ fun main() {
             val shouldBeResizable = windowState.placement != WindowPlacement.Fullscreen
             if (window.isResizable != shouldBeResizable) {
                 window.isResizable = shouldBeResizable
+            }
+            com.torve.desktop.platform.DesktopBorderlessFullscreen.apply(
+                frame = window,
+                fullscreen = windowState.placement == WindowPlacement.Fullscreen,
+            )
+        }
+
+        LaunchedEffect(windowVisible, windowState.placement) {
+            if (windowVisible) {
+                val fullscreen = windowState.placement == WindowPlacement.Fullscreen
+                kotlinx.coroutines.delay(50)
+                com.torve.desktop.platform.DesktopBorderlessFullscreen.apply(window, fullscreen)
+                kotlinx.coroutines.delay(250)
+                com.torve.desktop.platform.DesktopBorderlessFullscreen.apply(window, fullscreen)
             }
         }
 
@@ -481,10 +495,8 @@ fun main() {
         // `window` is non-null.
         DisposableEffect(Unit) {
             com.torve.desktop.dnd.installSubtitleDropTarget(window)
-            // Refresh premium state whenever the user brings the window
-            // back to focus - covers the "left it open overnight, server
-            // revoked entitlement, user expects gating to update on the
-            // next interaction" case.
+            // Refresh account access state whenever the user brings the
+            // window back to focus.
             val focusListener = object : java.awt.event.WindowFocusListener {
                 override fun windowGainedFocus(e: java.awt.event.WindowEvent?) {
                     com.torve.desktop.premium.DesktopPremiumStateHolder.refreshNow()
@@ -513,62 +525,64 @@ fun main() {
         }
 
         // Window-attached MenuBar - Compose Desktop maps this to native NSMenu
-        // on macOS automatically. Keyboard accelerators MUST be declared
-        // per-item via `shortcut = KeyShortcut(...)`. They are NOT inferred
-        // from menu structure.
+        // on macOS automatically. Keep it out of Windows fullscreen: on that
+        // platform it can still paint as a native menu strip above the content,
+        // which makes "fullscreen" look like a normal framed app window.
         val runtime = (bootstrapState as? BootstrapState.Ready)?.runtime
         val playPauseShortcut = if (isMac) KeyShortcut(Key.Spacebar) else primaryAccel(Key.K)
         val isFullscreen = windowState.placement == WindowPlacement.Fullscreen
-        MenuBar {
-            Menu("File") {
-                Item("Check for Updates...", onClick = {
-                    @OptIn(DelicateCoroutinesApi::class)
-                    globalUpdateChecker?.let { checker ->
-                        GlobalScope.launch {
-                            val result = checker.check()
-                            if (result is com.torve.desktop.updates.UpdateChecker.Result.UpToDate) {
-                                desktopNotify("Torve", "You're on the latest version.")
+        if (!isFullscreen || isMac) {
+            MenuBar {
+                Menu("File") {
+                    Item("Check for Updates...", onClick = {
+                        @OptIn(DelicateCoroutinesApi::class)
+                        globalUpdateChecker?.let { checker ->
+                            GlobalScope.launch {
+                                val result = checker.check()
+                                if (result is com.torve.desktop.updates.UpdateChecker.Result.UpToDate) {
+                                    desktopNotify("Torve", "You're on the latest version.")
+                                }
                             }
+                        } ?: desktopNotify("Torve", "Update channel isn't configured for this build.")
+                    })
+                    Item("Quit Torve", shortcut = primaryAccel(Key.Q), onClick = ::exitApplication)
+                }
+                Menu("Playback") {
+                    Item(
+                        "Play / Pause",
+                        shortcut = playPauseShortcut,
+                        onClick = {
+                            val player = runtime?.playerController ?: return@Item
+                            val phase = player.state.value.phase
+                            if (phase == com.torve.desktop.playback.DesktopPlayerPhase.PLAYING) player.pause()
+                            else player.play()
+                        },
+                    )
+                    Item(
+                        "Stop",
+                        onClick = { runtime?.playerController?.stop() },
+                    )
+                }
+                Menu("Window") {
+                    Item("Hide to Tray", shortcut = nonMacAccel(Key.W), onClick = { windowVisible = false })
+                    Item("Maximize", shortcut = nonMacAccel(Key.M), onClick = {
+                        windowState.placement = WindowPlacement.Maximized
+                    })
+                    Item(if (isFullscreen) "Exit Fullscreen" else "Fullscreen", shortcut = fullscreenAccel(), onClick = {
+                        windowState.placement = if (isFullscreen) {
+                            WindowPlacement.Floating
+                        } else {
+                            WindowPlacement.Fullscreen
                         }
-                    } ?: desktopNotify("Torve", "Update channel isn't configured for this build.")
-                })
-                Item("Quit Torve", shortcut = primaryAccel(Key.Q), onClick = ::exitApplication)
-            }
-            Menu("Playback") {
-                Item(
-                    "Play / Pause",
-                    shortcut = playPauseShortcut,
-                    onClick = {
-                        val player = runtime?.playerController ?: return@Item
-                        val phase = player.state.value.phase
-                        if (phase == com.torve.desktop.playback.DesktopPlayerPhase.PLAYING) player.pause()
-                        else player.play()
-                    },
-                )
-                Item(
-                    "Stop",
-                    onClick = { runtime?.playerController?.stop() },
-                )
-            }
-            Menu("Window") {
-                Item("Hide to Tray", shortcut = nonMacAccel(Key.W), onClick = { windowVisible = false })
-                Item("Maximize", shortcut = nonMacAccel(Key.M), onClick = {
-                    windowState.placement = WindowPlacement.Maximized
-                })
-                Item(if (isFullscreen) "Exit Fullscreen" else "Fullscreen", shortcut = fullscreenAccel(), onClick = {
-                    windowState.placement = if (isFullscreen) {
-                        WindowPlacement.Floating
-                    } else {
-                        WindowPlacement.Fullscreen
-                    }
-                })
-            }
-            Menu("Help") {
-                Item("About Torve", onClick = {
-                    runCatching {
-                        java.awt.Desktop.getDesktop().browse(java.net.URI("https://torve.app"))
-                    }
-                })
+                    })
+                }
+                Menu("Help") {
+                    Item("About Torve", onClick = {
+                        runCatching {
+                            java.awt.Desktop.getDesktop().browse(java.net.URI("https://torve.app"))
+                        }
+                    })
+                }
             }
         }
 
@@ -606,10 +620,9 @@ private fun bootstrapDesktop(): BootstrapState {
         val authClient = koin.get<AuthClient>()
         val accountSessionCoordinator = koin.get<AccountSessionCoordinator>()
         val subscriptionViewModel = koin.get<SubscriptionViewModel>()
-        // Desktop premium-state holder. Subscribed by gated UI surfaces;
-        // refreshes on sign-in, on window focus, every 60s, and after
-        // purchase verification. Free user → has_premium_access=false →
-        // gated actions route to the upgrade screen.
+        // Desktop access-state holder retained for compatibility. Product
+        // features are free by default; polling only keeps account/device
+        // state fresh.
         val premiumState = com.torve.desktop.premium.DesktopPremiumState(
             deviceApi = koin.get<com.torve.data.device.DeviceApi>(),
             authClient = authClient,

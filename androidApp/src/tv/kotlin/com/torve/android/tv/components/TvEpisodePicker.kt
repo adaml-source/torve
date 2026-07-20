@@ -196,7 +196,7 @@ fun TvEpisodePicker(
                 TvSeasonWatchedActionChip(
                     seasonNumber = selectedSeason,
                     isComplete = selectedSeasonFullyWatched,
-                    enabled = selectedSeasonEpisodeCount > 0 && !selectedSeasonFullyWatched,
+                    enabled = selectedSeasonEpisodeCount > 0,
                     modifier = Modifier
                         .focusRequester(requester)
                         .onPreviewKeyEvent { keyEvent ->

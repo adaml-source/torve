@@ -68,6 +68,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
+import coil3.compose.SubcomposeAsyncImage
 import com.torve.android.R
 import com.torve.android.premium.AccessTier
 import com.torve.android.premium.PremiumAccess
@@ -128,6 +129,8 @@ fun HomeScreen(
     accessTier: AccessTier = AccessTier.FREE,
     onLockedFeatureClick: (PremiumFeature) -> Unit = {},
     mediaType: String = "all",
+    resetScrollToTop: Boolean = false,
+    onScrollReset: () -> Unit = {},
     viewModel: HomeViewModel = koinInject(),
     watchlistViewModel: WatchlistViewModel = koinInject(),
     settingsViewModel: com.torve.presentation.settings.SettingsViewModel = koinInject(),
@@ -153,6 +156,26 @@ fun HomeScreen(
         PremiumAccess.isPremiumLocked(PremiumFeature.WATCHLIST_EDIT, accessTier)
     }
     val homeListState = rememberLazyListState()
+
+    // Snapshot content can arrive before the persisted section layout. Waiting
+    // for both avoids LazyColumn key anchoring keeping a later shelf at the top
+    // when Hero and earlier sections are inserted during startup.
+    LaunchedEffect(
+        resetScrollToTop,
+        state.isLoading,
+        sectionConfigs,
+        homeLayoutOrder,
+    ) {
+        if (
+            resetScrollToTop &&
+            !state.isLoading &&
+            sectionConfigs.isNotEmpty() &&
+            homeLayoutOrder.isNotEmpty()
+        ) {
+            homeListState.scrollToItem(0)
+            onScrollReset()
+        }
+    }
 
     // Filter by media type for TV Shows / Movies tab reuse
     val filteredShelves = remember(state.shelves, mediaType) {
@@ -1349,37 +1372,28 @@ fun PersonAvatarCard(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    var showFallback by remember(person.profileUrl) { mutableStateOf(person.profileUrl == null) }
+    val profileUrl = person.profileUrl?.trim()?.takeIf {
+        it.startsWith("https://") || it.startsWith("http://")
+    }
     Column(
         modifier = modifier
             .width(80.dp)
             .clickable(onClick = onClick),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        if (!showFallback && person.profileUrl != null) {
-            AsyncImage(
-                model = person.profileUrl,
+        if (profileUrl != null) {
+            SubcomposeAsyncImage(
+                model = profileUrl,
                 contentDescription = person.name,
                 contentScale = ContentScale.Crop,
                 modifier = Modifier
                     .size(72.dp)
                     .clip(CircleShape),
-                onError = { showFallback = true },
+                loading = { ShimmerBox(modifier = Modifier.fillMaxSize()) },
+                error = { PersonAvatarFallback(person.name, Modifier.fillMaxSize()) },
             )
         } else {
-            Box(
-                modifier = Modifier
-                    .size(72.dp)
-                    .clip(CircleShape)
-                    .background(Gunmetal),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text(
-                    text = person.name.split(" ").mapNotNull { it.firstOrNull()?.toString() }.take(2).joinToString(""),
-                    style = MaterialTheme.typography.titleSmall,
-                    color = Torve.colors.textTertiary,
-                )
-            }
+            PersonAvatarFallback(person.name, Modifier.size(72.dp))
         }
         Spacer(Modifier.height(6.dp))
         Text(
@@ -1390,6 +1404,22 @@ fun PersonAvatarCard(
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.fillMaxWidth(),
             textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+        )
+    }
+}
+
+@Composable
+private fun PersonAvatarFallback(name: String, modifier: Modifier = Modifier) {
+    Box(
+        modifier = modifier
+            .clip(CircleShape)
+            .background(Gunmetal),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text = name.split(" ").mapNotNull { it.firstOrNull()?.toString() }.take(2).joinToString(""),
+            style = MaterialTheme.typography.titleSmall,
+            color = Torve.colors.textTertiary,
         )
     }
 }

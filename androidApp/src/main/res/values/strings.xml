@@ -7,6 +7,8 @@
 
     <!-- Navigation -->
     <string name="nav_home">Home</string>
+    <string name="nav_search">Search</string>
+    <string name="nav_more">More</string>
     <string name="nav_movies">Movies</string>
     <string name="nav_tv_shows">TV Shows</string>
     <string name="nav_channels">Channels</string>
@@ -81,7 +83,7 @@
     <!-- Settings Screen -->
     <string name="settings_title">Settings</string>
     <string name="settings_profiles">Profiles</string>
-    <string name="settings_subscription">Premium</string>
+    <string name="settings_subscription">Account access</string>
     <string name="settings_downloads">Downloads</string>
     <string name="settings_calendar">Calendar</string>
     <string name="settings_send_credentials">Send credentials to another device</string>
@@ -128,15 +130,15 @@
     <string name="settings_connected">Connected</string>
     <string name="settings_sensitive_material">Sensitive material</string>
     <string name="settings_sensitive_material_sub">Review this account setting and update access if eligible</string>
-    <string name="settings_premium_until">Premium until %1$s</string>
-    <string name="settings_subscription_card_title">Subscription</string>
-    <string name="settings_subscription_upgrade_cta">Upgrade to Premium</string>
-    <string name="settings_subscription_manage_cta">Manage Subscription</string>
-    <string name="settings_subscription_signed_out_prompt">Sign in to see your subscription and unlock Premium on this device.</string>
+    <string name="settings_premium_until">Full access enabled</string>
+    <string name="settings_subscription_card_title">Account access</string>
+    <string name="settings_subscription_upgrade_cta">Free software</string>
+    <string name="settings_subscription_manage_cta">Account settings</string>
+    <string name="settings_subscription_signed_out_prompt">Sign in to manage your account on this device.</string>
     <string name="settings_subscription_sign_in_cta">Sign in or create account</string>
-    <string name="paywall_sign_in_action_hint">Tap here to sign in</string>
-    <string name="paywall_lifetime_upgrade_hint">You\'re on Monthly — upgrade once and never pay again</string>
-    <string name="paywall_upgrade_to_lifetime">Upgrade to Lifetime</string>
+    <string name="paywall_sign_in_action_hint">Sign in to continue</string>
+    <string name="paywall_lifetime_upgrade_hint">Torve is free software. No subscriptions. No paid tiers.</string>
+    <string name="paywall_upgrade_to_lifetime">Continue</string>
     <string name="settings_go_to">Go to:</string>
     <string name="settings_enter_code">Enter code:</string>
     <string name="settings_waiting_auth">Waiting for authorization…</string>
@@ -164,6 +166,10 @@
     <string name="settings_max_quality">Max Quality</string>
     <string name="settings_min_quality">Min Quality</string>
     <string name="settings_max_file_size">Max File Size (MB)</string>
+    <string name="settings_min_size_per_hour">Minimum Source Size per Hour (MB)</string>
+    <string name="settings_min_size_per_hour_hint">For example, 2048 means a 30-minute episode must be at least 1 GB.</string>
+    <string name="settings_preferred_audio_languages">Preferred Audio Languages</string>
+    <string name="settings_preferred_audio_languages_hint">Ordered language codes, for example: en, de</string>
     <string name="settings_no_limit">No limit</string>
     <string name="settings_cached_only">Cached Only</string>
     <string name="settings_cached_only_desc">Only show cached streams for instant playback</string>
@@ -177,6 +183,15 @@
     <string name="settings_auto_play_desc">Automatically pick and play the best stream</string>
     <string name="settings_auto_play_next">Auto-Play Next Episode</string>
     <string name="settings_auto_play_next_desc">Automatically play the next episode when current finishes</string>
+    <string name="settings_next_episode_timing">Next Episode Timing</string>
+    <string name="settings_next_episode_preparation">Next Episode Preparation</string>
+    <string name="settings_source_language_match">Source Language Matching</string>
+    <string name="settings_unknown_source_size">Sources with Unknown Size</string>
+    <string name="settings_source_fallback">When No Source Matches</string>
+    <string name="settings_preload_buffer_seconds">Preload Buffer (seconds)</string>
+    <string name="settings_preload_max_mb">Maximum Preload Data (MB)</string>
+    <string name="settings_preload_wifi_only">Prepare on Wi-Fi/Ethernet Only</string>
+    <string name="settings_preload_wifi_only_desc">Do not resolve or buffer the next episode over mobile data.</string>
     <string name="settings_codec_preference">Codec Preference</string>
     <string name="settings_hdr_mode">HDR Mode</string>
 
@@ -241,13 +256,13 @@
     <string name="settings_version">Torve v%1$s</string>
 
     <!-- Paywall Screen -->
-    <string name="paywall_title">Upgrade to Premium</string>
-    <string name="paywall_unlock">Upgrade to Premium</string>
-    <string name="paywall_subtitle">Choose monthly or lifetime access</string>
-    <string name="paywall_upgrade_title">Upgrade to Premium</string>
-    <string name="paywall_upgrade_subtitle">Torve is free to download. Choose monthly or lifetime access.</string>
-    <string name="paywall_free">Free</string>
-    <string name="paywall_pro">Premium</string>
+    <string name="paywall_title">Torve is free software</string>
+    <string name="paywall_unlock">Torve is free software</string>
+    <string name="paywall_subtitle">No subscriptions. No paid tiers.</string>
+    <string name="paywall_upgrade_title">Torve is free software</string>
+    <string name="paywall_upgrade_subtitle">No subscriptions. No paid tiers.</string>
+    <string name="paywall_free">Free software</string>
+    <string name="paywall_pro">All features</string>
     <string name="paywall_search_browse">Search &amp; Browse</string>
     <string name="paywall_stream_playback">Playback</string>
     <string name="paywall_downloads">Offline Access</string>
@@ -258,79 +273,79 @@
     <string name="paywall_rating_pills">Rating Pills</string>
     <string name="paywall_custom_home">Custom Home Layout</string>
     <string name="paywall_advanced_filters">Advanced Filters</string>
-    <string name="paywall_lifetime">Lifetime</string>
-    <string name="paywall_monthly_title">Monthly</string>
-    <string name="paywall_monthly_description">Auto-renewing monthly subscription</string>
-    <string name="paywall_lifetime_title">Lifetime</string>
-    <string name="paywall_lifetime_description">One-time purchase, lifetime access</string>
-    <string name="paywall_price">Price unavailable</string>
-    <string name="paywall_price_loading">Loading…</string>
-    <string name="paywall_best_value">BEST VALUE</string>
-    <string name="paywall_one_time">One-time, forever</string>
-    <string name="paywall_one_time_label">One-time purchase</string>
-    <string name="paywall_recurring_label">Recurring billing</string>
-    <string name="paywall_get_lifetime">Get Lifetime Access</string>
-    <string name="paywall_choose_monthly">Choose Monthly</string>
-    <string name="paywall_choose_lifetime">Choose Lifetime</string>
-    <string name="paywall_restore">Restore Purchase</string>
-    <string name="paywall_retry_verification">Retry Verification</string>
+    <string name="paywall_lifetime">Full access</string>
+    <string name="paywall_monthly_title">Available</string>
+    <string name="paywall_monthly_description">Available to everyone.</string>
+    <string name="paywall_lifetime_title">All features</string>
+    <string name="paywall_lifetime_description">No purchase required.</string>
+    <string name="paywall_price">No purchase required</string>
+    <string name="paywall_price_loading">Available</string>
+    <string name="paywall_best_value">Included</string>
+    <string name="paywall_one_time">No purchase required</string>
+    <string name="paywall_one_time_label">No billing</string>
+    <string name="paywall_recurring_label">No billing</string>
+    <string name="paywall_get_lifetime">Continue</string>
+    <string name="paywall_choose_monthly">Continue</string>
+    <string name="paywall_choose_lifetime">Continue</string>
+    <string name="paywall_restore">No restore needed</string>
+    <string name="paywall_retry_verification">Refresh access</string>
     <string name="premium_refresh_access">Refresh Access</string>
-    <string name="paywall_needs_verification_title">Verify your email to use Premium on this device</string>
-    <string name="paywall_needs_verification_body">You upgraded on a different device. Verify your email to unlock Premium here too.</string>
+    <string name="paywall_needs_verification_title">Verify your email to use Torve on this device</string>
+    <string name="paywall_needs_verification_body">Verify your email to keep your account secure on this device.</string>
     <string name="paywall_needs_verification_action_send">Send verification email</string>
-    <string name="paywall_needs_verification_action_refresh">Already verified — refresh</string>
-    <string name="paywall_lifetime_active">Lifetime Activated</string>
-    <string name="paywall_full_access">You have full access to all features</string>
-    <string name="paywall_free_status">Free Tier</string>
-    <string name="paywall_marketplace_copy">Billing is handled by %1$s.</string>
-    <string name="paywall_refund_copy">Refunds follow applicable marketplace rules.</string>
-    <string name="paywall_have_code">Have a code?</string>
-    <string name="paywall_enter_code">Enter rebate code</string>
-    <string name="paywall_redeem">Redeem</string>
-    <string name="paywall_redeem_success">Code redeemed! Premium activated.</string>
-    <string name="paywall_purchase_cancelled">Purchase cancelled.</string>
-    <string name="paywall_managed_through">Managed through %1$s</string>
+    <string name="paywall_needs_verification_action_refresh">Already verified - refresh</string>
+    <string name="paywall_lifetime_active">Full access enabled</string>
+    <string name="paywall_full_access">You have full access to all features.</string>
+    <string name="paywall_free_status">Free software</string>
+    <string name="paywall_marketplace_copy">No billing is required.</string>
+    <string name="paywall_refund_copy">No purchase is required.</string>
+    <string name="paywall_have_code">No code required</string>
+    <string name="paywall_enter_code">No code required</string>
+    <string name="paywall_redeem">Continue</string>
+    <string name="paywall_redeem_success">This feature is available to everyone.</string>
+    <string name="paywall_purchase_cancelled">No purchase required.</string>
+    <string name="paywall_managed_through">No billing is required.</string>
 
     <!-- Purchase status messages -->
-    <string name="purchase_received_title">Purchase received</string>
-    <string name="purchase_received_message">%1$s If this does not finish shortly, choose Restore Purchase.</string>
-    <string name="purchase_received_default">Amazon completed the purchase. Torve is waiting for account details to finish verification.</string>
-    <string name="purchase_verification_not_finished_title">Verification not finished</string>
-    <string name="purchase_verification_not_finished_message">Amazon completed the purchase, but Torve could not confirm it yet. Choose Retry Verification or Restore Purchase.</string>
-    <string name="purchase_service_unavailable_title">Verification service unavailable</string>
-    <string name="purchase_service_unavailable_retry">Your Amazon purchase info is saved, but Torve cannot reach the verification service right now. Choose Retry Verification again shortly.</string>
-    <string name="purchase_service_unavailable_restore">Torve cannot reach the verification service right now. Please try Restore Purchase again shortly.</string>
+    <string name="purchase_received_title">Access refresh received</string>
+    <string name="purchase_received_message">%1$s No purchase is required for access.</string>
+    <string name="purchase_received_default">Purchase state is historical and does not affect access.</string>
+    <string name="purchase_verification_not_finished_title">Access refresh pending</string>
+    <string name="purchase_verification_not_finished_message">No purchase verification is required for access.</string>
+    <string name="purchase_service_unavailable_title">Access service unavailable</string>
+    <string name="purchase_service_unavailable_retry">Torve cannot reach the access service right now. Refresh again shortly.</string>
+    <string name="purchase_service_unavailable_restore">No purchase restore is required for access.</string>
     <string name="purchase_sign_in_required_title">Sign in required</string>
-    <string name="purchase_sign_in_amazon_restore">Sign in to Torve before restoring Amazon Premium on this device.</string>
-    <string name="purchase_sign_in_buy">Sign in to Torve before buying Premium through %1$s on this device.</string>
-    <string name="purchase_sign_in_restore">Sign in to Torve before restoring Premium from %1$s on this device.</string>
-    <string name="purchase_conflict_title">Purchase linked to another account</string>
-    <string name="purchase_conflict_message">This Amazon purchase is already linked to a different Torve account. Sign in with the original account or contact support.</string>
-    <string name="purchase_nothing_to_restore_title">Nothing to restore</string>
-    <string name="purchase_nothing_to_restore_amazon">No Amazon premium purchase was found for this Torve account.</string>
-    <string name="purchase_nothing_to_restore_store">No premium purchase was found for this Torve account on %1$s.</string>
-    <string name="purchase_verified_title">Purchase verified</string>
-    <string name="purchase_restored_title">Purchase restored</string>
-    <string name="purchase_active_on_device">%1$s is active on this device.</string>
-    <string name="purchase_active_until">%1$s is active on this device until %2$s.</string>
-    <string name="purchase_needs_device_slot">%1$s is linked to this account, but this device still needs an available slot.</string>
-    <string name="purchase_restored_active">%1$s was restored and is active on this device.</string>
-    <string name="purchase_restored_active_until">%1$s was restored and is active on this device until %2$s.</string>
-    <string name="purchase_restored_needs_slot">%1$s was restored for this account, but this device still needs an available slot.</string>
-    <string name="purchase_google_verify_failed">Google Play purchase could not be verified. Try Restore Purchase again or contact support.</string>
-    <string name="purchase_apple_verify_failed">Apple purchase could not be verified. Try Restore Purchase again or contact support.</string>
-    <string name="purchase_store_restore_failed">%1$s restore could not be completed. Try again after signing in.</string>
-    <string name="purchase_premium_monthly">Premium Monthly</string>
-    <string name="purchase_premium_lifetime">Premium Lifetime</string>
-    <string name="purchase_premium_generic">Premium</string>
+    <string name="purchase_sign_in_amazon_restore">Sign in to Torve before refreshing access on this device.</string>
+    <string name="purchase_sign_in_buy">Sign in to Torve before continuing on this device.</string>
+    <string name="purchase_sign_in_restore">Sign in to Torve before refreshing access from %1$s on this device.</string>
+    <string name="purchase_conflict_title">Account mismatch</string>
+    <string name="purchase_conflict_message">This historical purchase record is linked to a different Torve account. Sign in with the original account or contact support.</string>
+    <string name="purchase_nothing_to_restore_title">No restore needed</string>
+    <string name="purchase_nothing_to_restore_amazon">No Amazon purchase record was found for this Torve account. Access is not affected.</string>
+    <string name="purchase_nothing_to_restore_store">No purchase record was found for this Torve account on %1$s. Access is not affected.</string>
+    <string name="purchase_verified_title">Access verified</string>
+    <string name="purchase_restored_title">Access refreshed</string>
+    <string name="purchase_active_on_device">Full access is enabled on this device.</string>
+    <string name="purchase_active_until">Full access is enabled on this device.</string>
+    <string name="purchase_needs_device_slot">This account has full access, but this device still needs registration.</string>
+    <string name="purchase_restored_active">Full access is enabled on this device.</string>
+    <string name="purchase_restored_active_until">Full access is enabled on this device.</string>
+    <string name="purchase_restored_needs_slot">This account has full access, but this device still needs registration.</string>
+    <string name="purchase_google_verify_failed">Google Play purchase state does not affect access.</string>
+    <string name="purchase_apple_verify_failed">Apple purchase state does not affect access.</string>
+    <string name="purchase_store_restore_failed">%1$s access refresh could not be completed. Try again after signing in.</string>
+    <string name="purchase_premium_monthly">Free access</string>
+    <string name="purchase_premium_lifetime">Free access</string>
+    <string name="purchase_premium_generic">Full access</string>
 
-    <!-- Premium gate messages -->
-    <string name="premium_gate_pair_devices">Premium is required to pair devices.</string>
-    <string name="premium_gate_manage_paired">Premium is required to manage paired devices.</string>
-    <string name="premium_gate_sync_devices">Premium is required to sync across devices.</string>
-    <string name="premium_gate_continue_playback">Premium is required to continue playback on another device.</string>
-    <string name="premium_gate_stream_playback">Premium is required to watch channels and premium streams.</string>
-    <string name="premium_gate_generic">Premium is required for %1$s.</string>
+    <!-- Access compatibility messages -->
+    <string name="premium_gate_pair_devices">Pairing devices is available to everyone.</string>
+    <string name="premium_gate_manage_paired">Managing paired devices is available to everyone.</string>
+    <string name="premium_gate_sync_devices">Device sync is available to everyone.</string>
+    <string name="premium_gate_continue_playback">Continue playback is available to everyone.</string>
+    <string name="premium_gate_stream_playback">Stream playback is available to everyone.</string>
+    <string name="premium_gate_generic">%1$s is available to everyone.</string>
 
     <!-- Login / Auth -->
     <string name="login_reset_password">Reset Password</string>
@@ -438,8 +453,8 @@
     <string name="tv_auth_no_account">Don\'t have an account?</string>
     <string name="tv_auth_switch_login">Switch to Log In</string>
     <string name="tv_auth_switch_signup">Switch to Sign Up</string>
-    <string name="tv_premium_needs_activation">Premium active on account. This device needs activation.</string>
-    <string name="tv_premium_check_access">Check this device\'s latest Premium access.</string>
+    <string name="tv_premium_needs_activation">Full access is enabled. This device needs registration.</string>
+    <string name="tv_premium_check_access">Refresh this device account access.</string>
 
     <!-- TV Live playback menu -->
     <string name="tv_menu_playback_info">Playback Info</string>
@@ -462,26 +477,26 @@
     <string name="settings_manage_devices_locked">Manage Devices (Locked)</string>
     <string name="settings_paired_count_one">%1$d paired device</string>
     <string name="settings_paired_count_other">%1$d paired devices</string>
-    <string name="settings_ai_locked_desc">Connect AI providers and API keys with Premium.</string>
+    <string name="settings_ai_locked_desc">Connect AI providers and API keys.</string>
 
     <!-- Access presentation (PurchaseStringResolver) -->
     <string name="access_free_label">Free</string>
-    <string name="access_free_helper">Torve is free to download. Choose monthly or lifetime access.</string>
-    <string name="access_monthly_active_until">Premium Monthly active until %1$s</string>
-    <string name="access_monthly_active">Premium Monthly active</string>
-    <string name="access_lifetime_active">Premium Lifetime active</string>
-    <string name="access_premium_active">Premium active</string>
-    <string name="access_monthly_on_account">Premium Monthly on account</string>
-    <string name="access_lifetime_on_account">Premium Lifetime on account</string>
-    <string name="access_premium_on_account">Premium active on account</string>
-    <string name="access_monthly_active_device">Premium Monthly is active on this device until %1$s.</string>
-    <string name="access_monthly_active_device_no_date">Premium Monthly is active on this device.</string>
-    <string name="access_lifetime_active_device">Premium Lifetime is active on this device.</string>
-    <string name="access_premium_active_device">Premium is active on this device.</string>
-    <string name="access_monthly_on_account_helper">Premium Monthly is active on your account until %1$s.</string>
-    <string name="access_monthly_on_account_helper_no_date">Premium Monthly is active on your account.</string>
-    <string name="access_lifetime_on_account_helper">Premium Lifetime is active on your account. %1$s</string>
-    <string name="access_premium_on_account_helper">Premium is active on your account. %1$s</string>
+    <string name="access_free_helper">Torve is free software. No subscriptions. No paid tiers.</string>
+    <string name="access_monthly_active_until">Full access enabled.</string>
+    <string name="access_monthly_active">Full access enabled</string>
+    <string name="access_lifetime_active">Full access enabled</string>
+    <string name="access_premium_active">Full access enabled</string>
+    <string name="access_monthly_on_account">Full access on account</string>
+    <string name="access_lifetime_on_account">Full access on account</string>
+    <string name="access_premium_on_account">Full access on account</string>
+    <string name="access_monthly_active_device">Full access is enabled on this device.</string>
+    <string name="access_monthly_active_device_no_date">Full access is enabled on this device.</string>
+    <string name="access_lifetime_active_device">Full access is enabled on this device.</string>
+    <string name="access_premium_active_device">Full access is enabled on this device.</string>
+    <string name="access_monthly_on_account_helper">Full access is enabled on your account.</string>
+    <string name="access_monthly_on_account_helper_no_date">Full access is enabled on your account.</string>
+    <string name="access_lifetime_on_account_helper">Full access is enabled on your account. %1$s</string>
+    <string name="access_premium_on_account_helper">Full access is enabled on your account. %1$s</string>
     <string name="access_device_needs_slot">This device needs an available activation slot.</string>
     <string name="access_device_needs_activation">This device needs activation.</string>
 
@@ -1211,7 +1226,7 @@
 
     <!-- TV Settings Categories -->
     <string name="tv_settings_cat_account">Account</string>
-    <string name="tv_settings_cat_account_sub">Sign in &amp; subscription</string>
+    <string name="tv_settings_cat_account_sub">Sign in and devices</string>
     <string name="tv_settings_cat_playback">Playback</string>
     <string name="tv_settings_cat_playback_sub">Quality &amp; autoplay</string>
     <string name="tv_settings_cat_appearance">Appearance</string>
@@ -1235,7 +1250,7 @@
     <string name="tv_settings_language">Language</string>
     <string name="tv_settings_playback_quality">Playback Quality</string>
     <string name="tv_settings_version">Version</string>
-    <string name="tv_settings_subscription">Subscription</string>
+    <string name="tv_settings_subscription">Account access</string>
     <string name="tv_settings_legal">Legal</string>
     <string name="tv_settings_legal_subtitle">Privacy Policy &amp; Terms</string>
     <string name="tv_settings_stats">Watch Stats</string>
@@ -1259,7 +1274,7 @@
     <string name="tv_settings_category_about">About</string>
     <string name="tv_settings_paired_devices">Paired Devices</string>
     <string name="tv_settings_activated_devices">Activated Devices</string>
-    <string name="tv_settings_activated_devices_subtitle">Revoke access or remove devices using Lifetime Access.</string>
+    <string name="tv_settings_activated_devices_subtitle">Manage registered devices on this account.</string>
     <string name="tv_settings_section_quality">Quality</string>
     <string name="tv_settings_section_quality_desc">Choose minimum and maximum stream quality.</string>
     <string name="tv_settings_section_playback_behavior">Playback Behavior</string>
@@ -1546,7 +1561,7 @@
 
     <!-- Manage Devices Screen -->
     <string name="manage_devices_title">Manage Devices</string>
-    <string name="manage_devices_limit_info">Your Torve Pro account can be active on up to %d devices at a time.</string>
+    <string name="manage_devices_limit_info">Your account can be active on up to %d devices at a time for security and sync integrity.</string>
     <string name="manage_devices_count">%1$d of %2$d devices active</string>
     <string name="manage_devices_limit_loading">Checking your account device limit…</string>
     <string name="manage_devices_count_loading">Checking active devices…</string>
@@ -1558,15 +1573,15 @@
     <string name="manage_devices_removed">Removed</string>
     <string name="manage_devices_remove_cd">Remove device</string>
     <string name="manage_devices_remove_title">Remove Device</string>
-    <string name="manage_devices_remove_confirm">Remove \"%s\" from your Torve Pro account? This will free a device slot.</string>
+    <string name="manage_devices_remove_confirm">Remove "%s" from your account? This frees a device registration.</string>
 
     <!-- Device Limit Reached Screen -->
     <string name="device_limit_title">Device Limit Reached</string>
-    <string name="device_limit_message">Your Torve Pro account is already active on %d devices. Remove one device to activate Torve Pro on this device.</string>
-    <string name="device_limit_message_loading">Checking your account device limit. Remove one active device to activate Torve Pro on this device.</string>
+    <string name="device_limit_message">Your account is already active on %d devices. Remove one device to register this device.</string>
+    <string name="device_limit_message_loading">Checking your account device registrations. Remove one active device to register this device.</string>
     <string name="device_limit_active_devices">Active Devices</string>
     <string name="device_limit_activate_hint">To activate this device, remove one from your account.</string>
-    <string name="device_limit_remove_confirm">Remove \"%s\"? This will free a slot and Torve Pro will be activated on your current device.</string>
+    <string name="device_limit_remove_confirm">Remove "%s"? This frees a device registration for your current device.</string>
     <string name="device_limit_remove_activate">Remove &amp; Activate</string>
 
     <!-- Stats Screen -->
@@ -1587,17 +1602,17 @@
     <string name="profile_stats_sub">Your watch activity</string>
     <string name="profile_channels">Channels</string>
     <string name="profile_channels_sub">Channels &amp; sources</string>
-    <string name="profile_subscription">Subscription</string>
-    <string name="profile_subscription_sub">Manage your plan</string>
+    <string name="profile_subscription">Account access</string>
+    <string name="profile_subscription_sub">Manage your account</string>
     <string name="profile_profiles">Profiles</string>
     <string name="profile_profiles_sub">Switch or manage profiles</string>
     <string name="profile_settings">Settings</string>
     <string name="profile_settings_sub">Accounts, quality, appearance</string>
 
     <!-- Settings Screen: Additional Sections -->
-    <string name="settings_sign_in_manage">Sign in to manage your subscription and devices.</string>
+    <string name="settings_sign_in_manage">Sign in to manage your account and devices.</string>
     <string name="settings_sign_in_create">Sign In / Create Account</string>
-    <string name="settings_cloud_desc">Connect streaming optimization services with Lifetime Access.</string>
+    <string name="settings_cloud_desc">Connect streaming optimization services.</string>
     <string name="settings_content_management">Content Management</string>
     <string name="settings_home_layout">Home Layout</string>
     <string name="settings_home_layout_sub">Section order &amp; poster style</string>
@@ -1616,11 +1631,11 @@
     <string name="settings_ratings_sub">Multi-source rating pills</string>
     <string name="settings_integrations">Integrations</string>
     <string name="settings_integrations_sub">Trakt, SIMKL, Jellyfin, Plex</string>
-    <string name="settings_kodi_desc">Configure Kodi hosts and remote control integration with Lifetime Access.</string>
+    <string name="settings_kodi_desc">Configure Kodi hosts and remote control integration.</string>
     <string name="settings_ai_features">AI Features</string>
     <string name="settings_backup">Backup</string>
     <string name="settings_account_sync">Account Sync</string>
-    <string name="settings_account_sync_desc">Manage pairings and signed-in devices with Lifetime Access. Shared settings sync through your account.</string>
+    <string name="settings_account_sync_desc">Manage pairings and signed-in devices. Shared settings sync through your account.</string>
     <string name="settings_manage_devices">Manage Devices</string>
     <string name="settings_diagnostics">Diagnostics</string>
     <string name="settings_report_issue">Report Issue</string>
@@ -1638,7 +1653,7 @@
     <string name="bug_report_type_integration_problem">Integration problem</string>
     <string name="bug_report_type_addon_problem">Addon problem</string>
     <string name="bug_report_type_iptv_problem">IPTV problem</string>
-    <string name="bug_report_type_account_access">Account / premium access problem</string>
+    <string name="bug_report_type_account_access">Account access problem</string>
     <string name="bug_report_type_playback">Playback</string>
     <string name="bug_report_type_live_tv">Live TV / EPG</string>
     <string name="bug_report_type_vod">Movies / TV Shows</string>
@@ -1670,7 +1685,7 @@
     <string name="bug_report_copied">Bug report copied</string>
     <string name="bug_report_generating">Generating report...</string>
     <string name="settings_danger_zone">Danger Zone</string>
-    <string name="settings_channels_desc">Manage channel sources and persistent favorites with Lifetime Access.</string>
+    <string name="settings_channels_desc">Manage channel sources and persistent favorites.</string>
     <string name="settings_region">Region</string>
     <string name="settings_availability_region">Availability Region</string>
     <string name="settings_availability_region_desc">2-letter country code (e.g. US, GB, DE). Determines which availability providers are shown on detail pages.</string>
@@ -1766,10 +1781,10 @@
     <string name="notif_new_episodes">New Episodes Available</string>
     <string name="notif_episodes_and_more">%1$s and %2$d more</string>
 
-    <!-- Premium Feature Titles -->
+    <!-- Feature titles -->
     <string name="premium_locked">Locked</string>
-    <string name="premium_requires_lifetime">Requires Premium</string>
-    <string name="premium_unlock_with_lifetime">Upgrade to Premium</string>
+    <string name="premium_requires_lifetime">Available to everyone</string>
+    <string name="premium_unlock_with_lifetime">Available to everyone</string>
     <string name="premium_benefit_watchlist">Watchlist and Favorites</string>
     <string name="premium_benefit_integrations">Trakt, Simkl, Jellyfin, Plex, and Kodi integrations</string>
     <string name="premium_benefit_pairing">Phone pairing and cross-device sync</string>
@@ -1785,7 +1800,7 @@
     <string name="premium_view_details">View Details</string>
     <string name="premium_basic_search">Basic Search</string>
     <string name="premium_about_legal">About and Legal</string>
-    <string name="premium_purchase_screen">Purchase Screen</string>
+    <string name="premium_purchase_screen">Free software info</string>
     <string name="premium_app_preview">App Preview</string>
     <string name="premium_trailer_playback">Trailer Playback</string>
     <string name="premium_account_setup">Account Setup</string>
@@ -1834,33 +1849,33 @@
 
     <!-- TV Settings: additional hardcoded labels -->
     <string name="tv_settings_channels_locked_title">Channels</string>
-    <string name="tv_settings_channels_locked_desc">Save sources, visibility, and channel management with Lifetime Access.</string>
-    <string name="tv_settings_premium_channels">Premium Channel Management</string>
+    <string name="tv_settings_channels_locked_desc">Save sources, visibility, and channel management.</string>
+    <string name="tv_settings_premium_channels">Channel management</string>
     <string name="tv_settings_connections_locked_title">Connections</string>
-    <string name="tv_settings_connections_locked_desc">Link cloud and metadata providers with Lifetime Access.</string>
-    <string name="tv_settings_premium_connections">Premium Connections</string>
+    <string name="tv_settings_connections_locked_desc">Link cloud and metadata providers.</string>
+    <string name="tv_settings_premium_connections">Connections</string>
     <string name="tv_settings_advanced_locked_title">Advanced</string>
-    <string name="tv_settings_advanced_locked_desc">Metadata providers, integrations, and diagnostics unlock with Lifetime Access.</string>
-    <string name="tv_settings_premium_advanced">Premium Advanced Tools</string>
+    <string name="tv_settings_advanced_locked_desc">Metadata providers, integrations, and diagnostics are available to everyone.</string>
+    <string name="tv_settings_premium_advanced">Advanced tools</string>
     <string name="tv_settings_pairing_desc">Pair devices for control/session linking and manage signed-in devices on this account.</string>
     <string name="tv_settings_pair_device">Pair Device</string>
     <string name="tv_settings_paired_count_one">%d paired device on this account</string>
     <string name="tv_settings_paired_count_other">%d paired devices on this account</string>
     <string name="tv_settings_no_paired_yet">No paired devices yet</string>
     <string name="tv_manage_activated_title">Activated Devices</string>
-    <string name="tv_manage_activated_desc">Devices using Lifetime Access under this account.</string>
+    <string name="tv_manage_activated_desc">Registered devices on this account.</string>
     <string name="tv_manage_active_count">%1$d of %2$d active</string>
     <string name="tv_manage_active_count_loading">Checking active devices…</string>
     <string name="tv_manage_limit_reached_warning">You have reached your %d-device limit.</string>
     <string name="tv_manage_no_activated">No activated devices found.</string>
-    <string name="tv_manage_revoke_info">Revoking removes Lifetime Access from that device. Removing clears the device record.</string>
+    <string name="tv_manage_revoke_info">Revoking removes access for that device. Removing clears the device record.</string>
     <string name="tv_manage_paired_title">Paired Devices</string>
     <string name="tv_manage_paired_desc">Devices paired for control and playback handoff with this TV/account.</string>
     <string name="tv_manage_no_paired">No paired devices found.</string>
     <string name="tv_manage_unpair_info">Unpair disconnects control and playback handoff only. Shared settings sync through account sign-in.</string>
     <string name="tv_manage_device_limit_title">Device Limit Reached</string>
-    <string name="tv_manage_device_limit_desc">Your Torve Pro account is already active on %d devices. Remove one device to activate Torve Pro on this device.</string>
-    <string name="tv_manage_device_limit_desc_loading">Checking your account device limit. Remove one active device to activate Torve Pro on this device.</string>
+    <string name="tv_manage_device_limit_desc">Your account is already active on %d devices. Remove one device to register this device.</string>
+    <string name="tv_manage_device_limit_desc_loading">Checking your account device registrations. Remove one active device to register this device.</string>
     <string name="tv_manage_current_device">CURRENT DEVICE</string>
     <string name="tv_manage_this_tv">THIS TV</string>
     <string name="tv_manage_this_device">THIS DEVICE</string>
@@ -1881,14 +1896,14 @@
     <string name="tv_settings_confirm_password">Confirm Password</string>
     <string name="tv_settings_forgot_password">Forgot Password?</string>
     <string name="tv_settings_forgot_password_desc">Send a password reset link to your email</string>
-    <string name="tv_settings_subscription_title">Premium</string>
-    <string name="tv_settings_subscription_desc">Manage Torve Premium access on this device.</string>
-    <string name="tv_settings_lifetime_access">Premium Lifetime</string>
-    <string name="tv_settings_monthly_access">Premium Monthly</string>
+    <string name="tv_settings_subscription_title">Account access</string>
+    <string name="tv_settings_subscription_desc">Torve is free software. No subscriptions. No paid tiers.</string>
+    <string name="tv_settings_lifetime_access">Full access</string>
+    <string name="tv_settings_monthly_access">Full access</string>
     <string name="tv_settings_retry_verification">Retry Verification</string>
-    <string name="tv_settings_retry_verification_desc">Retry Premium activation with the saved Amazon purchase details</string>
-    <string name="tv_settings_restore_purchase">Restore Purchase</string>
-    <string name="tv_settings_restore_purchase_desc">Recover an existing purchase on this store account</string>
+    <string name="tv_settings_retry_verification_desc">Refresh account access for this device.</string>
+    <string name="tv_settings_restore_purchase">No restore needed</string>
+    <string name="tv_settings_restore_purchase_desc">No purchase restore is required for access.</string>
     <string name="tv_settings_linked_services">Linked Services</string>
     <string name="tv_settings_linked_services_desc">Current account link status from your paired phone.</string>
     <string name="tv_settings_metadata_providers">Metadata Providers</string>
@@ -1953,7 +1968,7 @@
     <string name="tv_iptv_epg_not_configured">Program guide not configured. Open Settings &gt; Channels to add a guide data URL.</string>
     <string name="tv_iptv_open_settings">Open Settings</string>
     <string name="tv_home_layout_instructions">Press OK to enable or disable. Press RIGHT to enter move mode, UP or DOWN to reorder, LEFT to finish.</string>
-    <string name="tv_settings_sign_in_share">Sign in to share one purchase across your account devices.</string>
+    <string name="tv_settings_sign_in_share">Sign in to sync account devices.</string>
 
     <!-- User-facing error messages (mapped from UserFacingError) -->
     <string name="error_device_cap_reached">Device limit reached. Remove a device to continue.</string>
@@ -1966,11 +1981,11 @@
     <string name="error_not_logged_in">Please sign in to continue.</string>
     <string name="error_unauthorized">Your session has expired. Please sign in again.</string>
     <string name="error_session_expired">Your session has expired. Please sign in again.</string>
-    <string name="error_no_entitlement">A premium subscription is required.</string>
-    <string name="error_premium_required">This feature requires Torve Pro.</string>
-    <string name="error_billing_unavailable">In-app purchases are not available right now.</string>
-    <string name="error_billing_init_failed">Could not connect to the store. Please try again.</string>
-    <string name="error_purchase_failed">Purchase could not be completed. Please try again.</string>
+    <string name="error_no_entitlement">This feature is available to everyone.</string>
+    <string name="error_premium_required">This feature is available to everyone.</string>
+    <string name="error_billing_unavailable">Billing is deprecated and not required for access.</string>
+    <string name="error_billing_init_failed">Store billing is deprecated and not required for access.</string>
+    <string name="error_purchase_failed">Purchase state does not affect access.</string>
     <string name="error_product_not_available">This product is not available right now.</string>
     <string name="error_already_owned">You already own this product.</string>
     <string name="error_network_failure">Could not connect. Please check your internet connection.</string>
@@ -2100,7 +2115,7 @@
     <string name="custom_create_section">Create section</string>
     <string name="manage_panda_management_token_heading">Management token</string>
     <string name="manage_panda_token_required_desc">Required for editing, deleting, or rotating this Panda config.</string>
-    <string name="manage_panda_token_missing_desc">This device has no management token for this config. Paste an admin-issued token below to unlock config edits.</string>
+    <string name="manage_panda_token_missing_desc">This device has no management token for this config. Paste an admin-issued token below to enable config edits.</string>
     <string name="manage_panda_need_token">I need a management token</string>
     <string name="manage_panda_rotate_token">Rotate management token</string>
     <string name="manage_panda_reset_manifest_url">Reset leaked manifest URL</string>

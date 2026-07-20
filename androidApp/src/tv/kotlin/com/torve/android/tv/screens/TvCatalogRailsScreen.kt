@@ -105,6 +105,8 @@ import com.torve.domain.model.ParentalFilter
 import com.torve.domain.model.ContentRating
 import com.torve.domain.model.RatingDisplayPrefs
 import com.torve.domain.model.dedupeByStableKey
+import com.torve.domain.model.hasAnyEnabledDisplayValue
+import com.torve.domain.model.hasExternalRatingLookupIdentity
 import com.torve.domain.model.needsExternalRatingEnrichment
 import com.torve.domain.model.ratingEnrichmentLookupKeys
 import com.torve.domain.model.withFallbackTmdbScore
@@ -120,7 +122,8 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
@@ -129,6 +132,7 @@ import org.koin.compose.koinInject
 private data class CatalogRailsUiState(
     val loading: Boolean = true,
     val rails: List<TvContentRail> = emptyList(),
+    val pendingTopRatedRail: TvContentRail? = null,
     val error: String? = null,
 )
 
@@ -146,7 +150,16 @@ private object TvCatalogRailsSessionCache {
 }
 
 private const val TV_CATALOG_RAIL_ITEM_LIMIT = 24
-private const val TV_CATALOG_RAIL_CANDIDATE_LIMIT = TV_CATALOG_RAIL_ITEM_LIMIT * 4
+private const val TV_CATALOG_INITIAL_PAGE_LIMIT = 2
+private const val TV_CATALOG_INITIAL_CANDIDATE_LIMIT = 40
+private const val TV_CATALOG_TOP_RATED_PAGE_LIMIT = 3
+private const val TV_CATALOG_TOP_RATED_CANDIDATE_LIMIT = TV_CATALOG_RAIL_ITEM_LIMIT * 2
+private const val TV_CATALOG_MAX_CONCURRENT_RAIL_LOADS = 8
+private const val TV_CATALOG_INITIAL_RATING_ENRICH_LIMIT = 8
+private const val TV_CATALOG_INITIAL_RATING_ENRICH_DELAY_MS = 120L
+private const val TV_CATALOG_FOCUSED_RATING_ENRICH_DELAY_MS = 500L
+private const val TV_CATALOG_TOP_RATED_BACKGROUND_DELAY_MS = 5_000L
+private const val TV_CATALOG_HERO_FOCUS_DEBOUNCE_MS = 140L
 private const val TV_CATALOG_TOP_RATED_MIN_RATING = 7.0
 private const val TV_CATALOG_TOP_RATED_MIN_VOTES = 200
 private const val TV_CATALOG_TOP_RATED_MIN_RT = 70
@@ -354,7 +367,7 @@ internal fun TvCatalogRailsScreen(
             TvCatalogRailsSessionCache.put(cacheKey, uiState)
             return@LaunchedEffect
         }
-        val previousGoodState = uiState
+        var previousGoodState = uiState
             .takeIf { it.rails.isNotEmpty() }
             ?: TvScreenCache.get<CatalogRailsUiState>(cacheKey)
                 ?.takeIf { it.rails.isNotEmpty() }
@@ -362,29 +375,40 @@ internal fun TvCatalogRailsScreen(
         uiState = previousGoodState?.copy(loading = true, error = null)
             ?: CatalogRailsUiState(loading = true)
 
+        suspend fun loadState(allowNetwork: Boolean): CatalogRailsUiState = withContext(Dispatchers.IO) {
+            loadCachedCatalogRails(
+                mediaType = mediaType,
+                genreSpecs = genreSpecs,
+                userId = authClient.getAuthenticatedUser()?.id,
+                localSettingsRepo = localSettingsRepo,
+                catalogTopCache = catalogTopCache,
+                metadataRepo = metadataRepo,
+                ratingsEnricher = ratingsEnricher,
+                trendingLabel = trendingLabel,
+                popularLabel = popularLabel,
+                topRatedLabel = topRatedLabel,
+                allowNetwork = allowNetwork,
+            )
+        }
+
+        if (previousGoodState == null) {
+            val cachedState = loadState(allowNetwork = false)
+            if (cachedState.rails.isNotEmpty()) {
+                previousGoodState = cachedState
+                uiState = cachedState.copy(loading = false, error = null)
+                TvScreenCache.put(cacheKey, uiState)
+                TvCatalogRailsSessionCache.put(cacheKey, uiState)
+                Log.i(
+                    "TvCatalogRails",
+                    "cached rails published mediaType=$mediaType rails=${uiState.rails.size}",
+                )
+            }
+        }
+
         var lastState = CatalogRailsUiState(loading = true)
         TV_CATALOG_RAIL_RETRY_DELAYS_MS.forEachIndexed { attempt, delayMs ->
             if (delayMs > 0L) delay(delayMs)
-            val loadedState = withContext(Dispatchers.IO) {
-                val ratingsApiKey = runCatching {
-                    secretStore.get(com.torve.domain.integrations.IntegrationSecretKey.MDBLIST_API_KEY)
-                        ?: prefsRepo.getString(SettingsViewModel.KEY_MDBLIST_API_KEY)
-                        ?: com.torve.data.mdblist.MdbListApi.DEFAULT_API_KEY
-                }.getOrDefault(com.torve.data.mdblist.MdbListApi.DEFAULT_API_KEY)
-                loadCachedCatalogRails(
-                    mediaType = mediaType,
-                    genreSpecs = genreSpecs,
-                    userId = authClient.getAuthenticatedUser()?.id,
-                    localSettingsRepo = localSettingsRepo,
-                    catalogTopCache = catalogTopCache,
-                    metadataRepo = metadataRepo,
-                    ratingsEnricher = ratingsEnricher,
-                    ratingsApiKey = ratingsApiKey,
-                    trendingLabel = trendingLabel,
-                    popularLabel = popularLabel,
-                    topRatedLabel = topRatedLabel,
-                )
-            }
+            val loadedState = loadState(allowNetwork = true)
             if (loadedState.rails.isNotEmpty()) {
                 uiState = loadedState
                 TvScreenCache.put(cacheKey, loadedState)
@@ -397,7 +421,7 @@ internal fun TvCatalogRailsScreen(
                 "empty rails mediaType=$mediaType attempt=${attempt + 1}/${TV_CATALOG_RAIL_RETRY_DELAYS_MS.size} " +
                     "error=${loadedState.error ?: "none"}",
             )
-            if (attempt < TV_CATALOG_RAIL_RETRY_DELAYS_MS.lastIndex) {
+            if (previousGoodState == null && attempt < TV_CATALOG_RAIL_RETRY_DELAYS_MS.lastIndex) {
                 uiState = CatalogRailsUiState(loading = true)
             }
         }
@@ -498,48 +522,151 @@ internal fun TvCatalogRailsScreen(
     val catalogRatingPrefs = remember(settingsState.ratingPrefs) {
         settingsState.ratingPrefs.tvExternalCardRatingPrefs()
     }
-    val enrichCacheKey = remember(mediaType, catalogRatingPrefs.enabledProviders) {
-        val providerKey = catalogRatingPrefs.enabledProviders.joinToString("_") { it.name }
-            .ifBlank { "TMDB_FALLBACK" }
-        "enriched_${mediaType}_$providerKey"
+    var focusedCatalogRatingItem by remember(mediaType) { mutableStateOf<MediaItem?>(null) }
+    var pendingCatalogHeroItem by remember(mediaType) { mutableStateOf<MediaItem?>(null) }
+    var attemptedCatalogRatingKeys by remember(mediaType, catalogRatingPrefs.enabledProviders) {
+        mutableStateOf<Set<String>>(emptySet())
     }
-    LaunchedEffect(uiState.rails, enrichCacheKey) {
-        if (uiState.rails.isEmpty()) return@LaunchedEffect
-        if (!uiState.rails.needsRatingEnrichment()) {
-            TvScreenCache.put(enrichCacheKey, true)
-            return@LaunchedEffect
+    var attemptedFocusedRatingKeys by remember(mediaType, catalogRatingPrefs.enabledProviders) {
+        mutableStateOf<Set<String>>(emptySet())
+    }
+    var initialCatalogRatingBatchAttempted by remember(mediaType, catalogRatingPrefs.enabledProviders) {
+        mutableStateOf(false)
+    }
+    var initialCatalogRatingBatchFinished by remember(mediaType, catalogRatingPrefs.enabledProviders) {
+        mutableStateOf(false)
+    }
+    val onCatalogMediaFocused: (MediaItem) -> Unit = { item ->
+        focusedCatalogRatingItem = item
+        pendingCatalogHeroItem = item
+    }
+    LaunchedEffect(
+        pendingCatalogHeroItem?.type,
+        pendingCatalogHeroItem?.id,
+        pendingCatalogHeroItem?.tmdbId,
+    ) {
+        val item = pendingCatalogHeroItem ?: return@LaunchedEffect
+        delay(TV_CATALOG_HERO_FOCUS_DEBOUNCE_MS)
+        if (pendingCatalogHeroItem?.ratingEnrichmentAttemptKey() == item.ratingEnrichmentAttemptKey()) {
+            onMediaFocused?.invoke(item)
         }
-        if (TvScreenCache.get<Boolean>(enrichCacheKey) == true) return@LaunchedEffect
+    }
+    val applyCatalogRatingUpdates: (List<MediaItem>) -> Unit = { enrichedItems ->
+        if (enrichedItems.isNotEmpty()) {
+            val mergedRails = mergeCatalogRatingItems(uiState.rails, enrichedItems)
+            if (railsRatingsChanged(uiState.rails, mergedRails)) {
+                uiState = uiState.copy(rails = mergedRails)
+                TvScreenCache.put(cacheKey, uiState)
+                TvCatalogRailsSessionCache.put(cacheKey, uiState)
+            }
+            focusedCatalogRatingItem?.let { focused ->
+                val mergedFocused = mergeCatalogRatingItem(focused, enrichedItems)
+                if (mergedFocused.ratings != focused.ratings || mergedFocused.imdbId != focused.imdbId) {
+                    focusedCatalogRatingItem = mergedFocused
+                    onMediaFocused?.invoke(mergedFocused)
+                }
+            }
+        }
+    }
 
-        launch(Dispatchers.IO) {
-            val apiKey = runCatching {
+    LaunchedEffect(
+        cacheKey,
+        uiState.rails.isNotEmpty(),
+        catalogRatingPrefs.enabledProviders,
+    ) {
+        if (uiState.rails.isEmpty() || initialCatalogRatingBatchAttempted) return@LaunchedEffect
+        initialCatalogRatingBatchAttempted = true
+        try {
+            delay(TV_CATALOG_INITIAL_RATING_ENRICH_DELAY_MS)
+            val candidates = initialCatalogRatingCandidates(uiState.rails, catalogRatingPrefs)
+                .filterNot { item -> item.ratingEnrichmentAttemptKey() in attemptedCatalogRatingKeys }
+            if (candidates.isEmpty()) return@LaunchedEffect
+            attemptedCatalogRatingKeys = attemptedCatalogRatingKeys +
+                candidates.mapTo(mutableSetOf()) { item -> item.ratingEnrichmentAttemptKey() }
+            val apiKey = withContext(Dispatchers.IO) {
+                catalogRatingsApiKey(secretStore, prefsRepo)
+            }
+            val enriched = withContext(Dispatchers.IO) {
+                ratingsEnricher.enrichList(candidates, apiKey)
+            }
+            applyCatalogRatingUpdates(enriched)
+            Log.i(
+                "TvCatalogRatings",
+                "initial batch mediaType=$mediaType requested=${candidates.size} " +
+                    "displayable=${enriched.count { !it.needsCatalogCardRatingEnrichment(catalogRatingPrefs) }}",
+            )
+        } finally {
+            initialCatalogRatingBatchFinished = true
+        }
+    }
+
+    LaunchedEffect(
+        focusedCatalogRatingItem?.ratingEnrichmentAttemptKey(),
+        catalogRatingPrefs.enabledProviders,
+    ) {
+        val focused = focusedCatalogRatingItem ?: return@LaunchedEffect
+        val hydrated = withContext(Dispatchers.IO) {
+            ratingsEnricher.hydrateFromCache(focused)
+        }
+        applyCatalogRatingUpdates(listOf(hydrated))
+        if (!hydrated.needsCatalogCardRatingEnrichment(catalogRatingPrefs)) return@LaunchedEffect
+        delay(TV_CATALOG_FOCUSED_RATING_ENRICH_DELAY_MS)
+        val latestFocused = focusedCatalogRatingItem
+            ?.takeIf { item -> item.ratingEnrichmentAttemptKey() == hydrated.ratingEnrichmentAttemptKey() }
+            ?: hydrated
+        if (!latestFocused.needsCatalogCardRatingEnrichment(catalogRatingPrefs)) return@LaunchedEffect
+        val attemptKey = latestFocused.ratingEnrichmentAttemptKey()
+        if (attemptKey in attemptedFocusedRatingKeys) return@LaunchedEffect
+        attemptedFocusedRatingKeys = attemptedFocusedRatingKeys + attemptKey
+        val apiKey = withContext(Dispatchers.IO) {
+            catalogRatingsApiKey(secretStore, prefsRepo)
+        }
+        val enriched = withContext(Dispatchers.IO) {
+            ratingsEnricher.enrichSingle(latestFocused, apiKey)
+        }
+        applyCatalogRatingUpdates(listOf(enriched))
+        Log.d(
+            "TvCatalogRatings",
+            "focused item mediaType=$mediaType " +
+                "displayable=${!enriched.needsCatalogCardRatingEnrichment(catalogRatingPrefs)}",
+        )
+    }
+
+    LaunchedEffect(cacheKey, uiState.pendingTopRatedRail, initialCatalogRatingBatchFinished) {
+        val pendingRail = uiState.pendingTopRatedRail ?: return@LaunchedEffect
+        if (!initialCatalogRatingBatchFinished) return@LaunchedEffect
+        delay(TV_CATALOG_TOP_RATED_BACKGROUND_DELAY_MS)
+        val startedAt = android.os.SystemClock.elapsedRealtime()
+        val apiKey = withContext(Dispatchers.IO) {
+            runCatching {
                 secretStore.get(com.torve.domain.integrations.IntegrationSecretKey.MDBLIST_API_KEY)
                     ?: prefsRepo.getString(SettingsViewModel.KEY_MDBLIST_API_KEY)
                     ?: com.torve.data.mdblist.MdbListApi.DEFAULT_API_KEY
             }.getOrDefault(com.torve.data.mdblist.MdbListApi.DEFAULT_API_KEY)
-
-            // Retry loop mirrors HomeViewModel: if MDBList rate-limits, wait out
-            // the cooldown and re-enrich so RT/Metacritic pills eventually appear.
-            var iterations = 0
-            while (iterations < 5) {
-                iterations++
-                val enrichedRails = uiState.rails.map { rail ->
-                    val enrichedItems = ratingsEnricher.enrichList(rail.items, apiKey)
-                    rail.copy(items = enrichedItems)
-                }
-                withContext(Dispatchers.Main) {
-                    if (railsRatingsChanged(uiState.rails, enrichedRails)) {
-                        uiState = uiState.copy(rails = enrichedRails)
-                    }
-                    TvScreenCache.put(cacheKey, uiState)
-                    TvCatalogRailsSessionCache.put(cacheKey, uiState)
-                }
-                val remainingMs = ratingsEnricher.rateLimitRemainingMs()
-                if (remainingMs <= 0L) break
-                kotlinx.coroutines.delay(remainingMs + 2_000L)
-            }
-            TvScreenCache.put(enrichCacheKey, true)
         }
+        val enrichedItems = withContext(Dispatchers.IO) {
+            ratingsEnricher.enrichImdbList(pendingRail.items, apiKey)
+        }
+        val verifiedRail = listOf(pendingRail.copy(items = enrichedItems))
+            .finalizeCatalogRails(mediaType = mediaType)
+            .firstOrNull()
+        val existingVerifiedRail = uiState.rails.firstOrNull { it.key == pendingRail.key }
+        val replacement = verifiedRail ?: existingVerifiedRail
+        val mergedRails = buildList {
+            addAll(uiState.rails.filterNot { it.key == pendingRail.key })
+            replacement?.let(::add)
+        }.sortedBy { catalogRailPriority(it.key) }
+        uiState = uiState.copy(
+            rails = mergedRails,
+            pendingTopRatedRail = null,
+        )
+        TvScreenCache.put(cacheKey, uiState)
+        TvCatalogRailsSessionCache.put(cacheKey, uiState)
+        Log.i(
+            "TvCatalogRails",
+            "top rated verification finished mediaType=$mediaType verified=${replacement?.items?.size ?: 0} " +
+                "durationMs=${android.os.SystemClock.elapsedRealtime() - startedAt}",
+        )
     }
 
     val continueWatchingLabel = stringResource(
@@ -684,7 +811,7 @@ internal fun TvCatalogRailsScreen(
         if (!searchActive && defaultHeroItem != null) {
             val heroRoute = if (mediaType == "movie") TvRoutes.MOVIES else TvRoutes.SHOWS
             TvScreenCache.put("featured:$heroRoute", defaultHeroItem)
-            onMediaFocused?.invoke(defaultHeroItem)
+            onCatalogMediaFocused(defaultHeroItem)
         }
     }
 
@@ -836,7 +963,7 @@ internal fun TvCatalogRailsScreen(
             focusMemory = focusMemory,
             loading = uiState.loading,
             emptyMessage = emptyMessage,
-            onMediaFocused = onMediaFocused,
+            onMediaFocused = onCatalogMediaFocused,
             onSeeAll = onSeeAll,
             heroOverlay = heroOverlay,
             presentationMode = TvRailsPresentationMode.CatalogHero,
@@ -2006,15 +2133,6 @@ private fun TvCatalogSearchResultCard(
                         modifier = Modifier.fillMaxSize(),
                     )
                 }
-                item.ratings.withFallbackTmdbScore(item.rating)?.let { ratings ->
-                    PreferredRatingPills(
-                        ratings = ratings,
-                        prefs = ratingPrefs.tvExternalCardRatingPrefs(),
-                        modifier = Modifier
-                            .align(Alignment.BottomEnd)
-                            .padding(7.dp),
-                    )
-                }
             }
         }
     }
@@ -2028,10 +2146,10 @@ private suspend fun loadCachedCatalogRails(
     catalogTopCache: CatalogTopCacheRepository,
     metadataRepo: MetadataRepository,
     ratingsEnricher: RatingsEnricher,
-    ratingsApiKey: String,
     trendingLabel: String,
     popularLabel: String,
     topRatedLabel: String,
+    allowNetwork: Boolean,
 ): CatalogRailsUiState {
     val cacheOwnerId = userId ?: PUBLIC_CATALOG_RAILS_USER_ID
     val cachedBootstrap = listOfNotNull(userId, PUBLIC_CATALOG_RAILS_USER_ID)
@@ -2063,15 +2181,19 @@ private suspend fun loadCachedCatalogRails(
         popularLabel = popularLabel,
         topRatedLabel = topRatedLabel,
     ).map { it.key }
-
-    val bootstrapUsable = isUsableCatalogBootstrap(fromBootstrap, mediaType, expectedKeys)
-    val fromCatalogTop = if (!bootstrapUsable) {
+    val missingKeys = missingCatalogRailKeys(
+        expectedKeys = expectedKeys,
+        cachedKeys = fromBootstrap.map { it.key },
+    )
+    val fromCatalogTop = if (missingKeys.isNotEmpty()) {
         genreSpecs.mapNotNull { spec ->
+            val key = "genre_${mediaType}_${spec.id}"
+            if (key !in missingKeys) return@mapNotNull null
             val items = runCatching {
                 catalogTopCache.getTop(mediaType, spec.id, limit = 24)
             }.getOrDefault(emptyList())
             if (items.isEmpty()) null else TvContentRail(
-                key = "genre_${mediaType}_${spec.id}",
+                key = key,
                 title = spec.label,
                 items = items,
             )
@@ -2079,8 +2201,12 @@ private suspend fun loadCachedCatalogRails(
     } else {
         emptyList()
     }
+    val networkMissingKeys = missingCatalogRailKeys(
+        expectedKeys = expectedKeys,
+        cachedKeys = fromBootstrap.map { it.key } + fromCatalogTop.map { it.key },
+    )
 
-    val fromNetwork = if (!bootstrapUsable) {
+    val fromNetwork = if (allowNetwork && networkMissingKeys.isNotEmpty()) {
         loadLiveCatalogRails(
             mediaType = mediaType,
             genreSpecs = genreSpecs,
@@ -2088,6 +2214,7 @@ private suspend fun loadCachedCatalogRails(
             trendingLabel = trendingLabel,
             popularLabel = popularLabel,
             topRatedLabel = topRatedLabel,
+            requestedKeys = networkMissingKeys,
         )
     } else {
         emptyList()
@@ -2102,13 +2229,19 @@ private suspend fun loadCachedCatalogRails(
 
     if (fromNetwork.isNotEmpty()) {
         runCatching {
+            val mergedBootstrap = mergeCatalogRailsByKey(
+                expectedKeys = expectedKeys,
+                preferred = fromNetwork,
+                fallback = fromBootstrap,
+                lastResort = emptyList(),
+            )
             localSettingsRepo.setString(
                 catalogRailsBootstrapKey(cacheOwnerId, mediaType),
                 CatalogRailsBootstrapJson.encodeToString(
                     CatalogRailsBootstrapPayload(
                         savedAtMs = System.currentTimeMillis(),
                         mediaType = mediaType,
-                        rails = fromNetwork.map { rail ->
+                        rails = mergedBootstrap.map { rail ->
                             CatalogRailsBootstrapRail(
                                 key = rail.key,
                                 items = rail.items,
@@ -2127,12 +2260,13 @@ private suspend fun loadCachedCatalogRails(
         lastResort = fromCatalogTop,
     )
         .hydrateRailsFromRatingCache(ratingsEnricher)
-        .enrichTopRatedRailsForImdbGate(ratingsEnricher, ratingsApiKey)
+    val pendingTopRatedRail = candidateRails.firstOrNull { it.key.startsWith("top_rated_") }
     val rails = candidateRails.finalizeCatalogRails(mediaType = mediaType)
 
     return CatalogRailsUiState(
         loading = false,
         rails = rails,
+        pendingTopRatedRail = pendingTopRatedRail,
     )
 }
 
@@ -2272,27 +2406,12 @@ private fun MediaItem.passesCatalogRailCandidateQuality(railKey: String): Boolea
     return true
 }
 
-private fun isUsableCatalogBootstrap(
-    rails: List<TvContentRail>,
-    mediaType: String,
+internal fun missingCatalogRailKeys(
     expectedKeys: List<String>,
-): Boolean {
-    val keys = rails.mapTo(mutableSetOf()) { it.key }
-    val hasDesktopExtraRails = if (mediaType == "movie") {
-        "now-playing" in keys && "upcoming" in keys
-    } else {
-        "genre_tv_99" in keys
-    }
-    return expectedKeys.all { it in keys } &&
-        rails.size >= expectedKeys.size &&
-        hasDesktopExtraRails &&
-        "trending_$mediaType" in keys &&
-        "popular_$mediaType" in keys &&
-        "top_rated_$mediaType" in keys &&
-        rails.firstOrNull { it.key == "top_rated_$mediaType" }
-            ?.items
-            ?.take(12)
-            ?.all { it.passesCatalogRailCandidateQuality("top_rated_$mediaType") } == true
+    cachedKeys: List<String>,
+): Set<String> {
+    val cached = cachedKeys.toHashSet()
+    return expectedKeys.filterNotTo(linkedSetOf()) { it in cached }
 }
 
 private suspend fun loadLiveCatalogRails(
@@ -2302,6 +2421,7 @@ private suspend fun loadLiveCatalogRails(
     trendingLabel: String,
     popularLabel: String,
     topRatedLabel: String,
+    requestedKeys: Set<String>,
 ): List<TvContentRail> = coroutineScope {
     val specs = catalogRailSpecs(
         mediaType = mediaType,
@@ -2309,15 +2429,18 @@ private suspend fun loadLiveCatalogRails(
         trendingLabel = trendingLabel,
         popularLabel = popularLabel,
         topRatedLabel = topRatedLabel,
-    )
+    ).filter { it.key in requestedKeys }
+    val loadSemaphore = Semaphore(TV_CATALOG_MAX_CONCURRENT_RAIL_LOADS)
     val rails = specs.map { spec ->
         async {
-            fetchCatalogRailOrNull(
-                mediaType = mediaType,
-                key = spec.key,
-                title = spec.title,
-            ) {
-                loadCatalogRailItems(metadataRepo, mediaType, spec)
+            loadSemaphore.withPermit {
+                fetchCatalogRailOrNull(
+                    mediaType = mediaType,
+                    key = spec.key,
+                    title = spec.title,
+                ) {
+                    loadCatalogRailItems(metadataRepo, mediaType, spec)
+                }
             }
         }
     }.awaitAll().filterNotNull()
@@ -2357,7 +2480,9 @@ private suspend fun loadCatalogRailItems(
     spec: CatalogRailSpec,
 ): List<MediaItem> {
     val items = mutableListOf<MediaItem>()
-    for (page in 1..5) {
+    val pageLimit = catalogRailPageLimit(spec.key)
+    val candidateLimit = catalogRailCandidateLimit(spec.key)
+    for (page in 1..pageLimit) {
         val pageItems = runCatching {
             when (spec.special) {
                 "trending" -> metadataRepo.getTrending(mediaType, page)
@@ -2377,12 +2502,18 @@ private suspend fun loadCatalogRailItems(
             loadCatalogRailFallbackItems(metadataRepo, mediaType, spec, page)
         }
         items += pageItems.filter { it.passesCatalogRailCandidateQuality(spec.key) }
-        if (items.size >= TV_CATALOG_RAIL_CANDIDATE_LIMIT) break
+        if (items.size >= candidateLimit) break
     }
     return items
         .dedupeByCatalogIdentity()
-        .take(TV_CATALOG_RAIL_CANDIDATE_LIMIT)
+        .take(candidateLimit)
 }
+
+internal fun catalogRailPageLimit(key: String): Int =
+    if (key.startsWith("top_rated_")) TV_CATALOG_TOP_RATED_PAGE_LIMIT else TV_CATALOG_INITIAL_PAGE_LIMIT
+
+internal fun catalogRailCandidateLimit(key: String): Int =
+    if (key.startsWith("top_rated_")) TV_CATALOG_TOP_RATED_CANDIDATE_LIMIT else TV_CATALOG_INITIAL_CANDIDATE_LIMIT
 
 private suspend fun loadCatalogRailFallbackItems(
     metadataRepo: MetadataRepository,
@@ -2457,24 +2588,80 @@ private fun List<TvContentRail>.hydrateRailsFromRatingCache(
     rail.copy(items = ratingsEnricher.hydrateListFromCache(rail.items))
 }
 
-private suspend fun List<TvContentRail>.enrichTopRatedRailsForImdbGate(
-    ratingsEnricher: RatingsEnricher,
-    apiKey: String,
-): List<TvContentRail> = map { rail ->
-    if (!rail.key.startsWith("top_rated_") || rail.items.isEmpty()) {
-        rail
+internal fun initialCatalogRatingCandidates(
+    rails: List<TvContentRail>,
+    prefs: RatingDisplayPrefs,
+    limit: Int = TV_CATALOG_INITIAL_RATING_ENRICH_LIMIT,
+): List<MediaItem> {
+    if (limit <= 0) return emptyList()
+    val candidates = mutableListOf<MediaItem>()
+    val seen = mutableSetOf<String>()
+    var itemIndex = 0
+    while (candidates.size < limit) {
+        var foundAtIndex = false
+        rails.forEach { rail ->
+            val item = rail.items.getOrNull(itemIndex) ?: return@forEach
+            foundAtIndex = true
+            val key = item.ratingEnrichmentAttemptKey()
+            if (key !in seen && item.needsCatalogCardRatingEnrichment(prefs)) {
+                seen += key
+                candidates += item
+            }
+            if (candidates.size >= limit) return candidates
+        }
+        if (!foundAtIndex) break
+        itemIndex++
+    }
+    return candidates
+}
+
+private fun MediaItem.needsCatalogCardRatingEnrichment(prefs: RatingDisplayPrefs): Boolean =
+    hasExternalRatingLookupIdentity() && ratings?.hasAnyEnabledDisplayValue(prefs) != true
+
+internal fun mergeCatalogRatingItems(
+    rails: List<TvContentRail>,
+    enrichedItems: List<MediaItem>,
+): List<TvContentRail> {
+    val ratingsByKey = enrichedItems.ratingValuesByLookupKey()
+    if (ratingsByKey.isEmpty()) return rails
+    return rails.map { rail ->
+        rail.copy(items = rail.items.withEnrichedRatingsFrom(ratingsByKey))
+    }
+}
+
+private fun mergeCatalogRatingItem(
+    item: MediaItem,
+    enrichedItems: List<MediaItem>,
+): MediaItem {
+    val matched = enrichedItems.firstOrNull { enriched ->
+        item.ratingEnrichmentLookupKeys().any { it in enriched.ratingEnrichmentLookupKeys() }
+    }
+    val merged = item.withEnrichedRatingsFrom(enrichedItems.ratingValuesByLookupKey())
+    return if (matched == null) {
+        merged
     } else {
-        val enriched = ratingsEnricher.enrichList(rail.items, apiKey)
-        rail.copy(
-            items = enriched
-                .filter { it.topRatedExternalScore() != null }
-                .sortedWith(
-                    compareByDescending<MediaItem> { it.topRatedExternalScore() ?: -1.0 }
-                        .thenByDescending { it.ratings?.imdbVotes ?: 0 },
-                ),
+        merged.copy(
+            tmdbId = merged.tmdbId ?: matched.tmdbId,
+            imdbId = merged.imdbId ?: matched.imdbId,
         )
     }
 }
+
+private fun List<MediaItem>.ratingValuesByLookupKey() = buildMap {
+    this@ratingValuesByLookupKey.forEach { item ->
+        val ratings = item.ratings ?: return@forEach
+        item.ratingEnrichmentLookupKeys().forEach { key -> put(key, ratings) }
+    }
+}
+
+private suspend fun catalogRatingsApiKey(
+    secretStore: com.torve.domain.integrations.IntegrationSecretStore,
+    prefsRepo: com.torve.domain.repository.PreferencesRepository,
+): String = runCatching {
+    secretStore.get(com.torve.domain.integrations.IntegrationSecretKey.MDBLIST_API_KEY)
+        ?: prefsRepo.getString(SettingsViewModel.KEY_MDBLIST_API_KEY)
+        ?: com.torve.data.mdblist.MdbListApi.DEFAULT_API_KEY
+}.getOrDefault(com.torve.data.mdblist.MdbListApi.DEFAULT_API_KEY)
 
 private fun MediaItem.topRatedExternalScore(): Double? {
     val ratings = ratings ?: return null

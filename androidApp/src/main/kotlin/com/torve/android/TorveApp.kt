@@ -12,6 +12,7 @@ import com.torve.android.notification.EpisodeNotificationWorker
 import com.torve.android.sync.TraktSyncWorker
 import com.torve.data.acceleration.AccelerationInventorySyncService
 import com.torve.data.contentpolicy.MutableContentChannelProvider
+import com.torve.data.trakt.TraktClient
 import com.torve.di.sharedModule
 import com.torve.domain.security.ClientTrustSignalProvider
 import com.torve.domain.security.ClientTrustSignalRegistry
@@ -62,6 +63,10 @@ class TorveApp : Application() {
         }
         com.torve.android.debug.AnrDebugLogger.log("STARTUP startKoin END")
         ClientTrustSignalRegistry.setProvider(getKoin().get<ClientTrustSignalProvider>())
+        getKoin().get<TraktClient>().setPackagedCredentials(
+            clientId = BuildConfig.TRAKT_CLIENT_ID,
+            clientSecret = BuildConfig.TRAKT_CLIENT_SECRET,
+        )
         getKoin().get<MutableContentChannelProvider>().update(
             if (BuildConfig.FLAVOR.contains("google", ignoreCase = true)) "google_play" else null,
         )
@@ -80,14 +85,14 @@ class TorveApp : Application() {
 
             // Non-critical deferred work.
             kotlinx.coroutines.delay(NON_CRITICAL_STARTUP_DELAY_MS)
-            if (!com.torve.android.billing.isStripeFireTvBillingBuild()) {
+            if (BuildConfig.HAS_BILLING && !com.torve.android.billing.isStripeFireTvBillingBuild()) {
                 launch { runCatching { getKoin().get<BillingManager>().initialize() } }
             }
             launch {
                 TraktSyncWorker.schedule(this@TorveApp)
                 if (isTvBuild) {
                     CatalogWarmupWorker.cancel(this@TorveApp)
-                    EpgWarmupWorker.cancel(this@TorveApp)
+                    EpgWarmupWorker.schedule(this@TorveApp)
                 } else {
                     EpgWarmupWorker.schedule(this@TorveApp)
                     CatalogWarmupWorker.schedule(this@TorveApp)

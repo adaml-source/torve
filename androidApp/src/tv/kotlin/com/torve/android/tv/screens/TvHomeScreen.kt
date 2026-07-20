@@ -19,6 +19,7 @@ import com.torve.android.tv.components.TvProviderHealthBanner
 import com.torve.android.tv.components.dedupeAcrossRails
 import com.torve.android.tv.components.rememberTvFocusMemory
 import com.torve.android.tv.focus.TvScreenFocusHandle
+import com.torve.android.tv.isTvCatalogProgress
 import com.torve.android.tv.toMediaItemOrNull
 import com.torve.domain.lanlibrary.NetworkMode
 import com.torve.domain.model.CatalogShelf
@@ -359,7 +360,7 @@ private fun buildTvHomeRails(
                 rails += buildBuiltInRails(item.config, state)
             }
             is CustomHomeItem -> {
-                val items = state.customShelves[item.section.id].orEmpty().take(24)
+                val items = state.customShelves[item.section.id].orEmpty().tvHomeCardItems()
                 if (items.isNotEmpty()) {
                     rails += TvContentRail(
                         key = "custom:${item.section.id}",
@@ -369,7 +370,7 @@ private fun buildTvHomeRails(
                 }
             }
             is AddonShelfHomeItem -> {
-                val items = item.shelf.items.take(24)
+                val items = item.shelf.items.tvHomeCardItems()
                 if (items.isNotEmpty()) {
                     rails += TvContentRail(
                         key = "addon:${item.shelf.id}",
@@ -404,8 +405,7 @@ private fun buildBuiltInRails(
         HomeSection.CONTINUE_WATCHING -> {
             val items = state.continueWatching
                 .mapNotNull { it.toMediaItemOrNull() }
-                .filter { it.tmdbId != null }
-                .take(20)
+                .tvHomeCardItems(limit = 20)
                 .withEnrichedRatingsFrom(state.continueWatchingRatings)
             if (items.isEmpty()) emptyList()
             else {
@@ -416,7 +416,7 @@ private fun buildBuiltInRails(
                         items = items,
                         cardStyle = TvCardStyle.BACKDROP,
                         progressByMediaId = state.continueWatching
-                            .filter { it.progressPercent > 0f }
+                            .filter { it.isTvCatalogProgress() && it.progressPercent > 0f }
                             .associate { it.mediaId to it.progressPercent },
                     ),
                 )
@@ -424,7 +424,7 @@ private fun buildBuiltInRails(
         }
 
         HomeSection.WATCHLIST -> {
-            val items = state.watchlistItems.take(24)
+            val items = state.watchlistItems.tvHomeCardItems()
             if (items.isEmpty()) emptyList()
             else listOf(TvContentRail(key = "watchlist", title = title, items = items))
         }
@@ -432,7 +432,7 @@ private fun buildBuiltInRails(
         HomeSection.WATCHLIST_MOVIES -> {
             val items = state.watchlistItems
                 .filter { it.type == MediaType.MOVIE }
-                .take(24)
+                .tvHomeCardItems()
             if (items.isEmpty()) emptyList()
             else listOf(TvContentRail(key = "watchlist_movies", title = title, items = items))
         }
@@ -440,7 +440,7 @@ private fun buildBuiltInRails(
         HomeSection.WATCHLIST_TV -> {
             val items = state.watchlistItems
                 .filter { it.type == MediaType.SERIES }
-                .take(24)
+                .tvHomeCardItems()
             if (items.isEmpty()) emptyList()
             else listOf(TvContentRail(key = "watchlist_tv", title = title, items = items))
         }
@@ -452,7 +452,7 @@ private fun buildBuiltInRails(
         HomeSection.NEW_RELEASES,
         HomeSection.TOP_RATED -> {
             val shelf = state.shelves.firstOrNull { it.id == config.section.shelfId }
-            val items = shelf?.items?.take(24).orEmpty()
+            val items = shelf?.items?.tvHomeCardItems().orEmpty()
             if (items.isEmpty()) emptyList()
             else {
                 listOf(
@@ -466,27 +466,27 @@ private fun buildBuiltInRails(
         }
 
         HomeSection.RECOMMENDED -> {
-            val items = state.recommendedItems.map { it.item }.take(24)
+            val items = state.recommendedItems.map { it.item }.tvHomeCardItems()
             if (items.isEmpty()) emptyList()
             else listOf(TvContentRail(key = "recommended", title = title, items = items))
         }
 
         HomeSection.RECENTLY_WATCHED -> {
-            val items = state.recentlyWatched.take(24)
+            val items = state.recentlyWatched.tvHomeCardItems()
             if (items.isEmpty()) emptyList()
             else listOf(TvContentRail(key = "recently_watched", title = title, items = items))
         }
 
         HomeSection.HIDDEN_GEMS -> {
             val shelf = state.hiddenGemsShelf
-            val items = shelf?.items?.take(24).orEmpty()
+            val items = shelf?.items?.tvHomeCardItems().orEmpty()
             if (items.isEmpty()) emptyList()
             else listOf(TvContentRail(key = shelf?.id ?: "hidden_gems", title = title, items = items))
         }
 
         HomeSection.BECAUSE_YOU_WATCHED -> {
             state.becauseYouWatched.mapNotNull { shelf ->
-                shelf.items.take(24)
+                shelf.items.tvHomeCardItems()
                     .takeIf { it.isNotEmpty() }
                     ?.let { items ->
                         TvContentRail(
@@ -500,7 +500,7 @@ private fun buildBuiltInRails(
 
         HomeSection.MDBLIST_SHELVES -> {
             state.mdbListShelves.mapNotNull { shelf ->
-                shelf.items.take(24)
+                shelf.items.tvHomeCardItems()
                     .takeIf { it.isNotEmpty() }
                     ?.let { items ->
                         TvContentRail(
@@ -513,3 +513,14 @@ private fun buildBuiltInRails(
         }
     }
 }
+
+private fun List<MediaItem>.tvHomeCardItems(limit: Int = 24): List<MediaItem> =
+    asSequence()
+        .filter { it.isTvHomeDisplayable() }
+        .take(limit)
+        .toList()
+
+private fun MediaItem.isTvHomeDisplayable(): Boolean =
+    !isContentPlaceholder &&
+        !isStubDetail &&
+        title.isNotBlank()

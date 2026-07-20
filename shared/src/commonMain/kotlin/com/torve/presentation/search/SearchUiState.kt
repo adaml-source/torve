@@ -144,6 +144,11 @@ data class SearchUiState(
     val peopleResults: List<PersonSummary> = emptyList(),
     val userLists: List<String> = emptyList(),
     val isDiscovering: Boolean = false,
+    val isLoadingMore: Boolean = false,
+    val searchPage: Int = 1,
+    val searchHasMore: Boolean = false,
+    val discoverPage: Int = 1,
+    val discoverHasMore: Boolean = false,
     val hasActiveSearch: Boolean = false,
     /**
      * Monotonic id of the search that produced [results] / [discoverResults].
@@ -173,7 +178,7 @@ data class SearchUiState(
 ) {
     /** List the UI should render. Already a committed visible projection. */
     val displayItems: List<MediaItem>
-        get() = if (query.length >= 2 || hasActiveSearch) results else discoverResults
+        get() = if (query.length >= 2) results else discoverResults
 
     /**
      * SENSITIVE items committed for the active text-search slice that are

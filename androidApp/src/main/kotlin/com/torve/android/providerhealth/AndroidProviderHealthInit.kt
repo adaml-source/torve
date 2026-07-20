@@ -63,7 +63,7 @@ class AndroidProviderHealthInit(
     private val libraryService: LibraryOverlayService,
     private val addonRepository: AddonRepository,
     private val stremioAddonClient: StremioAddonClient,
-    private val channelsViewModel: ChannelsViewModel,
+    private val channelsViewModel: Lazy<ChannelsViewModel>,
     private val pandaConfigStateStore: PandaConfigStateStore,
     private val refreshOnSettings: ProviderHealthRefreshOnSettings,
     private val context: android.content.Context,
@@ -208,10 +208,10 @@ class AndroidProviderHealthInit(
         // ChannelsViewModel is bound as a single in SharedModule, so the
         // state we read here matches the user-facing one.
         coordinator.register(
-            IptvProviderHealthChecker(stateSource = { channelsViewModel.state.value }),
+            IptvProviderHealthChecker(stateSource = { channelsViewModel.value.state.value }),
         )
         coordinator.register(
-            IptvEpgProviderHealthChecker(stateSource = { channelsViewModel.state.value }),
+            IptvEpgProviderHealthChecker(stateSource = { channelsViewModel.value.state.value }),
         )
 
         // ── Trakt / SIMKL (token presence) ────────────────────────────

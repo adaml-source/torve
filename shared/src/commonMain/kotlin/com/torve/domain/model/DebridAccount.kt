@@ -66,7 +66,53 @@ data class StreamPreferences(
     val autoSourceMode: AutoSourceMode = AutoSourceMode.BALANCED,
     val allow4kAuto: Boolean = false,
     val preferCompatibleCodecs: Boolean = true,
+    /** Ordered ISO-639 language codes. The currently selected audio language may be prepended at runtime. */
+    val preferredAudioLanguages: List<String> = emptyList(),
+    val sourceLanguageMatchMode: SourceLanguageMatchMode = SourceLanguageMatchMode.PREFER,
+    /** Minimum advertised source size normalized to one hour. Zero disables the floor. */
+    val minSourceSizePerHourBytes: Long = 0L,
+    val unknownSourceSizePolicy: UnknownSourceMetadataPolicy = UnknownSourceMetadataPolicy.ALLOW_WITH_PENALTY,
+    val unknownSourceLanguagePolicy: UnknownSourceMetadataPolicy = UnknownSourceMetadataPolicy.ALLOW_WITH_PENALTY,
+    val sourceFallbackPolicy: SourceFallbackPolicy = SourceFallbackPolicy.ASK,
+    val nextEpisodeMode: NextEpisodeMode = NextEpisodeMode.AT_END,
+    val nextEpisodePreparationMode: NextEpisodePreparationMode = NextEpisodePreparationMode.RESOLVE_ONLY,
+    val nextEpisodePreloadBufferSeconds: Int = 30,
+    val nextEpisodePreloadMaxBytes: Long = 128L * 1024L * 1024L,
+    val nextEpisodePreloadWifiOnly: Boolean = true,
 )
+
+@Serializable
+enum class SourceLanguageMatchMode(val label: String) {
+    PREFER("Prefer selected languages"),
+    REQUIRE("Require selected languages"),
+}
+
+@Serializable
+enum class UnknownSourceMetadataPolicy(val label: String) {
+    ALLOW_WITH_PENALTY("Allow, but rank lower"),
+    REJECT("Do not auto-select"),
+}
+
+@Serializable
+enum class SourceFallbackPolicy(val label: String) {
+    ASK("Ask before relaxing rules"),
+    DO_NOT_AUTOPLAY("Do not autoplay"),
+    BEST_AVAILABLE("Use best available"),
+}
+
+@Serializable
+enum class NextEpisodeMode(val label: String) {
+    AT_END("At episode end"),
+    AT_CREDITS("At credits"),
+    OFF("Off"),
+}
+
+@Serializable
+enum class NextEpisodePreparationMode(val label: String) {
+    OFF("Off"),
+    RESOLVE_ONLY("Resolve only"),
+    RESOLVE_AND_BUFFER("Resolve and buffer"),
+}
 
 @Serializable
 enum class AutoSourceMode(val label: String) {

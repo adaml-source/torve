@@ -22,6 +22,7 @@ import androidx.media3.exoplayer.Renderer
 import androidx.media3.exoplayer.analytics.AnalyticsListener
 import androidx.media3.exoplayer.audio.DefaultAudioSink
 import androidx.media3.datasource.DefaultHttpDataSource
+import androidx.media3.datasource.HttpDataSource
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.exoplayer.source.MediaSource
 import androidx.media3.exoplayer.trackselection.DefaultTrackSelector
@@ -121,6 +122,9 @@ class ExoPlayerEngine(
     private var videoDecoderName: String? = null
     private var audioDecoderName: String? = null
     private var currentUrl: String? = null
+    private var audioSinkErrorCount = 0
+    private var lastAudioSinkErrorElapsedMs = 0L
+    private var lastAudioSinkErrorSummary: String? = null
     internal var liveBufferDurationMs: Int = DEFAULT_LIVE_BUFFER_MS
     private var preferSoftwareAudioDecoding = false
     private var currentRendererPrefersSoftwareAudio = false
@@ -182,12 +186,12 @@ class ExoPlayerEngine(
         }
 
         override fun onPlayerError(error: PlaybackException) {
+            Log.e(TAG, "Playback failure ${error.playbackFailureSummary()}")
             // When no compatibility failure handler is set (TV live playback),
             // skip all custom audio recovery — let ExoPlayer + FFmpeg handle
             // codec fallback automatically via setEnableDecoderFallback(true),
             // exactly like TiviMate does.
             if (onLiveAudioCompatibilityFailure == null) {
-                Log.w(TAG, "Player error (${error.errorCode}): ${error.message}")
                 if (error.errorCode == PlaybackException.ERROR_CODE_BEHIND_LIVE_WINDOW ||
                     error.errorCode == PlaybackException.ERROR_CODE_AUDIO_TRACK_WRITE_FAILED
                 ) {
@@ -408,6 +412,22 @@ class ExoPlayerEngine(
             applyTuneSnapshot(liveTuneStateMachine.onVideoReady(SystemClock.elapsedRealtime()))
             maybeConfirmTune("rendered_first_frame")
             notifyStateChanged()
+        }
+
+        override fun onAudioSinkError(
+            eventTime: AnalyticsListener.EventTime,
+            audioSinkError: Exception,
+        ) {
+            recordAudioSinkError(audioSinkError)
+        }
+
+        override fun onAudioCodecError(
+            eventTime: AnalyticsListener.EventTime,
+            audioCodecError: Exception,
+        ) {
+            if (audioCodecError.buildCauseChainSummary().contains("AudioSink", ignoreCase = true)) {
+                recordAudioSinkError(audioCodecError)
+            }
         }
     }
 
@@ -640,6 +660,7 @@ class ExoPlayerEngine(
                 "softwareAudio=$preferSoftwareAudioDecoding " +
                 "sessionRecoverySkipped=$sessionIncompatibleRecoverySkipped",
         )
+        resetAudioSinkErrorTelemetry()
         exoPlayer?.apply {
             stop()
             clearMediaItems()
@@ -1234,7 +1255,7 @@ class ExoPlayerEngine(
         )
     }
 
-    private fun PlaybackException.buildCauseChainSummary(maxDepth: Int = 8): String {
+    private fun Throwable.buildCauseChainSummary(maxDepth: Int = 8): String {
         val parts = mutableListOf<String>()
         var current: Throwable? = this
         var depth = 0
@@ -1246,6 +1267,33 @@ class ExoPlayerEngine(
             depth++
         }
         return parts.joinToString(" <- ")
+    }
+
+    private fun PlaybackException.playbackFailureSummary(maxDepth: Int = 8): String {
+        val causes = mutableListOf<String>()
+        var current: Throwable? = this
+        var depth = 0
+        var httpStatus: Int? = null
+        while (current != null && depth < maxDepth) {
+            causes += current::class.simpleName ?: current::class.java.simpleName
+            if (current is HttpDataSource.InvalidResponseCodeException) {
+                httpStatus = current.responseCode
+            }
+            current = current.cause
+            depth++
+        }
+        return buildString {
+            append("code=")
+            append(errorCode)
+            append(" name=")
+            append(errorCodeName)
+            httpStatus?.let {
+                append(" http=")
+                append(it)
+            }
+            append(" causes=")
+            append(causes.joinToString("<-"))
+        }
     }
 
     private fun ExoPlayer.setPlaybackSource(url: String) {
@@ -1856,6 +1904,9 @@ class ExoPlayerEngine(
             fallbackFromHardwareDefault = liveAudioRecoveryAttempts > 0 ||
                 inferDecoderKind(videoDecoderName) == DecoderKind.SOFTWARE ||
                 inferDecoderKind(audioDecoderName) == DecoderKind.SOFTWARE,
+            audioSinkErrorCount = audioSinkErrorCount,
+            lastAudioSinkErrorElapsedMs = lastAudioSinkErrorElapsedMs,
+            lastAudioSinkErrorSummary = lastAudioSinkErrorSummary,
         )
     }
 
@@ -1872,6 +1923,24 @@ class ExoPlayerEngine(
             isAudioReady = snapshot.audioReady,
             isVideoReady = snapshot.videoReady,
             isEngineFallbackAllowed = snapshot.fallbackAllowed,
+        )
+    }
+
+    private fun resetAudioSinkErrorTelemetry() {
+        audioSinkErrorCount = 0
+        lastAudioSinkErrorElapsedMs = 0L
+        lastAudioSinkErrorSummary = null
+    }
+
+    private fun recordAudioSinkError(error: Exception) {
+        audioSinkErrorCount += 1
+        lastAudioSinkErrorElapsedMs = SystemClock.elapsedRealtime()
+        lastAudioSinkErrorSummary = error.buildCauseChainSummary().take(240)
+        Log.w(
+            "LiveTune",
+            "Audio sink error count=$audioSinkErrorCount " +
+                "channel=${currentPlaybackContext?.displayName.orEmpty()} " +
+                "summary=$lastAudioSinkErrorSummary",
         )
     }
 

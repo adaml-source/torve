@@ -31,8 +31,10 @@ private fun List<MediaItem>.filterUpcomingMovieReleases(today: String = todayIso
         releaseDate != null && releaseDate >= today
     }
 
-private const val HOME_RAIL_PREFETCH_PAGES = 2
-private const val HOME_UPCOMING_PREFETCH_PAGES = 5
+// First paint only needs the first page. Destination screens load deeper
+// pages as the user browses instead of making Home wait for them at startup.
+private const val HOME_RAIL_PREFETCH_PAGES = 1
+private const val HOME_UPCOMING_PREFETCH_PAGES = 1
 private const val METADATA_LIST_TTL_MS = 30 * 60 * 1000L
 private const val METADATA_DETAIL_TTL_MS = 12 * 60 * 60 * 1000L
 private const val METADATA_CACHE_MAX_ENTRIES = 320
@@ -728,12 +730,7 @@ class MetadataRepositoryImpl(
         val topRated = async {
             homeRequest("top_rated") {
                 homePages(HOME_RAIL_PREFETCH_PAGES) { page ->
-                    api.discoverMovies(
-                        page = page,
-                        sortBy = "vote_average.desc",
-                        minRating = 7.0f,
-                        requestCategory = "home.top_rated.page_$page",
-                    ).results
+                    api.getPopular("movie", page = page, requestCategory = "home.top_rated_candidates.page_$page").results
                 }.map { TmdbMappers.movieToMediaItem(it) }.dedupeByStableKey()
             }
         }

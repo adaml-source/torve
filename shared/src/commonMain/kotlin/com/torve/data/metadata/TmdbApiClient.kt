@@ -86,11 +86,9 @@ class TmdbApiClient(
         private val requestLimiter = Semaphore(MAX_CONCURRENT_REQUESTS)
     }
 
-    @Volatile
     private var resolvedHostCache: String? = null
 
     /** Mutable language override. Set by SettingsViewModel when the user changes language. */
-    @Volatile
     var contentLanguage: String? = null
 
     /** Base params included in every TMDB call: API key + language (if set). */
@@ -483,13 +481,9 @@ class TmdbApiClient(
                 withWatchProviders?.let { add("with_watch_providers" to it) }
                 watchRegion?.let { add("watch_region" to it) }
                 withKeywords?.let { add("with_keywords" to it) }
-                // Floor vote_count at 100 globally to exclude indie shorts
-                // with 1-2 votes that pollute the top of any sort
-                // (especially IMDB-rating sort, which previously showed a
-                // wall of "10.0" titles by 1-vote items). 100 is permissive
-                // enough to keep most legitimate small-release content
-                // while filtering the long tail of fringe entries.
-                add("vote_count.gte" to 100)
+                // Rating-sorted discovery is otherwise dominated by lightly
+                // voted titles and requires excessive external verification.
+                add("vote_count.gte" to if (sortBy == "vote_average.desc") 500 else 100)
             },
         )
     }
@@ -532,8 +526,7 @@ class TmdbApiClient(
                 withWatchProviders?.let { add("with_watch_providers" to it) }
                 watchRegion?.let { add("watch_region" to it) }
                 withKeywords?.let { add("with_keywords" to it) }
-                // Floor vote_count at 100 globally (see discoverMovie comment).
-                add("vote_count.gte" to 100)
+                add("vote_count.gte" to if (sortBy == "vote_average.desc") 500 else 100)
             },
         )
     }

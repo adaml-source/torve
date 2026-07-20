@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="utf-8"?>
+﻿<?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="tv_nav_iptv">Canali</string>
     <string name="tv_nav_search">Cerca</string>
@@ -448,10 +448,10 @@
     <string name="tv_live_audio_prefer_surround">Preferisci tracce surround</string>
     <string name="tv_live_audio_prefer_surround_desc">Dai priorit\u00e0 all\'audio multicanale rispetto allo stereo</string>
     <string name="tv_notification_device_removed_data_cleared">Questa TV \u00e8 stata rimossa dai dispositivi attivi. I dati locali di Torve sono stati eliminati.</string>
-    <string name="tv_notification_setup_sync_premium_verify_failed">La sincronizzazione della configurazione non ha potuto verificare Premium su questa TV.</string>
-    <string name="tv_notification_setup_sync_premium_device_blocked">La sincronizzazione \u00e8 bloccata finch\u00e9 questa TV non ha uno slot dispositivo Premium attivo.</string>
-    <string name="tv_notification_setup_sync_premium_required">Premium \u00e8 necessario prima che questa TV possa ricevere la sincronizzazione.</string>
-    <string name="tv_notification_setup_sync_premium_offline">Connettiti a Torve per verificare Premium prima di ricevere la sincronizzazione.</string>
+    <string name="tv_notification_setup_sync_premium_verify_failed">Setup sync could not refresh account access on this TV.</string>
+    <string name="tv_notification_setup_sync_premium_device_blocked">Setup sync is waiting for this TV device registration.</string>
+    <string name="tv_notification_setup_sync_premium_required">This TV needs account setup before receiving setup sync.</string>
+    <string name="tv_notification_setup_sync_premium_offline">Connect to Torve before receiving setup sync.</string>
     <string name="tv_notification_invalid_settings_data">Dati impostazioni non validi: %1$s</string>
     <string name="tv_notification_sync_import_failed">Importazione sync non riuscita: %1$s</string>
     <string name="tv_notification_settings_synced">Impostazioni sincronizzate: %1$s</string>
@@ -464,8 +464,8 @@
     <string name="tv_notification_sync_summary_progress">%1$d progressi</string>
     <string name="tv_notification_sync_error">Errore sync: %1$s</string>
     <string name="tv_notification_downloads_completed">%1$d download completati</string>
-    <string name="tv_unlock_purchase_phone_title">Acquista su telefono o tablet</string>
-    <string name="tv_unlock_purchase_phone_body">Apri Torve sul dispositivo mobile e vai in Impostazioni &gt; Abbonamento per sbloccare Premium. L\'abbonamento funziona su tutti i tuoi dispositivi.\n\nDopo l\'acquisto, riavvia questa app o esci e rientra per rendere attivo l\'abbonamento.</string>
+    <string name="tv_unlock_purchase_phone_title">Torve is free software</string>
+    <string name="tv_unlock_purchase_phone_body">Torve is free software. No subscriptions. No paid tiers.</string>
     <string name="tv_action_got_it">Capito</string>
     <string name="tv_home_on_now">In onda ora</string>
     <string name="tv_home_available_now">Disponibile ora</string>
@@ -502,12 +502,12 @@
     <string name="tv_auth_sign_out_second_press_hint">Richiede una seconda pressione per evitare uscite accidentali.</string>
     <string name="tv_settings_pair_phone_title">Accedi con il telefono</string>
     <string name="tv_settings_pair_phone_subtitle">Scansiona un QR con l\'app Torve sul telefono - senza digitare.</string>
-    <string name="tv_purchase_verifying_premium">Acquisto ricevuto. Verifica Premium...</string>
-    <string name="tv_purchase_restore_started">Ripristino avviato. Controllo accesso Premium...</string>
-    <string name="tv_purchase_cancelled">Acquisto annullato.</string>
-    <string name="tv_purchase_verification_pending">La verifica \u00e8 gi\u00e0 in sospeso. Scegli Riprova verifica o Ripristina acquisto.</string>
-    <string name="tv_purchase_billing_managed_by">La fatturazione \u00e8 gestita da %1$s.</string>
-    <string name="tv_purchase_choose_billing_store">Scegli accesso mensile o a vita. La fatturazione \u00e8 gestita da %1$s.</string>
+    <string name="tv_purchase_verifying_premium">Access refresh received.</string>
+    <string name="tv_purchase_restore_started">Access refresh started.</string>
+    <string name="tv_purchase_cancelled">No purchase required.</string>
+    <string name="tv_purchase_verification_pending">Account access refresh is already pending.</string>
+    <string name="tv_purchase_billing_managed_by">No billing is required.</string>
+    <string name="tv_purchase_choose_billing_store">Torve is free software. No billing is required.</string>
     <string name="tv_settings_receive_credentials_import_desc">Mostra un codice di associazione unico per importare segreti Debrid, Plex e Panda senza digitare.</string>
     <string name="tv_settings_receive_credentials_tv_desc">Mostra un codice di associazione unico per far inviare a desktop o telefono credenziali Debrid, Plex e Panda senza digitare col telecomando.</string>
     <string name="tv_settings_open_transfer_arrow">Apri trasferimento &gt;</string>

@@ -18,6 +18,11 @@ import com.torve.domain.model.RatingDisplayPrefs
 import com.torve.domain.model.RegexPattern
 import com.torve.domain.model.StreamGroup
 import com.torve.domain.model.StreamQuality
+import com.torve.domain.model.NextEpisodeMode
+import com.torve.domain.model.NextEpisodePreparationMode
+import com.torve.domain.model.SourceFallbackPolicy
+import com.torve.domain.model.SourceLanguageMatchMode
+import com.torve.domain.model.UnknownSourceMetadataPolicy
 import com.torve.domain.player.DesktopPlaybackHotkeys
 
 enum class ThemeMode { SYSTEM, LIGHT, DARK }
@@ -94,6 +99,7 @@ data class SettingsUiState(
     val maxQuality: StreamQuality = StreamQuality.REMUX_4K,
     val minQuality: StreamQuality = StreamQuality.SD_480P,
     val maxFileSizeMb: Int? = null,
+    val minSourceSizePerHourMb: Int = 0,
     val cachedOnly: Boolean = true,
     val hdrEnabled: Boolean = false,
     // Playback
@@ -101,6 +107,15 @@ data class SettingsUiState(
     val codecPreference: CodecPreference = CodecPreference.HEVC_PREFERRED,
     val hdrMode: HdrMode = HdrMode.AUTO,
     val autoPlayNextEpisodeEnabled: Boolean = true,
+    val nextEpisodeMode: NextEpisodeMode = NextEpisodeMode.AT_END,
+    val nextEpisodePreparationMode: NextEpisodePreparationMode = NextEpisodePreparationMode.RESOLVE_ONLY,
+    val nextEpisodePreloadBufferSeconds: Int = 30,
+    val nextEpisodePreloadMaxMb: Int = 128,
+    val nextEpisodePreloadWifiOnly: Boolean = true,
+    val sourceLanguageMatchMode: SourceLanguageMatchMode = SourceLanguageMatchMode.PREFER,
+    val unknownSourceSizePolicy: UnknownSourceMetadataPolicy = UnknownSourceMetadataPolicy.ALLOW_WITH_PENALTY,
+    val unknownSourceLanguagePolicy: UnknownSourceMetadataPolicy = UnknownSourceMetadataPolicy.ALLOW_WITH_PENALTY,
+    val sourceFallbackPolicy: SourceFallbackPolicy = SourceFallbackPolicy.ASK,
     val autoSourceMode: AutoSourceMode = AutoSourceMode.BALANCED,
     val allow4kAuto: Boolean = false,
     val preferCompatibleCodecs: Boolean = true,

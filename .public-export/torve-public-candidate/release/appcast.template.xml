@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Torve appcast template (Sparkle / WinSparkle XML format).
+
+  This is the file the in-app updater fetches from
+  ${TORVE_UPDATE_FEED}. Host it at a stable HTTPS URL alongside your
+  versioned MSIs. The handoff refuses non-HTTPS installer URLs, so the
+  whole feed (and the linked enclosure URL) MUST be HTTPS.
+
+  Workflow per release:
+    1. Build the new MSI with the feed URL baked in:
+         ./gradlew :desktopApp:packageMsiCloseApp \
+           -PtorveUpdateFeed=https://YOURDOMAIN/releases/appcast.xml
+    2. Upload Torve-X.Y.Z.msi to the same domain.
+    3. Compute SHA-256 of the uploaded MSI. The handoff verifies this
+       before launching, so a feed -> MSI mismatch fails closed.
+    4. Copy this template, replace every CHANGEME field, set the new
+       <pubDate> to RFC-1123 (UTC), and upload as appcast.xml.
+    5. End users' next "Check for updates" picks up the new version.
+
+  CHANGEME fields (search the file for "CHANGEME"):
+    * <link> in <channel>     — your release-notes landing page
+    * <title> in <item>       — "Torve X.Y.Z"
+    * <pubDate>               — RFC-1123 in UTC, e.g.
+                                "Sat, 03 May 2026 17:24:00 +0000"
+    * <link> in <item>        — release-notes URL for THIS version
+    * <description>           — HTML inside <![CDATA[...]]>
+    * <enclosure url=…>       — direct HTTPS URL to the MSI
+    * <enclosure length=…>    — exact byte length of the MSI on disk
+    * sparkle:version /
+      sparkle:shortVersionString — the version this enclosure ships
+    * sparkle:dsaSignature    — leave empty until you wire signed
+                                appcast verification (Sparkle's DSA);
+                                Torve currently relies on
+                                sparkle:installerSha256 below.
+    * sparkle:installerSha256 — hex-encoded SHA-256 of the MSI; the
+                                handoff verifies this and refuses to
+                                launch a mismatched download.
+-->
+<rss version="2.0"
+     xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">
+  <channel>
+    <title>Torve</title>
+    <link>https://CHANGEME.example/releases/</link>
+    <description>Torve desktop release feed.</description>
+    <language>en</language>
+    <item>
+      <title>Torve CHANGEME_VERSION</title>
+      <pubDate>CHANGEME_RFC1123_UTC_DATE</pubDate>
+      <link>https://CHANGEME.example/releases/CHANGEME_VERSION/</link>
+      <description><![CDATA[
+        <h3>What's new in CHANGEME_VERSION</h3>
+        <ul>
+          <li>Replace these notes with the real changelog.</li>
+          <li>Markdown-ish HTML inside CDATA is fine.</li>
+        </ul>
+      ]]></description>
+      <enclosure
+        url="https://CHANGEME.example/releases/Torve-CHANGEME_VERSION.msi"
+        sparkle:version="CHANGEME_VERSION"
+        sparkle:shortVersionString="CHANGEME_VERSION"
+        sparkle:installerSha256="CHANGEME_SHA256_LOWER_HEX"
+        length="CHANGEME_MSI_BYTES"
+        type="application/octet-stream"
+        />
+    </item>
+  </channel>
+</rss>

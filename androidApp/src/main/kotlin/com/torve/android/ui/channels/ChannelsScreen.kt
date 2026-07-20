@@ -1,8 +1,11 @@
 package com.torve.android.ui.channels
 
+import android.content.res.Configuration
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -10,15 +13,13 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
 import androidx.compose.ui.layout.ContentScale
 import coil3.compose.AsyncImage
@@ -61,6 +62,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.res.stringResource
@@ -86,10 +88,12 @@ fun ChannelsScreen(
     viewModel: ChannelsViewModel = koinInject(),
 ) {
     val state by viewModel.state.collectAsState()
+    val isLandscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
 
     Box(
         modifier = Modifier
             .fillMaxSize()
+            .then(if (isLandscape) Modifier.navigationBarsPadding() else Modifier)
             .background(MaterialTheme.colorScheme.background),
     ) {
         if (state.playlists.isEmpty() && !state.isLoading) {
@@ -179,7 +183,25 @@ fun ChannelsScreen(
                             }
                         }
                     } else {
-                        Spacer(Modifier.weight(1f))
+                        val playlist = state.playlists.firstOrNull()
+                        if (playlist != null) {
+                            Icon(
+                                Icons.Rounded.LiveTv,
+                                contentDescription = null,
+                                tint = Amber,
+                                modifier = Modifier.size(18.dp),
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            Text(
+                                playlist.name,
+                                style = MaterialTheme.typography.titleSmall,
+                                color = Torve.colors.textPrimary,
+                                maxLines = 1,
+                                modifier = Modifier.weight(1f),
+                            )
+                        } else {
+                            Spacer(Modifier.weight(1f))
+                        }
                     }
                     IconButton(onClick = { viewModel.toggleCategoryManager() }) {
                         Icon(
@@ -212,6 +234,8 @@ fun ChannelsScreen(
                         expandedCategories = state.expandedCategories,
                         searchQuery = state.searchQuery,
                         searchResults = state.searchResults,
+                        recentChannels = state.recentlyViewedChannels,
+                        favoriteChannels = state.favorites,
                         isLoading = state.isLoadingChannels,
                         viewMode = state.viewMode,
                         onToggleCategory = { viewModel.toggleCategoryExpanded(it) },
@@ -559,50 +583,62 @@ fun VodMoviesContent(
         return
     }
 
-    LazyColumn(modifier = modifier.fillMaxSize()) {
-        categories.forEach { category ->
-            val expanded = category.name in expandedCategories
-            item(key = "header_${category.name}") {
-                CategoryHeader(
-                    name = category.name,
-                    channelCount = category.channelCount,
-                    qualityTags = emptySet(),
-                    isExpanded = expanded,
-                    onToggle = { onToggleCategory(category.name) },
-                )
-            }
-            if (expanded) {
-                if (category.channels.isEmpty()) {
-                    item(key = "loading_${category.name}") {
-                        Box(
-                            modifier = Modifier.fillMaxWidth().height(160.dp),
-                            contentAlignment = androidx.compose.ui.Alignment.Center,
-                        ) {
-                            androidx.compose.material3.CircularProgressIndicator(
-                                color = Amber,
-                                modifier = Modifier.size(24.dp),
-                            )
-                        }
-                    }
-                } else {
-                    item(key = "grid_${category.name}") {
-                        LazyVerticalGrid(
-                            columns = GridCells.Fixed(3),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(((category.channels.size / 3 + 1) * 180).coerceAtMost(540).dp),
-                            contentPadding = androidx.compose.foundation.layout.PaddingValues(
-                                horizontal = 12.dp, vertical = 8.dp,
-                            ),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalArrangement = Arrangement.spacedBy(8.dp),
-                            userScrollEnabled = false,
-                        ) {
-                            items(category.channels, key = { it.channel.url }) { enriched ->
-                                VodPosterCard(
-                                    channel = enriched.channel,
-                                    onClick = { onChannelPlay(enriched.channel) },
+    BoxWithConstraints(modifier = modifier.fillMaxSize()) {
+        val columnCount = when {
+            maxWidth >= 900.dp -> 6
+            maxWidth >= 600.dp -> 5
+            maxWidth >= 430.dp -> 4
+            else -> 3
+        }
+        LazyColumn(modifier = Modifier.fillMaxSize()) {
+            categories.forEach { category ->
+                val expanded = category.name in expandedCategories
+                item(key = "header_${category.name}") {
+                    CategoryHeader(
+                        name = category.name,
+                        channelCount = category.channelCount,
+                        qualityTags = emptySet(),
+                        isExpanded = expanded,
+                        onToggle = { onToggleCategory(category.name) },
+                    )
+                }
+                if (expanded) {
+                    if (category.channels.isEmpty()) {
+                        item(key = "loading_${category.name}") {
+                            Box(
+                                modifier = Modifier.fillMaxWidth().height(160.dp),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                CircularProgressIndicator(
+                                    color = Amber,
+                                    modifier = Modifier.size(24.dp),
                                 )
+                            }
+                        }
+                    } else {
+                        val rows = category.channels.chunked(columnCount)
+                            .mapIndexed { index, channels -> index to channels }
+                        items(
+                            rows,
+                            key = { (index, _) -> "vod_row_${category.name}_$index" },
+                        ) { (_, channels) ->
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 12.dp, vertical = 4.dp),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalAlignment = Alignment.Top,
+                            ) {
+                                channels.forEach { enriched ->
+                                    VodPosterCard(
+                                        channel = enriched.channel,
+                                        onClick = { onChannelPlay(enriched.channel) },
+                                        modifier = Modifier.weight(1f),
+                                    )
+                                }
+                                repeat(columnCount - channels.size) {
+                                    Spacer(Modifier.weight(1f))
+                                }
                             }
                         }
                     }
@@ -618,6 +654,7 @@ private fun VodPosterCard(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val displayName = channel.iptvDisplayName()
     androidx.compose.material3.Card(
         onClick = onClick,
         modifier = modifier.fillMaxWidth(),
@@ -627,7 +664,7 @@ private fun VodPosterCard(
         Column {
             AsyncImage(
                 model = channel.tvgLogo,
-                contentDescription = channel.name,
+                contentDescription = displayName,
                 modifier = Modifier
                     .fillMaxWidth()
                     .aspectRatio(2f / 3f),
@@ -635,7 +672,7 @@ private fun VodPosterCard(
                 error = null,
             )
             androidx.compose.material3.Text(
-                text = channel.name,
+                text = displayName,
                 style = androidx.compose.material3.MaterialTheme.typography.labelSmall,
                 color = Snow,
                 maxLines = 2,

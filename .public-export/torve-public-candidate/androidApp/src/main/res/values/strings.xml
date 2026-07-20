@@ -1,0 +1,2238 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- App -->
+    <string name="app_name">Torve</string>
+    <string name="widget_description">Shows your continue watching list</string>
+    <string name="widget_name">Continue Watching</string>
+
+    <!-- Navigation -->
+    <string name="nav_home">Home</string>
+    <string name="nav_movies">Movies</string>
+    <string name="nav_tv_shows">TV Shows</string>
+    <string name="nav_channels">Channels</string>
+    <string name="nav_watchlist">Watchlist</string>
+    <string name="nav_library">Library</string>
+    <string name="nav_settings">Settings</string>
+
+    <!-- Common Actions -->
+    <string name="common_connect">Connect</string>
+    <string name="common_disconnect">Disconnect</string>
+    <string name="common_cancel">Cancel</string>
+    <string name="common_add">Add</string>
+    <string name="common_clear">Clear</string>
+    <string name="common_retry">Retry</string>
+    <string name="common_close">Close</string>
+    <string name="common_back">Back</string>
+    <string name="common_play">Play</string>
+    <string name="common_pause">Pause</string>
+    <string name="common_delete">Delete</string>
+    <string name="common_remove">Remove</string>
+    <string name="common_test">Test</string>
+    <string name="common_share">Share</string>
+    <string name="common_search">Search</string>
+    <string name="common_off">Off</string>
+    <string name="common_details">Details</string>
+    <string name="common_apply">Apply</string>
+
+    <!-- Home Screen -->
+    <string name="home_something_went_wrong">Something went wrong</string>
+    <string name="home_try_again">Try Again</string>
+    <string name="home_search_hint">Search movies &amp; TV shows…</string>
+    <string name="home_continue_watching">Continue Watching</string>
+    <string name="home_continue_watching_empty">Start watching a movie or show to track your progress here.</string>
+    <string name="home_recommended">Recommended For You</string>
+    <string name="home_see_all">SEE ALL \u2192</string>
+    <string name="home_in_watchlist">In Watchlist</string>
+    <string name="home_watchlist">Watchlist</string>
+
+    <!-- Detail Screen -->
+    <string name="detail_connect_cloud">Connect streaming service in Settings</string>
+    <string name="detail_install_addon">Install an addon to play</string>
+    <string name="detail_finding_streams">Finding sources…</string>
+    <string name="detail_resolving">Resolving…</string>
+    <string name="detail_watchlist">Watchlist</string>
+    <string name="detail_in_watchlist">In Watchlist</string>
+    <string name="detail_add_watchlist">Add to Watchlist</string>
+    <string name="detail_remove_watchlist">Remove from Watchlist</string>
+    <string name="detail_add_favorites">Add to Favorites</string>
+    <string name="detail_remove_favorites">Remove from Favorites</string>
+    <string name="detail_watched">Watched</string>
+    <string name="detail_unwatched">Unwatched</string>
+    <string name="detail_watch_trailer">Watch Trailer</string>
+    <string name="detail_select_manually">Select Manually</string>
+    <string name="detail_director">Director: </string>
+    <string name="detail_cast">Cast</string>
+    <string name="detail_more_like_this">More Like This</string>
+    <string name="detail_stub_title">Content unavailable</string>
+    <string name="detail_stub_body">This title is not available with the current content setting.</string>
+
+    <!-- Player Screen -->
+    <string name="player_playback_error">Playback Error</string>
+    <string name="player_retry">Retry</string>
+    <string name="player_go_back">Go Back</string>
+    <string name="player_rewind">Rewind 10s</string>
+    <string name="player_forward">Forward 10s</string>
+    <string name="player_track_selection">Track Selection</string>
+    <string name="player_subtitles">Subtitles</string>
+    <string name="player_audio">Audio</string>
+    <string name="player_selected">Selected</string>
+    <string name="player_download_subtitles">Download Subtitles</string>
+
+    <!-- Settings Screen -->
+    <string name="settings_title">Settings</string>
+    <string name="settings_profiles">Profiles</string>
+    <string name="settings_subscription">Account access</string>
+    <string name="settings_downloads">Downloads</string>
+    <string name="settings_calendar">Calendar</string>
+    <string name="settings_send_credentials">Send credentials to another device</string>
+    <string name="settings_receive_credentials">Receive credentials from another device</string>
+    <string name="settings_transfer_diagnostics">Transfer diagnostics</string>
+    <string name="tv_settings_import_setup_title">Import setup from another device</string>
+    <string name="tv_settings_import_setup_subtitle">Receive providers, IPTV, Panda, and integration credentials from a phone or desktop that already works.</string>
+
+    <!-- Recovery card: shown when 2+ transferable categories have no local credentials. -->
+    <string name="recovery_card_title">Restore setup from another device</string>
+    <string name="recovery_card_body">Transfer encrypted credentials from a device that already works. Faster than re-entering each one by hand.</string>
+    <string name="recovery_card_action_receive">Receive credentials</string>
+    <string name="credential_transfer_nudge_go_to_settings">Go to Settings</string>
+    <string name="recovery_card_action_manual">Set up manually</string>
+    <string name="recovery_card_summary_format">%1$d provider categories missing local credentials.</string>
+    <string name="tv_send_credentials_subtitle">Paste the receive code from the other Torve device.</string>
+    <string name="tv_receive_credentials_subtitle">Show a one-time QR code for another Torve device to scan.</string>
+
+    <!-- Encryption + safety disclosure shared by send + receive surfaces. -->
+    <string name="transfer_encryption_disclosure">Credentials are end-to-end encrypted with a one-time key. Torve servers only forward the encrypted bundle — they can\'t read the contents.</string>
+    <string name="transfer_paste_safety">Manual paste is the same encrypted bundle shown as text. Copy/paste between your own devices when the camera or relay aren\'t available — never share it with anyone else.</string>
+    <string name="transfer_companion_config_explanation">Some integrations (Plex, Jellyfin) need a server URL alongside their token. If the URL isn\'t set on the sending device, you\'ll need to fill it in manually after import.</string>
+
+    <!-- Diagnostics labels. -->
+    <string name="diag_transfer_title">Credential transfer status</string>
+    <string name="diag_transfer_crypto">Crypto engine</string>
+    <string name="diag_transfer_signed_in">Signed in</string>
+    <string name="diag_transfer_relay">Automatic transfer</string>
+    <string name="diag_transfer_last_attempt">Last credential transfer</string>
+    <string name="diag_transfer_no_attempt">No credential transfer has been started on this device yet.</string>
+    <string name="diag_transfer_redaction_note">No credentials, tokens, session strings, or envelope bytes appear on this screen.</string>
+    <string name="diag_transfer_probe">Check automatic transfer</string>
+    <string name="diag_transfer_probing">Checking automatic transfer...</string>
+    <string name="diag_transfer_relay_unknown">Automatic transfer has not been checked yet. This is normal until you send or receive credentials.</string>
+    <string name="diag_transfer_relay_reachable">Automatic transfer is reachable. QR transfer can complete without manual paste.</string>
+    <string name="diag_transfer_relay_unavailable">Automatic transfer is not available from this backend. Use the Advanced manual code paste fallback.</string>
+    <string name="diag_transfer_relay_unauthorized">Sign in again to use automatic transfer. The Advanced manual code paste fallback still works.</string>
+    <string name="diag_transfer_relay_network">This phone could not reach the Torve backend for automatic transfer. Use the Advanced manual code paste fallback.</string>
+    <string name="diag_transfer_relay_not_signed_in">Sign in to use automatic transfer. The Advanced manual code paste fallback still works.</string>
+    <string name="diag_transfer_relay_no_crypto">Encrypted transfer is not available on this device. Update the app or set up credentials manually.</string>
+
+    <string name="settings_cloud_service">Streaming Service</string>
+    <string name="settings_provider">Provider</string>
+    <string name="settings_connected">Connected</string>
+    <string name="settings_sensitive_material">Sensitive material</string>
+    <string name="settings_sensitive_material_sub">Review this account setting and update access if eligible</string>
+    <string name="settings_premium_until">Full access enabled</string>
+    <string name="settings_subscription_card_title">Account access</string>
+    <string name="settings_subscription_upgrade_cta">Free software</string>
+    <string name="settings_subscription_manage_cta">Account settings</string>
+    <string name="settings_subscription_signed_out_prompt">Sign in to manage your account on this device.</string>
+    <string name="settings_subscription_sign_in_cta">Sign in or create account</string>
+    <string name="paywall_sign_in_action_hint">Sign in to continue</string>
+    <string name="paywall_lifetime_upgrade_hint">Torve is free software. No subscriptions. No paid tiers.</string>
+    <string name="paywall_upgrade_to_lifetime">Continue</string>
+    <string name="settings_go_to">Go to:</string>
+    <string name="settings_enter_code">Enter code:</string>
+    <string name="settings_waiting_auth">Waiting for authorization…</string>
+    <string name="settings_api_key">API Key</string>
+    <string name="settings_device_auth">Device Auth</string>
+
+    <string name="settings_trakt">Trakt.tv</string>
+    <string name="settings_connect_trakt">Connect Trakt</string>
+    <string name="settings_movies">Movies</string>
+    <string name="settings_episodes">Episodes</string>
+    <string name="settings_watch_time">Watch Time</string>
+    <string name="settings_scrobble">Scrobble</string>
+    <string name="settings_scrobble_desc">Auto-track what you watch</string>
+    <string name="settings_api_status">API: %1$s</string>
+
+    <string name="settings_simkl">SIMKL</string>
+    <string name="settings_connect_simkl">Connect SIMKL</string>
+
+    <string name="settings_live_tv">Channels</string>
+    <string name="settings_no_playlists">No channel sources configured</string>
+    <string name="settings_channels_count">%1$d channels</string>
+    <string name="settings_add_playlist">Add Source</string>
+
+    <string name="settings_stream_quality">Stream Quality</string>
+    <string name="settings_max_quality">Max Quality</string>
+    <string name="settings_min_quality">Min Quality</string>
+    <string name="settings_max_file_size">Max File Size (MB)</string>
+    <string name="settings_no_limit">No limit</string>
+    <string name="settings_cached_only">Cached Only</string>
+    <string name="settings_cached_only_desc">Only show cached streams for instant playback</string>
+    <string name="settings_hdr_content">HDR Content</string>
+    <string name="settings_hdr_content_desc">Include HDR / Dolby Vision streams</string>
+    <string name="settings_dedupe_results">Deduplicate Results</string>
+    <string name="settings_dedupe_results_desc">Hide repeated movies or shows in lists</string>
+
+    <string name="settings_playback">Playback</string>
+    <string name="settings_auto_play">Auto-Play Best Stream</string>
+    <string name="settings_auto_play_desc">Automatically pick and play the best stream</string>
+    <string name="settings_auto_play_next">Auto-Play Next Episode</string>
+    <string name="settings_auto_play_next_desc">Automatically play the next episode when current finishes</string>
+    <string name="settings_codec_preference">Codec Preference</string>
+    <string name="settings_hdr_mode">HDR Mode</string>
+
+    <string name="settings_kodi_remote">Kodi Remote</string>
+    <string name="settings_no_kodi_hosts">No Kodi hosts configured</string>
+    <string name="settings_add_kodi_host">Add Kodi Host</string>
+    <string name="settings_kodi_name">Name</string>
+    <string name="settings_kodi_name_hint">Living Room</string>
+    <string name="settings_kodi_ip">IP Address</string>
+    <string name="settings_kodi_port">Port</string>
+
+    <string name="settings_appearance">Appearance</string>
+    <string name="settings_theme">Theme</string>
+    <string name="settings_language">Language</string>
+    <string name="language_change_confirm">Changing the language to %1$s will restart the app. Continue?</string>
+
+    <string name="settings_storage">Storage</string>
+    <string name="settings_clear_cache">Clear Cache</string>
+    <string name="settings_clear_cache_desc">Remove cached metadata and images</string>
+    <string name="settings_cleared">Cleared!</string>
+    <string name="settings_clear_cache_confirm">This will remove all cached metadata. You may need to reload content.</string>
+
+    <string name="settings_backup_sync">Backup &amp; Sync</string>
+    <string name="settings_last_backup">Last backup: %1$s</string>
+    <string name="settings_export_backup">Export Backup</string>
+    <string name="settings_import_backup">Import Backup</string>
+    <string name="settings_backup_desc">Export your extensions, preferences, watch progress, and channel favorites to a file. API keys and tokens are never included.</string>
+
+    <string name="settings_account">Account</string>
+    <string name="settings_account_coming_soon">Cloud sync in development</string>
+    <string name="settings_account_desc">Once available, you\'ll be able to create an account to sync your settings, watchlist, watch progress, and card style presets across all your devices. No action needed — this feature will be enabled automatically in a future update.</string>
+    <string name="settings_refresh_all">Refresh all</string>
+    <string name="settings_refresh_all_started">Refreshing account, devices, channels, and content in the background.</string>
+
+    <string name="settings_about">About</string>
+
+    <!-- Delete Account -->
+    <string name="settings_delete_account">Delete Account</string>
+    <string name="settings_delete_account_subtitle">Permanently remove your Torve account and associated data</string>
+    <string name="settings_delete_account_title">Delete your account?</string>
+    <string name="settings_delete_account_body">Deleting your Torve account will permanently remove your account and associated data, including saved preferences, watchlist, favorites, linked devices, and other account-related data that is no longer required.\n\nSome limited information may be retained where necessary for security, fraud prevention, billing, dispute resolution, or legal compliance.\n\nThis action cannot be undone.</string>
+    <string name="settings_delete_account_confirm">Delete Account</string>
+    <string name="settings_delete_account_deleting">Deleting account…</string>
+    <string name="settings_delete_account_success">Your account has been deleted</string>
+    <string name="settings_delete_account_error_title">Could not delete account</string>
+    <string name="settings_delete_account_error_body">We could not complete your account deletion right now. Please try again in a moment.</string>
+    <string name="tv_settings_delete_account_subtitle">Permanently delete your Torve account</string>
+    <string name="tv_settings_delete_account_title">Delete account?</string>
+    <string name="tv_settings_delete_account_body">This will permanently delete your Torve account and associated data. This action cannot be undone.</string>
+    <string name="settings_privacy_policy">Privacy Policy</string>
+    <string name="settings_terms">Terms &amp; Conditions</string>
+    <string name="settings_help">Help &amp; Documentation</string>
+    <string name="help_body">Extensive help and documentation is available for registered and signed-in users at torve.app, in all supported languages.</string>
+    <string name="help_open_web">Open Help &amp; Documentation</string>
+    <string name="help_web_url">https://torve.app/app/help.html</string>
+    <string name="help_support_label">Need further assistance?</string>
+    <string name="help_support_email">support@torve.app</string>
+    <string name="help_support_body">Contact us at</string>
+    <string name="settings_share_app">Share App</string>
+    <string name="settings_share_text">Check out Torve — a beautiful media player and content organizer! https://torve.app</string>
+    <string name="settings_share_title">Share Torve</string>
+    <string name="settings_version">Torve v%1$s</string>
+
+    <!-- Paywall Screen -->
+    <string name="paywall_title">Torve is free software</string>
+    <string name="paywall_unlock">Torve is free software</string>
+    <string name="paywall_subtitle">No subscriptions. No paid tiers.</string>
+    <string name="paywall_upgrade_title">Torve is free software</string>
+    <string name="paywall_upgrade_subtitle">No subscriptions. No paid tiers.</string>
+    <string name="paywall_free">Free software</string>
+    <string name="paywall_pro">All features</string>
+    <string name="paywall_search_browse">Search &amp; Browse</string>
+    <string name="paywall_stream_playback">Playback</string>
+    <string name="paywall_downloads">Offline Access</string>
+    <string name="paywall_channels">Channels</string>
+    <string name="paywall_multi_cloud">Cloud Services</string>
+    <string name="paywall_trakt_simkl">Trakt &amp; SIMKL Sync</string>
+    <string name="paywall_ai_search">AI Search</string>
+    <string name="paywall_rating_pills">Rating Pills</string>
+    <string name="paywall_custom_home">Custom Home Layout</string>
+    <string name="paywall_advanced_filters">Advanced Filters</string>
+    <string name="paywall_lifetime">Full access</string>
+    <string name="paywall_monthly_title">Available</string>
+    <string name="paywall_monthly_description">Available to everyone.</string>
+    <string name="paywall_lifetime_title">All features</string>
+    <string name="paywall_lifetime_description">No purchase required.</string>
+    <string name="paywall_price">No purchase required</string>
+    <string name="paywall_price_loading">Available</string>
+    <string name="paywall_best_value">Included</string>
+    <string name="paywall_one_time">No purchase required</string>
+    <string name="paywall_one_time_label">No billing</string>
+    <string name="paywall_recurring_label">No billing</string>
+    <string name="paywall_get_lifetime">Continue</string>
+    <string name="paywall_choose_monthly">Continue</string>
+    <string name="paywall_choose_lifetime">Continue</string>
+    <string name="paywall_restore">No restore needed</string>
+    <string name="paywall_retry_verification">Refresh access</string>
+    <string name="premium_refresh_access">Refresh Access</string>
+    <string name="paywall_needs_verification_title">Verify your email to use Torve on this device</string>
+    <string name="paywall_needs_verification_body">Verify your email to keep your account secure on this device.</string>
+    <string name="paywall_needs_verification_action_send">Send verification email</string>
+    <string name="paywall_needs_verification_action_refresh">Already verified - refresh</string>
+    <string name="paywall_lifetime_active">Full access enabled</string>
+    <string name="paywall_full_access">You have full access to all features.</string>
+    <string name="paywall_free_status">Free software</string>
+    <string name="paywall_marketplace_copy">No billing is required.</string>
+    <string name="paywall_refund_copy">No purchase is required.</string>
+    <string name="paywall_have_code">No code required</string>
+    <string name="paywall_enter_code">No code required</string>
+    <string name="paywall_redeem">Continue</string>
+    <string name="paywall_redeem_success">This feature is available to everyone.</string>
+    <string name="paywall_purchase_cancelled">No purchase required.</string>
+    <string name="paywall_managed_through">No billing is required.</string>
+
+    <!-- Purchase status messages -->
+    <string name="purchase_received_title">Access refresh received</string>
+    <string name="purchase_received_message">%1$s No purchase is required for access.</string>
+    <string name="purchase_received_default">Purchase state is historical and does not affect access.</string>
+    <string name="purchase_verification_not_finished_title">Access refresh pending</string>
+    <string name="purchase_verification_not_finished_message">No purchase verification is required for access.</string>
+    <string name="purchase_service_unavailable_title">Access service unavailable</string>
+    <string name="purchase_service_unavailable_retry">Torve cannot reach the access service right now. Refresh again shortly.</string>
+    <string name="purchase_service_unavailable_restore">No purchase restore is required for access.</string>
+    <string name="purchase_sign_in_required_title">Sign in required</string>
+    <string name="purchase_sign_in_amazon_restore">Sign in to Torve before refreshing access on this device.</string>
+    <string name="purchase_sign_in_buy">Sign in to Torve before continuing on this device.</string>
+    <string name="purchase_sign_in_restore">Sign in to Torve before refreshing access from %1$s on this device.</string>
+    <string name="purchase_conflict_title">Account mismatch</string>
+    <string name="purchase_conflict_message">This historical purchase record is linked to a different Torve account. Sign in with the original account or contact support.</string>
+    <string name="purchase_nothing_to_restore_title">No restore needed</string>
+    <string name="purchase_nothing_to_restore_amazon">No Amazon purchase record was found for this Torve account. Access is not affected.</string>
+    <string name="purchase_nothing_to_restore_store">No purchase record was found for this Torve account on %1$s. Access is not affected.</string>
+    <string name="purchase_verified_title">Access verified</string>
+    <string name="purchase_restored_title">Access refreshed</string>
+    <string name="purchase_active_on_device">Full access is enabled on this device.</string>
+    <string name="purchase_active_until">Full access is enabled on this device.</string>
+    <string name="purchase_needs_device_slot">This account has full access, but this device still needs registration.</string>
+    <string name="purchase_restored_active">Full access is enabled on this device.</string>
+    <string name="purchase_restored_active_until">Full access is enabled on this device.</string>
+    <string name="purchase_restored_needs_slot">This account has full access, but this device still needs registration.</string>
+    <string name="purchase_google_verify_failed">Google Play purchase state does not affect access.</string>
+    <string name="purchase_apple_verify_failed">Apple purchase state does not affect access.</string>
+    <string name="purchase_store_restore_failed">%1$s access refresh could not be completed. Try again after signing in.</string>
+    <string name="purchase_premium_monthly">Free access</string>
+    <string name="purchase_premium_lifetime">Free access</string>
+    <string name="purchase_premium_generic">Full access</string>
+
+    <!-- Access compatibility messages -->
+    <string name="premium_gate_pair_devices">Pairing devices is available to everyone.</string>
+    <string name="premium_gate_manage_paired">Managing paired devices is available to everyone.</string>
+    <string name="premium_gate_sync_devices">Device sync is available to everyone.</string>
+    <string name="premium_gate_continue_playback">Continue playback is available to everyone.</string>
+    <string name="premium_gate_stream_playback">Stream playback is available to everyone.</string>
+    <string name="premium_gate_generic">%1$s is available to everyone.</string>
+
+    <!-- Login / Auth -->
+    <string name="login_reset_password">Reset Password</string>
+    <string name="login_forgot_password">Forgot Password?</string>
+    <string name="login_send_reset_link">Send Reset Link</string>
+    <string name="login_back_to_sign_in">Back to Sign In</string>
+    <string name="login_reset_sent">If that email exists, a reset link will be sent.</string>
+    <string name="login_account_created">Account created! Please check your email to verify your address.</string>
+    <string name="login_device_limit_reached">Device limit reached. Remove an existing device to continue.</string>
+    <string name="login_hide_password">Hide password</string>
+    <string name="login_show_password">Show password</string>
+
+    <!-- Verification banner -->
+    <string name="verify_email_sent">Verification email sent!</string>
+    <string name="verify_checking">Checking…</string>
+    <string name="verify_wait_before_resend">Please wait before resending.</string>
+    <string name="verify_email_not_verified">Email not verified</string>
+    <string name="verify_ive_verified">I\'ve verified</string>
+    <string name="verify_check">Check</string>
+    <string name="verify_resend">Resend</string>
+
+    <!-- Storage mode selector -->
+    <string name="storage_how_title">How credentials are stored</string>
+    <string name="storage_how_body">Choose whether to save integrations to your Torve account or keep them only on this device.</string>
+    <string name="storage_how_options">• Torve account (recommended) — Restores this integration when you sign in on another device.\n• This device only — Keeps this integration local to this device and does not sync.</string>
+    <string name="storage_how_note">Passwords and API keys are not shown in full after saving.\nDevice-only credentials are cleared when you sign out.</string>
+    <string name="storage_store_label">Store this integration</string>
+    <string name="storage_account_recommended">Save to Torve account (recommended)</string>
+    <string name="storage_account_sign_in_required">Save to Torve account (sign in required)</string>
+    <string name="storage_account_desc">Securely saves this integration to your Torve account and restores it on other devices.</string>
+    <string name="storage_device_only_label">Store on this device only</string>
+    <string name="storage_device_only_desc">Keeps this integration only on this device. It will not be restored on other devices.</string>
+    <string name="storage_keys_note">Passwords and API keys are not shown in full after saving.</string>
+    <string name="storage_badge_account">Account</string>
+    <string name="storage_badge_device_only">Device only</string>
+    <string name="storage_state_connected">Connected</string>
+    <string name="storage_state_needs_reauth">Needs re-authentication</string>
+    <string name="storage_state_needs_credentials">Needs credentials</string>
+    <string name="storage_state_not_configured">Not configured</string>
+    <string name="storage_creds_needed_title">Credentials needed on this device</string>
+    <string name="storage_creds_needed_body">This integration is set to device-only storage. Enter credentials on this device to use it.</string>
+    <string name="storage_creds_enter">Enter credentials</string>
+    <string name="storage_reauth_title">Re-authentication needed</string>
+    <string name="storage_reauth_body">This integration is saved to your Torve account but credentials could not be restored on this device. Please re-authenticate.</string>
+    <string name="storage_reauth_action">Re-authenticate</string>
+    <string name="storage_change_method">Change storage method</string>
+    <string name="storage_remove_title">Remove integration?</string>
+    <string name="storage_remove_account_body">This removes the saved integration from your Torve account and this device.</string>
+    <string name="storage_remove_device_body">This removes the saved integration from this device.</string>
+    <string name="storage_switch_device_title">Store only on this device?</string>
+    <string name="storage_switch_device_body">This will remove the saved credentials from your Torve account. You may need to enter them again on this device.</string>
+    <string name="storage_switch_device_confirm">Switch to device only</string>
+    <string name="storage_switch_account_title">Save to Torve account?</string>
+    <string name="storage_switch_account_body">This will securely save this integration to your Torve account so it can be restored on other devices.</string>
+    <string name="storage_switch_account_confirm">Save to account</string>
+
+    <!-- Settings sign-out -->
+    <string name="settings_sign_out">Sign Out</string>
+    <string name="settings_sign_out_title">Sign out?</string>
+    <string name="settings_sign_out_body">Signing out clears local credentials stored on this device. Integrations saved to your Torve account will be restored when you sign in again.</string>
+
+    <!-- Devices / Pairing -->
+    <string name="devices_secure_channel_ok">Secure channel established with %1$s</string>
+    <string name="devices_secure_channel_fail">Failed to establish secure channel</string>
+    <string name="devices_setup_sent">Setup sent to %1$s</string>
+    <string name="devices_setup_fail">Failed to send setup</string>
+    <string name="devices_send_setup">Send Setup</string>
+    <string name="devices_establish_secure">Establish Secure Channel</string>
+
+    <!-- Stream action sheet -->
+    <string name="stream_cast_connected">Cast (Connected)</string>
+    <string name="stream_cast_to_device">Cast to Device</string>
+    <string name="stream_play_in">Play in %1$s</string>
+    <string name="stream_player_not_found">%1$s not found</string>
+    <string name="stream_download_vlc">Download with VLC</string>
+    <string name="stream_vlc_not_installed">VLC is not installed</string>
+
+    <!-- Player -->
+    <string name="player_replay_unavailable">Replay is unavailable for this programme.</string>
+
+    <!-- Catalog filters -->
+    <string name="catalog_movies">Movies</string>
+    <string name="catalog_tv">TV</string>
+
+    <!-- Integrations -->
+    <string name="integrations_save_connect">Save &amp; Connect</string>
+
+    <!-- Detail / person -->
+    <string name="person_filmography">Filmography</string>
+
+    <!-- Stream picker -->
+    <string name="stream_resolving">Resolving stream…</string>
+    <string name="stream_best_match">Best Match</string>
+    <string name="stream_other_options">Other Options</string>
+    <string name="stream_available">Available Streams</string>
+
+    <!-- TV Settings auth -->
+    <string name="tv_auth_create_account">Create Account</string>
+    <string name="tv_auth_log_in">Log In</string>
+    <string name="tv_auth_please_wait">Please wait…</string>
+    <string name="tv_auth_sign_up_desc">Sign up with email and password</string>
+    <string name="tv_auth_sign_in_desc">Sign in to your Torve account</string>
+    <string name="tv_auth_passwords_mismatch">Passwords do not match</string>
+    <string name="tv_auth_already_have_account">Already have an account?</string>
+    <string name="tv_auth_no_account">Don\'t have an account?</string>
+    <string name="tv_auth_switch_login">Switch to Log In</string>
+    <string name="tv_auth_switch_signup">Switch to Sign Up</string>
+    <string name="tv_premium_needs_activation">Full access is enabled. This device needs registration.</string>
+    <string name="tv_premium_check_access">Refresh this device account access.</string>
+
+    <!-- TV Live playback menu -->
+    <string name="tv_menu_playback_info">Playback Info</string>
+    <string name="tv_menu_decoder_info">Decoder Info</string>
+    <string name="tv_menu_channel_list">Channel List</string>
+    <string name="tv_menu_channel_list_desc">Browse and switch channels</string>
+    <string name="tv_menu_tv_guide">TV Guide</string>
+    <string name="tv_menu_tv_guide_desc">View programme schedule</string>
+    <string name="tv_menu_playback_options">Playback Options</string>
+    <string name="tv_menu_playback_options_desc">Audio, subtitles, and quality</string>
+    <string name="tv_menu_channel_options">Channel Options</string>
+    <string name="tv_menu_channel_options_desc">Catchup and channel settings</string>
+    <string name="tv_menu_sleep_timer">Sleep Timer</string>
+    <string name="tv_menu_sleep_timer_desc">Set auto-off timer</string>
+    <string name="tv_menu_playback_info_desc">Stream details and diagnostics</string>
+
+    <!-- Settings screen -->
+    <string name="settings_manage_pairings">Manage Pairings</string>
+    <string name="settings_manage_pairings_locked">Manage Pairings (Locked)</string>
+    <string name="settings_manage_devices_locked">Manage Devices (Locked)</string>
+    <string name="settings_paired_count_one">%1$d paired device</string>
+    <string name="settings_paired_count_other">%1$d paired devices</string>
+    <string name="settings_ai_locked_desc">Connect AI providers and API keys.</string>
+
+    <!-- Access presentation (PurchaseStringResolver) -->
+    <string name="access_free_label">Free</string>
+    <string name="access_free_helper">Torve is free software. No subscriptions. No paid tiers.</string>
+    <string name="access_monthly_active_until">Full access enabled.</string>
+    <string name="access_monthly_active">Full access enabled</string>
+    <string name="access_lifetime_active">Full access enabled</string>
+    <string name="access_premium_active">Full access enabled</string>
+    <string name="access_monthly_on_account">Full access on account</string>
+    <string name="access_lifetime_on_account">Full access on account</string>
+    <string name="access_premium_on_account">Full access on account</string>
+    <string name="access_monthly_active_device">Full access is enabled on this device.</string>
+    <string name="access_monthly_active_device_no_date">Full access is enabled on this device.</string>
+    <string name="access_lifetime_active_device">Full access is enabled on this device.</string>
+    <string name="access_premium_active_device">Full access is enabled on this device.</string>
+    <string name="access_monthly_on_account_helper">Full access is enabled on your account.</string>
+    <string name="access_monthly_on_account_helper_no_date">Full access is enabled on your account.</string>
+    <string name="access_lifetime_on_account_helper">Full access is enabled on your account. %1$s</string>
+    <string name="access_premium_on_account_helper">Full access is enabled on your account. %1$s</string>
+    <string name="access_device_needs_slot">This device needs an available activation slot.</string>
+    <string name="access_device_needs_activation">This device needs activation.</string>
+
+    <!-- Catalog Screen -->
+    <string name="catalog_failed_to_load">Failed to load</string>
+    <string name="catalog_search_movies">Search movies…</string>
+    <string name="catalog_search_tv">Search TV shows…</string>
+    <string name="catalog_search_results">Search Results</string>
+    <string name="catalog_no_results">No results found</string>
+    <string name="catalog_all">All</string>
+    <string name="catalog_filters">Filters</string>
+    <string name="catalog_clear_all">Clear All</string>
+    <string name="catalog_sort_by">Sort By</string>
+    <string name="catalog_min_rating">Minimum Rating</string>
+    <string name="catalog_any">Any</string>
+    <string name="catalog_release_year">Release Year</string>
+    <string name="catalog_from">From</string>
+    <string name="catalog_to">To</string>
+    <string name="catalog_runtime">Runtime</string>
+    <string name="catalog_apply_filters">Apply Filters</string>
+    <string name="catalog_classic">Classic</string>
+
+    <!-- Channels Screen -->
+    <string name="channels_no_playlists">No Sources</string>
+    <string name="channels_add_playlist_prompt">Add a channel source or service login to get started</string>
+    <string name="channels_add_playlist">Add Source</string>
+    <string name="channels_add_title">Add Channel Source</string>
+    <string name="channels_playlist_name">Source Name</string>
+    <string name="channels_m3u_url">Source URL</string>
+    <string name="channels_epg_optional">Guide URL (optional)</string>
+    <string name="channels_check_epg">Check EPG</string>
+    <string name="channels_check_epg_checking">Checking EPG...</string>
+    <string name="channels_server_url">Server URL</string>
+    <string name="channels_username">Username</string>
+    <string name="channels_password">Password</string>
+    <string name="channels_manage_categories">Manage Categories</string>
+    <string name="channels_refresh">Refresh</string>
+
+    <!-- Downloads Screen -->
+    <string name="download_title">Downloads</string>
+    <string name="download_no_downloads">No Downloads</string>
+    <string name="download_empty_desc">Downloaded content will appear here for offline viewing.</string>
+    <string name="download_queued">Queued</string>
+    <string name="download_paused">Paused</string>
+    <string name="download_completed">Completed</string>
+    <string name="download_failed">Failed</string>
+    <string name="download_resume">Resume</string>
+
+    <!-- Stream Actions -->
+    <string name="action_play_in_torve">Play in Torve</string>
+    <string name="action_play_external">Play in External Player…</string>
+    <string name="action_download">Download</string>
+    <string name="action_download_queued">Download queued</string>
+    <string name="action_copy_url">Copy URL</string>
+    <string name="action_url_copied">URL copied to clipboard</string>
+    <string name="action_stream_actions">Stream Actions</string>
+
+    <!-- Stream Picker -->
+    <string name="picker_select_stream">Select Stream</string>
+    <string name="picker_cached">Cached</string>
+    <string name="picker_streams_found">%1$d streams found</string>
+
+    <!-- Watchlist Screen -->
+    <string name="watchlist_title">Watchlist</string>
+    <string name="watchlist_all">All</string>
+    <string name="watchlist_movies">Movies</string>
+    <string name="watchlist_tv_shows">TV Shows</string>
+    <string name="watchlist_empty">Your watchlist is empty</string>
+    <string name="watchlist_empty_desc">Add movies and shows to your watchlist to keep track of what you want to watch.</string>
+    <string name="watchlist_in_progress">In Progress</string>
+    <string name="watchlist_history">History</string>
+    <string name="watchlist_nothing_in_progress">Nothing in progress</string>
+    <string name="watchlist_start_watching">Start watching something to see it here</string>
+    <string name="watchlist_no_history">No watch history yet</string>
+    <string name="watchlist_history_desc">Your watched items will appear here</string>
+    <string name="watchlist_watched_min">Watched %1$dmin</string>
+    <string name="watchlist_jellyfin">Jellyfin</string>
+    <string name="jellyfin_library_empty">No items found on your Jellyfin server</string>
+    <string name="jellyfin_not_connected">Connect your Jellyfin server in Settings → Integrations</string>
+    <string name="watchlist_added">Added to Watchlist</string>
+    <string name="watchlist_removed">Removed from Watchlist</string>
+
+    <!-- Calendar Screen -->
+    <string name="calendar_title">Calendar</string>
+    <string name="calendar_no_episodes">No Upcoming Episodes</string>
+    <string name="calendar_no_episodes_desc">Add TV shows to your Trakt watchlist to see new episodes here.</string>
+    <string name="calendar_connect_trakt_desc">Link your Trakt account in Settings to see upcoming episodes from your watchlist.</string>
+    <string name="calendar_reconnect_trakt">Reconnect Trakt to see your calendar</string>
+    <string name="calendar_reconnect_trakt_desc">Your Trakt session expired or was revoked. Reconnect Trakt in Settings to load upcoming episodes.</string>
+    <string name="calendar_stale_warning">Showing the last saved calendar while Trakt is unavailable.</string>
+    <string name="calendar_stale_rate_limited">Showing saved calendar because Trakt is rate limiting requests.</string>
+    <string name="calendar_stale_network">Showing saved calendar because Trakt could not be reached.</string>
+    <string name="calendar_stale_server">Showing saved calendar because Trakt is temporarily unavailable.</string>
+    <string name="calendar_stale_unknown">Showing saved calendar because it could not be refreshed.</string>
+    <string name="calendar_error">Error</string>
+    <string name="calendar_connect_trakt">Connect Trakt to see your calendar</string>
+    <string name="calendar_upcoming_count">%1$d upcoming episodes</string>
+    <string name="calendar_notify_toggle">Notify me</string>
+    <string name="calendar_notify_toggle_desc">When new episodes air</string>
+
+    <!-- Episodes -->
+    <string name="episode_season">Season %1$d</string>
+    <string name="episode_all_seasons">All Seasons</string>
+    <string name="episode_mark_season_watched">Mark Season %1$d Watched</string>
+    <string name="episode_format">S%1$dE%2$d</string>
+
+    <!-- Diagnostics Screen -->
+    <string name="diagnostics_title">Diagnostics</string>
+    <string name="diagnostics_service_health">Service Health</string>
+    <string name="diagnostics_sync_status">Sync Status</string>
+    <string name="diagnostics_content_config">Content &amp; Configuration</string>
+    <string name="diagnostics_stream_prefs">Stream Preferences</string>
+    <string name="diagnostics_rating_config">Rating Configuration</string>
+    <string name="diagnostics_integrations_detail">Integrations Detail</string>
+    <string name="diagnostics_connected">Connected</string>
+    <string name="diagnostics_not_configured">Not configured</string>
+    <string name="diagnostics_never">Never</string>
+    <string name="diagnostics_copied">Copied to clipboard</string>
+    <string name="diagnostics_copy">Copy</string>
+
+    <!-- Integrations Screen -->
+    <string name="integrations_title">Integrations</string>
+    <string name="integrations_subtitle">Connect external services to sync your library and progress.</string>
+    <string name="integrations_omdb_desc">Free API key for IMDb, Rotten Tomatoes, and Metacritic ratings. Get yours at omdbapi.com</string>
+    <string name="integrations_omdb_hint">Get a free key at omdbapi.com (1,000 requests/day).</string>
+    <string name="integrations_trakt_desc">OAuth device authorization and two-way sync (watchlist/history/progress).</string>
+    <string name="integrations_status_connected">Status: Connected</string>
+    <string name="integrations_status_not_connected">Status: Not connected</string>
+    <string name="integrations_last_sync">Last sync: %1$s</string>
+    <string name="integrations_connecting">Connecting…</string>
+    <string name="integrations_syncing">Syncing…</string>
+    <string name="integrations_sync_complete">Sync complete</string>
+    <string name="integrations_sync_now">Sync now</string>
+    <string name="integrations_simkl_desc">Automatic anime and TV show tracking with device code authorization.</string>
+    <string name="integrations_jellyfin_desc">Connect to your Jellyfin server for library sync and continue-watching overlay.</string>
+    <string name="integrations_server_url">Server URL</string>
+    <string name="integrations_test_connection">Test Connection</string>
+    <string name="integrations_user_profile">User Profile</string>
+    <string name="integrations_admin">Admin</string>
+    <string name="integrations_plex_desc">Connect your Plex server for library badges and continue watching.</string>
+    <string name="integrations_plex_url_hint">Server URL (e.g. http://192.168.1.100:32400)</string>
+    <string name="integrations_access_token">Access Token</string>
+    <string name="integrations_plex_token_hint">Find your token at plex.tv/claim or in Plex app settings.</string>
+    <string name="integrations_testing">Testing…</string>
+    <string name="integrations_your_code">Your code</string>
+    <string name="integrations_code_copied">Code copied</string>
+    <string name="integrations_open_browser">Open in Browser</string>
+
+    <!-- MDBList Screen -->
+    <string name="mdblist_title">MDBList</string>
+    <string name="mdblist_api_key_hint">Get your free API key at mdblist.com/preferences</string>
+    <string name="mdblist_enter_key">Enter MDBList API key</string>
+    <string name="mdblist_saved">Saved</string>
+    <string name="mdblist_save">Save</string>
+    <string name="mdblist_popular">Popular</string>
+    <string name="mdblist_most_popular">Most Popular Lists</string>
+    <string name="mdblist_load_popular">Load popular lists</string>
+    <string name="mdblist_search_lists">Search Lists</string>
+    <string name="mdblist_search_placeholder">Search public lists…</string>
+    <string name="mdblist_search_results">Search Results</string>
+    <string name="mdblist_installed">Installed Lists</string>
+    <string name="mdblist_no_lists">No lists added yet.</string>
+    <string name="mdblist_items">%1$d items</string>
+    <string name="mdblist_by">by %1$s</string>
+    <string name="mdblist_likes">%1$d likes</string>
+    <string name="mdblist_added">Added</string>
+
+    <!-- Rating Settings Screen -->
+    <string name="ratings_title">Ratings</string>
+    <string name="ratings_show_detail">Show on Detail Page</string>
+    <string name="ratings_show_detail_desc">Display ratings on movie/show detail screen</string>
+    <string name="ratings_torve_detail">Show Torve Score on Detail</string>
+    <string name="ratings_torve_detail_desc">Displays weighted Torve Score in metadata row</string>
+    <string name="ratings_torve_cards">Allow Torve Score Pill on Cards</string>
+    <string name="ratings_torve_cards_desc">Enable Torve Score in provider pills</string>
+    <string name="ratings_landscape">Allow Ratings on Landscape Cards</string>
+    <string name="ratings_landscape_desc">Show compact rating pills on backdrop-style cards</string>
+    <string name="ratings_torve_weights">Torve Score Weights</string>
+    <string name="ratings_weights_desc">Weights are normalized using available sources</string>
+    <string name="ratings_add_provider">Add Provider</string>
+    <string name="ratings_reset_weights">Reset Torve Weights</string>
+    <string name="ratings_pill_position">Pill Position</string>
+    <string name="ratings_pill_position_desc">Where to show rating pills on poster cards</string>
+    <string name="ratings_max_on_card">Max Ratings on Card</string>
+    <string name="ratings_max_on_card_desc">How many rating pills to show on poster cards</string>
+    <string name="ratings_pill_style">Pill Style</string>
+    <string name="ratings_with_icon">With Icon</string>
+    <string name="ratings_with_letter">With Letter</string>
+    <string name="ratings_preview">Preview</string>
+    <string name="ratings_preview_desc">Compact preview of inside vs outside placement</string>
+    <string name="ratings_sources">Rating Sources</string>
+    <string name="ratings_sources_desc">Enable sources and reorder with arrows. Higher sources show first.</string>
+    <string name="ratings_inside_card">Inside Card</string>
+    <string name="ratings_outside_card">Outside Card</string>
+    <string name="ratings_inside">Inside</string>
+    <string name="ratings_outside">Outside</string>
+    <string name="ratings_reset_defaults">Reset to Defaults</string>
+
+    <!-- Regex Patterns Screen -->
+    <string name="regex_title">Regex Patterns</string>
+    <string name="regex_filter_desc">Filter stream results by title. Matching streams will be excluded.</string>
+    <string name="regex_quick_add">Quick Add</string>
+    <string name="regex_added">Added: %1$s</string>
+    <string name="regex_label_hint">Label</string>
+    <string name="regex_pattern_hint">Regex pattern</string>
+    <string name="regex_import_json">Import JSON</string>
+    <string name="regex_export_json">Export JSON</string>
+    <string name="regex_imported">Imported %1$d regex pattern(s).</string>
+    <string name="regex_imported_disabled">Imported %1$d regex pattern(s). %2$d disabled because the regex was blank or invalid.</string>
+    <string name="regex_import_failed">Could not import regex JSON.</string>
+    <string name="regex_export_failed">Could not export regex JSON.</string>
+    <string name="regex_exported">Regex JSON exported.</string>
+
+    <!-- Home Layout Screen -->
+    <string name="home_layout_title">Home Layout</string>
+    <string name="home_layout_reset">Reset</string>
+    <string name="home_layout_hint">Drag the handle to reorder. Tap a section to customize its poster style.</string>
+    <string name="home_layout_add_custom">Add Custom Section</string>
+    <string name="home_layout_addon">Extension</string>
+    <string name="home_layout_collapse">Collapse</string>
+    <string name="home_layout_customize">Customize</string>
+    <string name="home_layout_card_style">Card Style</string>
+    <string name="home_layout_reset_section">Reset section to default</string>
+
+    <!-- Home Customize Sheet -->
+    <string name="home_customize_title">Customize Home</string>
+    <string name="home_customize_done">Done</string>
+
+    <!-- Addon Catalog Screen -->
+    <string name="addon_catalog_title">Extensions</string>
+    <string name="addon_catalog_installed_count">%1$d installed</string>
+    <string name="addon_catalog_search_hint">Search or paste extension URL…</string>
+    <string name="addon_catalog_installed">Installed</string>
+    <string name="addon_catalog_available">Available</string>
+    <string name="addon_catalog_installing">Installing…</string>
+    <string name="addon_catalog_install">Install</string>
+    <string name="addon_catalog_open_browser">Open in Browser</string>
+    <string name="addon_catalog_open_setup">Open Setup</string>
+    <string name="addon_catalog_copy_url">Copy URL</string>
+    <string name="addon_catalog_manifest_hint">If the page shows a JSON manifest, copy its URL and try again.</string>
+    <string name="addon_restricted_label">Not available</string>
+    <string name="addon_popular_cinemeta_name">Cinemeta</string>
+    <string name="addon_popular_cinemeta_desc">Movie &amp; series info from IMDB/TMDB</string>
+    <string name="addon_popular_panda_name">Panda</string>
+    <string name="addon_popular_panda_desc">Recommended guided setup for Torve streaming. Configure providers, debrid, and quality in Panda.</string>
+    <string name="addon_popular_torrentio_name">Torrentio</string>
+    <string name="addon_popular_torrentio_desc">Popular stream extension for torrent sources. Install it optionally if you want Torrentio-based streaming.</string>
+    <string name="addon_popular_tmdb_name">The Movie Database Addon</string>
+    <string name="addon_popular_tmdb_desc">Rich catalogs powered by TMDB - trending, popular, top rated</string>
+    <string name="addon_popular_trakt_name">Trakt Lists</string>
+    <string name="addon_popular_trakt_desc">Access your Trakt lists, trending, popular, and anticipated titles</string>
+    <string name="addon_popular_imdb_name">IMDB Catalogs</string>
+    <string name="addon_popular_imdb_desc">IMDB movie &amp; series lists - Top 250, Most Popular, Box Office</string>
+    <string name="addon_popular_rpdb_name">RPDB Catalogs</string>
+    <string name="addon_popular_rpdb_desc">Rating poster database - catalogs with rating overlays</string>
+    <string name="addon_popular_opensubtitles_name">OpenSubtitles v3</string>
+    <string name="addon_popular_opensubtitles_desc">Subtitles from OpenSubtitles.com - largest subtitle database</string>
+    <string name="addon_category_all">All</string>
+    <string name="addon_category_streams">Sources</string>
+    <string name="addon_category_catalogs">Catalogs</string>
+    <string name="addon_category_subtitles">Subtitles</string>
+
+    <!-- Manage Panda Screen -->
+    <string name="manage_panda_title">Panda</string>
+    <string name="manage_panda_not_installed">Panda is not installed yet. Install it to get guided streaming setup with server-side configuration.</string>
+    <string name="manage_panda_install">Install Panda</string>
+    <string name="manage_panda_remove">Remove Panda</string>
+    <string name="manage_panda_open_config">Open Configuration</string>
+    <string name="manage_panda_enabled">Enabled</string>
+    <string name="manage_panda_version">Version %1$s</string>
+    <string name="manage_panda_installing">Installing…</string>
+    <string name="manage_panda_manage">Manage</string>
+
+    <!-- Panda Native Setup -->
+    <string name="panda_setup_title">Set up Panda</string>
+    <string name="panda_setup_type_title">Choose setup type</string>
+    <string name="panda_setup_type_desc">Start with debrid cloud streaming or skip straight to Usenet configuration.</string>
+    <string name="panda_setup_type_debrid_title">Debrid</string>
+    <string name="panda_setup_type_debrid_subtitle">Use Real-Debrid, AllDebrid, Premiumize, TorBox, or another supported Panda debrid service.</string>
+    <string name="panda_setup_type_usenet_title">Usenet only</string>
+    <string name="panda_setup_type_usenet_subtitle">Skip debrid and configure Usenet, indexers, and a download client.</string>
+    <string name="panda_setup_provider_title">Choose debrid provider</string>
+    <string name="panda_setup_provider_desc">Select the debrid service you want to use with Panda.</string>
+    <string name="panda_setup_auth_title">Connect %1$s</string>
+    <string name="panda_setup_auth_choose_title">Connect debrid provider</string>
+    <string name="panda_setup_auth_inline_hint">Choose a provider, then connect it directly below the selected row.</string>
+    <string name="panda_setup_auth_oauth">Sign in with browser</string>
+    <string name="panda_setup_auth_apikey">Enter API key</string>
+    <string name="panda_setup_auth_enter_key">Paste your API key</string>
+    <string name="panda_setup_auth_validate">Validate</string>
+    <string name="panda_setup_auth_validating">Validating…</string>
+    <string name="panda_setup_auth_connected">Connected</string>
+    <string name="panda_setup_auth_open_browser">Open in browser</string>
+    <string name="panda_setup_auth_enter_code">Enter this code:</string>
+    <string name="panda_setup_auth_waiting">Waiting for authorization…</string>
+    <string name="panda_setup_auth_oauth_unsupported">%1$s does not support browser sign-in. Enter your API key instead.</string>
+    <string name="panda_setup_sources_title">Torrent sources</string>
+    <string name="panda_setup_sources_desc">Choose which torrent sources Panda should search. The defaults work well for most users.</string>
+    <string name="panda_setup_quality_title">Quality preferences</string>
+    <string name="panda_setup_quality_max">Maximum quality</string>
+    <string name="panda_setup_quality_profile">Quality profile</string>
+    <string name="panda_setup_quality_language">Release language</string>
+    <string name="panda_setup_review_title">Review &amp; save</string>
+    <string name="panda_setup_review_provider">Provider</string>
+    <string name="panda_setup_review_auth">Authentication</string>
+    <string name="panda_setup_review_save">Save &amp; Install</string>
+    <string name="panda_setup_review_update">Update Configuration</string>
+    <string name="panda_setup_review_saving">Saving…</string>
+    <string name="panda_setup_review_success">Panda installed and ready.</string>
+    <string name="panda_setup_review_done">Done</string>
+    <string name="panda_setup_web_fallback">Set up on web instead</string>
+    <string name="panda_setup_reconfigure">Reconfigure</string>
+    <string name="panda_setup_editing">Editing existing configuration</string>
+    <string name="panda_setup_next">Next</string>
+    <string name="panda_setup_retry">Retry</string>
+    <string name="panda_quality_balanced">Balanced</string>
+    <string name="panda_quality_best">Best Quality</string>
+    <string name="panda_quality_fast">Fast Start</string>
+    <string name="panda_quality_saver">Data Saver</string>
+    <string name="panda_language_any">Any</string>
+
+    <!-- Panda Usenet Setup -->
+    <string name="panda_setup_usenet_title">Usenet</string>
+    <string name="panda_setup_usenet_desc">Configure Usenet for additional streaming sources. Easynews provides the simplest setup with direct HTTP streaming.</string>
+    <string name="panda_setup_usenet_enable">Enable Usenet</string>
+    <string name="panda_setup_usenet_provider">Usenet provider</string>
+    <string name="panda_setup_usenet_easynews">Easynews</string>
+    <string name="panda_setup_usenet_easynews_desc">Direct HTTP streaming with built-in search. No indexer needed.</string>
+    <string name="panda_setup_usenet_generic">Generic NNTP</string>
+    <string name="panda_setup_usenet_generic_desc">Any Usenet provider. Requires an NZB indexer and download client.</string>
+    <string name="panda_setup_usenet_host">NNTP host</string>
+    <string name="panda_setup_usenet_port">Port</string>
+    <string name="panda_setup_usenet_username">Username</string>
+    <string name="panda_setup_usenet_password">Password</string>
+    <string name="panda_setup_usenet_ssl">Use SSL</string>
+    <string name="panda_setup_usenet_connections">Connections</string>
+    <string name="panda_setup_usenet_indexer">NZB indexer</string>
+    <string name="panda_setup_usenet_indexer_key">Indexer API key</string>
+    <string name="panda_setup_usenet_indexer_url">Custom indexer URL</string>
+    <string name="panda_setup_usenet_indexer_none">None</string>
+    <string name="panda_setup_usenet_indexer_custom">Custom URL</string>
+    <string name="panda_setup_usenet_client">Download client</string>
+    <string name="panda_setup_usenet_client_none">None</string>
+    <string name="panda_provider_usenet_only_title">Use Usenet only (skip debrid)</string>
+    <string name="panda_provider_usenet_only_subtitle">No debrid — configure Usenet on the next steps</string>
+    <string name="panda_setup_usenet_client_url">Client URL</string>
+    <string name="panda_setup_usenet_client_user">Client username</string>
+    <string name="panda_setup_usenet_client_pass">Client password</string>
+    <string name="panda_setup_usenet_client_key">Client API key</string>
+    <string name="panda_setup_usenet_add_indexer">Add another indexer</string>
+    <string name="panda_setup_review_usenet">Usenet</string>
+    <string name="panda_setup_review_indexer">NZB indexer</string>
+    <string name="panda_setup_review_client">Download client</string>
+
+    <!-- Category Manager Sheet -->
+    <string name="categories_subtitle">Select countries and categories you want to see</string>
+    <string name="categories_select_all">Select All</string>
+    <string name="categories_deselect_all">Deselect All</string>
+
+    <!-- Stats Screen -->
+    <string name="stats_title">Your Stats</string>
+    <string name="stats_movies">Movies</string>
+    <string name="stats_episodes">Episodes</string>
+    <string name="stats_watch_time">Watch Time</string>
+    <string name="stats_this_week">This Week</string>
+    <string name="stats_this_month">This Month</string>
+    <string name="stats_day_streak">Day Streak</string>
+    <string name="stats_no_data">No watch data yet</string>
+    <string name="stats_start_watching">Start watching to see your stats</string>
+
+    <!-- TV Home Screen -->
+    <string name="tv_trending_movies">Trending Movies</string>
+    <string name="tv_trending_tv">Trending TV Shows</string>
+
+    <!-- Common Actions (extended) -->
+    <string name="common_next">Next</string>
+    <string name="common_skip">Skip</string>
+    <string name="common_save">Save</string>
+    <string name="common_rename">Rename</string>
+    <string name="common_duplicate">Duplicate</string>
+    <string name="common_reset">Reset</string>
+    <string name="common_loading">Loading…</string>
+    <string name="common_play_now">Play Now</string>
+    <string name="common_sort_by">Sort By</string>
+    <string name="common_view_details">View Details</string>
+    <string name="common_open_browser">Open in Browser</string>
+
+    <!-- Login Screen -->
+    <string name="login_display_name">Display Name</string>
+    <string name="login_email">Email</string>
+    <string name="login_password">Password</string>
+    <string name="login_create_account">Create Account</string>
+    <string name="login_sign_in">Sign In</string>
+    <string name="login_switch_to_signin">Already have an account? Sign In</string>
+    <string name="login_switch_to_register">Don\'t have an account? Register</string>
+    <string name="login_skip">Skip for now</string>
+
+    <!-- Setup Wizard -->
+    <string name="setup_step_of">Step %1$d of %2$d</string>
+    <string name="setup_get_started">Get Started</string>
+    <string name="setup_start_streaming">Start Streaming</string>
+    <string name="setup_i_agree">I Agree</string>
+    <string name="setup_verify_connect">Verify &amp; Connect</string>
+    <string name="setup_connect_trakt">Connect with Trakt.tv</string>
+    <string name="setup_m3u">URL Import</string>
+    <string name="setup_provider_login">Service Login</string>
+    <string name="setup_channels_desc">Add a channel source or service login to access your channels. You can add more later in the Channels tab.</string>
+    <string name="setup_playlist_hint">e.g. My Channels</string>
+    <string name="setup_m3u_hint">https://example.com/channels</string>
+    <string name="setup_server_hint">http://example.com:8080</string>
+
+    <!-- Card Style Settings -->
+    <string name="card_style_title">Card Style</string>
+    <string name="card_style_preset">Preset</string>
+    <string name="card_style_default_suffix">%1$s (Default)</string>
+    <string name="card_style_set_default">Set Default</string>
+    <string name="card_style_save_as_preset">Save as Preset</string>
+    <string name="card_style_quick_presets">Quick Presets</string>
+    <string name="card_style_quick_desc">Apply a predefined style to the current preset</string>
+    <string name="card_style_cinema">Cinema</string>
+    <string name="card_style_compact">Compact</string>
+    <string name="card_style_classic">Classic</string>
+    <string name="card_style_live_preview">Live Preview</string>
+    <string name="card_style_reset_all">Reset All to Defaults</string>
+    <string name="card_style_rename_title">Rename Preset</string>
+    <string name="card_style_save_title">Save Preset</string>
+    <string name="card_style_delete_title">Delete Preset?</string>
+    <string name="card_style_delete_desc">This will remove \"%1$s\". Sections using it will fall back to Default.</string>
+
+    <!-- Next Episode Overlay -->
+    <string name="player_next_season">Next Season</string>
+    <string name="player_next_episode">Next Episode</string>
+
+    <!-- Download Catalogue -->
+    <string name="download_delete_title">Delete %1$s?</string>
+    <string name="download_delete_movie">This will delete the movie (%1$s).</string>
+    <string name="download_delete_show">This will delete all %1$d episodes (%2$s).</string>
+    <string name="download_delete_all_watched">Delete All Watched?</string>
+    <string name="download_delete_all_watched_desc">This will delete all items you\'ve finished watching.</string>
+    <string name="download_delete_season">Delete Season %1$d</string>
+
+    <!-- Settings - Appearance Reset -->
+    <string name="settings_reset_appearance">Reset all appearance settings</string>
+    <string name="settings_reset_appearance_desc">This will delete all custom card style presets and reset rating display settings to defaults.</string>
+    <string name="settings_reset_appearance_title">Reset Appearance?</string>
+    <string name="settings_reset_appearance_confirm">This will permanently delete all custom card style presets and reset all appearance settings to defaults. This cannot be undone.</string>
+
+    <!-- Player Controls -->
+    <string name="player_audio_delay">Audio Delay</string>
+    <string name="player_audio_delay_value">Delay: %1$d ms</string>
+
+    <!-- Integrations (extended) -->
+    <string name="integrations_sync_in_progress">Syncing…</string>
+
+    <!-- Legal Documents -->
+    <string name="privacy_last_updated">Last updated: February 2026</string>
+    <string name="legal_document_loading">Loading document…</string>
+    <string name="legal_document_fallback_title">Offline copy</string>
+    <string name="legal_document_fallback_body">The latest online version could not be loaded. Showing the bundled document instead.</string>
+    <string name="legal_document_error_title">Unable to load document</string>
+    <string name="legal_document_error_body">The online copy and bundled fallback were both unavailable.</string>
+
+    <!-- Setup Wizard (extended) -->
+    <string name="setup_welcome_subtitle">Your personal media hub</string>
+    <string name="setup_feature_stream">Organize and play your personal media library</string>
+    <string name="setup_feature_cloud">Streaming service integration for optimized playback</string>
+    <string name="setup_feature_channels">Personal channel sources</string>
+    <string name="setup_feature_download">Save media for offline access</string>
+    <string name="setup_feature_trakt">Track your watchlist with Trakt.tv</string>
+    <string name="setup_lets_go">Let\'s set things up in a few quick steps.</string>
+    <string name="setup_terms_title">Terms of Use</string>
+    <string name="setup_terms_text">Torve is a media organizer and player. You are responsible for ensuring you have the right to access any content through third-party sources you configure. Torve does not host, provide, or control any media content.</string>
+    <string name="setup_tmdb_text">This product uses the TMDB API but is not endorsed or certified by TMDB.</string>
+    <string name="setup_accept_terms">I understand and accept these terms</string>
+    <string name="setup_cloud_desc">Connect your streaming optimization service for faster playback.</string>
+    <string name="setup_panda_title">Recommended setup</string>
+    <string name="setup_panda_desc">Use Panda for the easiest setup. It configures providers, debrid, and quality in one guided flow.</string>
+    <string name="setup_panda_open_setup">Open Panda setup</string>
+    <string name="setup_panda_advanced">Advanced manual setup</string>
+    <string name="setup_panda_advanced_desc">Keep using direct provider and API-key setup here if you want maximum manual control.</string>
+    <string name="setup_connected_success">Connected successfully!</string>
+    <string name="setup_trakt_desc">Connect Trakt to sync your watchlist, track progress, and get personalized recommendations.</string>
+    <string name="setup_trakt_connected">Connected to Trakt!</string>
+    <string name="setup_logged_in_as">Logged in as %1$s</string>
+    <string name="setup_go_to">Go to:</string>
+    <string name="setup_enter_code">Enter this code:</string>
+    <string name="setup_waiting_auth">Waiting for authorization…</string>
+    <string name="setup_trakt_hint">You\'ll be asked to visit trakt.tv/activate and enter a code to authorize.</string>
+    <string name="setup_quality_title">Quality Preferences</string>
+    <string name="setup_quality_desc">Set your preferred stream quality. You can change this later in Settings.</string>
+    <string name="setup_channels_title">Channels</string>
+    <string name="setup_done_title">You\'re All Set!</string>
+    <string name="setup_done_desc">Torve is ready. You can adjust settings anytime from the Settings tab.</string>
+
+    <!-- Search Screen -->
+    <string name="search_placeholder">Search movies &amp; TV shows…</string>
+    <string name="search_clear">Clear search</string>
+    <string name="search_no_results">No results found</string>
+    <string name="search_try_different">Try a different search term or adjust filters</string>
+    <string name="search_prompt">Search for movies and TV shows</string>
+    <string name="search_filters_title">Search Filters</string>
+    <string name="search_type">Type</string>
+    <string name="search_power_filters">Power Filters</string>
+    <string name="search_provider_ready">Provider Ready</string>
+    <string name="search_results_count">%1$d results</string>
+    <string name="search_people_prefix">People: </string>
+    <string name="search_lists_prefix">Lists: </string>
+
+    <!-- Equalizer -->
+    <string name="eq_title">Equalizer</string>
+    <string name="eq_enabled">Enabled</string>
+    <string name="eq_bass">Bass</string>
+    <string name="eq_surround">Surround</string>
+    <string name="eq_not_available">Equalizer not available for this audio session</string>
+    <string name="eq_custom">Custom</string>
+
+    <!-- Home Customize (extended) -->
+    <string name="home_streaming_services">Availability Services</string>
+    <string name="home_tmdb_credit">Data provided by TMDB</string>
+    <string name="home_move_up">Move up</string>
+    <string name="home_move_down">Move down</string>
+
+    <!-- Addon Manager -->
+    <string name="addon_content_sources">Media Sources</string>
+    <string name="addon_no_sources">No media sources installed. Add one below.</string>
+    <string name="addon_extension_url">Extension URL</string>
+
+    <!-- Stream Groups -->
+    <string name="stream_groups_title">Stream Groups</string>
+    <string name="stream_groups_desc">Organize and prioritize stream sources. Streams matching a group pattern are sorted together by priority (lower = higher).</string>
+    <string name="stream_groups_name_hint">Group name</string>
+    <string name="stream_groups_regex_hint">Match regex</string>
+    <string name="stream_groups_import_json">Import JSON</string>
+    <string name="stream_groups_export_json">Export JSON</string>
+    <string name="stream_groups_imported">Imported %1$d stream group(s).</string>
+    <string name="stream_groups_imported_disabled">Imported %1$d stream group(s). %2$d disabled because the regex was blank or invalid.</string>
+    <string name="stream_groups_import_failed">Could not import stream group JSON.</string>
+    <string name="stream_groups_export_failed">Could not export stream group JSON.</string>
+    <string name="stream_groups_exported">Stream group JSON exported.</string>
+
+    <!-- Downloaded Show Detail -->
+    <string name="download_show_not_found">Show not found</string>
+    <string name="download_episodes_count">%1$d episodes</string>
+    <string name="download_watched_count">%1$d/%2$d watched</string>
+
+    <!-- Regex help text -->
+    <string name="regex_help_text">Patterns use standard regex. Use (?i) for case-insensitive. Use | to match alternatives.\nExample: (?i)(cam|ts) excludes streams containing \'cam\' or \'ts\'.\nLearn more at regex101.com</string>
+
+    <!-- Common (extended) -->
+    <string name="common_done">Done</string>
+    <string name="common_install">Install</string>
+    <string name="common_default">Default</string>
+
+    <!-- Custom Section Editor -->
+    <string name="custom_section_name">Section Name</string>
+    <string name="custom_min_rating">Min Rating</string>
+    <string name="custom_year_from">Year From</string>
+    <string name="custom_year_to">Year To</string>
+    <string name="custom_search_person">Search person…</string>
+    <string name="custom_media_type">Media Type</string>
+    <string name="custom_genres">Genres</string>
+    <string name="custom_keywords">Keywords</string>
+
+    <!-- Card Style Settings (extended) -->
+    <string name="card_style_card_size">Card Size</string>
+    <string name="card_style_orientation">Orientation</string>
+    <string name="card_style_size">Size</string>
+    <string name="card_style_card_width">Card Width: %1$ddp</string>
+    <string name="card_style_hover_zoom">Hover / Focus Zoom</string>
+    <string name="card_style_hover_zoom_desc">Cards grow when hovered, focused, or long-pressed</string>
+    <string name="card_style_zoom_amount">Zoom Amount</string>
+    <string name="card_style_animation_speed">Animation Speed</string>
+    <string name="card_style_preview_tap">Preview (tap middle card)</string>
+    <string name="card_style_watched_indicator">Watched Indicator</string>
+    <string name="card_style_watched_desc">Mark movies and shows you\'ve already seen</string>
+    <string name="card_style_indicator_style">Indicator Style</string>
+    <string name="card_style_dim_amount">Dim Amount</string>
+    <string name="card_style_appearance">Appearance</string>
+    <string name="card_style_corner_radius">Corner Radius</string>
+    <string name="card_style_card_spacing">Card Spacing</string>
+    <string name="card_style_title_position">Title Position</string>
+    <string name="card_style_scroll_animation">Scroll Animation</string>
+    <string name="card_style_preset_copy_template">%1$s Copy</string>
+    <string name="card_style_new_preset">New Preset</string>
+    <string name="card_style_preview_title">Signal in the Dust</string>
+    <string name="card_style_custom_width_min">60dp (tiny)</string>
+    <string name="card_style_custom_width_max">300dp (huge)</string>
+    <string name="card_style_elevation_shadow">Elevation / Shadow</string>
+    <string name="card_style_accent_border">Accent Border</string>
+    <string name="card_style_dim_other_cards">Dim Other Cards</string>
+    <string name="card_style_tap">TAP</string>
+    <string name="card_style_dim_watched_posters">Dim Watched Posters</string>
+    <string name="card_style_progress_bar_partial">Progress Bar (partial watches)</string>
+    <string name="card_style_rewatch_badge">Rewatch Count Badge</string>
+    <string name="card_style_title_pos_below">Below</string>
+    <string name="card_style_title_pos_overlay">Overlay</string>
+    <string name="card_style_title_pos_hidden">Hidden</string>
+    <string name="card_style_scroll_none">None</string>
+    <string name="card_style_scroll_fade_in">Fade In</string>
+    <string name="card_style_scroll_slide_up">Slide Up</string>
+    <string name="card_style_scroll_scale_in">Scale In</string>
+    <string name="card_style_show_year">Show Year</string>
+    <string name="card_style_bottom_gradient">Bottom Gradient</string>
+    <string name="card_style_card_border">Card Border</string>
+    <string name="card_style_genre_tags">Genre Tags</string>
+    <string name="card_style_type_badge">Type Badge (Movie/TV)</string>
+    <string name="card_style_runtime">Runtime</string>
+
+    <!-- Download Catalogue (extended) -->
+    <string name="download_group_by">Group By</string>
+    <string name="download_catalogue_settings">Catalogue Settings</string>
+    <string name="download_grid_columns">Grid Columns</string>
+    <string name="download_auto">Auto</string>
+    <string name="download_card_info">Card Info</string>
+    <string name="download_special_sections">Special Sections</string>
+    <string name="download_auto_cleanup">Auto-Cleanup</string>
+    <string name="download_delete_after">Delete after: %1$d days</string>
+    <string name="download_bulk_actions">Bulk Actions</string>
+    <string name="download_items_count">%1$d items</string>
+    <string name="download_storage_counts">%1$d movies • %2$d shows (%3$d ep)</string>
+    <string name="download_storage_free_used">%1$s free • %2$d%% used by Torve</string>
+    <string name="download_active_downloads">Active Downloads (%1$d)</string>
+    <string name="download_filter_genre">Genre</string>
+    <string name="download_filter_quality">Quality</string>
+    <string name="download_all_downloads">All Downloads</string>
+    <string name="download_episodes_short">%1$d ep</string>
+    <string name="download_episodes_short_caps">%1$d EP</string>
+    <string name="download_tv_show">TV Show</string>
+    <string name="download_movie">Movie</string>
+    <string name="download_storage_info_bar">Storage Info Bar</string>
+    <string name="download_quality_badges">Quality Badges</string>
+    <string name="download_episode_count">Episode Count</string>
+    <string name="download_file_size">File Size</string>
+    <string name="download_download_date">Download Date</string>
+    <string name="download_watch_progress">Watch Progress</string>
+    <string name="download_continue_watching">Continue Watching</string>
+    <string name="download_recently_added">Recently Added</string>
+    <string name="download_auto_delete_watched">Auto-Delete After Watched</string>
+
+    <!-- Detail Screen (extended) -->
+    <string name="detail_no_offers">No provider offers available in selected region.</string>
+
+    <!-- Settings (extended) -->
+    <string name="settings_ai_provider">AI Provider</string>
+    <string name="settings_your_code">Your code</string>
+    <string name="settings_code_copied">Code copied</string>
+    <string name="settings_open_browser">Open in Browser</string>
+
+    <!-- Integrations (extended 2) -->
+    <string name="integrations_key_invalid">Key is invalid or inactive</string>
+
+    <!-- TV Settings: Poster Titles -->
+    <string name="tv_settings_poster_titles">Poster Titles</string>
+    <string name="tv_settings_poster_titles_on">Shown</string>
+    <string name="tv_settings_poster_titles_off">Hidden</string>
+    <string name="tv_settings_see_all_poster_columns">See All posters per row</string>
+    <string name="tv_settings_see_all_poster_columns_value">%1$d posters per row</string>
+
+    <!-- TV Navigation -->
+    <string name="tv_nav_iptv">Channels</string>
+    <string name="tv_nav_sports">Sports</string>
+    <string name="tv_nav_search">Search</string>
+    <string name="tv_nav_library">Library</string>
+    <string name="tv_nav_settings">Settings</string>
+
+    <!-- TV Section Titles -->
+    <string name="tv_section_continue_watching">Continue Watching</string>
+    <string name="tv_section_continue_watching_movies">Continue Watching Movies</string>
+    <string name="tv_section_continue_watching_shows">Continue Watching Shows</string>
+    <string name="tv_section_recommended">Recommended</string>
+    <string name="tv_section_trending_movies">Trending Movies</string>
+    <string name="tv_section_trending_shows">Trending TV Shows</string>
+    <string name="tv_section_popular_movies">Popular Movies</string>
+    <string name="tv_section_top_rated_movies">Top Rated Movies</string>
+    <string name="tv_section_popular_shows">Popular TV Shows</string>
+    <string name="tv_section_top_rated_shows">Top Rated TV Shows</string>
+    <string name="tv_section_watchlist_movies">Watchlist Movies</string>
+    <string name="tv_section_watchlist_shows">Watchlist TV Shows</string>
+    <string name="tv_section_popular_searches">Popular Searches</string>
+    <string name="tv_section_search_results">Results</string>
+
+    <!-- TV Hero -->
+    <string name="tv_hero_subtitle_home">Picked for your evening</string>
+    <string name="tv_hero_subtitle_movies">Cinema highlights</string>
+    <string name="tv_hero_subtitle_shows">Series worth binging</string>
+    <string name="tv_hero_subtitle_iptv">Your channels</string>
+    <string name="tv_hero_subtitle_search">Find something to watch</string>
+    <string name="tv_hero_subtitle_library">Your saved titles</string>
+    <string name="tv_hero_subtitle_settings">Tune your experience</string>
+
+    <!-- TV Actions -->
+    <string name="tv_action_play">Play</string>
+    <string name="tv_action_details">Details</string>
+    <string name="tv_action_add_watchlist">Add to Watchlist</string>
+    <string name="tv_action_remove_watchlist">Remove from Watchlist</string>
+    <string name="tv_action_trailer">Trailer</string>
+    <string name="tv_action_back">Back</string>
+
+    <!-- TV Search -->
+    <string name="tv_search_hint">Search movies and shows</string>
+    <string name="tv_search_empty">Use search or popular terms to start</string>
+    <string name="tv_library_empty">Your library is empty</string>
+    <string name="tv_loading">Loading</string>
+    <string name="tv_no_data">Nothing available right now</string>
+    <string name="tv_player_preparing">Preparing playback</string>
+    <string name="tv_settings_description">Use this screen to configure TV behavior and account integrations from a remote.</string>
+    <string name="tv_settings_cast">Cast works on Android TV and fails gracefully on Fire TV when Play Services are unavailable.</string>
+
+    <!-- TV Genres -->
+    <string name="tv_genre_action">Action</string>
+    <string name="tv_genre_comedy">Comedy</string>
+    <string name="tv_genre_sci_fi">Sci-Fi</string>
+    <string name="tv_genre_horror">Horror</string>
+    <string name="tv_genre_drama">Drama</string>
+    <string name="tv_genre_animation">Animation</string>
+    <string name="tv_genre_action_adventure">Action &amp; Adventure</string>
+    <string name="tv_genre_sci_fi_fantasy">Sci-Fi &amp; Fantasy</string>
+    <string name="tv_genre_crime">Crime</string>
+
+    <!-- TV Episode Picker -->
+    <string name="tv_episodes_title">Episodes</string>
+    <string name="tv_no_episodes">No episodes available</string>
+    <string name="tv_watched">Watched</string>
+
+    <!-- TV See All -->
+    <string name="tv_see_all">See All</string>
+
+    <!-- TV Settings Categories -->
+    <string name="tv_settings_cat_account">Account</string>
+    <string name="tv_settings_cat_account_sub">Sign in and devices</string>
+    <string name="tv_settings_cat_playback">Playback</string>
+    <string name="tv_settings_cat_playback_sub">Quality &amp; autoplay</string>
+    <string name="tv_settings_cat_appearance">Appearance</string>
+    <string name="tv_settings_cat_appearance_sub">Language &amp; layout</string>
+    <string name="tv_settings_cat_library">Library</string>
+    <string name="tv_settings_cat_library_sub">Channels &amp; lists</string>
+    <string name="tv_settings_cat_connections">Connections</string>
+    <string name="tv_settings_cat_connections_sub">Services &amp; devices</string>
+    <string name="tv_settings_cat_advanced">Advanced</string>
+    <string name="tv_settings_cat_advanced_sub">API keys &amp; extensions</string>
+    <string name="tv_settings_cat_about">About</string>
+    <string name="tv_settings_cat_about_sub">Version &amp; legal</string>
+
+    <!-- TV Settings -->
+    <string name="tv_settings_section_account">Account</string>
+    <string name="tv_settings_section_app">App</string>
+    <string name="tv_settings_section_about">About</string>
+    <string name="tv_settings_cloud_service">Streaming Service</string>
+    <string name="tv_settings_trakt">Trakt</string>
+    <string name="tv_settings_phone_pairing">Phone Pairing</string>
+    <string name="tv_settings_language">Language</string>
+    <string name="tv_settings_playback_quality">Playback Quality</string>
+    <string name="tv_settings_version">Version</string>
+    <string name="tv_settings_subscription">Account access</string>
+    <string name="tv_settings_legal">Legal</string>
+    <string name="tv_settings_legal_subtitle">Privacy Policy &amp; Terms</string>
+    <string name="tv_settings_stats">Watch Stats</string>
+    <string name="tv_settings_connected">Connected</string>
+    <string name="tv_settings_not_connected">Not connected</string>
+    <string name="tv_settings_paired">Paired</string>
+    <string name="tv_settings_pairing_code">Pairing code:</string>
+    <string name="tv_settings_generating_code">Generating pairing code</string>
+    <string name="tv_settings_not_paired">Not paired</string>
+    <string name="tv_settings_debug">Debug</string>
+    <string name="tv_settings_sync_status">Sync Status</string>
+    <string name="tv_settings_sync_error">Sync Error</string>
+    <string name="tv_settings_language_restart">Language changed — restart may be needed for full effect</string>
+
+    <string name="tv_settings_category_account">Account</string>
+    <string name="tv_settings_category_playback">Playback</string>
+    <string name="tv_settings_category_appearance">Appearance</string>
+    <string name="tv_settings_category_channels">Channels</string>
+    <string name="tv_settings_category_connections">Connections</string>
+    <string name="tv_settings_category_advanced">Advanced</string>
+    <string name="tv_settings_category_about">About</string>
+    <string name="tv_settings_paired_devices">Paired Devices</string>
+    <string name="tv_settings_activated_devices">Activated Devices</string>
+    <string name="tv_settings_activated_devices_subtitle">Manage registered devices on this account.</string>
+    <string name="tv_settings_section_quality">Quality</string>
+    <string name="tv_settings_section_quality_desc">Choose minimum and maximum stream quality.</string>
+    <string name="tv_settings_section_playback_behavior">Playback Behavior</string>
+    <string name="tv_settings_section_playback_preferences">Playback Preferences</string>
+    <string name="tv_settings_section_display">Display</string>
+    <string name="tv_settings_section_language_region">Language &amp; Region</string>
+    <string name="tv_settings_section_home_experience">Home Experience</string>
+    <string name="tv_settings_section_home_experience_desc">Control how content is presented on Home.</string>
+    <string name="tv_settings_section_metadata_ratings">Metadata &amp; Ratings</string>
+
+    <!-- TV Voice -->
+    <string name="tv_voice_listening">Listening…</string>
+    <string name="tv_voice_processing">Processing voice input…</string>
+    <string name="tv_voice_unavailable">Voice input is not available on this device</string>
+
+    <!-- TV Channels -->
+    <string name="tv_iptv_empty">No channels available. Add a source in Settings.</string>
+    <string name="tv_iptv_recently_viewed">Recently Viewed</string>
+    <string name="tv_iptv_favorites">Favorites</string>
+    <string name="tv_iptv_no_playlists_title">No Channels Configured</string>
+    <string name="tv_iptv_no_playlists_subtitle">Add a channel source on your phone, then sync to TV</string>
+    <string name="tv_iptv_all_channels">All Channels</string>
+    <string name="tv_iptv_channels_count">%d channels</string>
+    <string name="tv_iptv_now_playing">Now Playing</string>
+    <string name="tv_iptv_no_channels_in_group">No channels in this group</string>
+
+    <!-- TV Settings: Customization -->
+    <string name="tv_settings_section_customization">Customization</string>
+    <string name="tv_settings_sync_from_phone">Sync Settings from Phone</string>
+    <string name="tv_settings_sync_ready">Import all settings from your paired phone</string>
+    <string name="tv_settings_pair_first">Pair a phone first to sync</string>
+    <string name="tv_settings_region">Content Region</string>
+    <string name="tv_settings_streaming_services">Availability Services</string>
+    <string name="tv_settings_home_layout_note">To customize your Home tab layout, card styles, rating sources, and availability services — configure them on the Torve mobile app and tap \"Sync Settings from Phone\" above.</string>
+
+    <!-- TV Settings: Setup Mode -->
+    <string name="tv_settings_setup_prompt">How do you use Torve?</string>
+    <string name="tv_settings_setup_mode">Setup Mode</string>
+    <string name="tv_settings_tap_to_change">tap to change</string>
+    <string name="tv_settings_mode_android">I have Torve on Android</string>
+    <string name="tv_settings_mode_android_desc">Pair your phone to sync all settings instantly</string>
+    <string name="tv_settings_mode_ios">I have Torve on iOS</string>
+    <string name="tv_settings_mode_ios_desc">Pair your iPhone to sync settings</string>
+    <string name="tv_settings_mode_tv_only">TV only — no phone app</string>
+    <string name="tv_settings_mode_tv_only_desc">Set up everything directly on your TV</string>
+    <string name="tv_settings_simkl">SIMKL</string>
+    <string name="tv_settings_change_provider">Streaming Provider</string>
+    <string name="tv_settings_sync_note">To customize Home layout, card styles, and rating sources — configure on the mobile app and tap Sync.</string>
+
+    <!-- TV Detail -->
+    <string name="tv_detail_director">Director</string>
+    <string name="tv_detail_cast">Cast</string>
+    <string name="tv_detail_more_like_this">More Like This</string>
+
+    <!-- TV Sync Notices -->
+    <string name="tv_sync_search_received">Search received from phone</string>
+    <string name="tv_sync_playback_received">Playback handoff received</string>
+
+    <!-- TV Settings: Channels -->
+    <string name="tv_settings_section_channels">Channels</string>
+    <string name="tv_settings_add_playlist">Add Source</string>
+    <string name="tv_settings_playlist_name">Source Name</string>
+    <string name="tv_settings_playlist_url">Source URL</string>
+    <string name="tv_settings_playlist_save">Save Source</string>
+    <string name="tv_settings_playlist_type_m3u">URL Import</string>
+    <string name="tv_settings_playlist_type_xtream">Service Login</string>
+    <string name="tv_settings_xtream_server">Server URL</string>
+    <string name="tv_settings_xtream_username">Username</string>
+    <string name="tv_settings_xtream_password">Password</string>
+    <string name="tv_settings_playlist_remove">Remove</string>
+    <string name="tv_settings_playlist_confirm_remove">Tap again to confirm removal</string>
+    <string name="tv_settings_no_playlists">No channel sources configured</string>
+    <string name="tv_settings_channels_count">%d channels</string>
+
+    <!-- TV Settings: Integrations -->
+    <string name="tv_settings_section_integrations">Integrations</string>
+    <string name="tv_settings_omdb">OMDB</string>
+    <string name="tv_settings_omdb_api_key">OMDB API Key</string>
+    <string name="tv_settings_omdb_test">Test OMDB</string>
+    <string name="tv_settings_mdblist">MDBList</string>
+    <string name="tv_settings_mdblist_api_key">MDBList API Key</string>
+    <string name="tv_settings_jellyfin">Jellyfin</string>
+    <string name="tv_settings_jellyfin_url">Jellyfin Server URL</string>
+    <string name="tv_settings_jellyfin_api_key">Jellyfin API Key</string>
+    <string name="tv_settings_jellyfin_test">Test Jellyfin</string>
+    <string name="tv_settings_plex">Plex</string>
+    <string name="tv_settings_plex_url">Plex Server URL</string>
+    <string name="tv_settings_plex_token">Plex Access Token</string>
+    <string name="tv_settings_plex_test">Test Plex</string>
+    <string name="tv_settings_kodi">Kodi</string>
+    <string name="tv_settings_kodi_name">Name</string>
+    <string name="tv_settings_kodi_ip">Host / IP</string>
+    <string name="tv_settings_kodi_port">Port</string>
+    <string name="tv_settings_kodi_add">Add Kodi Host</string>
+    <string name="tv_settings_kodi_test">Test</string>
+    <string name="tv_settings_test_success">Connected</string>
+    <string name="tv_settings_test_failed">Connection failed</string>
+    <string name="tv_settings_validating">Validating…</string>
+    <string name="tv_settings_valid">Valid</string>
+    <string name="tv_settings_invalid">Invalid</string>
+    <string name="tv_settings_not_set">Not set</string>
+    <string name="tv_settings_set">Configured</string>
+    <string name="tv_settings_tap_to_edit">Tap to edit</string>
+
+    <!-- TV Settings: AI -->
+    <string name="tv_settings_section_ai">AI Search</string>
+    <string name="tv_settings_ai_provider">AI Provider</string>
+    <string name="tv_settings_ai_api_key">API Key</string>
+    <string name="tv_settings_ai_test">Test AI Connection</string>
+
+    <!-- TV Settings: App -->
+    <string name="tv_settings_dedupe">Deduplicate Streams</string>
+    <string name="tv_settings_dedupe_on">Enabled — duplicate streams hidden</string>
+    <string name="tv_settings_dedupe_off">Disabled — all streams shown</string>
+    <string name="tv_settings_home_layout">Home Layout</string>
+    <string name="tv_settings_home_layout_subtitle">Customize sections on your Home tab</string>
+    <string name="tv_settings_ratings">Rating Providers</string>
+    <string name="tv_settings_ratings_subtitle">Choose which ratings to display</string>
+
+    <!-- TV Home Layout -->
+    <string name="tv_home_layout_title">Home Layout</string>
+    <string name="tv_home_layout_enabled">Enabled</string>
+    <string name="tv_home_layout_disabled">Disabled</string>
+    <string name="tv_home_layout_move_up">Move Up</string>
+    <string name="tv_home_layout_move_down">Move Down</string>
+    <string name="tv_home_layout_reset">Reset to Defaults</string>
+    <string name="tv_home_layout_reset_subtitle">Restore all sections to default order and visibility</string>
+    <string name="tv_home_layout_create_custom">Create Custom Section</string>
+    <string name="tv_home_layout_create_custom_subtitle">Add a personalized content rail</string>
+    <string name="tv_home_layout_section_title">Section Title</string>
+
+    <!-- TV Ratings Settings -->
+    <string name="tv_ratings_title">Rating Providers</string>
+    <string name="tv_ratings_show_on_detail">Show Ratings on Detail Page</string>
+    <string name="tv_ratings_show_torve_score">Show Torve Score</string>
+    <string name="tv_ratings_section_sources">Rating Sources</string>
+    <string name="tv_ratings_max_on_cards">Max Ratings on Cards</string>
+    <string name="tv_ratings_reset">Reset Rating Preferences</string>
+    <string name="tv_ratings_reset_subtitle">Restore default rating sources and display</string>
+
+    <!-- TV Settings: Extensions -->
+    <string name="tv_settings_section_addons">Extensions</string>
+    <string name="tv_settings_no_addons">No extensions installed</string>
+    <string name="tv_settings_addon_install_url">Extension URL</string>
+    <string name="tv_settings_addon_install">Install Extension</string>
+    <string name="tv_settings_addon_installing">Installing…</string>
+    <string name="tv_settings_addon_enabled">Enabled</string>
+    <string name="tv_settings_addon_disabled">Disabled</string>
+    <string name="tv_settings_addon_remove">Remove</string>
+    <string name="tv_settings_addon_confirm_remove">Tap again to confirm removal</string>
+
+    <!-- TV Settings: MDBList Browse -->
+    <string name="tv_settings_mdblist_browse">Browse MDBList</string>
+    <string name="tv_settings_mdblist_popular">Popular Lists</string>
+    <string name="tv_settings_mdblist_search">Search Lists</string>
+    <string name="tv_settings_mdblist_search_hint">Search community lists…</string>
+    <string name="tv_settings_mdblist_no_results">No results</string>
+    <string name="tv_settings_mdblist_items">%d items</string>
+    <string name="tv_settings_mdblist_by">by %s</string>
+    <string name="tv_settings_mdblist_saved">Saved Lists</string>
+    <string name="tv_settings_mdblist_no_saved">No saved lists</string>
+    <string name="tv_settings_mdblist_add">Add</string>
+    <string name="tv_settings_mdblist_added">Added</string>
+    <string name="tv_settings_mdblist_no_api_key">Set MDBList API key above first</string>
+    <string name="tv_settings_mdblist_loading">Loading lists…</string>
+
+    <!-- TV Home Layout: AI -->
+    <string name="tv_home_layout_ai_prompt">Describe what you want</string>
+    <string name="tv_home_layout_ai_hint">e.g. cozy winter movies, dark sci-fi thrillers…</string>
+    <string name="tv_home_layout_ai_search">Find with AI</string>
+    <string name="tv_home_layout_ai_searching">Searching…</string>
+    <string name="tv_home_layout_ai_found">AI filled: %s</string>
+    <string name="tv_home_layout_ai_error">AI search failed — try again</string>
+    <string name="tv_home_layout_save">Save Section</string>
+    <string name="tv_home_layout_media_type">Media Type</string>
+
+    <!-- TV Live Player -->
+    <string name="tv_live_tv_guide">Program Guide</string>
+    <string name="tv_live_history">History</string>
+    <string name="tv_live_clear">Clear</string>
+    <string name="tv_live_next_label">Next:</string>
+    <string name="tv_live_search">Search</string>
+    <string name="tv_live_channels_list">Channels</string>
+    <string name="tv_live_channels">Channels</string>
+    <string name="tv_live_recordings">Recordings</string>
+    <string name="tv_live_multiview">Multiview</string>
+    <string name="tv_live_pip">PiP</string>
+    <string name="tv_live_coming_soon">Coming soon</string>
+    <string name="tv_live_no_programme_data">No programme data</string>
+    <string name="tv_live_settings">Settings</string>
+    <string name="tv_live_playlists">Sources</string>
+    <string name="tv_live_countries">Countries</string>
+    <string name="tv_live_select_all">Select All</string>
+    <string name="tv_live_clear_all">Clear All</string>
+    <string name="tv_live_current_channel">Current Channel</string>
+    <string name="tv_live_add_favorite">Add %s to Favorites</string>
+    <string name="tv_live_remove_favorite">Remove %s from Favorites</string>
+    <string name="tv_live_category_visibility">Category Visibility</string>
+    <string name="tv_live_hidden">Hidden</string>
+    <string name="tv_live_visible">Visible</string>
+    <string name="tv_live_adult_content">Adult Content</string>
+    <string name="tv_live_show_adult">Show Adult Channels</string>
+    <string name="tv_live_active">Active</string>
+
+    <!-- TV Settings: Stream Quality & Playback -->
+    <string name="tv_settings_section_stream_quality">Stream Quality &amp; Playback</string>
+    <string name="tv_settings_section_content">Content Management</string>
+    <string name="tv_settings_autoplay">Auto-play Best Stream</string>
+    <string name="tv_settings_autoplay_on">Enabled — plays top stream automatically</string>
+    <string name="tv_settings_autoplay_off">Disabled — shows stream picker</string>
+    <string name="tv_settings_autoplay_next">Auto-play Next Episode</string>
+    <string name="tv_settings_autoplay_next_on">Enabled — next episode plays automatically</string>
+    <string name="tv_settings_autoplay_next_off">Disabled — returns to detail screen</string>
+    <string name="tv_settings_min_quality">Minimum Quality</string>
+    <string name="tv_settings_max_quality">Maximum Quality</string>
+    <string name="tv_settings_select_quality">Select Quality</string>
+    <string name="tv_settings_select_language">Select Language</string>
+
+    <!-- TV Library -->
+    <string name="tv_library_tab_watchlist">Watchlist</string>
+    <string name="tv_library_tab_downloads">Downloads</string>
+    <string name="tv_library_tab_recordings">Recordings</string>
+    <string name="tv_library_recordings_coming_soon">Recordings — coming soon</string>
+    <string name="tv_library_no_downloads">No downloads yet</string>
+
+    <!-- TV Downloads -->
+    <string name="tv_action_download">Download</string>
+    <string name="tv_action_download_all">Download All</string>
+    <string name="tv_action_download_season">Download S%d</string>
+    <string name="tv_download_queued">Download queued</string>
+
+    <!-- TV Extension Catalog -->
+    <string name="tv_addon_category_all">All</string>
+    <string name="tv_addon_category_streams">Sources</string>
+    <string name="tv_addon_category_catalogs">Catalogs</string>
+    <string name="tv_addon_category_subtitles">Subtitles</string>
+    <string name="tv_addon_suggested">Suggested Extensions</string>
+    <string name="tv_addon_installed">Installed</string>
+
+    <!-- TV Search AI -->
+    <string name="tv_search_mode_standard">Standard</string>
+    <string name="tv_search_mode_ai">AI Search</string>
+    <string name="tv_search_ai_configure">Configure in Settings</string>
+    <string name="tv_search_hide_filters">Hide Filters</string>
+    <string name="tv_search_show_filters">Show Filters</string>
+    <string name="tv_search_ai_label">AI: %s</string>
+    <string name="tv_search_ai_fallback">AI unavailable, showing standard results</string>
+    <string name="common_on">On</string>
+    <string name="tv_settings_reduce_motion">Reduce Motion</string>
+    <string name="tv_settings_section_stream_handling">Stream Handling</string>
+    <string name="tv_settings_section_pairing_sync">Pairing &amp; Sync</string>
+    <string name="tv_settings_section_profile_signin">Profile &amp; Sign-in</string>
+
+    <!-- Account Screen -->
+    <string name="account_title">Account</string>
+    <string name="account_not_signed_in">Not signed in</string>
+    <string name="account_this_device">This device: %s</string>
+    <string name="account_settings_sync_ok">Shared settings sync through your account.</string>
+    <string name="account_settings_sync_error">Shared settings sync error: %s</string>
+    <string name="account_pairings">Pairings</string>
+    <string name="account_no_pairings">No paired TVs or controller links yet.</string>
+    <string name="account_pairings_count_one">%d active pairing linked to this account.</string>
+    <string name="account_pairings_count_other">%d active pairings linked to this account.</string>
+    <string name="account_pairing_note">Pairing is only for controller and playback handoff. Shared settings no longer depend on pairing.</string>
+    <string name="account_manage_pairings">Manage Pairings</string>
+    <string name="account_devices">Devices</string>
+    <string name="account_devices_note">Signed-in devices are managed separately from pairings and count toward your account device limit.</string>
+    <string name="account_manage_signed_in">Manage Signed-In Devices</string>
+
+    <!-- Devices Screen (Pairing) -->
+    <string name="devices_paired_title">Paired Devices</string>
+    <string name="devices_paired_desc">Pair TVs or controller devices to enable remote control and playback handoff. Shared settings sync through account sign-in.</string>
+    <string name="devices_pairing_code">Pairing Code</string>
+    <string name="devices_add_pairing">Add Pairing</string>
+    <string name="devices_refresh">Refresh</string>
+    <string name="devices_sign_in_first">Sign in before pairing additional devices.</string>
+    <string name="devices_pairing_unavailable">Code-based pairing is not available on this server right now.</string>
+    <string name="devices_no_paired">No paired devices linked to this account yet.</string>
+    <string name="devices_last_seen">Last seen: %s</string>
+    <string name="devices_state_label">State: %s</string>
+    <string name="devices_state_revoked">revoked</string>
+    <string name="devices_revoked_at">Revoked: %s</string>
+    <string name="devices_unpair">Unpair</string>
+
+    <!-- Manage Devices Screen -->
+    <string name="manage_devices_title">Manage Devices</string>
+    <string name="manage_devices_limit_info">Your account can be active on up to %d devices at a time for security and sync integrity.</string>
+    <string name="manage_devices_count">%1$d of %2$d devices active</string>
+    <string name="manage_devices_limit_loading">Checking your account device limit…</string>
+    <string name="manage_devices_count_loading">Checking active devices…</string>
+    <string name="manage_devices_limit_reached_warning">You have reached your %d-device limit.</string>
+    <string name="manage_devices_remove_info">Removing a device frees a slot for another device.</string>
+    <string name="manage_devices_inactive_info">Inactive devices may stop counting automatically after extended inactivity.</string>
+    <string name="manage_devices_this_device">THIS DEVICE</string>
+    <string name="manage_devices_active">Active</string>
+    <string name="manage_devices_removed">Removed</string>
+    <string name="manage_devices_remove_cd">Remove device</string>
+    <string name="manage_devices_remove_title">Remove Device</string>
+    <string name="manage_devices_remove_confirm">Remove "%s" from your account? This frees a device registration.</string>
+
+    <!-- Device Limit Reached Screen -->
+    <string name="device_limit_title">Device Limit Reached</string>
+    <string name="device_limit_message">Your account is already active on %d devices. Remove one device to register this device.</string>
+    <string name="device_limit_message_loading">Checking your account device registrations. Remove one active device to register this device.</string>
+    <string name="device_limit_active_devices">Active Devices</string>
+    <string name="device_limit_activate_hint">To activate this device, remove one from your account.</string>
+    <string name="device_limit_remove_confirm">Remove "%s"? This frees a device registration for your current device.</string>
+    <string name="device_limit_remove_activate">Remove &amp; Activate</string>
+
+    <!-- Stats Screen -->
+    <string name="stats_top_genres">Top Genres</string>
+    <string name="stats_watched_count">%d watched</string>
+    <string name="stats_most_active_days">Most Active Days</string>
+    <string name="stats_no_data_desc">Start watching to see your stats</string>
+
+    <!-- Profile Tab Screen -->
+    <string name="profile_torve_user">Torve User</string>
+    <string name="profile_trakt_connected">Trakt connected</string>
+    <string name="profile_quick_access">Quick Access</string>
+    <string name="profile_calendar">Calendar</string>
+    <string name="profile_calendar_sub">Upcoming episodes &amp; releases</string>
+    <string name="profile_downloads">Downloads</string>
+    <string name="profile_downloads_sub">Manage offline content</string>
+    <string name="profile_stats">Stats</string>
+    <string name="profile_stats_sub">Your watch activity</string>
+    <string name="profile_channels">Channels</string>
+    <string name="profile_channels_sub">Channels &amp; sources</string>
+    <string name="profile_subscription">Account access</string>
+    <string name="profile_subscription_sub">Manage your account</string>
+    <string name="profile_profiles">Profiles</string>
+    <string name="profile_profiles_sub">Switch or manage profiles</string>
+    <string name="profile_settings">Settings</string>
+    <string name="profile_settings_sub">Accounts, quality, appearance</string>
+
+    <!-- Settings Screen: Additional Sections -->
+    <string name="settings_sign_in_manage">Sign in to manage your account and devices.</string>
+    <string name="settings_sign_in_create">Sign In / Create Account</string>
+    <string name="settings_cloud_desc">Connect streaming optimization services.</string>
+    <string name="settings_content_management">Content Management</string>
+    <string name="settings_home_layout">Home Layout</string>
+    <string name="settings_home_layout_sub">Section order &amp; poster style</string>
+    <string name="settings_card_style">Card Style</string>
+    <string name="settings_card_style_sub">Size, hover zoom, watched indicators, appearance</string>
+    <string name="settings_addons_title">Extensions &amp; Media Sources</string>
+    <string name="settings_addons_sub">%d installed · Browse &amp; manage</string>
+    <string name="settings_streaming_services">Availability Services</string>
+    <string name="settings_streaming_services_sub">Personalize home availability</string>
+    <string name="settings_streaming_services_desc">Choose which availability services appear on your home screen. Matching titles from these services are highlighted while browsing Torve.</string>
+    <string name="settings_stream_groups">Stream Groups</string>
+    <string name="settings_stream_groups_sub">%d groups</string>
+    <string name="settings_regex_patterns">Regex Patterns</string>
+    <string name="settings_regex_patterns_sub">%d patterns</string>
+    <string name="settings_ratings">Ratings</string>
+    <string name="settings_ratings_sub">Multi-source rating pills</string>
+    <string name="settings_integrations">Integrations</string>
+    <string name="settings_integrations_sub">Trakt, SIMKL, Jellyfin, Plex</string>
+    <string name="settings_kodi_desc">Configure Kodi hosts and remote control integration.</string>
+    <string name="settings_ai_features">AI Features</string>
+    <string name="settings_backup">Backup</string>
+    <string name="settings_account_sync">Account Sync</string>
+    <string name="settings_account_sync_desc">Manage pairings and signed-in devices. Shared settings sync through your account.</string>
+    <string name="settings_manage_devices">Manage Devices</string>
+    <string name="settings_diagnostics">Diagnostics</string>
+    <string name="settings_report_issue">Report Issue</string>
+    <string name="settings_export_diagnostics">Export diagnostics</string>
+    <string name="bug_report_title">Report a problem</string>
+    <string name="bug_report_subtitle">Send a redacted report directly to Torve support. Pasted logs are scrubbed before sending.</string>
+    <string name="bug_report_tv_subtitle">Send a redacted report directly to Torve support. No email or share app is required.</string>
+    <string name="bug_report_tv_settings_subtitle">Create a redacted diagnostics report for support</string>
+    <string name="bug_report_issue_type">Issue type</string>
+    <string name="bug_report_type_crash">Crash</string>
+    <string name="bug_report_type_lag_freezing">Lag / freezing</string>
+    <string name="bug_report_type_focus_navigation">Stuck focus / remote navigation</string>
+    <string name="bug_report_type_playback_problem">Playback problem</string>
+    <string name="bug_report_type_broken_link">Broken link / source failed</string>
+    <string name="bug_report_type_integration_problem">Integration problem</string>
+    <string name="bug_report_type_addon_problem">Addon problem</string>
+    <string name="bug_report_type_iptv_problem">IPTV problem</string>
+    <string name="bug_report_type_account_access">Account access problem</string>
+    <string name="bug_report_type_playback">Playback</string>
+    <string name="bug_report_type_live_tv">Live TV / EPG</string>
+    <string name="bug_report_type_vod">Movies / TV Shows</string>
+    <string name="bug_report_type_account">Account / Sync</string>
+    <string name="bug_report_type_settings">Settings / Setup</string>
+    <string name="bug_report_type_other">Other</string>
+    <string name="bug_report_type_tv">Android TV</string>
+    <string name="bug_report_description">What happened?</string>
+    <string name="bug_report_description_hint">Describe what you were doing and what went wrong.</string>
+    <string name="bug_report_logs">Paste logs</string>
+    <string name="bug_report_logs_hint">Optional logcat, error text, or screenshots notes. Secrets are redacted.</string>
+    <string name="bug_report_attach_diagnostics">Attach diagnostics</string>
+    <string name="bug_report_attach_diagnostics_desc">Includes app/device/provider status, never saved credentials.</string>
+    <string name="bug_report_privacy_note">Diagnostic reports include device/app status and recent Torve logs. Secrets, tokens, passwords, stream URLs, payment data, and account credentials are redacted.</string>
+    <string name="bug_report_send_email">Email support</string>
+    <string name="bug_report_send_email_desc">Open an email to Torve support with the report filled in.</string>
+    <string name="bug_report_send_support">Send to Torve support</string>
+    <string name="bug_report_send_support_tv_desc">Uploads the redacted report from this signed-in TV. No email app required.</string>
+    <string name="bug_report_send_full_diagnostics">Send full diagnostic report</string>
+    <string name="bug_report_sending">Sending report...</string>
+    <string name="bug_report_sent">Report sent. Reference: %1$s</string>
+    <string name="bug_report_saved_for_retry">A previous diagnostic report is saved locally. Try sending again.</string>
+    <string name="bug_report_send_failed">Could not send report right now. Copy the report and try again later.</string>
+    <string name="bug_report_share">Share report</string>
+    <string name="bug_report_share_desc">Use another app if no email client is installed.</string>
+    <string name="bug_report_copy_report">Copy report</string>
+    <string name="bug_report_copy_report_desc">Copy the redacted report to the clipboard.</string>
+    <string name="bug_report_email_subject">Torve bug report</string>
+    <string name="bug_report_copied">Bug report copied</string>
+    <string name="bug_report_generating">Generating report...</string>
+    <string name="settings_danger_zone">Danger Zone</string>
+    <string name="settings_channels_desc">Manage channel sources and persistent favorites.</string>
+    <string name="settings_region">Region</string>
+    <string name="settings_availability_region">Availability Region</string>
+    <string name="settings_availability_region_desc">2-letter country code (e.g. US, GB, DE). Determines which availability providers are shown on detail pages.</string>
+
+    <!-- Sync Device Picker Dialog -->
+    <string name="sync_no_targets">No paired target devices found.</string>
+    <string name="sync_device_info">%1$s - %2$s</string>
+
+    <!-- Search Screen -->
+    <string name="search_create_profile_first">Create a local profile to send search to a TV</string>
+    <string name="search_no_paired_tv">No paired TV devices found</string>
+    <string name="search_send_to_device_cd">Send search to device</string>
+    <string name="search_listening">Listening</string>
+    <string name="search_processing_voice">Processing voice input</string>
+    <string name="search_hidden_results_notice">Some results are hidden by your content setting.</string>
+    <string name="search_send_to_device_title">Send Search To Device</string>
+    <string name="search_enter_query_first">Enter a search query first</string>
+    <string name="search_sent_to">Search sent to %s</string>
+
+    <!-- Player Screen -->
+    <string name="player_switched_source">Switched to a more stable source</string>
+    <string name="player_resume_title">Resume Playback</string>
+    <string name="player_resume_message">Continue from %s or start over?</string>
+    <string name="player_resume">Resume</string>
+    <string name="player_start_over">Start Over</string>
+    <string name="player_cast_cd">Cast</string>
+    <string name="player_create_profile_first">Create a local profile to transfer playback</string>
+    <string name="player_no_paired_tv">No paired TV devices found</string>
+    <string name="player_play_on_device_cd">Play on device</string>
+    <string name="player_voice_cd">Voice command</string>
+    <string name="player_audio_delay_cd">Audio delay</string>
+    <string name="player_equalizer_cd">Equalizer</string>
+    <string name="player_play_on_device_title">Play On Device</string>
+    <string name="player_cannot_handoff">This title cannot be handed off</string>
+    <string name="player_sent_to">Playback sent to %s</string>
+    <string name="player_picture_format">Picture Format</string>
+    <string name="player_enter_applies">Enter applies instantly. Back closes.</string>
+
+    <!-- Detail Screen -->
+    <string name="detail_in_library">In Library</string>
+    <string name="detail_where_to_watch">Where to Watch</string>
+
+    <!-- Channels Screens -->
+    <string name="channels_no_content">No content yet</string>
+    <string name="channels_add_playlist_start">Add a channel source to get started</string>
+    <string name="channels_recently_viewed">Recently Viewed</string>
+    <string name="channels_favorites">Favorites</string>
+    <string name="channels_no_movies">No movies available</string>
+    <string name="channels_movies_xtream">Movies require a compatible channel source with service login</string>
+    <string name="channels_no_series">No series available</string>
+    <string name="channels_series_xtream">Series require a compatible channel source with service login</string>
+    <string name="channels_no_favourites">No favourites yet</string>
+    <string name="channels_tap_heart">Tap the heart on any channel to add it here.</string>
+    <string name="channels_no_programme">No programme info</string>
+    <string name="channels_filter">Filter</string>
+    <string name="channels_sort">Sort</string>
+    <string name="channels_select_countries">Select countries and categories you want to see</string>
+    <string name="channels_toggle_view_cd">Toggle view</string>
+    <string name="channels_filter_sort_cd">Filter &amp; Sort</string>
+    <string name="channels_favorite_cd">Favorite</string>
+
+    <!-- Mood Matcher -->
+    <string name="mood_what_to_watch">What should I watch?</string>
+    <string name="mood_pick_mood">Pick your mood</string>
+    <string name="mood_love_these">We think you\'ll love these</string>
+
+    <!-- Misc UI -->
+    <string name="common_back_cd">Back</string>
+    <string name="common_close_cd">Close</string>
+    <string name="common_edit_cd">Edit</string>
+    <string name="common_customize_cd">Customize</string>
+    <string name="common_voice_search_cd">Voice search</string>
+    <string name="downloaded_cd">Downloaded</string>
+    <string name="watched_cd">Watched</string>
+    <string name="drag_to_reorder_cd">Drag to reorder</string>
+    <string name="detail_open_failed">Unable to open details for this item</string>
+    <string name="discover_title">Discover</string>
+    <string name="next_format">Next: %s</string>
+
+    <!-- Notification Strings -->
+    <string name="notif_channel_downloads">Offline Access</string>
+    <string name="notif_channel_downloads_desc">Download progress for offline media</string>
+    <string name="notif_download_started">Download started</string>
+    <string name="notif_download_starting">Downloading \"%1$s\" for offline access</string>
+    <string name="notif_download_progress">\"%1$s\" — %2$d%% complete</string>
+    <string name="notif_download_progress_title">Downloading</string>
+    <string name="notif_download_complete_title">Download complete</string>
+    <string name="notif_download_complete">\"%1$s\" is ready offline</string>
+    <string name="notif_download_failed_title">Download failed</string>
+    <string name="notif_download_failed">Couldn\'t download \"%1$s\". Try again.</string>
+    <string name="notif_channel_episodes">Episode Notifications</string>
+    <string name="notif_channel_episodes_desc">Notifications for new TV show episodes</string>
+    <string name="notif_new_episodes">New Episodes Available</string>
+    <string name="notif_episodes_and_more">%1$s and %2$d more</string>
+
+    <!-- Feature titles -->
+    <string name="premium_locked">Locked</string>
+    <string name="premium_requires_lifetime">Available to everyone</string>
+    <string name="premium_unlock_with_lifetime">Available to everyone</string>
+    <string name="premium_benefit_watchlist">Watchlist and Favorites</string>
+    <string name="premium_benefit_integrations">Trakt, Simkl, Jellyfin, Plex, and Kodi integrations</string>
+    <string name="premium_benefit_pairing">Phone pairing and cross-device sync</string>
+    <string name="premium_benefit_personalization">Advanced personalization and library management</string>
+    <string name="premium_benefit_tools">Provider setup, diagnostics, and advanced tools</string>
+    <string name="premium_browse_home">Browse Home</string>
+    <string name="premium_browse_movies">Browse Movies</string>
+    <string name="premium_browse_tv_shows">Browse TV Shows</string>
+    <string name="premium_browse_posters">Browse Posters</string>
+    <string name="premium_focused_info">Focused Info Panel</string>
+    <string name="premium_title_artwork">Title Artwork</string>
+    <string name="premium_metadata_ratings">Metadata and Ratings</string>
+    <string name="premium_view_details">View Details</string>
+    <string name="premium_basic_search">Basic Search</string>
+    <string name="premium_about_legal">About and Legal</string>
+    <string name="premium_purchase_screen">Free software info</string>
+    <string name="premium_app_preview">App Preview</string>
+    <string name="premium_trailer_playback">Trailer Playback</string>
+    <string name="premium_account_setup">Account Setup</string>
+    <string name="premium_cloud_sign_in">Cloud Sign In</string>
+    <string name="premium_synced_history">Synced Watch History</string>
+    <string name="premium_synced_watchlist">Synced Watchlist</string>
+    <string name="premium_synced_favorites">Synced Favorites</string>
+    <string name="premium_custom_layout_sync">Custom Layout Sync</string>
+    <string name="premium_cross_device_sync">Cross-Device Sync</string>
+    <string name="premium_cloud_backup">Cloud Backup</string>
+    <string name="premium_phone_pairing">Phone Pairing</string>
+    <string name="premium_device_linking">Device Linking</string>
+    <string name="premium_device_sync">Device Sync</string>
+    <string name="premium_tv_phone_continuation">TV-Phone Continuation</string>
+    <string name="premium_qr_pairing">QR Pairing</string>
+    <string name="premium_watchlist_editing">Watchlist Editing</string>
+    <string name="premium_favorites_editing">Favorites Editing</string>
+    <string name="premium_watched_state">Watched State</string>
+    <string name="premium_trakt_lists">Trakt Lists</string>
+    <string name="premium_favorites_manager">Favorites Manager</string>
+    <string name="premium_persistent_collections">Persistent Collections</string>
+    <string name="premium_trakt_connect">Trakt Connect</string>
+    <string name="premium_simkl_connect">Simkl Connect</string>
+    <string name="premium_jellyfin_setup">Jellyfin Setup</string>
+    <string name="premium_plex_setup">Plex Setup</string>
+    <string name="premium_kodi_setup">Kodi Setup</string>
+    <string name="premium_omdb_setup">OMDb Setup</string>
+    <string name="premium_mdblist_setup">MDBList Setup</string>
+    <string name="premium_ai_provider_setup">AI Provider Setup</string>
+    <string name="premium_cloud_provider_setup">Cloud Provider Setup</string>
+    <string name="premium_addon_management">Extension Management</string>
+    <string name="premium_diagnostics">Diagnostics</string>
+    <string name="premium_debug_tools">Debug Tools</string>
+    <string name="premium_provider_tests">Provider Tests</string>
+    <string name="premium_metadata_rebuild">Metadata Rebuild</string>
+    <string name="premium_provider_rematch">Provider Re-Match</string>
+    <string name="premium_custom_sources">Custom Sources</string>
+    <string name="premium_advanced_connections">Advanced Connections</string>
+    <string name="premium_developer_logs">Developer Event Logs</string>
+    <string name="premium_ai_search">AI Search</string>
+    <string name="premium_advanced_recommendations">Advanced Recommendations</string>
+    <string name="premium_more_like_this">More Like This</string>
+    <string name="premium_choose_source">Choose Source</string>
+    <string name="premium_stream_playback">Stream Playback</string>
+    <string name="premium_downloads">Downloads</string>
+
+    <!-- TV Settings: additional hardcoded labels -->
+    <string name="tv_settings_channels_locked_title">Channels</string>
+    <string name="tv_settings_channels_locked_desc">Save sources, visibility, and channel management.</string>
+    <string name="tv_settings_premium_channels">Channel management</string>
+    <string name="tv_settings_connections_locked_title">Connections</string>
+    <string name="tv_settings_connections_locked_desc">Link cloud and metadata providers.</string>
+    <string name="tv_settings_premium_connections">Connections</string>
+    <string name="tv_settings_advanced_locked_title">Advanced</string>
+    <string name="tv_settings_advanced_locked_desc">Metadata providers, integrations, and diagnostics are available to everyone.</string>
+    <string name="tv_settings_premium_advanced">Advanced tools</string>
+    <string name="tv_settings_pairing_desc">Pair devices for control/session linking and manage signed-in devices on this account.</string>
+    <string name="tv_settings_pair_device">Pair Device</string>
+    <string name="tv_settings_paired_count_one">%d paired device on this account</string>
+    <string name="tv_settings_paired_count_other">%d paired devices on this account</string>
+    <string name="tv_settings_no_paired_yet">No paired devices yet</string>
+    <string name="tv_manage_activated_title">Activated Devices</string>
+    <string name="tv_manage_activated_desc">Registered devices on this account.</string>
+    <string name="tv_manage_active_count">%1$d of %2$d active</string>
+    <string name="tv_manage_active_count_loading">Checking active devices…</string>
+    <string name="tv_manage_limit_reached_warning">You have reached your %d-device limit.</string>
+    <string name="tv_manage_no_activated">No activated devices found.</string>
+    <string name="tv_manage_revoke_info">Revoking removes access for that device. Removing clears the device record.</string>
+    <string name="tv_manage_paired_title">Paired Devices</string>
+    <string name="tv_manage_paired_desc">Devices paired for control and playback handoff with this TV/account.</string>
+    <string name="tv_manage_no_paired">No paired devices found.</string>
+    <string name="tv_manage_unpair_info">Unpair disconnects control and playback handoff only. Shared settings sync through account sign-in.</string>
+    <string name="tv_manage_device_limit_title">Device Limit Reached</string>
+    <string name="tv_manage_device_limit_desc">Your account is already active on %d devices. Remove one device to register this device.</string>
+    <string name="tv_manage_device_limit_desc_loading">Checking your account device registrations. Remove one active device to register this device.</string>
+    <string name="tv_manage_current_device">CURRENT DEVICE</string>
+    <string name="tv_manage_this_tv">THIS TV</string>
+    <string name="tv_manage_this_device">THIS DEVICE</string>
+    <string name="tv_manage_last_active">Last active: %s</string>
+    <string name="tv_manage_last_seen">Last seen: %s</string>
+    <string name="tv_manage_unpaired">Unpaired: %s</string>
+    <string name="tv_manage_remove_title">Remove Device</string>
+    <string name="tv_manage_remove_confirm">Remove \"%s\"?</string>
+    <string name="tv_manage_back">&#8249; Back</string>
+    <string name="tv_settings_account_sync_status">Account Sync Status</string>
+    <string name="tv_settings_account_manage_desc">Manage your Torve account on this TV.</string>
+    <string name="tv_settings_torve_account">Torve Account</string>
+    <string name="tv_settings_email_not_verified">Email Not Verified</string>
+    <string name="tv_settings_resend_verification">Tap to resend verification email</string>
+    <string name="tv_settings_log_out">Log Out</string>
+    <string name="tv_settings_email">Email</string>
+    <string name="tv_settings_password">Password</string>
+    <string name="tv_settings_confirm_password">Confirm Password</string>
+    <string name="tv_settings_forgot_password">Forgot Password?</string>
+    <string name="tv_settings_forgot_password_desc">Send a password reset link to your email</string>
+    <string name="tv_settings_subscription_title">Account access</string>
+    <string name="tv_settings_subscription_desc">Torve is free software. No subscriptions. No paid tiers.</string>
+    <string name="tv_settings_lifetime_access">Full access</string>
+    <string name="tv_settings_monthly_access">Full access</string>
+    <string name="tv_settings_retry_verification">Retry Verification</string>
+    <string name="tv_settings_retry_verification_desc">Refresh account access for this device.</string>
+    <string name="tv_settings_restore_purchase">No restore needed</string>
+    <string name="tv_settings_restore_purchase_desc">No purchase restore is required for access.</string>
+    <string name="tv_settings_linked_services">Linked Services</string>
+    <string name="tv_settings_linked_services_desc">Current account link status from your paired phone.</string>
+    <string name="tv_settings_metadata_providers">Metadata Providers</string>
+    <string name="tv_settings_metadata_read_only">Read-only status while managed by phone sync.</string>
+    <string name="tv_settings_streaming_accounts">Cloud Accounts</string>
+    <string name="tv_settings_streaming_accounts_desc">Connect your cloud and tracking services directly on TV.</string>
+    <string name="tv_settings_metadata_keys_desc">Keys and validation for metadata services.</string>
+    <string name="tv_settings_integrations_title">Integrations</string>
+    <string name="tv_settings_integrations_desc">Media servers and external service connections.</string>
+    <string name="tv_settings_ai_discovery">AI &amp; Discovery</string>
+    <string name="tv_settings_ai_discovery_desc">Provider and key setup for AI-assisted search.</string>
+    <string name="tv_settings_external_addons">External Extensions</string>
+    <string name="tv_settings_external_addons_desc">Install and manage optional extension sources.</string>
+    <string name="tv_settings_metadata_collections">Metadata Collections</string>
+    <string name="tv_settings_metadata_collections_desc">Browse and manage MDBList collections.</string>
+    <string name="tv_settings_content_sources">Content Sources</string>
+    <string name="tv_settings_content_sources_desc">Sources and feeds used by your library.</string>
+    <string name="tv_settings_channel_visibility">Channel Visibility</string>
+    <string name="tv_settings_diagnostics_dev">Diagnostics / Developer</string>
+    <string name="tv_settings_diagnostics_dev_desc">Developer tools and troubleshooting details.</string>
+    <string name="tv_settings_app_info">App Info</string>
+    <string name="tv_settings_app_info_desc">Version and usage information.</string>
+    <string name="tv_settings_tv_version">Torve TV v%s</string>
+    <string name="tv_settings_build_number">Build Number</string>
+    <string name="tv_settings_legal_support">Legal &amp; Support</string>
+    <string name="tv_settings_support">Support</string>
+    <string name="tv_settings_support_desc">Get help and troubleshooting</string>
+    <string name="tv_settings_terms">Terms</string>
+    <string name="tv_settings_terms_desc">Review terms of service</string>
+    <string name="tv_settings_support_modal_body">Need help with Torve? Email us at support@torve.app</string>
+    <string name="tv_settings_support_modal_subtext">Use this address for technical support, account issues, and bug reports.</string>
+    <string name="tv_settings_support_email">support@torve.app</string>
+    <string name="tv_settings_support_email_action">Press OK to compose an email if an app is available.</string>
+    <string name="tv_settings_support_email_unavailable">No email app is available on this device.</string>
+    <string name="tv_settings_document_back_hint">Press Back to close</string>
+    <string name="tv_settings_document_loading">Loading document…</string>
+    <string name="tv_settings_document_fallback_title">Offline copy</string>
+    <string name="tv_settings_document_fallback_body">The latest online version could not be loaded. Showing the bundled document instead.</string>
+    <string name="tv_settings_document_error_title">Unable to load document</string>
+    <string name="tv_settings_document_error_body">The online copy and bundled fallback were both unavailable.</string>
+    <string name="tv_settings_not_now">Not now</string>
+    <string name="sensitive_material_status_title">Status</string>
+    <string name="sensitive_material_overview_body">This setting controls whether sensitive catalog material can appear in eligible parts of the app for this account.</string>
+    <string name="sensitive_material_locked_body">This setting stays locked until the account is eligible.</string>
+    <string name="sensitive_material_enable">Review access</string>
+    <string name="sensitive_material_disable">Turn off</string>
+    <string name="sensitive_material_dob_body">Enter the account holder’s date of birth to continue.</string>
+    <string name="sensitive_material_dob_label">Date of birth</string>
+    <string name="sensitive_material_confirm_body">Confirm that you want to enable sensitive material for this account.</string>
+    <string name="sensitive_material_confirm_enable">Enable</string>
+
+    <!-- TV Search/Library hardcoded -->
+    <string name="tv_search_all">All</string>
+    <string name="tv_search_movies">Movies</string>
+    <string name="tv_search_tv_shows">TV Shows</string>
+    <string name="tv_library_downloading">Downloading</string>
+    <string name="tv_library_downloaded_movies">Downloaded Movies</string>
+    <string name="tv_library_downloaded_shows">Downloaded Shows</string>
+
+    <!-- TV IPTV: EPG -->
+    <string name="tv_iptv_loading_epg">Loading guide…</string>
+    <string name="tv_iptv_epg_not_configured">Program guide not configured. Open Settings &gt; Channels to add a guide data URL.</string>
+    <string name="tv_iptv_open_settings">Open Settings</string>
+    <string name="tv_home_layout_instructions">Press OK to enable or disable. Press RIGHT to enter move mode, UP or DOWN to reorder, LEFT to finish.</string>
+    <string name="tv_settings_sign_in_share">Sign in to sync account devices.</string>
+
+    <!-- User-facing error messages (mapped from UserFacingError) -->
+    <string name="error_device_cap_reached">Device limit reached. Remove a device to continue.</string>
+    <string name="error_device_swap_limit">You\u2019ve reached the device swap limit. Try again later.</string>
+    <string name="error_device_already_removed">This device was already removed.</string>
+    <string name="error_device_remove_failed">Could not remove device.</string>
+    <string name="error_device_activate_failed">Could not activate this device. Please try again.</string>
+    <string name="error_device_rename_failed">Could not rename device.</string>
+    <string name="error_device_fetch_failed">Could not load devices. Please try again.</string>
+    <string name="error_not_logged_in">Please sign in to continue.</string>
+    <string name="error_unauthorized">Your session has expired. Please sign in again.</string>
+    <string name="error_session_expired">Your session has expired. Please sign in again.</string>
+    <string name="error_no_entitlement">This feature is available to everyone.</string>
+    <string name="error_premium_required">This feature is available to everyone.</string>
+    <string name="error_billing_unavailable">Billing is deprecated and not required for access.</string>
+    <string name="error_billing_init_failed">Store billing is deprecated and not required for access.</string>
+    <string name="error_purchase_failed">Purchase state does not affect access.</string>
+    <string name="error_product_not_available">This product is not available right now.</string>
+    <string name="error_already_owned">You already own this product.</string>
+    <string name="error_network_failure">Could not connect. Please check your internet connection.</string>
+    <string name="error_timeout">The request timed out. Please try again.</string>
+    <string name="error_server_error">Something went wrong on our end. Please try again later.</string>
+    <string name="error_sync_failed">Settings sync failed. Please try again.</string>
+    <string name="error_integration_connect_failed">Could not connect to the service. Please try again.</string>
+    <string name="error_integration_auth_timeout">Authorization timed out. Please try again.</string>
+    <string name="error_integration_auth_denied">Authorization was denied.</string>
+    <string name="error_integration_auth_expired">Authorization code expired. Please try again.</string>
+    <string name="error_integration_auth_used">Authorization code already used. Please try again.</string>
+    <string name="error_integration_invalid_key">Invalid credentials. Please check and try again.</string>
+    <string name="error_integration_service_unavailable">The service is not available right now.</string>
+    <string name="error_integration_rate_limited">Too many requests. Please wait and try again.</string>
+    <string name="error_integration_config_missing">Required configuration is missing.</string>
+    <string name="error_integration_connect_check">Could not connect. Please check your settings.</string>
+    <string name="error_already_registered">This resource is already set up.</string>
+    <string name="error_content_load_failed">Could not load content. Please try again.</string>
+    <string name="error_search_failed">Search failed. Please try again.</string>
+    <string name="error_streams_load_failed">Could not load streams. Please try again.</string>
+    <string name="error_stream_resolve_failed">Could not resolve stream. Try another source.</string>
+    <string name="error_stream_reference_unavailable">This source is no longer available. Refresh sources or try another one.</string>
+    <string name="error_stream_resolve_timeout">Stream resolution timed out. Try another source.</string>
+    <string name="error_stream_real_debrid_source_blocked">Real-Debrid blocked this source. Try another source.</string>
+    <string name="stream_preparing_title">Preparing your stream</string>
+    <string name="stream_preparing_body">%1$s is fetching this release from Usenet. This usually takes a minute or two.</string>
+    <string name="stream_preparing_elapsed">Waiting %1$s</string>
+    <string name="stream_preparing_subnote">We\'ll start playback automatically as soon as it\'s ready. Leaving this screen is safe — your place is held.</string>
+    <string name="stream_preparing_cancel">Cancel</string>
+    <string name="error_stream_preparing_timeout">Your cloud download service is still working on this. Try a different source or check back in a few minutes.</string>
+    <string name="error_watchlist_failed">Watchlist update failed. Please try again.</string>
+    <string name="error_download_failed">Download action failed. Please try again.</string>
+    <string name="error_channel_load_failed">Could not load channels. Please try again.</string>
+    <string name="error_profile_failed">Profile action failed. Please try again.</string>
+    <string name="error_stats_load_failed">Could not load stats. Please try again.</string>
+    <string name="error_addon_failed">Add-on action failed. Please try again.</string>
+    <string name="error_addon_install_failed">Could not install add-on. Check the URL and try again.</string>
+    <string name="error_calendar_load_failed">Could not load calendar. Please try again.</string>
+    <string name="error_unknown">Something went wrong. Please try again.</string>
+
+    <!-- Usenet source sheet — the only five strings the mapper layer is
+         allowed to produce. See UsenetUserMessageKey in the shared module. -->
+    <string name="usenet_row_ready_now">Ready now</string>
+    <string name="usenet_row_preparing">Preparing</string>
+    <string name="usenet_row_unavailable">Unavailable</string>
+    <string name="usenet_trying_next_source">Trying next source</string>
+    <string name="usenet_playback_link_expired">Playback link expired, refreshing</string>
+
+    <!-- NzbDAV integration card. Copy is deliberately neutral — the
+         card is backend-owned and must not expose NzbDAV internals,
+         version strings, or transport details. -->
+    <string name="integrations_nzbdav_title">NzbDAV</string>
+    <string name="integrations_nzbdav_desc">Torve uses your NzbDAV instance to stream Usenet sources. Connection is managed by the Torve backend.</string>
+    <string name="integrations_nzbdav_base_url">Base URL</string>
+    <string name="integrations_nzbdav_api_key">API key</string>
+    <string name="integrations_nzbdav_test">Test connection</string>
+    <string name="integrations_nzbdav_save">Save</string>
+    <string name="integrations_nzbdav_remove">Remove</string>
+    <string name="integrations_nzbdav_status_loading">Checking status…</string>
+    <string name="integrations_nzbdav_status_not_configured">Not configured</string>
+    <string name="integrations_nzbdav_status_connected">Connected</string>
+    <string name="integrations_nzbdav_status_connected_degraded">Connected, but backend reported degraded status</string>
+    <string name="integrations_nzbdav_status_failed">Connection failed</string>
+    <string name="integrations_nzbdav_action_test_ok">Connection test succeeded</string>
+    <string name="integrations_nzbdav_action_test_degraded">Connection test succeeded, backend reported degraded status</string>
+    <string name="integrations_nzbdav_action_test_failed">Connection test failed</string>
+    <string name="integrations_nzbdav_action_missing_fields">Base URL and API key are required</string>
+    <string name="integrations_nzbdav_action_saved">Saved</string>
+    <string name="integrations_nzbdav_action_removed">Removed</string>
+
+    <!-- Shared mobile/localized UI strings -->
+    <string name="common_dismiss">Dismiss</string>
+    <string name="channels_no_epg_data">No EPG Data</string>
+    <string name="channels_no_epg_desc">Programme guide requires an EPG URL in your playlist</string>
+    <string name="channels_guide_search_placeholder">Search channels in guide</string>
+    <string name="channels_channel_header">Channel</string>
+    <string name="channels_no_channels_matching">No channels matching “%1$s”.</string>
+    <string name="sort_label">Sort: %1$s</string>
+    <string name="filter_from">From</string>
+    <string name="filter_to">To</string>
+    <string name="filter_any">Any</string>
+    <string name="verify_gate_title">Confirm your email</string>
+    <string name="verify_gate_body_no_email">Confirm your email before setting up sources.</string>
+    <string name="verify_gate_body_email">We sent a confirmation link to %1$s. Confirm it, then continue to setup.</string>
+    <string name="verify_gate_confirmed">I\'ve confirmed my email</string>
+    <string name="verify_gate_send_again">Send email again</string>
+    <string name="verify_gate_next">Next: choose how you want to watch. Use Panda for Debrid/Usenet, add IPTV for live TV, or connect Plex/Jellyfin.</string>
+    <string name="verify_gate_different_account">Use a different account</string>
+    <string name="panda_setup_nudge_title">Set up Panda</string>
+    <string name="panda_setup_nudge_body">Easiest way to enable Torve\'s core source discovery — a guided wizard wires debrid + Usenet for you.</string>
+    <string name="voice_input_no_input">No voice input detected</string>
+    <string name="voice_input_unavailable">Voice input is not available on this device</string>
+    <string name="voice_input_failed_start">Voice input failed to start</string>
+    <string name="sign_in_tv_title">Sign in a TV</string>
+    <string name="sign_in_tv_need_signed_in">You need to be signed in on this phone before you can sign in a TV.</string>
+    <string name="sign_in_tv_instructions">Open Torve on your TV, go to Settings → “Sign in with your phone”. Then either scan the QR code below, or type the 6-character code shown next to it.</string>
+    <string name="sign_in_tv_scan_qr">Scan QR on TV</string>
+    <string name="sign_in_tv_cancel_scan">Cancel scan</string>
+    <string name="sign_in_tv_no_camera">This phone has no camera available — use the manual code below.</string>
+    <string name="sign_in_tv_enter_code_title">Or enter the 6-character code shown on the TV</string>
+    <string name="sign_in_tv_code_label">TV sign-in code</string>
+    <string name="sign_in_tv_submit">Sign in this TV</string>
+    <string name="settings_sign_in_tv_with_phone">Sign in a TV with this phone</string>
+    <string name="transfer_receive_title">Receive credentials</string>
+    <string name="transfer_send_title">Send credentials</string>
+    <string name="transfer_preparing_handshake">Preparing a one-time handshake…</string>
+    <string name="transfer_generating">Generating…</string>
+    <string name="transfer_generate_sealed_code">Generate sealed code</string>
+    <string name="transfer_sealing_credentials_title">Sealing credentials</string>
+    <string name="transfer_sealing_credentials_body">Credentials stay local while the encrypted envelope is generated.</string>
+    <string name="transfer_generate_code_failed">Could not generate code</string>
+    <string name="transfer_scan_qr_from_receiver">Scan QR from receiving device</string>
+    <string name="transfer_close_camera">Close camera</string>
+    <string name="transfer_open_camera">Open camera</string>
+    <string name="manage_panda_token_title">Paste management token</string>
+    <string name="manage_panda_token_desc">Paste the admin-issued management token for this Panda config. It validates immediately; invalid tokens aren\'t stored.</string>
+    <string name="manage_panda_token_label">Management token</string>
+    <string name="manage_panda_checking">Checking…</string>
+    <string name="manage_panda_validate_save">Validate and save</string>
+    <string name="panda_management_token_title">Management token (advanced)</string>
+    <string name="panda_management_token_desc">This token lets you edit your Panda config from other devices or restore access if you uninstall. Most users don\'t need it.</string>
+    <string name="panda_show_token">Show token</string>
+    <string name="panda_management_token_saved">I\'ve saved it</string>
+    <string name="common_hide">Hide</string>
+    <string name="common_copy">Copy</string>
+    <string name="custom_save_changes">Save changes</string>
+    <string name="custom_create_section">Create section</string>
+    <string name="manage_panda_management_token_heading">Management token</string>
+    <string name="manage_panda_token_required_desc">Required for editing, deleting, or rotating this Panda config.</string>
+    <string name="manage_panda_token_missing_desc">This device has no management token for this config. Paste an admin-issued token below to enable config edits.</string>
+    <string name="manage_panda_need_token">I need a management token</string>
+    <string name="manage_panda_rotate_token">Rotate management token</string>
+    <string name="manage_panda_reset_manifest_url">Reset leaked manifest URL</string>
+    <string name="common_learn_more">Learn more</string>
+    <string name="panda_setup_review_token_required">This device does not have a Panda management token yet. Open Manage Panda → “I need a management token” to paste the admin-issued token before editing this config.</string>
+    <string name="common_save_changes">Save changes</string>
+    <string name="stream_group_fast_start">Fast Start</string>
+    <string name="stream_group_fast_start_subtitle">Trusted quick-start options</string>
+    <string name="stream_group_best_fit">Best Fit</string>
+    <string name="stream_group_more_great_matches">More Great Matches</string>
+    <string name="stream_group_ranked_for_device">Ranked for this device</string>
+    <string name="stream_group_more_options">More Options</string>
+    <string name="stream_group_more_options_subtitle">Extra fallbacks and alternates</string>
+    <string name="stream_filter_torrent">Torrent/RD</string>
+    <string name="stream_filter_usenet_nzb">Usenet / NZB</string>
+    <string name="stream_seed_count">%1$d seeds</string>
+    <string name="detail_cached_count">%1$d cached</string>
+    <string name="detail_direct_count">%1$d direct</string>
+    <string name="detail_best_fit_count">%1$d best fit</string>
+    <string name="detail_total_count">%1$d total</string>
+    <string name="detail_opening_best_option">Opening the best playback option.</string>
+    <string name="detail_preparing_quick_start">Preparing quick-start playback options.</string>
+    <string name="detail_trying_fastest_option">Trying the fastest trusted option.</string>
+    <string name="detail_checking_more_options">Checking more playback options.</string>
+    <string name="detail_loading_more_options">Loading more playback options.</string>
+    <string name="detail_checking_services">Checking connected services and ranking playback options.</string>
+    <string name="detail_fast_start_ready_checking_more">%1$d fast-start options ready. Checking more in the background.</string>
+    <string name="detail_playback_summary">%1$d fast start • %2$d ready now • %3$d more options</string>
+    <string name="detail_ranked_fallbacks_ready">Torve keeps ranked fallbacks ready if this first attempt does not start cleanly.</string>
+    <string name="detail_quickest_option_failed">The quickest option did not start, so broader results are being checked.</string>
+    <string name="detail_quick_start_stays_visible">Quick-start options stay visible while more playback choices are added.</string>
+    <string name="detail_immediate_options_first">Immediate options are surfaced first, then broader results are ranked for this device.</string>
+    <string name="detail_fast_badge">Fast %1$d</string>
+    <string name="detail_ready_badge">Ready %1$d</string>
+    <string name="detail_best_fit_badge">Best fit %1$d</string>
+    <string name="detail_ratings_shown_from">Ratings shown from %1$s.</string>
+    <string name="detail_torve_score_blends">Torve Score blends %1$s using your selected weights.</string>
+    <string name="detail_fast_start">Fast start</string>
+    <string name="detail_ready_now">Ready now</string>
+    <string name="detail_ready_when_picked">Ready when picked</string>
+    <string name="detail_additional_option">Additional option</string>
+    <string name="detail_recent_success">Recent success</string>
+    <string name="detail_in_your_cloud">In your cloud</string>
+    <string name="detail_cached">Cached</string>
+    <string name="detail_direct">Direct</string>
+    <string name="detail_best_fit">Best fit</string>
+    <string name="transfer_send_step1_header">Step 1 - Start on the device you want to set up</string>
+    <string name="transfer_send_step1_explainer">Open Torve on your TV/phone &gt; Settings &gt; Receive credentials. It will show a QR code and a receiver code.</string>
+    <string name="transfer_send_step2_header">Step 2 - Choose what to send</string>
+    <string name="transfer_send_receiver_field_label">Receiver code from the other device</string>
+    <string name="transfer_send_receiver_field_placeholder">Scan the QR code or paste the receiver code shown on the other device</string>
+    <string name="transfer_send_receiver_empty_hint">No receiver code yet. Open Receive credentials on the device you are setting up.</string>
+    <string name="transfer_send_camera_denied">Camera is blocked. Type the receiver code instead.</string>
+    <string name="transfer_receive_explainer_tv">On your desktop or phone, open Send credentials and scan this code.</string>
+    <string name="transfer_receive_explainer_desktop">On the device that already has these set up, open Send credentials and scan this QR - or paste the receiver code below.</string>
+    <string name="transfer_receive_short_code_label">Receiver code</string>
+    <string name="transfer_qr_code_cd">Credential transfer QR code</string>
+    <string name="transfer_qr_unavailable">QR rendering unavailable.</string>
+    <string name="transfer_expires_in">Expires in %1$d:%2$02d</string>
+    <string name="transfer_auto_import_setting_up">Setting up auto-import…</string>
+    <string name="transfer_auto_import_setting_up_body">Asking the Torve backend to forward an encrypted bundle to this device.</string>
+    <string name="transfer_auto_import_on">Auto-import is on</string>
+    <string name="transfer_auto_import_on_body">When the sender posts the encrypted bundle, this device imports it automatically. Manual paste stays available below.</string>
+    <string name="transfer_auto_import_unavailable">Auto-import unavailable</string>
+    <string name="transfer_auto_import_unavailable_body">%1$s Use the paste field below.</string>
+    <string name="transfer_category_debrid">Debrid</string>
+    <string name="transfer_category_debrid_desc">Real-Debrid, AllDebrid, Premiumize, TorBox, and RD OAuth tokens.</string>
+    <string name="transfer_category_iptv">IPTV</string>
+    <string name="transfer_category_iptv_desc">Xtream and M3U playlists with their credentials.</string>
+    <string name="transfer_category_plex_jellyfin">Plex / Jellyfin</string>
+    <string name="transfer_category_plex_jellyfin_desc">Plex token and Jellyfin API key, plus their server URLs.</string>
+    <string name="transfer_category_trakt_simkl">Trakt / SIMKL</string>
+    <string name="transfer_category_trakt_simkl_desc">OAuth access, refresh, and client-secret tokens.</string>
+    <string name="transfer_category_ai_keys">AI and metadata keys</string>
+    <string name="transfer_category_ai_keys_desc">OpenAI, Claude, Gemini, Perplexity, DeepSeek, MDBList, and OMDB keys.</string>
+    <string name="transfer_category_panda">Panda / Usenet</string>
+    <string name="transfer_category_panda_desc">Panda token, NzbDAV credentials, and locally cached Panda provider keys.</string>
+    <string name="transfer_selected_categories">selected categories</string>
+    <string name="transfer_send_ready_body">Encrypted %1$d credential record(s) for: %2$s.</string>
+    <string name="transfer_send_ready_body_with_config">Encrypted %1$d credential record(s) + %2$d config record(s) for: %3$s.</string>
+    <string name="transfer_no_local_credentials_for">No local credentials found for: %1$s.</string>
+    <string name="transfer_sealed_code_ready">Sealed code ready</string>
+    <string name="transfer_companion_config_missing_title">Companion config missing</string>
+    <string name="transfer_companion_config_missing_body">Tokens for %1$s are included, but their server URL is not set on this device. The receiver will need to fill it in manually.</string>
+    <string name="transfer_clipboard_sealed_code">Torve sealed code</string>
+    <string name="transfer_clipboard_receive_code">Torve receive code</string>
+    <string name="transfer_relay_delivering_title">Delivering through relay…</string>
+    <string name="transfer_relay_delivering_body">Posting the encrypted bundle to the Torve backend so the receiver can pull it automatically.</string>
+    <string name="transfer_relay_delivered_title">Delivered to the receiver</string>
+    <string name="transfer_relay_delivered_body">The encrypted bundle is on the relay; the receiver will import on its next poll.</string>
+    <string name="transfer_relay_delivery_failed">Relay delivery failed</string>
+    <string name="transfer_manual_fallback_sealed_code">Manual fallback - sealed code</string>
+    <string name="transfer_copy_sealed_code">Copy sealed code</string>
+    <string name="transfer_copy_receiver_code">Copy receiver code</string>
+    <string name="transfer_hide_manual_paste">Hide manual paste</string>
+    <string name="transfer_advanced_paste_sealed_code">Advanced: paste sealed code manually</string>
+    <string name="transfer_sealed_code_from_sender">Sealed credential code from sender</string>
+    <string name="transfer_sealed_code_placeholder">{\"version\":1,...}</string>
+    <string name="transfer_importing">Importing…</string>
+    <string name="transfer_import_sealed_code">Import sealed code</string>
+    <string name="transfer_credentials_imported">Credentials imported</string>
+    <string name="transfer_receive_code_expired">Receive code expired</string>
+    <string name="transfer_receive_code_expired_body">Receive codes expire so a forgotten one cannot be used later. Generate a new code to keep transferring.</string>
+    <string name="transfer_generate_new_code">Generate new code</string>
+    <string name="transfer_invalid_sealed_code">Invalid sealed code</string>
+    <string name="transfer_could_not_apply_credentials">Could not apply credentials</string>
+    <string name="transfer_no_active_receive_session">No active receive session</string>
+    <string name="transfer_generate_receive_code_first">Generate a new receive code first.</string>
+    <string name="transfer_receive_session_unusable">Receive session is no longer usable</string>
+    <string name="transfer_generate_receive_code_try_again">Generate a new receive code and try again.</string>
+    <string name="transfer_sealed_code_expired">Sealed code expired</string>
+    <string name="transfer_could_not_decrypt_code">Could not decrypt code</string>
+    <string name="transfer_unsupported_transfer_version">Unsupported transfer version</string>
+    <string name="transfer_code_already_used">Code already used</string>
+    <string name="transfer_code_integrity_failed">Code failed integrity check</string>
+    <string name="transfer_malformed_sealed_code">Malformed sealed code</string>
+    <string name="transfer_ask_sender_fresh_code">Ask the sender to generate a fresh sealed code.</string>
+    <string name="transfer_code_not_for_session">This code was not sealed for this receive session, or it was changed.</string>
+    <string name="transfer_cannot_read_version">This app cannot read transfer version %1$d.</string>
+    <string name="transfer_nonce_already_consumed">This transfer nonce has already been consumed on this device.</string>
+    <string name="transfer_envelope_payload_mismatch">The envelope and payload expiry values do not match.</string>
+    <string name="transfer_imported_records">Imported %1$d credential record(s).</string>
+    <string name="transfer_imported_records_with_config">Imported %1$d credential record(s) + %2$d companion config record(s).</string>
+    <string name="transfer_no_known_keys">No known credential keys were found in the payload.</string>
+    <string name="transfer_rollback_succeeded">Rollback succeeded; existing credentials were restored.</string>
+    <string name="transfer_rollback_failed">Rollback failed; verify credentials manually.</string>
+    <string name="transfer_imported_with_setup">Credentials and setup details imported. Some providers may take a moment to reconnect.</string>
+    <string name="transfer_imported_credentials_only">Credentials imported. Some providers may take a moment to reconnect.</string>
+    <string name="transfer_refresh_all_after_import">Refresh all app data</string>
+    <string name="transfer_refresh_all_after_import_running">Refresh started</string>
+    <string name="transfer_skipped_unknown_keys">Skipped unknown keys: %1$s.</string>
+    <string name="transfer_skipped_config_keys">Skipped config keys not on the receiver allowlist: %1$s.</string>
+    <string name="transfer_import_missing_companion_config">Imported credentials but missing companion config for: %1$s. Fill in the matching server URL in Settings to finish setup.</string>
+</resources>
+

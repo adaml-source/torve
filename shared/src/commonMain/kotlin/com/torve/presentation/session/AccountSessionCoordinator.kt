@@ -34,8 +34,8 @@ import com.torve.presentation.settings.SettingsRefreshNotifier
 import com.torve.presentation.integrations.setTorBoxCredentialStorageMode
 import com.torve.presentation.integrations.syncTorBoxCredentialPair
 import com.torve.platform.torveVerboseLog
+import com.torve.util.ioDispatcher
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.withContext
@@ -123,6 +123,8 @@ data class RestoreProgress(
     val restoredPlaylists: Int = 0,
     val currentPlaylistName: String? = null,
     val errorCount: Int = 0,
+    /** Safe, user-facing reasons. Never place URLs, usernames, tokens, or passwords here. */
+    val issues: List<String> = emptyList(),
     val integrationsRestored: Int = 0,
     /** True while heavy import is running — UI should show blocking overlay. */
     val isImporting: Boolean = false,
@@ -159,7 +161,7 @@ class AccountSessionCoordinator(
 ) {
     // Use IO dispatcher for background restore — heavy network + disk work
     // must not compete with Compose rendering on the Default (CPU) pool.
-    private val backgroundScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val backgroundScope = CoroutineScope(SupervisorJob() + ioDispatcher)
     private var signInRestoreJob: Job? = null
 
     private val _state = MutableStateFlow(AccountSessionState())
@@ -231,7 +233,7 @@ class AccountSessionCoordinator(
             isImporting = true,
         )
 
-        return withContext(Dispatchers.IO) {
+        return withContext(ioDispatcher) {
             var errors = 0
             postTrustSignal(token, "credential_transfer")
 
@@ -341,7 +343,7 @@ class AccountSessionCoordinator(
             isImporting = true,
         )
         settingsRefreshNotifier.notifyRefresh(Clock.System.now().toEpochMilliseconds())
-        withContext(Dispatchers.IO) {
+        withContext(ioDispatcher) {
             try {
                 torveVerboseLog { "[SignOut] Local account cleanup started reason=$reason" }
                 integrationSecretStore.clearAllSecrets()
@@ -448,7 +450,7 @@ class AccountSessionCoordinator(
      *
      * Returns the typed [com.torve.data.account.PatchCredentialsOutcome]
      * so callers can branch on `RowMissing` (fall back to PUT) and
-     * `PremiumRequired` (surface upgrade UX) explicitly.
+     * `PremiumRequired` as historical compatibility only.
      */
     /**
      * Expose the user's currently-valid Torve JWT to other components
@@ -534,6 +536,33 @@ class AccountSessionCoordinator(
     fun dismissRestoreProgress() {
         _restoreProgress.value = RestoreProgress()
     }
+
+    /** Retry the account-owned restore without requiring another sign-out/sign-in cycle. */
+    fun retryAccountRestore() {
+        if (signInRestoreJob?.isActive == true) return
+        signInRestoreJob = backgroundScope.launch {
+            val token = authClient.getValidAccessToken()
+            if (token.isNullOrBlank()) {
+                _restoreProgress.value = RestoreProgress(
+                    phase = RestorePhase.COMPLETED_WITH_ERRORS,
+                    message = "Restore could not be retried",
+                    errorCount = 1,
+                    issues = listOf("Sign in again, then retry account restore."),
+                )
+                return@launch
+            }
+            backgroundRestore(token)
+        }
+    }
+
+    private fun recordRestoreIssue(message: String) {
+        _restoreProgress.update { current ->
+            current.copy(issues = (current.issues + message).distinct().take(8))
+        }
+    }
+
+    private fun restorePlaylistLabel(name: String): String =
+        name.trim().take(60).ifBlank { "Unnamed channel source" }
 
     // ── Bootstrap: fast critical path + deferred background restore ──
 
@@ -728,29 +757,49 @@ class AccountSessionCoordinator(
                 isImporting = true,
             )
             torveVerboseLog { "[Restore] Local data exists (${localPlaylists.size} playlists) — skipping heavy restore" }
-            val settingsResult = runCatching { accountSettingsRepository.syncAfterSignIn() }.getOrNull()
+            var errors = 0
+            val settingsResult = runCatching { accountSettingsRepository.syncAfterSignIn() }.getOrElse {
+                errors++
+                recordRestoreIssue("Account settings could not be synced.")
+                null
+            }
             val restoredIntegrations = runCatching {
                 restoreIntegrations(token, forceCredentials = true)
-            }.getOrDefault(0)
+            }.getOrElse {
+                errors++
+                recordRestoreIssue("Provider credentials could not be restored.")
+                0
+            }
             val traktSynced = runCatching {
                 syncTraktFromAccountIfConnected()
             }.getOrElse {
+                errors++
+                recordRestoreIssue("Trakt data could not be synced.")
                 torveVerboseLog { "[TraktSync] Sign-in restore FAILED: ${DiagnosticsRedactor.redact(it.message)}" }
                 false
             }
             val playlistSync = runCatching {
                 syncPlaylistsFromAccount(token)
             }.getOrElse {
+                errors++
+                recordRestoreIssue("Channel sources could not be downloaded from your account.")
                 torveVerboseLog { "[PlaylistSync] Sign-in restore FAILED: ${DiagnosticsRedactor.redact(it.message)}" }
                 PlaylistSyncResult()
             }
+            errors += playlistSync.failed
             if (settingsResult?.appliedChanges == true || restoredIntegrations > 0 || traktSynced || playlistSync.hasChanges) {
                 settingsRefreshNotifier.notifyRefresh(Clock.System.now().toEpochMilliseconds())
             }
             _restoreProgress.value = RestoreProgress(
-                phase = RestorePhase.COMPLETED,
-                message = "Account sync complete",
+                phase = if (errors > 0) RestorePhase.COMPLETED_WITH_ERRORS else RestorePhase.COMPLETED,
+                message = if (errors > 0) {
+                    "Account sync completed with $errors issue${if (errors == 1) "" else "s"}"
+                } else {
+                    "Account sync complete"
+                },
                 integrationsRestored = restoredIntegrations,
+                errorCount = errors,
+                issues = _restoreProgress.value.issues,
                 isImporting = false,
             )
             return
@@ -772,6 +821,7 @@ class AccountSessionCoordinator(
             torveVerboseLog { "[Restore] Account settings synced" }
         }.onFailure { e ->
             errors++
+            recordRestoreIssue("Account settings could not be synced.")
             torveVerboseLog { "[Restore] Account settings FAILED: ${e.message}" }
         }
 
@@ -781,11 +831,13 @@ class AccountSessionCoordinator(
             restoreIntegrations(token, forceCredentials = true)
         }.getOrElse {
             errors++
+            recordRestoreIssue("Provider credentials could not be restored.")
             torveVerboseLog { "[Restore] Integrations restore FAILED: ${it.message}" }
             0
         }
         runCatching { syncTraktFromAccountIfConnected() }.onFailure {
             errors++
+            recordRestoreIssue("Trakt data could not be synced.")
             torveVerboseLog { "[Restore] Trakt sync FAILED: ${it.message}" }
         }
         settingsRefreshNotifier.notifyRefresh(Clock.System.now().toEpochMilliseconds())
@@ -796,6 +848,7 @@ class AccountSessionCoordinator(
             restorePlaylists(token)
         }.getOrElse {
             errors++
+            recordRestoreIssue("Channel sources could not be downloaded from your account.")
             torveVerboseLog { "[Restore] Playlist restore FAILED: ${DiagnosticsRedactor.redact(it.message)}" }
             0 to 0
         }
@@ -818,6 +871,7 @@ class AccountSessionCoordinator(
             totalPlaylists = playlistsRestored + playlistsFailed,
             restoredPlaylists = playlistsRestored,
             errorCount = errors,
+            issues = _restoreProgress.value.issues,
             isImporting = false,
         )
         torveVerboseLog { "[Restore] Completed in ${elapsed}s: $integrationsRestored integrations, $playlistsRestored playlists, $errors errors" }
@@ -1066,11 +1120,17 @@ class AccountSessionCoordinator(
                     val server = remote.server?.trim().orEmpty()
                     if (server.isBlank()) {
                         failed++
+                        recordRestoreIssue(
+                            "${restorePlaylistLabel(remote.name)} is missing its server address. Re-save it on the original device, then retry.",
+                        )
                         torveVerboseLog { "[PlaylistRestore]   FAILED: missing Xtream server" }
                         continue
                     }
                     if (password.isBlank()) {
                         failed++
+                        recordRestoreIssue(
+                            "${restorePlaylistLabel(remote.name)} credentials could not be restored. Re-save that channel source on the original device, then retry.",
+                        )
                         torveVerboseLog { "[PlaylistRestore]   FAILED: missing Xtream credentials" }
                         continue
                     }
@@ -1094,9 +1154,19 @@ class AccountSessionCoordinator(
                 } else {
                     torveVerboseLog { "[PlaylistRestore]   Skipped — no url or server" }
                 }
+                if (!xtreamPlaylist && remote.url.isNullOrBlank()) {
+                    failed++
+                    recordRestoreIssue(
+                        "${restorePlaylistLabel(remote.name)} is missing its playlist URL. Re-save it on the original device, then retry.",
+                    )
+                    continue
+                }
                 restored++
             } catch (e: Exception) {
                 failed++
+                recordRestoreIssue(
+                    "${restorePlaylistLabel(remote.name)} could not be restored. Check the source and retry.",
+                )
                 torveVerboseLog { "[PlaylistRestore]   FAILED: ${DiagnosticsRedactor.redact(e.message)}" }
             }
         }
@@ -1129,6 +1199,16 @@ class AccountSessionCoordinator(
                 }
             } catch (e: Exception) {
                 failed++
+                val reason = when (e.message) {
+                    "missing server" -> "is missing its server address"
+                    "missing username" -> "is missing its username"
+                    "missing credentials" -> "credentials could not be restored"
+                    "missing playlist URL" -> "is missing its playlist URL"
+                    else -> "could not be restored"
+                }
+                recordRestoreIssue(
+                    "${restorePlaylistLabel(remote.name)} $reason. Re-save it on the original device, then retry.",
+                )
                 torveVerboseLog {
                     "[PlaylistSync] FAILED for '$playlistId' (${remote.name}): ${e.message}"
                 }
@@ -1159,7 +1239,8 @@ class AccountSessionCoordinator(
         local: ChannelPlaylist?,
         playlistId: String,
     ): Boolean {
-        val remoteUrl = remote.url?.trim()?.takeIf { it.isNotEmpty() } ?: return false
+        val remoteUrl = remote.url?.trim()?.takeIf { it.isNotEmpty() }
+            ?: throw IllegalStateException("missing playlist URL")
         val remoteEpgUrl = remote.epgUrl.normalizedRemoteValue()
         if (local == null) {
             channelRepo.saveM3uPlaylistConfig(
@@ -1204,11 +1285,13 @@ class AccountSessionCoordinator(
         playlistId: String,
     ): Boolean {
         val creds = accountSettingsApi.getPlaylistCredentials(token, playlistId)
-        val server = remote.server.normalizedServerValue() ?: return false
+        val server = remote.server.normalizedServerValue()
+            ?: throw IllegalStateException("missing server")
         val username = creds?.username.normalizedRemoteValue()
             ?: remote.username.normalizedRemoteValue()
-            ?: return false
-        val password = creds?.password.normalizedRemoteValue() ?: return false
+            ?: throw IllegalStateException("missing username")
+        val password = creds?.password.normalizedRemoteValue()
+            ?: throw IllegalStateException("missing credentials")
 
         if (local != null) {
             val sameType = local.type == PlaylistType.XTREAM

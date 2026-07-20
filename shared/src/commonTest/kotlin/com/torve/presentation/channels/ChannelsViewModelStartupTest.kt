@@ -14,6 +14,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.advanceUntilIdle
+import kotlinx.coroutines.test.advanceTimeBy
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
@@ -40,7 +42,7 @@ class ChannelsViewModelStartupTest {
     }
 
     @Test
-    fun startup_with_persisted_catalog_restores_local_channels_without_startup_refresh() = runTest(dispatcher) {
+    fun startup_with_stale_persisted_catalog_refreshes_in_background() = runTest(dispatcher) {
         val channel = sampleChannel("playlist-1", "News One", tvgId = "news.one")
         val repo = FakeChannelRepository(
             playlists = listOf(samplePlaylist("playlist-1")),
@@ -60,15 +62,15 @@ class ChannelsViewModelStartupTest {
 
         assertEquals("playlist-1", viewModel.state.value.selectedPlaylistId)
         assertEquals(1, viewModel.state.value.categoryChannels.size)
-        assertEquals("News One", viewModel.state.value.categoryChannels.first().channel.name)
+        assertEquals("News One HD", viewModel.state.value.categoryChannels.first().channel.name)
         assertEquals("News", viewModel.state.value.selectedGroup)
         assertEquals(stableChannelId(channel), stableChannelId(viewModel.state.value.selectedChannel!!))
         assertEquals(0, repo.refreshCalls)
-        assertEquals(0, repo.catalogRefreshCalls)
+        assertEquals(1, repo.catalogRefreshCalls)
     }
 
     @Test
-    fun startup_with_persisted_catalog_keeps_last_known_good_catalog_without_startup_refresh() = runTest(dispatcher) {
+    fun failed_background_refresh_keeps_last_known_good_catalog() = runTest(dispatcher) {
         val localChannel = sampleChannel("playlist-1", "Sports One", tvgId = "sports.one")
         val repo = FakeChannelRepository(
             playlists = listOf(samplePlaylist("playlist-1")),
@@ -87,7 +89,7 @@ class ChannelsViewModelStartupTest {
         assertEquals("Sports One", viewModel.state.value.categoryChannels.first().channel.name)
         assertFalse(viewModel.state.value.isLoadingChannels)
         assertEquals(0, repo.refreshCalls)
-        assertEquals(0, repo.catalogRefreshCalls)
+        assertEquals(1, repo.catalogRefreshCalls)
     }
 
     @Test
@@ -183,6 +185,27 @@ class ChannelsViewModelStartupTest {
         advanceUntilIdle()
 
         assertEquals(stableChannelId(channel), stableChannelId(secondViewModel.state.value.selectedChannel!!))
+    }
+
+    @Test
+    fun changing_search_query_clears_results_until_new_debounced_results_arrive() = runTest(dispatcher) {
+        val channel = sampleChannel("playlist-1", "News One", tvgId = "news.one")
+        val repo = FakeChannelRepository(
+            playlists = listOf(samplePlaylist("playlist-1")),
+            persistedChannels = mutableMapOf("playlist-1" to listOf(channel)),
+            remoteChannels = mutableMapOf("playlist-1" to listOf(channel)),
+        )
+        val viewModel = ChannelsViewModel(repo, FakePreferencesRepository(), backgroundDispatcher = dispatcher)
+        advanceUntilIdle()
+
+        viewModel.updateSearchQuery("News")
+        advanceTimeBy(301)
+        runCurrent()
+        assertEquals(listOf("News One"), viewModel.state.value.searchResults.map { it.name })
+
+        viewModel.updateSearchQuery("Sports")
+
+        assertTrue(viewModel.state.value.searchResults.isEmpty())
     }
 
     private fun samplePlaylist(id: String) = ChannelPlaylist(

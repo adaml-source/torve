@@ -22,8 +22,6 @@ import com.torve.data.addon.SubtitleAggregator
 import com.torve.data.addon.StreamRepositoryImpl
 import com.torve.data.auth.AuthClient
 import com.torve.data.auth.UserIdProvider
-import com.torve.data.beta.BetaProgramApi
-import com.torve.data.beta.BetaProgramRepositoryImpl
 import com.torve.data.ai.AiSuggestClient
 import com.torve.data.ai.KeywordSearchService
 import com.torve.data.billing.BillingApi
@@ -86,7 +84,6 @@ import com.torve.presentation.player.TraktScrobbler
 import com.torve.db.TorveDatabase
 import com.torve.domain.repository.AddonRepository
 import com.torve.domain.repository.AvailabilityRepository
-import com.torve.domain.repository.BetaProgramRepository
 import com.torve.domain.repository.DownloadRepository
 import com.torve.domain.repository.ChannelRepository
 import com.torve.domain.repository.DeviceLocalSettingsRepository
@@ -106,7 +103,6 @@ import com.torve.domain.sync.SyncRepository
 import com.torve.platform.DatabaseDriverFactory
 import com.torve.presentation.addon.AddonViewModel
 import com.torve.presentation.calendar.CalendarViewModel
-import com.torve.presentation.beta.BetaProgramViewModel
 import com.torve.presentation.detail.DetailViewModel
 import com.torve.presentation.detail.PersonViewModel
 import com.torve.presentation.download.DownloadCatalogueViewModel
@@ -282,14 +278,6 @@ val sharedModule = module {
         )
     }
     single {
-        BetaProgramApi(
-            httpClient = get(),
-            authClient = get(),
-            baseUrlProvider = { com.torve.data.auth.AuthClient.DEFAULT_BASE_URL },
-            installationIdProvider = { get<com.torve.domain.device.DeviceIdProvider>().getDeviceId() },
-        )
-    }
-    single {
         com.torve.data.security.TrustSignalsApi(
             httpClient = get(),
             baseUrlProvider = { com.torve.data.auth.AuthClient.DEFAULT_BASE_URL },
@@ -436,7 +424,6 @@ val sharedModule = module {
     // Subscription
     single { RebateCodeApi(get()) }
     single<SubscriptionRepository> { SubscriptionRepositoryImpl(get(), get(), get(), get(), get()) }
-    single<BetaProgramRepository> { BetaProgramRepositoryImpl(get(), get(), get()) }
 
     // Watchlist Repository
     single<WatchlistRepository> { WatchlistRepositoryImpl(get(), get(), get(), get(), get(), get(), get(), get()) }
@@ -728,9 +715,12 @@ val sharedModule = module {
             tmdbToImdbResolver = get(qualifier = named("availability.tmdb_to_imdb")),
         )
     }
+    single { com.torve.presentation.channels.ChannelsStateRelay() }
     single {
         com.torve.data.sourceavailability.IptvLiveSourceAvailabilityProvider(
-            channelsStateSource = { get<ChannelsViewModel>().state.value },
+            channelsStateSource = {
+                get<com.torve.presentation.channels.ChannelsStateRelay>().snapshot()
+            },
             titleSource = get(qualifier = named("availability.tmdb_to_title")),
         )
     }
@@ -815,7 +805,6 @@ val sharedModule = module {
             availabilityAggregator = get(),
             lanLibraryConsumer = get(),
             providerHealthCoordinator = get(),
-            channelsViewModel = get(),
         )
     }
     single {
@@ -945,13 +934,14 @@ val sharedModule = module {
             prefsRepo = get(),
             localSettingsRepo = get(),
             catchupResolver = get(),
-            backgroundDispatcher = kotlinx.coroutines.Dispatchers.IO,
+            backgroundDispatcher = com.torve.util.ioDispatcher,
             playlistBackup = get(),
             settingsRefreshNotifier = get(),
             // Prompt 10C: apply persisted EPG corrections at guide
             // build time + emit health to drive the stale banner.
             epgCorrectionRepository = get(),
             epgCorrectionViewModel = get(),
+            stateRelay = get(),
         )
     }
     factory {
@@ -1002,7 +992,6 @@ val sharedModule = module {
             traktApi = getOrNull(),
         )
     }
-    single { BetaProgramViewModel(get(), get()) }
     factory { SensitiveMaterialSettingsViewModel(get()) }
     factory { com.torve.presentation.jellyfin.JellyfinBrowserViewModel(get()) }
 }

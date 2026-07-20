@@ -35,7 +35,7 @@ import com.torve.presentation.channels.ChannelsSubTab
 private val tabs = listOf(
     ChannelsSubTab.LIVE to "LIVE",
     ChannelsSubTab.MOVIES to "VOD",
-    ChannelsSubTab.FAVOURITES to "FAVOURITES",
+    ChannelsSubTab.FAVOURITES to "SAVED",
     ChannelsSubTab.GUIDE to "GUIDE",
 )
 
@@ -49,7 +49,7 @@ fun ChannelsSubTabBar(
         modifier = modifier
             .fillMaxWidth()
             .background(MaterialTheme.colorScheme.background)
-            .padding(horizontal = 16.dp, vertical = 8.dp),
+            .padding(horizontal = 16.dp, vertical = 4.dp),
         horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         tabs.forEach { (tab, label) ->
@@ -78,7 +78,7 @@ fun ChannelsSubTabBar(
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(36.dp)
+                        .height(34.dp)
                         .clip(RoundedCornerShape(10.dp))
                         .background(bgColor),
                     contentAlignment = Alignment.Center,
@@ -92,16 +92,16 @@ fun ChannelsSubTabBar(
                 }
 
                 // Active indicator dot
-                Spacer(Modifier.height(4.dp))
+                Spacer(Modifier.height(2.dp))
                 if (selected) {
                     Box(
                         modifier = Modifier
-                            .size(4.dp)
+                            .size(3.dp)
                             .clip(CircleShape)
                             .background(Amber),
                     )
                 } else {
-                    Spacer(Modifier.height(4.dp))
+                    Spacer(Modifier.height(3.dp))
                 }
             }
         }

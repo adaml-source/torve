@@ -77,12 +77,12 @@ fun PandaReviewStep(
         ) {
             ReviewRow(
                 label = stringResource(R.string.panda_setup_review_provider),
-                value = state.selectedProvider?.name ?: "â€”",
+                value = state.selectedProvider?.name ?: "—",
             )
             HorizontalDivider(color = Steel.copy(alpha = 0.15f), modifier = Modifier.padding(vertical = 10.dp))
             ReviewRow(
                 label = stringResource(R.string.panda_setup_review_auth),
-                value = if (state.authConnected) stringResource(R.string.panda_setup_auth_connected) else "â€”",
+                value = if (state.authConnected) stringResource(R.string.panda_setup_auth_connected) else "—",
             )
             HorizontalDivider(color = Steel.copy(alpha = 0.15f), modifier = Modifier.padding(vertical = 10.dp))
             ReviewRow(
@@ -115,7 +115,7 @@ fun PandaReviewStep(
                         label = stringResource(R.string.panda_setup_review_indexer),
                         value = when (state.nzbIndexer) {
                             "nzbgeek" -> "NZBgeek"
-                            "scenenzbs" -> "SceneNZBs"
+                            "scenenzbs" -> "Treasure Maps"
                             "dognzb" -> "DogNZB"
                             "nzbplanet" -> "NZBPlanet"
                             "custom" -> "Custom"

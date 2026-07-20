@@ -1,6 +1,7 @@
 package com.torve.data.scoping
 
 import app.cash.sqldelight.driver.jdbc.sqlite.JdbcSqliteDriver
+import com.torve.data.auth.UserIdProvider
 import com.torve.db.TorveDatabase
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -113,21 +114,26 @@ class UserScopingIsolationTest {
 
     /**
      * Test 3 (sign-out behaviour): when no user is signed in we treat
-     * userId as the empty string. Empty-string queries must not see
-     * any of user A's rows. Exercises the same defence the
-     * repositories now apply via `if (!isSignedIn()) return ...`.
+     * userId as the signed-out sentinel. Sentinel queries must not see
+     * any of user A's rows, but local rows written under the sentinel
+     * must remain readable so signed-out addon installs work.
      */
     @Test
-    fun signedOutQueriesReturnEmpty() {
+    fun signedOutQueriesUseIsolatedLocalSentinel() {
         val db = freshDb()
         val userA = "user-a"
-        val signedOut = ""
+        val signedOut = UserIdProvider.SIGNED_OUT_USER_ID
 
         db.insertAddonRow(userA, "https://example.com/x/manifest.json")
         db.insertSubscriptionRow(userA, "LIFETIME")
 
         assertEquals(0, db.torveQueries.getAllAddons(userId = signedOut).executeAsList().size)
         assertNull(db.torveQueries.getActiveSubscription(userId = signedOut).executeAsOneOrNull())
+
+        db.insertAddonRow(signedOut, "https://example.com/local/manifest.json")
+
+        assertEquals(1, db.torveQueries.getAllAddons(userId = signedOut).executeAsList().size)
+        assertEquals(1, db.torveQueries.getAllAddons(userId = userA).executeAsList().size)
     }
 
     /**

@@ -49,13 +49,33 @@ class TraktClient(
     var clientSecret: String = DEFAULT_PUBLIC_CLIENT_SECRET
         private set
 
+    private var packagedClientId: String = DEFAULT_PUBLIC_CLIENT_ID
+    private var packagedClientSecret: String = DEFAULT_PUBLIC_CLIENT_SECRET
+
+    val usesCustomCredentials: Boolean
+        get() = clientId != DEFAULT_PUBLIC_CLIENT_ID
+
+    fun setPackagedCredentials(clientId: String, clientSecret: String) {
+        val normalizedClientId = clientId.trim()
+        val normalizedClientSecret = clientSecret.trim()
+        if (normalizedClientId.isBlank() || normalizedClientSecret.isBlank()) return
+        packagedClientId = normalizedClientId
+        packagedClientSecret = normalizedClientSecret
+        this.clientId = normalizedClientId
+        this.clientSecret = normalizedClientSecret
+    }
+
     private val requestScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val inFlightGetMutex = Mutex()
     private val inFlightGets = mutableMapOf<String, Deferred<TraktRawResponse>>()
 
     fun setCredentials(clientId: String, clientSecret: String) {
-        this.clientId = clientId.ifBlank { DEFAULT_PUBLIC_CLIENT_ID }
-        this.clientSecret = clientSecret.ifBlank { DEFAULT_PUBLIC_CLIENT_SECRET }
+        val normalizedClientId = clientId.trim()
+        val normalizedClientSecret = clientSecret.trim()
+        val hasCompleteCustomCredentials = normalizedClientId.isNotBlank() &&
+            normalizedClientSecret.isNotBlank()
+        this.clientId = if (hasCompleteCustomCredentials) normalizedClientId else packagedClientId
+        this.clientSecret = if (hasCompleteCustomCredentials) normalizedClientSecret else packagedClientSecret
     }
 
     suspend fun resetRequestControlForAccountChange() {
@@ -134,6 +154,10 @@ class TraktClient(
             ),
             bucket = TraktRequestBucket.OAUTH_REFRESH,
         )
+        println(
+            "[TraktAuth] Device code response status=${response.status} " +
+                "credentialSource=${if (usesCustomCredentials) "configured" else "bundled"}",
+        )
         val resp: TraktDeviceCodeResponse = decodeTraktBody(response, TraktRequestBucket.OAUTH_REFRESH)
         if (resp.userCode.isBlank() || resp.verificationUrl.isBlank()) {
             throw Exception("Trakt returned empty device code fields.")
@@ -187,10 +211,21 @@ class TraktClient(
                     }
                 }
                 400 -> TraktPollResult.Pending
-                403 -> TraktPollResult.SlowDown
-                404, 410 -> TraktPollResult.Expired
-                409 -> TraktPollResult.AlreadyUsed
-                418 -> TraktPollResult.Denied
+                403 -> TraktPollResult.Error(
+                    "Trakt rejected Torve's OAuth application (HTTP 403).",
+                )
+                404, 410 -> {
+                    println("[TraktAuth] Device authorization ended status=${response.status}")
+                    TraktPollResult.Expired
+                }
+                409 -> {
+                    println("[TraktAuth] Device authorization ended status=409")
+                    TraktPollResult.AlreadyUsed
+                }
+                418 -> {
+                    println("[TraktAuth] Device authorization ended status=418")
+                    TraktPollResult.Denied
+                }
                 429 -> {
                     rateLimiter.markRateLimited(
                         TraktRequestBucket.OAUTH_REFRESH,

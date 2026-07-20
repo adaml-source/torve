@@ -1,0 +1,40 @@
+Torve — Android Release Signing Setup
+======================================
+
+1. GENERATE A KEYSTORE (once, keep it safe forever):
+
+   keytool -genkeypair \
+     -alias torve-release \
+     -keyalg RSA -keysize 2048 \
+     -validity 10000 \
+     -keystore torve-release.keystore \
+     -storepass YOUR_STORE_PASSWORD \
+     -keypass YOUR_KEY_PASSWORD \
+     -dname "CN=Torve, OU=Mobile, O=Torve, L=City, ST=State, C=US"
+
+2. CREATE keystore.properties in the project root:
+
+   storeFile=torve-release.keystore
+   storePassword=YOUR_STORE_PASSWORD
+   keyAlias=torve-release
+   keyPassword=YOUR_KEY_PASSWORD
+
+3. NEVER commit the .keystore file or keystore.properties.
+   Both are already in .gitignore.
+
+4. BUILD signed release:
+
+   Google Play (AAB):
+   ./gradlew :androidApp:bundleGoogleMobileRelease
+   ./gradlew :androidApp:bundleGoogleTvRelease
+
+   Amazon (APK):
+   ./gradlew :androidApp:assembleAmazonTvRelease
+
+5. CI / ENV VARS alternative (no keystore.properties file):
+
+   Export these environment variables:
+   - TORVE_KEYSTORE_PATH=/path/to/torve-release.keystore
+   - TORVE_KEYSTORE_PASSWORD=...
+   - TORVE_KEY_ALIAS=torve-release
+   - TORVE_KEY_PASSWORD=...

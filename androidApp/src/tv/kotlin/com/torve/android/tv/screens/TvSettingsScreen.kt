@@ -100,15 +100,14 @@ import com.torve.android.tv.premium.TvPremiumAccess
 import com.torve.android.ui.settings.POPULAR_ADDONS
 import com.torve.data.ai.AiProvider
 import com.torve.domain.model.StreamQuality
+import com.torve.domain.model.NextEpisodeMode
+import com.torve.domain.model.NextEpisodePreparationMode
 import com.torve.domain.player.LiveAudioOutputMode
 import com.torve.presentation.channels.EpgState
 import com.torve.presentation.addon.AddonViewModel
 import com.torve.presentation.channels.ChannelsViewModel
 import com.torve.presentation.mdblist.MdbListTab
 import com.torve.presentation.mdblist.MdbListViewModel
-import com.torve.presentation.beta.BetaProgramCopy
-import com.torve.presentation.beta.BetaProgramViewModel
-import com.torve.presentation.beta.shouldShowBetaProgramSettingsEntry
 import com.torve.presentation.settings.AppLanguage
 import com.torve.presentation.settings.SettingsViewModel
 import com.torve.presentation.stats.WatchStatsUiText
@@ -260,7 +259,6 @@ internal fun TvSettingsScreen(
     onNavigateToTransferDiagnostics: () -> Unit = {},
     onNavigateToReportIssue: () -> Unit = {},
     onNavigateToWatchStats: () -> Unit = {},
-    onNavigateToBetaProgram: () -> Unit = {},
     onNavigateToPairingSignIn: () -> Unit = {},
     onAuthSuccess: () -> Unit = {},
     pairedDevicesFocusRequester: FocusRequester? = null,
@@ -282,14 +280,12 @@ internal fun TvSettingsScreen(
     mdbListViewModel: MdbListViewModel = koinInject(),
     subscriptionViewModel: SubscriptionViewModel = koinInject(),
     watchStatsViewModel: WatchStatsViewModel = koinInject(),
-    betaProgramViewModel: BetaProgramViewModel = koinInject(),
     deviceGovernanceViewModel: DeviceGovernanceViewModel = koinInject(),
 ) {
     val syncState by syncCoordinator.state.collectAsState()
     val accountSettingsState by accountSettingsRepository.state.collectAsState()
     val settingsState by settingsViewModel.state.collectAsState()
     val subscriptionState by subscriptionViewModel.state.collectAsState()
-    val betaProgramState by betaProgramViewModel.state.collectAsState()
     val deviceGovernanceState by deviceGovernanceViewModel.state.collectAsState()
     val pandaSetupViewModel: PandaSetupViewModel = koinInject()
     val pandaSetupState by pandaSetupViewModel.state.collectAsState()
@@ -384,7 +380,6 @@ internal fun TvSettingsScreen(
     LaunchedEffect(Unit) {
         authUser = authClient.getAuthenticatedUser()
         subscriptionViewModel.refreshAccess()
-        betaProgramViewModel.onOpenBetaProgram()
         if (authUser != null) {
             // Always force-fetch account settings on TV settings entry
             // so changes made on mobile are picked up immediately.
@@ -508,15 +503,9 @@ internal fun TvSettingsScreen(
     val pendingSettingsOrigin = settingsFocusController.pendingRestore
     val hasPendingExactSettingsRestore = pendingSettingsOrigin != null
     val allowPendingRestoreFromRail = pendingSettingsOrigin?.reason == "app_link"
-    val hasExistingPremiumAccess = subscriptionState.hasEntitlement || subscriptionState.isPro
-    val showBetaProgramSettingsEntry = shouldShowBetaProgramSettingsEntry(
-        state = betaProgramState,
-        hasPremiumAccess = hasExistingPremiumAccess,
-    )
-    val subscriptionSectionHeaderScrollIndex = remember(authUser, authShowRegister, authError, showBetaProgramSettingsEntry) {
+    val subscriptionSectionHeaderScrollIndex = remember(authUser, authShowRegister, authError) {
         var index = 0
         index += 1 // section_account
-        if (showBetaProgramSettingsEntry) index += 1 // beta_program
         if (authUser == null) {
             index += 1 // auth_info_banner
             index += 2 // auth_email + auth_password
@@ -532,7 +521,7 @@ internal fun TvSettingsScreen(
             index += 1 // auth_logout
             index += 1 // auth_delete_account
         }
-        index += 1 // section_account_subscription
+        if (com.torve.android.BuildConfig.HAS_BILLING) index += 1 // section_account_subscription
         index
     }
     val subscriptionEntryScrollIndex = remember(subscriptionSectionHeaderScrollIndex) {
@@ -548,15 +537,19 @@ internal fun TvSettingsScreen(
     }
     LaunchedEffect(openToSubscriptionSection) {
         if (openToSubscriptionSection) {
-            settingsFocusController.selectedCategory = TvSettingsCategory.ACCOUNT
-            settingsFocusController.requestRestore(
-                itemId = TvSettingsItemIds.ACCOUNT_SUBSCRIPTION_MONTHLY,
-                reason = "open_subscription_section",
-                outerListState = settingsListState,
-            )
-            settingsListState.scrollToItem(subscriptionEntryScrollIndex)
-            kotlinx.coroutines.delay(120)
-            runCatching { subscriptionCardRequester.requestFocus() }
+            if (com.torve.android.BuildConfig.HAS_BILLING) {
+                settingsFocusController.selectedCategory = TvSettingsCategory.ACCOUNT
+                settingsFocusController.requestRestore(
+                    itemId = TvSettingsItemIds.ACCOUNT_SUBSCRIPTION_MONTHLY,
+                    reason = "open_subscription_section",
+                    outerListState = settingsListState,
+                )
+                settingsListState.scrollToItem(subscriptionEntryScrollIndex)
+                kotlinx.coroutines.delay(120)
+                runCatching { subscriptionCardRequester.requestFocus() }
+            } else {
+                settingsFocusController.selectedCategory = TvSettingsCategory.ACCOUNT
+            }
             onSubscriptionSectionConsumed()
         }
     }
@@ -754,7 +747,6 @@ internal fun TvSettingsScreen(
     // Registered with the focus state machine so it participates in fallback resolution.
     // addAddonTarget category is set dynamically below where selectedCategory is available
     val addAddonCardRequester = remember { FocusRequester() }
-    val accountBetaProgramRequester = remember { FocusRequester() }
     val authAccountRequester = remember { FocusRequester() }
     val authPrimaryActionRequester = remember { FocusRequester() }
     val authEmailRequester = remember { FocusRequester() }
@@ -1049,14 +1041,6 @@ internal fun TvSettingsScreen(
             category = TvSettingsCategory.ACCOUNT,
             listIndex = 10,
             focusTargetType = "card",
-        )
-    }
-    val accountBetaProgramTarget = remember {
-        TvSettingsFocusTarget(
-            itemId = TvSettingsItemIds.ACCOUNT_BETA_PROGRAM,
-            category = TvSettingsCategory.ACCOUNT,
-            listIndex = 9,
-            focusTargetType = "navigation",
         )
     }
     val authVerifyTarget = remember {
@@ -1788,6 +1772,26 @@ internal fun TvSettingsScreen(
         }
         else -> notConnectedLabel
     }
+    val nextEpisodePreparationTarget = remember {
+        TvSettingsFocusTarget(
+            itemId = "playback_next_episode_preparation",
+            category = TvSettingsCategory.PLAYBACK,
+            listIndex = 12,
+            focusTargetType = "selector",
+        )
+    }
+    val minimumSourceSizeTarget = remember {
+        TvSettingsFocusTarget(
+            itemId = "playback_minimum_source_size",
+            category = TvSettingsCategory.PLAYBACK,
+            listIndex = 13,
+            focusTargetType = "selector",
+        )
+    }
+    val traktNeedsReauthorization = settingsState.traktConnected &&
+        settingsState.traktUser == null &&
+        !settingsState.traktApiStatus.equals("Online", ignoreCase = true) &&
+        settingsState.traktApiStatus?.contains("rate", ignoreCase = true) != true
 
     // SIMKL subtitle
     val simklSubtitle = when {
@@ -1845,11 +1849,7 @@ internal fun TvSettingsScreen(
 
     val detailRequesterForCategory: (TvSettingsCategory) -> FocusRequester = {
         when (it) {
-            TvSettingsCategory.ACCOUNT -> when {
-                showBetaProgramSettingsEntry -> accountBetaProgramRequester
-                authUser != null -> authAccountRequester
-                else -> authEmailRequester
-            }
+            TvSettingsCategory.ACCOUNT -> if (authUser != null) authAccountRequester else authEmailRequester
             TvSettingsCategory.PLAYBACK -> maxQualityCardRequester
             TvSettingsCategory.APPEARANCE -> reduceMotionCardRequester
             TvSettingsCategory.LIBRARY -> channelsTopRequester
@@ -2560,57 +2560,6 @@ internal fun TvSettingsScreen(
             )
         }
 
-        if (showBetaProgramSettingsEntry) {
-        item(key = "account_beta_program") {
-            val requester = rememberRegisteredTvSettingsFocusRequester(
-                controller = settingsFocusController,
-                target = accountBetaProgramTarget,
-                externalRequester = accountBetaProgramRequester,
-                isDefaultEntry = true,
-            )
-            val betaSubtitle = when {
-                !betaProgramState.isSignedIn -> "Sign in to apply for the Torve Beta Program."
-                betaProgramState.isEmailVerificationRequired -> "Verify your email to apply."
-                hasExistingPremiumAccess &&
-                    !betaProgramState.betaAccessActive &&
-                    betaProgramState.blockedReason != com.torve.domain.beta.BetaBlockedReason.BETA_SIGNUP_CLOSED &&
-                    betaProgramState.blockedReason != com.torve.domain.beta.BetaBlockedReason.BETA_ACCESS_ENDED ->
-                    BetaProgramCopy.PREMIUM_TESTER_APPLICATION
-                betaProgramState.betaAccessActive -> betaProgramState.betaAccessExpiresAt
-                    ?.let { "Free beta premium active until ${it.take(10)}." }
-                    ?: "Beta tester access is active."
-                betaProgramState.applicationStatus == com.torve.domain.beta.BetaApplicationStatus.SUBMITTED ->
-                    "Your application is waiting for review."
-                betaProgramState.blockedReason == com.torve.domain.beta.BetaBlockedReason.BETA_SIGNUP_CLOSED ->
-                    "Beta applications are currently closed."
-                betaProgramState.blockedReason == com.torve.domain.beta.BetaBlockedReason.BETA_ACCESS_ENDED ->
-                    "Free beta premium ended. Tester access may still be available."
-                else -> BetaProgramCopy.SETTINGS_DEFAULT_SUBTITLE
-            }
-            TvSettingCard(
-                title = "Torve Beta Program",
-                subtitle = betaSubtitle,
-                modifier = Modifier.fillMaxWidth().focusProperties {
-                    left = railFocusRequester
-                    up = categoryRequesters.getValue(TvSettingsCategory.ACCOUNT)
-                    down = if (authUser != null) authAccountRequester else authEmailRequester
-                },
-                focusRequester = requester,
-                onFocused = { onSettingsRowFocused(accountBetaProgramTarget, requester) },
-                onClick = {
-                    logSettingsFocus("launch_subpage category=ACCOUNT row=ACCOUNT item=beta_program reason=route_open")
-                    settingsFocusController.captureOrigin(
-                        itemId = accountBetaProgramTarget.itemId,
-                        outerListState = settingsListState,
-                        reason = "route_open",
-                    )
-                    onNavigateToBetaProgram()
-                },
-                rowType = TvSettingRowType.NAVIGATION,
-            )
-        }
-        }
-
         // Account benefit notice
         if (authUser == null) {
             item(key = "auth_info_banner") {
@@ -2656,11 +2605,7 @@ internal fun TvSettingsScreen(
                     else authUser!!.email,
                     modifier = Modifier.fillMaxWidth().focusProperties {
                         left = railFocusRequester
-                        up = if (showBetaProgramSettingsEntry) {
-                            accountBetaProgramRequester
-                        } else {
-                            categoryRequesters.getValue(TvSettingsCategory.ACCOUNT)
-                        }
+                        up = categoryRequesters.getValue(TvSettingsCategory.ACCOUNT)
                     },
                     focusRequester = requester,
                     onFocused = { onSettingsRowFocused(authAccountTarget, requester) },
@@ -2911,11 +2856,7 @@ internal fun TvSettingsScreen(
                     focusRequester = requester,
                     expandedInput = expandedInput,
                     railFocusRequester = railFocusRequester,
-                    upFocusRequester = if (showBetaProgramSettingsEntry) {
-                        accountBetaProgramRequester
-                    } else {
-                        categoryRequesters.getValue(TvSettingsCategory.ACCOUNT)
-                    },
+                    upFocusRequester = categoryRequesters.getValue(TvSettingsCategory.ACCOUNT),
                     onContentFocused = {
                         onSettingsRowFocused(authEmailTarget, requester)
                     },
@@ -3135,7 +3076,7 @@ internal fun TvSettingsScreen(
 
         // Subscription and restore
 
-        if (selectedCategory == TvSettingsCategory.ACCOUNT) {
+        if (selectedCategory == TvSettingsCategory.ACCOUNT && com.torve.android.BuildConfig.HAS_BILLING) {
             item(key = "section_account_subscription") {
                 TvSectionHeader(
                     text = stringResource(R.string.tv_settings_subscription_title),
@@ -3651,12 +3592,17 @@ internal fun TvSettingsScreen(
                         onFocused = { onSettingsRowFocused(connectionsTraktTarget, requester) },
                         onClick = {
                             when {
-                                settingsState.traktConnected -> {
-                                    TvNotificationQueue.post("Checking Trakt connection...", NotificationType.INFO)
-                                    settingsViewModel.syncTraktNow()
-                                }
                                 settingsState.isPollingTrakt -> {
                                     TvNotificationQueue.post("Waiting for Trakt authorization", NotificationType.INFO)
+                                }
+                                settingsState.traktConnected -> {
+                                    if (traktNeedsReauthorization) {
+                                        TvNotificationQueue.post("Starting Trakt reauthorization", NotificationType.INFO)
+                                        settingsViewModel.startTraktDeviceAuth()
+                                    } else {
+                                        TvNotificationQueue.post("Checking Trakt connection...", NotificationType.INFO)
+                                        settingsViewModel.syncTraktNow()
+                                    }
                                 }
                                 else -> {
                                     TvNotificationQueue.post("Starting Trakt authorization", NotificationType.INFO)
@@ -3990,8 +3936,13 @@ internal fun TvSettingsScreen(
                                     TvNotificationQueue.post("Waiting for Trakt authorization", NotificationType.INFO)
                                 }
                                 settingsState.traktConnected -> {
-                                    TvNotificationQueue.post("Checking Trakt connection...", NotificationType.INFO)
-                                    settingsViewModel.syncTraktNow()
+                                    if (traktNeedsReauthorization) {
+                                        TvNotificationQueue.post("Starting Trakt reauthorization", NotificationType.INFO)
+                                        settingsViewModel.startTraktDeviceAuth()
+                                    } else {
+                                        TvNotificationQueue.post("Checking Trakt connection...", NotificationType.INFO)
+                                        settingsViewModel.syncTraktNow()
+                                    }
                                 }
                                 else -> {
                                     TvNotificationQueue.post("Starting Trakt authorization", NotificationType.INFO)
@@ -4020,8 +3971,12 @@ internal fun TvSettingsScreen(
                             focusRequester = requester,
                             onFocused = { onSettingsRowFocused(connectionsTraktReconnectTarget, requester) },
                             onClick = {
-                                TvNotificationQueue.post("Starting Trakt reauthorization", NotificationType.INFO)
-                                settingsViewModel.startTraktDeviceAuth()
+                                if (settingsState.traktLoading || settingsState.isPollingTrakt) {
+                                    TvNotificationQueue.post("Waiting for Trakt authorization", NotificationType.INFO)
+                                } else {
+                                    TvNotificationQueue.post("Starting Trakt reauthorization", NotificationType.INFO)
+                                    settingsViewModel.startTraktDeviceAuth()
+                                }
                             },
                             rowType = TvSettingRowType.ACTION,
                         )
@@ -5613,6 +5568,17 @@ internal fun TvSettingsScreen(
                 }
             }
 
+            if (channelsState.isLoadingChannels) {
+                item(key = "channel_mgr_refreshing") {
+                    Text(
+                        text = "Refreshing channel groups...",
+                        color = Silver,
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.padding(vertical = 12.dp),
+                    )
+                }
+            }
+
             if (channelsState.allCategories.isEmpty()) {
                 item(key = "channel_mgr_loading") {
                     Text(
@@ -6048,13 +6014,80 @@ internal fun TvSettingsScreen(
             )
             TvSettingCard(
                 title = stringResource(R.string.tv_settings_autoplay_next),
-                subtitle = if (settingsState.autoPlayNextEpisodeEnabled) stringResource(R.string.tv_settings_autoplay_next_on)
-                           else stringResource(R.string.tv_settings_autoplay_next_off),
+                subtitle = when (settingsState.nextEpisodeMode) {
+                    NextEpisodeMode.AT_END -> "At the actual end"
+                    NextEpisodeMode.AT_CREDITS -> "During the final credits"
+                    NextEpisodeMode.OFF -> stringResource(R.string.tv_settings_autoplay_next_off)
+                },
                 modifier = Modifier.fillMaxWidth().focusProperties { left = railFocusRequester },
                 focusRequester = requester,
                 onFocused = { onSettingsRowFocused(autoplayNextTarget, requester) },
-                onClick = { settingsViewModel.setAutoPlayNextEpisodeEnabled(!settingsState.autoPlayNextEpisodeEnabled) },
-                rowType = TvSettingRowType.TOGGLE,
+                onClick = {
+                    val next = when (settingsState.nextEpisodeMode) {
+                        NextEpisodeMode.AT_END -> NextEpisodeMode.AT_CREDITS
+                        NextEpisodeMode.AT_CREDITS -> NextEpisodeMode.OFF
+                        NextEpisodeMode.OFF -> NextEpisodeMode.AT_END
+                    }
+                    settingsViewModel.setNextEpisodeMode(next)
+                },
+                rowType = TvSettingRowType.SELECTOR,
+            )
+        }
+
+        item(key = "next_episode_preparation") {
+            val requester = rememberRegisteredTvSettingsFocusRequester(
+                controller = settingsFocusController,
+                target = nextEpisodePreparationTarget,
+                externalRequester = remember("next_episode_preparation") { FocusRequester() },
+            )
+            TvSettingCard(
+                title = "Prepare next episode",
+                subtitle = when (settingsState.nextEpisodePreparationMode) {
+                    NextEpisodePreparationMode.OFF -> "Off"
+                    NextEpisodePreparationMode.RESOLVE_ONLY -> "Resolve source early"
+                    NextEpisodePreparationMode.RESOLVE_AND_BUFFER -> "Resolve and warm buffer"
+                },
+                modifier = Modifier.fillMaxWidth().focusProperties { left = railFocusRequester },
+                focusRequester = requester,
+                onFocused = { onSettingsRowFocused(nextEpisodePreparationTarget, requester) },
+                onClick = {
+                    val next = when (settingsState.nextEpisodePreparationMode) {
+                        NextEpisodePreparationMode.OFF -> NextEpisodePreparationMode.RESOLVE_ONLY
+                        NextEpisodePreparationMode.RESOLVE_ONLY -> NextEpisodePreparationMode.RESOLVE_AND_BUFFER
+                        NextEpisodePreparationMode.RESOLVE_AND_BUFFER -> NextEpisodePreparationMode.OFF
+                    }
+                    settingsViewModel.setNextEpisodePreparationMode(next)
+                },
+                rowType = TvSettingRowType.SELECTOR,
+            )
+        }
+
+        item(key = "minimum_source_size") {
+            val requester = rememberRegisteredTvSettingsFocusRequester(
+                controller = settingsFocusController,
+                target = minimumSourceSizeTarget,
+                externalRequester = remember("minimum_source_size") { FocusRequester() },
+            )
+            TvSettingCard(
+                title = "Minimum source size",
+                subtitle = if (settingsState.minSourceSizePerHourMb <= 0) {
+                    "No minimum"
+                } else {
+                    "${settingsState.minSourceSizePerHourMb} MB per hour"
+                },
+                modifier = Modifier.fillMaxWidth().focusProperties { left = railFocusRequester },
+                focusRequester = requester,
+                onFocused = { onSettingsRowFocused(minimumSourceSizeTarget, requester) },
+                onClick = {
+                    val next = when (settingsState.minSourceSizePerHourMb) {
+                        in Int.MIN_VALUE..0 -> 1024
+                        in 1..1024 -> 2048
+                        in 1025..2048 -> 3072
+                        else -> 0
+                    }
+                    settingsViewModel.setMinSourceSizePerHourMb(next)
+                },
+                rowType = TvSettingRowType.SELECTOR,
             )
         }
 
@@ -7359,7 +7392,7 @@ private fun TvTextInputCard(
             },
             rowType = TvSettingRowType.NAVIGATION,
             focusedHint = if (locked) {
-                "Press OK to upgrade to Premium."
+                "Press OK to continue."
             } else {
                 "Press OK to edit this value."
             },
@@ -7726,7 +7759,7 @@ internal fun TvSettingCard(
     )
 
     val hintText = if (premiumLocked) {
-        "Press OK to upgrade to Premium."
+        "Press OK to continue."
     } else {
         focusedHint ?: when (rowType) {
             TvSettingRowType.NAVIGATION -> "Press OK to open."
@@ -7779,15 +7812,15 @@ internal fun TvSettingCard(
                 when {
                     event.type == KeyEventType.KeyDown &&
                         (event.key == Key.DirectionCenter || event.key == Key.Enter || event.key == Key.NumPadEnter) -> {
-                        keyDownReceivedHere = true
+                        if (!keyDownReceivedHere) {
+                            keyDownReceivedHere = true
+                            onClick()
+                        }
                         true
                     }
                     event.type == KeyEventType.KeyUp &&
                         (event.key == Key.DirectionCenter || event.key == Key.Enter || event.key == Key.NumPadEnter) -> {
-                        if (keyDownReceivedHere) {
-                            keyDownReceivedHere = false
-                            onClick()
-                        }
+                        keyDownReceivedHere = false
                         true
                     }
                     else -> false

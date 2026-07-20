@@ -391,10 +391,23 @@ fun AddonCatalogScreen(
                     val addonDescription = stringResource(addon.descriptionRes)
                     val addonFlags = state.policyFlagsByUrl[AddonViewModel.normalizeManifestUrl(addon.url)]
                     val addonInstallBlocked = addonFlags?.installable == false
+                    val actionEnabled = addon.action == PopularAddonAction.OPEN_BROWSER || !state.isInstalling
+                    val performAction = {
+                        if (addon.action == PopularAddonAction.OPEN_BROWSER) {
+                            onManagePandaClick()
+                        } else {
+                            viewModel.setInstallUrl(addon.url)
+                            viewModel.installAddon()
+                        }
+                    }
 
                     Row(
                         Modifier
                             .fillMaxWidth()
+                            .clickable(
+                                enabled = !addonInstallBlocked && actionEnabled,
+                                onClick = performAction,
+                            )
                             .padding(vertical = 10.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
@@ -435,15 +448,8 @@ fun AddonCatalogScreen(
                             )
                         } else {
                             OutlinedButton(
-                                onClick = {
-                                    if (addon.action == PopularAddonAction.OPEN_BROWSER) {
-                                        onManagePandaClick()
-                                    } else {
-                                        viewModel.setInstallUrl(addon.url)
-                                        viewModel.installAddon()
-                                    }
-                                },
-                                enabled = addon.action == PopularAddonAction.OPEN_BROWSER || !state.isInstalling,
+                                onClick = performAction,
+                                enabled = actionEnabled,
                             ) {
                                 if (addon.action == PopularAddonAction.OPEN_BROWSER) {
                                     Text(

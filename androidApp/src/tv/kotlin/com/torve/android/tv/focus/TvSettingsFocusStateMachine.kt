@@ -26,7 +26,6 @@ internal object TvSettingsItemIds {
     const val ACCOUNT_SYNC_STATUS = "settings/account/sync_status"
     const val ACCOUNT_SYNC_ERROR = "settings/account/sync_error"
     const val ACCOUNT_AUTH_ACCOUNT = "settings/account/auth_account"
-    const val ACCOUNT_BETA_PROGRAM = "settings/account/beta_program"
     const val ACCOUNT_IMPORT_SETUP = "settings/account/import_setup"
     const val ACCOUNT_IMPORT_REFRESH = "settings/account/import_refresh"
     const val ACCOUNT_AUTH_PRIMARY_ACTION = "settings/account/auth_primary_action"

@@ -9,7 +9,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxHeight
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -17,11 +16,9 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -29,22 +26,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.viewinterop.AndroidView
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.LifecycleEventObserver
-import androidx.lifecycle.compose.LocalLifecycleOwner
-import androidx.media3.common.MediaItem
-import androidx.media3.common.PlaybackException
-import androidx.media3.common.Player
-import androidx.media3.exoplayer.ExoPlayer
-import androidx.media3.ui.PlayerView
 import coil3.compose.AsyncImage
 import com.torve.android.R
 import com.torve.android.ui.theme.Amber
@@ -63,13 +50,6 @@ import kotlinx.coroutines.delay
 
 private val previewTimeFormat = SimpleDateFormat("HH:mm", Locale.getDefault())
 
-private enum class PreviewPlaybackState {
-    Idle,
-    Loading,
-    Playing,
-    Error,
-}
-
 @Composable
 internal fun TvEpgPreviewPanel(
     focusedChannel: EnrichedChannel?,
@@ -78,78 +58,13 @@ internal fun TvEpgPreviewPanel(
     modifier: Modifier = Modifier,
 ) {
     val channel = focusedChannel?.channel
-    val context = LocalContext.current
-    val lifecycleOwner = LocalLifecycleOwner.current
     var nowMs by remember { mutableLongStateOf(System.currentTimeMillis()) }
-    var playbackState by remember { mutableStateOf(PreviewPlaybackState.Idle) }
-    val player = remember {
-        ExoPlayer.Builder(context).build().apply {
-            playWhenReady = true
-        }
-    }
 
     LaunchedEffect(Unit) {
         while (true) {
             delay(30_000)
             nowMs = System.currentTimeMillis()
         }
-    }
-
-    DisposableEffect(player) {
-        val listener = object : Player.Listener {
-            override fun onPlaybackStateChanged(playbackStateValue: Int) {
-                playbackState = when (playbackStateValue) {
-                    Player.STATE_BUFFERING -> PreviewPlaybackState.Loading
-                    Player.STATE_READY -> PreviewPlaybackState.Playing
-                    Player.STATE_ENDED, Player.STATE_IDLE -> PreviewPlaybackState.Idle
-                    else -> playbackState
-                }
-            }
-
-            override fun onPlayerError(error: PlaybackException) {
-                playbackState = PreviewPlaybackState.Error
-            }
-        }
-        player.addListener(listener)
-        onDispose {
-            player.removeListener(listener)
-            player.release()
-        }
-    }
-
-    DisposableEffect(lifecycleOwner, player) {
-        val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_STOP) {
-                player.stop()
-                playbackState = PreviewPlaybackState.Idle
-            }
-        }
-        lifecycleOwner.lifecycle.addObserver(observer)
-        onDispose {
-            lifecycleOwner.lifecycle.removeObserver(observer)
-        }
-    }
-
-    LaunchedEffect(channel?.url, isActive) {
-        val url = channel?.url?.trim().orEmpty()
-        if (!isActive || url.isBlank()) {
-            player.stop()
-            playbackState = PreviewPlaybackState.Idle
-            return@LaunchedEffect
-        }
-        val currentUrl = player.currentMediaItem?.localConfiguration?.uri?.toString()
-        if (currentUrl != url) {
-            player.stop()
-            playbackState = PreviewPlaybackState.Loading
-        }
-        delay(500)
-        if (!isActive || channel?.url?.trim().orEmpty() != url) return@LaunchedEffect
-        if (player.currentMediaItem?.localConfiguration?.uri?.toString() != url) {
-            player.setMediaItem(MediaItem.fromUri(url))
-            player.prepare()
-        }
-        player.playWhenReady = true
-        player.play()
     }
 
     val progress = focusedProgramme?.let { programme ->
@@ -197,69 +112,26 @@ internal fun TvEpgPreviewPanel(
                 .border(1.dp, Steel.copy(alpha = 0.28f), RoundedCornerShape(20.dp)),
             contentAlignment = Alignment.Center,
         ) {
-            AndroidView(
-                factory = { ctx ->
-                    PlayerView(ctx).apply {
-                        useController = false
-                        this.player = player
-                        isFocusable = false
-                        isFocusableInTouchMode = false
-                        descendantFocusability = android.view.ViewGroup.FOCUS_BLOCK_DESCENDANTS
-                    }
-                },
-                update = { view ->
-                    view.player = player
-                    view.isFocusable = false
-                    view.isFocusableInTouchMode = false
-                },
-                modifier = Modifier.fillMaxSize(),
-            )
-
-            if (playbackState != PreviewPlaybackState.Playing) {
-                Box(
+            if (channelLogo != null) {
+                AsyncImage(
+                    model = channelLogo,
+                    contentDescription = channel.name,
+                    contentScale = ContentScale.Fit,
                     modifier = Modifier
-                        .fillMaxSize()
-                        .background(Obsidian.copy(alpha = 0.74f)),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    if (channelLogo != null) {
-                        AsyncImage(
-                            model = channelLogo,
-                            contentDescription = channel.name,
-                            contentScale = ContentScale.Fit,
-                            modifier = Modifier
-                                .width(140.dp)
-                                .height(80.dp),
-                        )
-                    } else {
-                        Text(
-                            text = channel?.name?.take(2)?.uppercase() ?: stringResource(R.string.tv_iptv_preview_idle),
-                            color = Snow,
-                            fontSize = 24.sp,
-                            fontWeight = FontWeight.Bold,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            textAlign = TextAlign.Center,
-                            modifier = Modifier.padding(horizontal = 10.dp),
-                        )
-                    }
-                    if (playbackState == PreviewPlaybackState.Loading || playbackState == PreviewPlaybackState.Error) {
-                        Text(
-                            text = if (playbackState == PreviewPlaybackState.Error) {
-                                "Preview unavailable"
-                            } else {
-                                "Starting preview"
-                            },
-                            color = Silver,
-                            fontSize = 10.sp,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier
-                                .align(Alignment.BottomCenter)
-                                .padding(bottom = 14.dp),
-                        )
-                    }
-                }
+                        .width(140.dp)
+                        .height(80.dp),
+                )
+            } else {
+                Text(
+                    text = channel?.name?.take(2)?.uppercase() ?: stringResource(R.string.tv_iptv_preview_idle),
+                    color = Snow.copy(alpha = if (isActive) 1f else 0.72f),
+                    fontSize = 24.sp,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.padding(horizontal = 10.dp),
+                )
             }
         }
 

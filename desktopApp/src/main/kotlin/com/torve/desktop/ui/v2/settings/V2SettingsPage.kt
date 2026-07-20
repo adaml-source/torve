@@ -48,8 +48,6 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import com.torve.data.ai.AiProvider
-import com.torve.data.device.resolvedDeviceCapOverride
-import com.torve.data.device.resolvedDeviceLimit
 import com.torve.data.kodi.KodiHost
 import com.torve.desktop.DesktopReleaseInfo
 import com.torve.desktop.auth.DesktopAuthController
@@ -110,11 +108,6 @@ import com.torve.presentation.settings.AppLanguage
 import com.torve.presentation.settings.SettingsUiState
 import com.torve.presentation.settings.SettingsViewModel
 import com.torve.presentation.settings.ThemeMode
-import com.torve.presentation.beta.BetaProgramCopy
-import com.torve.presentation.beta.BetaProgramUiState
-import com.torve.presentation.beta.BetaProgramViewModel
-import com.torve.presentation.beta.shouldShowBetaProgramSettingsEntry
-import com.torve.presentation.subscription.accessPresentation
 import com.torve.domain.streams.StreamRulePatternValidator
 import java.time.Instant
 import java.time.ZoneId
@@ -305,24 +298,14 @@ fun V2SettingsPage(
             )
 
             // Persistent (until-dismissed) Panda nudge - easiest path to
-            // wiring debrid + indexer access. Only shown to users who can
-            // actually finish the flow (signed in + email verified +
-            // premium entitlement); Panda's addon catalog is premium-
-            // gated so nudging anyone else points them at a wall.
+            // wiring debrid + indexer access. Shown to signed-in verified
+            // users; add-ons are no longer payment-gated.
             val pandaNudgeEligible = authState.user != null &&
-                authState.user?.isVerified == true &&
-                authState.subscriptionState.isPro &&
-                authState.subscriptionState.hasEntitlement
+                authState.user?.isVerified == true
             DesktopPandaSetupNudgeCard(
                 onSetupClick = onOpenPandaSetup,
                 eligible = pandaNudgeEligible,
             )
-            DesktopBetaProgramSection(
-                compact = true,
-                hasPremiumAccess = authState.subscriptionState.hasEntitlement || authState.subscriptionState.isPro,
-                onOpenAccount = { selectedCategory = SettingsCategory.ACCOUNT },
-            )
-
             when (selectedCategory) {
                 SettingsCategory.SOURCES -> SourcesSection(
                     setupIntentsViewModel = setupIntentsViewModel,
@@ -1028,169 +1011,21 @@ private fun RatingsSection(
 
 @Composable
 private fun SubscriptionSection() {
-    val accessState by com.torve.desktop.premium.DesktopPremiumStateHolder.accessState.collectAsState()
-    val hasPremium by com.torve.desktop.premium.DesktopPremiumStateHolder.hasPremium.collectAsState()
-    val subscriptionViewModel = remember {
-        org.koin.mp.KoinPlatform.getKoin()
-            .get<com.torve.presentation.subscription.SubscriptionViewModel>()
-    }
-    val subscriptionState by subscriptionViewModel.state.collectAsState()
-    val subscriptionAccess = subscriptionState.accessPresentation()
-    val colors = TorveDesktopThemeTokens.colors
-
-    LaunchedEffect(subscriptionViewModel) {
-        subscriptionViewModel.refreshAccess()
-        com.torve.desktop.premium.DesktopPremiumStateHolder.refreshNow()
-    }
-
-    val tier = accessState?.access_tier
-        ?: accessState?.entitlement_type
-        ?: subscriptionState.subscription?.tier?.name?.lowercase()
-        ?: if (subscriptionAccess.hasPremiumEntitlement || hasPremium) "premium" else "free"
-    val tierLabel = when (tier.lowercase()) {
-        "free" -> "Free"
-        "premium" -> "Premium"
-        "pro" -> "Pro"
-        "premium_lifetime" -> "Lifetime"
-        "lifetime_access" -> "Lifetime"
-        "lifetime" -> "Lifetime"
-        "premium_subscription" -> "Monthly"
-        "monthly" -> "Monthly"
-        else -> tier.replaceFirstChar { it.uppercase() }
-    }
-    val expiry = accessState?.expires_at
-    val granted = accessState?.granted_at
-    val autoRenew = accessState?.auto_renew
-    val source = accessState?.source ?: subscriptionState.subscription?.platform
-    val sourceLabel = desktopBillingSourceLabel(source)
-    val deviceLimit = accessState?.resolvedDeviceLimit()
-    val deviceCapOverride = accessState?.resolvedDeviceCapOverride()
-    val hasPremiumEntitlement = subscriptionAccess.hasPremiumEntitlement || hasPremium
-    val checkoutBlocked = subscriptionState.isPurchasing ||
-        subscriptionState.isLoading ||
-        subscriptionState.purchaseVerificationState == com.torve.presentation.subscription.PurchaseVerificationState.PENDING
-    val stripeManaged = source?.lowercase()?.contains("stripe") == true
-    val isMonthlyPlan = tier.lowercase() in setOf("premium_subscription", "monthly", "subscription_monthly")
-    val canBuyMonthly = !hasPremiumEntitlement
-    val canBuyLifetime = !hasPremiumEntitlement || (hasPremiumEntitlement && stripeManaged && isMonthlyPlan)
-
     TorveSectionCard(
-        title = "Subscription",
-        supportingText = "Your Torve plan, expiry, and renewal status. Premium is activated only after Torve confirms backend access.",
+        title = "Access",
+        supportingText = "Torve is free software. There are no subscriptions or paid tiers.",
     ) {
         TorveListRow(
-            title = "Plan",
-            subtitle = listOfNotNull(
-                sourceLabel?.let { "via $it" },
-                if (autoRenew == true) "auto-renew on" else if (autoRenew == false) "auto-renew off" else null,
-            ).joinToString(" · ").ifBlank { "-" },
+            title = "Product access",
+            subtitle = "All product features are available by default for active accounts.",
             trailing = {
                 TorveBadge(
-                    text = tierLabel,
-                    tone = if (hasPremiumEntitlement) TorveBadgeTone.Success else TorveBadgeTone.Neutral,
+                    text = "Free",
+                    tone = TorveBadgeTone.Success,
                 )
             },
         )
-        if (!expiry.isNullOrBlank()) {
-            TorveListRow(
-                title = if (autoRenew == true) "Renews on" else "Expires on",
-                subtitle = formatIsoDateForDisplay(expiry),
-            )
-        }
-        if (!granted.isNullOrBlank()) {
-            TorveListRow(
-                title = "Active since",
-                subtitle = formatIsoDateForDisplay(granted),
-            )
-        }
-        TorveListRow(
-            title = "Device limit",
-            subtitle = deviceLimit?.toString() ?: "unknown",
-        )
-        TorveListRow(
-            title = "Device cap override",
-            subtitle = deviceCapOverride?.toString() ?: "null",
-        )
-        Text(
-            text = "Torve sells premium software access only. Torve does not sell, host, provide, or bundle third-party content, IPTV subscriptions, playlists, movies, series, or live TV.",
-            style = MaterialTheme.typography.bodySmall,
-            color = colors.textSecondary,
-        )
-        subscriptionState.purchaseStatus?.let { status ->
-            TorveBanner(
-                title = status.title,
-                description = status.message,
-                tone = desktopPurchaseTone(status.tone),
-            )
-        }
-        FlowRow(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            if (canBuyMonthly) {
-                TorvePrimaryButton(
-                    text = "Monthly Premium",
-                    enabled = !checkoutBlocked,
-                    onClick = {
-                        com.torve.desktop.premium.startDesktopStripeCheckout(
-                            com.torve.data.billing.StripePurchaseType.MONTHLY,
-                        )
-                    },
-                )
-            }
-            if (canBuyLifetime) {
-                TorveSecondaryButton(
-                    text = if (hasPremiumEntitlement) "Upgrade to Lifetime" else "Lifetime Premium",
-                    enabled = !checkoutBlocked,
-                    onClick = {
-                        com.torve.desktop.premium.startDesktopStripeCheckout(
-                            com.torve.data.billing.StripePurchaseType.LIFETIME,
-                        )
-                    },
-                )
-            }
-            if (hasPremiumEntitlement && stripeManaged) {
-                TorveGhostButton(
-                    text = "Manage billing",
-                    enabled = !checkoutBlocked,
-                    onClick = {
-                        com.torve.desktop.premium.startDesktopStripePortal()
-                    },
-                )
-            } else if (!canBuyMonthly && !canBuyLifetime) {
-                TorveBadge(
-                    text = sourceLabel?.let { "Billing managed by $it" } ?: "Premium active",
-                    tone = TorveBadgeTone.Success,
-                )
-            }
-            TorveGhostButton(
-                text = "Refresh",
-                enabled = !subscriptionState.isLoading,
-                onClick = {
-                    subscriptionViewModel.refreshAccess()
-                    com.torve.desktop.premium.DesktopPremiumStateHolder.refreshNow()
-                },
-            )
-        }
     }
-}
-
-private fun desktopBillingSourceLabel(source: String?): String? {
-    val normalized = source?.trim()?.lowercase()?.replace('-', '_') ?: return null
-    return when {
-        normalized.contains("stripe") -> "Stripe"
-        normalized.contains("google") -> "Google Play"
-        normalized.contains("amazon") -> "Amazon Appstore"
-        normalized.contains("apple") -> "Apple App Store"
-        normalized == "backend" || normalized == "admin" -> "Torve"
-        normalized.isBlank() -> null
-        else -> source.replaceFirstChar { it.uppercase() }
-    }
-}
-
-private fun desktopPurchaseTone(
-    tone: com.torve.presentation.subscription.PurchaseStatusTone,
-): TorveBannerTone = when (tone) {
-    com.torve.presentation.subscription.PurchaseStatusTone.INFO -> TorveBannerTone.Info
-    com.torve.presentation.subscription.PurchaseStatusTone.SUCCESS -> TorveBannerTone.Success
-    com.torve.presentation.subscription.PurchaseStatusTone.ERROR -> TorveBannerTone.Error
 }
 
 private fun formatIsoDateForDisplay(iso: String): String {
@@ -1207,185 +1042,6 @@ private fun formatIsoDateForDisplay(iso: String): String {
 }
 
 @Composable
-private fun DesktopBetaProgramSection(
-    compact: Boolean = false,
-    hasPremiumAccess: Boolean = false,
-    onOpenAccount: (() -> Unit)? = null,
-) {
-    val betaViewModel = remember {
-        org.koin.mp.KoinPlatform.getKoin().get<BetaProgramViewModel>()
-    }
-    val state by betaViewModel.state.collectAsState()
-    val discordInviteUrl = resolveDesktopDiscordInviteUrl(state.discordInviteUrl)
-    LaunchedEffect(Unit) {
-        betaViewModel.onOpenBetaProgram()
-    }
-    if (!shouldShowBetaProgramSettingsEntry(state, hasPremiumAccess = hasPremiumAccess)) {
-        return
-    }
-
-    TorveSectionCard(
-        title = ds("Torve Beta Program"),
-        supportingText = if (compact) {
-            ds("Want early access? Apply from Settings.")
-        } else {
-            BetaProgramCopy.DETAIL_INTRO
-        },
-        trailing = {
-            TorveBadge(
-                text = state.primaryBadge,
-                tone = betaBadgeTone(state),
-            )
-        },
-    ) {
-        Text(
-            text = BetaProgramCopy.DEADLINE,
-            style = MaterialTheme.typography.bodyMedium,
-            color = TorveDesktopThemeTokens.colors.textSecondary,
-        )
-        Text(
-            text = state.body,
-            style = MaterialTheme.typography.bodyMedium,
-            color = TorveDesktopThemeTokens.colors.textPrimary,
-        )
-        if (hasPremiumAccess) {
-            Text(
-                text = BetaProgramCopy.PREMIUM_TESTER_APPLICATION,
-                style = MaterialTheme.typography.bodyMedium,
-                color = TorveDesktopThemeTokens.colors.textPrimary,
-                fontWeight = FontWeight.SemiBold,
-            )
-            Text(
-                text = BetaProgramCopy.FREE_PREMIUM_NON_PREMIUM_ONLY,
-                style = MaterialTheme.typography.bodySmall,
-                color = TorveDesktopThemeTokens.colors.textSecondary,
-            )
-        }
-
-        state.generatedCode?.takeIf { it.isNotBlank() }?.let { code ->
-            Surface(
-                color = TorveDesktopThemeTokens.colors.fieldSurface,
-                shape = RoundedCornerShape(TorveDesktopThemeTokens.radii.md),
-                border = BorderStroke(1.dp, TorveDesktopThemeTokens.colors.accentContainerStrong),
-            ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(14.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp),
-                ) {
-                    Text(
-                        text = ds("Discord link code"),
-                        style = MaterialTheme.typography.labelMedium,
-                        color = TorveDesktopThemeTokens.colors.accent,
-                        fontWeight = FontWeight.SemiBold,
-                    )
-                    Text(
-                        text = code,
-                        style = MaterialTheme.typography.headlineMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = TorveDesktopThemeTokens.colors.textPrimary,
-                    )
-                    state.generatedCodeExpiresAt?.let {
-                        Text(
-                            text = ds("Expires at") + " $it",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = TorveDesktopThemeTokens.colors.textSecondary,
-                        )
-                    }
-                    Text(
-                        text = BetaProgramCopy.DISCORD_INSTRUCTION,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = TorveDesktopThemeTokens.colors.textSecondary,
-                    )
-                    Text(
-                        text = ds("Torve Discord") + ": $discordInviteUrl",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = TorveDesktopThemeTokens.colors.textSecondary,
-                    )
-                }
-            }
-        }
-
-        if (!compact || state.generatedCode != null || state.errorMessage != null) {
-            Text(
-                text = BetaProgramCopy.SAFETY,
-                style = MaterialTheme.typography.bodySmall,
-                color = TorveDesktopThemeTokens.colors.textSecondary,
-            )
-        }
-
-        state.errorMessage?.let { message ->
-            TorveBanner(
-                title = ds("Beta status issue"),
-                description = message,
-                tone = TorveBannerTone.Error,
-            )
-        }
-
-        FlowRow(
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            TorvePrimaryButton(
-                text = if (state.isGeneratingCode) ds("Generating...") else state.primaryActionLabel,
-                onClick = {
-                    handleDesktopBetaPrimaryAction(
-                        state = state,
-                        viewModel = betaViewModel,
-                        onOpenAccount = onOpenAccount,
-                    )
-                },
-                enabled = !state.isGeneratingCode && !state.isRefreshing && !state.isLoading,
-            )
-            if (discordInviteUrl != null) {
-                TorveSecondaryButton(
-                    text = ds("Open Discord"),
-                    onClick = { openDesktopUrl(discordInviteUrl) },
-                )
-            }
-            if (state.showVerifyEmail) {
-                TorveSecondaryButton(
-                    text = ds("Resend Verification Email"),
-                    onClick = betaViewModel::onResendVerificationEmail,
-                )
-            }
-            TorveGhostButton(
-                text = if (state.isRefreshing) ds("Refreshing...") else ds("Refresh Status"),
-                onClick = betaViewModel::onRefreshStatus,
-                enabled = !state.isRefreshing && !state.isLoading,
-            )
-        }
-    }
-}
-
-private fun handleDesktopBetaPrimaryAction(
-    state: BetaProgramUiState,
-    viewModel: BetaProgramViewModel,
-    onOpenAccount: (() -> Unit)?,
-) {
-    when {
-        !state.isSignedIn -> onOpenAccount?.invoke()
-        state.showVerifyEmail -> viewModel.onVerifyEmail()
-        state.showGenerateCode -> viewModel.onGenerateCode()
-        state.showCopyCode && !state.generatedCode.isNullOrBlank() -> {
-            if (copyDesktopText(state.generatedCode.orEmpty())) {
-                viewModel.onCopyCode()
-            }
-        }
-        else -> viewModel.onRefreshStatus()
-    }
-}
-
-private fun betaBadgeTone(state: BetaProgramUiState): TorveBadgeTone = when {
-    state.betaAccessActive -> TorveBadgeTone.Success
-    state.isEmailVerificationRequired -> TorveBadgeTone.Warning
-    state.errorMessage != null -> TorveBadgeTone.Error
-    state.applicationStatus == com.torve.domain.beta.BetaApplicationStatus.SUBMITTED -> TorveBadgeTone.Accent
-    else -> TorveBadgeTone.Accent
-}
-
-@Composable
 private fun AccountSection(
     authState: DesktopAuthUiState,
     authController: DesktopAuthController,
@@ -1394,10 +1050,18 @@ private fun AccountSection(
 ) {
     val openLabel = ds("Open")
     Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-        SubscriptionSection()
-        DesktopBetaProgramSection(
-            hasPremiumAccess = authState.subscriptionState.hasEntitlement || authState.subscriptionState.isPro,
-        )
+        TorveSectionCard(
+            title = ds("Access"),
+            supportingText = ds("Torve is free software. There are no subscriptions or paid tiers."),
+        ) {
+            TorveListRow(
+                title = ds("Product access"),
+                subtitle = ds("All product features are available by default for active accounts."),
+                trailing = {
+                    TorveBadge(text = ds("Free"), tone = TorveBadgeTone.Success)
+                },
+            )
+        }
         TorveSectionCard(
             title = ds("Identity"),
             supportingText = ds("Desktop account status, verification, and access are visible here."),
@@ -1482,17 +1146,7 @@ private fun IntegrationsSection(
     onKodiPortChange: (String) -> Unit,
     onOpenPandaSetup: () -> Unit,
 ) {
-    val hasPremium = com.torve.desktop.premium.rememberHasPremium()
     Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-        if (!hasPremium) {
-            com.torve.desktop.premium.PremiumLockedSection(
-                title = "Premium required to save integrations",
-                description = "Trakt, Simkl, debrid, Panda, and Kodi credentials sync to your Torve account on a Premium plan. Read-only access to already-saved integrations remains available - saving / connecting new ones is gated. Upgrade at torve.app.",
-                onUpgrade = {
-                    com.torve.desktop.premium.startDesktopStripeCheckout()
-                },
-            )
-        }
         PandaSection(onOpenPandaSetup = onOpenPandaSetup)
         TraktSection(settingsState, settingsViewModel)
         SimklSection(settingsState, settingsViewModel)
@@ -1977,7 +1631,6 @@ private fun AddonsSection(
     onRefresh: () -> Unit,
     onConfigurePanda: () -> Unit = {},
 ) {
-    val hasPremium = com.torve.desktop.premium.rememberHasPremium()
     val enabledLabel = ds("Enabled")
     val disabledLabel = ds("Disabled")
     val configureLabel = ds("Configure")
@@ -1985,15 +1638,6 @@ private fun AddonsSection(
     val disableLabel = ds("Disable")
     val removeLabel = ds("Remove")
     Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-        if (!hasPremium) {
-            com.torve.desktop.premium.PremiumLockedSection(
-                title = ds("Premium required to install add-ons"),
-                description = ds("Free accounts can browse and use already-installed add-ons. Installing new add-ons, saving credentials, and cross-device sync need a Torve subscription. Upgrade at torve.app."),
-                onUpgrade = {
-                    com.torve.desktop.premium.startDesktopStripeCheckout()
-                },
-            )
-        }
         TorveSectionCard(
             title = ds("Install Add-ons"),
             supportingText = ds("Paste a Stremio-compatible manifest URL and install it directly on desktop."),
@@ -2008,7 +1652,7 @@ private fun AddonsSection(
                 TorvePrimaryButton(
                     text = ds("Install"),
                     onClick = onInstall,
-                    enabled = addonManifestUrl.isNotBlank() && !addonBusy && hasPremium,
+                    enabled = addonManifestUrl.isNotBlank() && !addonBusy,
                 )
                 TorveGhostButton(
                     text = ds("Refresh"),
@@ -2127,12 +1771,11 @@ private fun DesktopStreamRulesSection(
     settingsState: SettingsUiState,
     settingsViewModel: SettingsViewModel,
 ) {
-    val hasPremium = com.torve.desktop.premium.rememberHasPremium()
     val colors = TorveDesktopThemeTokens.colors
     Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
         TorveSectionCard(
             title = ds("Regex Patterns"),
-            supportingText = ds("Premium stream filters hide matching source titles before the picker is shown."),
+            supportingText = ds("Stream filters hide matching source titles before the picker is shown."),
             trailing = {
                 TorveBadge(
                     text = "${settingsState.regexPatterns.count { it.enabled }} active",
@@ -2140,13 +1783,6 @@ private fun DesktopStreamRulesSection(
                 )
             },
         ) {
-            if (!hasPremium) {
-                com.torve.desktop.premium.PremiumLockedSection(
-                    title = ds("Premium required for runtime stream filters"),
-                    description = ds("Regex Patterns sync with your account, but only premium accounts apply them to stream results."),
-                    onUpgrade = { com.torve.desktop.premium.startDesktopStripeCheckout() },
-                )
-            }
             FlowRow(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -2157,14 +1793,13 @@ private fun DesktopStreamRulesSection(
                         text = if (exists) "$label added" else label,
                         selected = exists,
                         onClick = {
-                            if (!exists && hasPremium) settingsViewModel.addRegexPattern(label, pattern)
+                            if (!exists) settingsViewModel.addRegexPattern(label, pattern)
                         },
                     )
                 }
                 TorveSecondaryButton(
                     text = ds("Add rule"),
                     onClick = { settingsViewModel.addRegexPattern() },
-                    enabled = hasPremium,
                 )
             }
             if (settingsState.regexPatterns.isEmpty()) {
@@ -2174,9 +1809,9 @@ private fun DesktopStreamRulesSection(
                 )
             } else {
                 settingsState.regexPatterns.forEachIndexed { index, pattern ->
-                    DesktopRegexPatternRow(
-                        pattern = pattern,
-                        enabled = hasPremium,
+                        DesktopRegexPatternRow(
+                            pattern = pattern,
+                            enabled = true,
                         onUpdate = { settingsViewModel.updateRegexPattern(index, it) },
                         onToggle = { settingsViewModel.toggleRegexPattern(index) },
                         onDelete = { settingsViewModel.removeRegexPattern(index) },
@@ -2192,7 +1827,7 @@ private fun DesktopStreamRulesSection(
 
         TorveSectionCard(
             title = ds("Stream Groups"),
-            supportingText = ds("Premium stream groups prioritize matching sources inside existing ranking buckets; they do not hide streams."),
+            supportingText = ds("Stream groups prioritize matching sources inside existing ranking buckets; they do not hide streams."),
             trailing = {
                 TorveBadge(
                     text = "${settingsState.streamGroups.count { it.enabled }} active",
@@ -2200,13 +1835,6 @@ private fun DesktopStreamRulesSection(
                 )
             },
         ) {
-            if (!hasPremium) {
-                com.torve.desktop.premium.PremiumLockedSection(
-                    title = ds("Premium required for grouped stream ordering"),
-                    description = ds("Stream Groups sync with your account, but only premium accounts apply them to stream ordering."),
-                    onUpgrade = { com.torve.desktop.premium.startDesktopStripeCheckout() },
-                )
-            }
             FlowRow(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -2217,19 +1845,17 @@ private fun DesktopStreamRulesSection(
                         text = if (exists) "$name added" else name,
                         selected = exists,
                         onClick = {
-                            if (!exists && hasPremium) settingsViewModel.addStreamGroup(name, pattern, priority)
+                            if (!exists) settingsViewModel.addStreamGroup(name, pattern, priority)
                         },
                     )
                 }
                 TorveSecondaryButton(
                     text = ds("Add group"),
                     onClick = { settingsViewModel.addStreamGroup() },
-                    enabled = hasPremium,
                 )
                 TorveGhostButton(
                     text = ds("Reset defaults"),
                     onClick = settingsViewModel::resetStreamGroups,
-                    enabled = hasPremium,
                 )
             }
             if (settingsState.streamGroups.isEmpty()) {
@@ -2244,7 +1870,7 @@ private fun DesktopStreamRulesSection(
                     .forEach { (index, group) ->
                         DesktopStreamGroupRow(
                             group = group,
-                            enabled = hasPremium,
+                            enabled = true,
                             onUpdate = { settingsViewModel.updateStreamGroup(index, it) },
                             onToggle = { settingsViewModel.toggleStreamGroup(index) },
                             onDelete = { settingsViewModel.removeStreamGroup(index) },
@@ -2408,7 +2034,6 @@ private fun PlaylistsSection(
 ) {
     val selectedPlaylist = channelsState.playlists.firstOrNull { it.id == channelsState.selectedPlaylistId }
     val selectedPlaylistForEpg = selectedPlaylist
-    val hasPremium = com.torve.desktop.premium.rememberHasPremium()
     var selectedPlaylistEpgDraft by remember { mutableStateOf("") }
 
     LaunchedEffect(channelsState.playlists, channelsState.selectedPlaylistId) {
@@ -2426,16 +2051,6 @@ private fun PlaylistsSection(
     }
 
     Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-        if (!hasPremium) {
-            com.torve.desktop.premium.PremiumLockedSection(
-                title = ds("Premium required to manage playlists"),
-                description = ds("Reading existing playlists is free. Adding, syncing, or storing IPTV credentials needs Torve Premium. Upgrade at torve.app."),
-                onUpgrade = {
-                    com.torve.desktop.premium.startDesktopStripeCheckout()
-                },
-            )
-        }
-
         // ── IPTV recordings + EPG correction (Prompt 10B) ────────
         // The selected playlist drives both surfaces: the recordings
         // list is global, but EPG correction is per-playlist (offset,

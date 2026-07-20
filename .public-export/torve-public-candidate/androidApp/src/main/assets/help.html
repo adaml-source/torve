@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Help - Torve</title>
+<style>
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    line-height: 1.6;
+    color: #e2e8f0;
+    background-color: #020617;
+    padding: 16px;
+    margin: 0;
+  }
+  h1 { color: #f1f5f9; font-size: 1.5em; }
+  h2 { color: #f1f5f9; font-size: 1.2em; margin-top: 1.5em; border-bottom: 1px solid #1e293b; padding-bottom: 4px; }
+  h3 { color: #cbd5e1; font-size: 1.05em; margin-top: 1em; }
+  p, li { color: #cbd5e1; }
+  ul { padding-left: 20px; }
+  code { background: #1e293b; padding: 2px 6px; border-radius: 4px; font-size: 0.9em; }
+  .tip { background: #1e293b; border-left: 3px solid #f59e0b; padding: 8px 12px; margin: 8px 0; border-radius: 4px; }
+</style>
+</head>
+<body>
+<h1>Help &amp; Documentation</h1>
+
+<h2>1. Getting Started</h2>
+<p>Torve is a media companion app that helps you organize, discover, and track your entertainment across multiple services. Browse and search content, manage your personal library, track what you watch, and tune into your channel playlists — all from a single interface.</p>
+<p>To get started, configure your preferred services in Settings, install any content extensions you'd like to use, and optionally connect a tracking account to sync your watch history.</p>
+
+<h2>2. Cloud Services</h2>
+<p>Torve supports connecting to cloud media services that provide high-speed access to your personal content library.</p>
+<p>Go to <strong>Settings &gt; Cloud Service</strong> to connect your preferred provider. You can authenticate via:</p>
+<ul>
+  <li><strong>API Key</strong> — paste your key from the provider's account page</li>
+  <li><strong>Device Authorization</strong> — scan a code on the provider's website to grant access securely</li>
+</ul>
+<p>You can link multiple providers simultaneously. Torve will check availability across all connected services and prioritize the best results.</p>
+
+<h2>3. Content Extensions</h2>
+<p>Torve uses a modular extension system to discover and resolve media links from your connected services.</p>
+<p>Go to <strong>Settings &gt; Extensions</strong> to manage your installed extensions. To install one:</p>
+<ul>
+  <li>Paste the extension's manifest URL (usually ends in <code>/manifest.json</code>)</li>
+  <li>The extension will be validated and added to your list</li>
+</ul>
+<p>Extensions provide catalog browsing and link resolution from your connected cloud services.</p>
+
+<h2>4. Channels</h2>
+<p>Navigate to the <strong>Channels</strong> tab to manage your personal channel playlists.</p>
+<h3>Playlists</h3>
+<p>Import your personal playlist by pasting its URL. The app parses channel names, logos, group titles, and program guide data.</p>
+<h3>Provider Login</h3>
+<p>If your playlist provider supports direct login, enter the server URL, username, and password to import your subscribed content.</p>
+<p>You can manage multiple playlists, filter by category, mark favorites, and view program guides when available.</p>
+
+<h2>5. Trakt Integration</h2>
+<p>Trakt.tv provides comprehensive watch tracking, ratings, and social features for movies and TV shows.</p>
+<p>Go to <strong>Settings &gt; Integrations &gt; Trakt</strong> to connect:</p>
+<ul>
+  <li>Tap <strong>Connect</strong> to start device authorization</li>
+  <li>Visit the URL shown and enter the code</li>
+  <li>Once authorized, your watchlist and history will sync</li>
+</ul>
+<h3>Features</h3>
+<ul>
+  <li><strong>Scrobbling</strong> — automatically marks content as watched when you finish</li>
+  <li><strong>Two-way sync</strong> — changes in Trakt appear in the app, and vice versa</li>
+  <li><strong>Watchlist</strong> — your Trakt watchlist appears on the home screen</li>
+  <li><strong>Ratings</strong> — rate content and sync ratings with Trakt</li>
+</ul>
+<p>Use the <strong>Sync now</strong> button to manually trigger a full sync at any time.</p>
+
+<h2>6. SIMKL Integration</h2>
+<p>SIMKL is focused on anime and TV show tracking with automatic detection.</p>
+<p>Go to <strong>Settings &gt; Integrations &gt; SIMKL</strong> and authorize via device code. Your watch history will sync with SIMKL automatically.</p>
+
+<h2>7. MDBList Integration</h2>
+<p>MDBList provides aggregated ratings from multiple sources and curated content lists.</p>
+<p>Go to <strong>Settings &gt; MDBList</strong>:</p>
+<ul>
+  <li>Enter your free API key from <code>mdblist.com/preferences</code></li>
+  <li>Search for public lists and add them to your home screen</li>
+  <li>Ratings from IMDb, Rotten Tomatoes, TMDB, Metacritic, Letterboxd, Trakt, MAL, and more will appear on content cards</li>
+</ul>
+
+<h2>8. AI-Powered Search</h2>
+<p>Torve includes AI-powered search that understands natural language queries like "sci-fi movies from the 90s with time travel" or "feel-good comedies similar to The Grand Budapest Hotel."</p>
+<p>Go to <strong>Settings &gt; AI Provider</strong> to configure. Supported providers:</p>
+<ul>
+  <li>Claude (Anthropic)</li>
+  <li>ChatGPT (OpenAI)</li>
+  <li>Gemini (Google)</li>
+  <li>Perplexity</li>
+  <li>DeepSeek</li>
+</ul>
+<p>Enter your API key for your preferred provider. AI search results appear alongside standard search results to help you discover content that matches your mood and preferences.</p>
+
+<h2>9. Rating Pills</h2>
+<p>Rating pills show scores from multiple providers directly on poster and landscape cards.</p>
+<p>Go to <strong>Settings &gt; Appearance &gt; Rating Pills</strong> to configure:</p>
+<ul>
+  <li><strong>Pill style</strong> — choose between "With Icon" (provider logo) or "With Letter" (letter abbreviation)</li>
+  <li><strong>Position</strong> — inside the card image or below it</li>
+  <li><strong>Max ratings</strong> — limit how many pills appear per card (1–9)</li>
+  <li><strong>Provider order</strong> — drag to reorder which ratings appear first</li>
+  <li><strong>Per-source toggle</strong> — enable or disable individual rating sources</li>
+</ul>
+<div class="tip">TMDB ratings appear automatically. For IMDb, Rotten Tomatoes, and Metacritic, add a free OMDB API key in Settings &gt; Integrations &gt; OMDB. For additional sources like Letterboxd and MAL, add an MDBList API key.</div>
+
+<h2>10. Card Styles &amp; Home Layout</h2>
+<p>Card style presets control how content cards look across different sections of the home screen.</p>
+<p>Go to <strong>Settings &gt; Appearance &gt; Card Styles</strong> to create and manage presets. Each preset includes size, hover effects, watched indicators, and rating pill configuration.</p>
+<p>In <strong>Settings &gt; Home Layout</strong>, you can:</p>
+<ul>
+  <li>Drag to reorder home sections</li>
+  <li>Enable or disable sections</li>
+  <li>Assign a specific card style preset to each section</li>
+  <li>Set custom titles for sections</li>
+</ul>
+<p>Sections use the built-in default style unless you explicitly assign a different preset.</p>
+
+<h2>11. Regex Filters</h2>
+<p>Regex patterns let you filter out unwanted results by title matching.</p>
+<p>Go to <strong>Settings &gt; Regex Patterns</strong>:</p>
+<ul>
+  <li>Use <strong>Quick Add</strong> presets for common filters (quality preferences, language filters, etc.)</li>
+  <li>Create custom patterns using standard regex syntax</li>
+  <li>Toggle individual patterns on/off without deleting them</li>
+</ul>
+<div class="tip">Use <code>(?i)</code> at the start for case-insensitive matching. Use <code>|</code> to match alternatives. Example: <code>(?i)(cam|ts)</code> excludes results containing "cam" or "ts".</div>
+
+<h2>12. Kodi Remote</h2>
+<p>Send media directly to your Kodi devices for playback on your TV.</p>
+<p>Go to <strong>Settings &gt; Kodi Remote</strong>:</p>
+<ul>
+  <li>Add devices with name, IP address, and port (default 8080)</li>
+  <li>Use the <strong>Test</strong> button to verify connectivity</li>
+  <li>When viewing media details, choose "Play on Kodi" to send it to a connected device</li>
+</ul>
+
+<h2>13. External Players</h2>
+<p>When playing content, you can choose to open it in an external video player:</p>
+<ul>
+  <li><strong>VLC</strong> — broad codec support</li>
+  <li><strong>MX Player</strong> — hardware acceleration</li>
+  <li>Any other compatible video player installed on your device</li>
+</ul>
+
+<h2>14. Jellyfin &amp; Plex</h2>
+<p>Connect your personal Jellyfin or Plex media server to overlay your own library on the home screen.</p>
+<p>Go to <strong>Settings &gt; Integrations</strong>:</p>
+<ul>
+  <li><strong>Jellyfin</strong> — enter your server URL and API key, then select a user profile</li>
+  <li><strong>Plex</strong> — enter your server URL and access token</li>
+</ul>
+<p>Items from your personal library will be highlighted, and "Continue Watching" from your media servers appears alongside other content on the home screen.</p>
+
+<h2>15. Quality &amp; Playback Preferences</h2>
+<p>Go to <strong>Settings &gt; Playback Preferences</strong> to control content selection:</p>
+<ul>
+  <li><strong>Resolution range</strong> — set minimum and maximum quality (SD to 4K)</li>
+  <li><strong>File size limit</strong> — cap the maximum file size for downloads or playback</li>
+  <li><strong>Availability filter</strong> — show only readily available content from your connected services</li>
+  <li><strong>Codec preference</strong> — prefer HEVC, AV1, or no preference</li>
+  <li><strong>HDR mode</strong> — auto, force on, or force off</li>
+</ul>
+
+<h2>16. Backup &amp; Restore</h2>
+<p>Go to <strong>Settings &gt; Backup &amp; Sync</strong>:</p>
+<ul>
+  <li><strong>Export</strong> — saves your extensions, preferences, watch progress, and favorites to a file</li>
+  <li><strong>Import</strong> — restores from a previously exported file</li>
+</ul>
+<div class="tip">API keys and authentication tokens are never included in exports for security.</div>
+
+<h2>17. Diagnostics</h2>
+<p>Go to <strong>Settings &gt; Diagnostics</strong> to view a summary of your app configuration:</p>
+<ul>
+  <li>Service connection status for all configured integrations</li>
+  <li>Sync timestamps</li>
+  <li>Device and app version information</li>
+  <li>Extension, playlist, download, and card style details</li>
+</ul>
+<p>Use the <strong>Share</strong> or <strong>Copy</strong> buttons to send diagnostics when requesting support.</p>
+
+<h2>18. Navigation &amp; Tips</h2>
+<ul>
+  <li>Use the bottom tabs to switch between Movies, TV Shows, Channels, and Settings</li>
+  <li>Pull down on the home screen to refresh content</li>
+  <li>Long-press on a content card for quick actions</li>
+  <li>The app supports Android TV with D-pad navigation and leanback UI</li>
+</ul>
+
+<h2>19. Contact &amp; Support</h2>
+<p>For bug reports, feature requests, or questions, please contact us:</p>
+<p>Email: <a href="mailto:support@torve.app" style="color: #3b82f6;">support@torve.app</a></p>
+</body>
+</html>

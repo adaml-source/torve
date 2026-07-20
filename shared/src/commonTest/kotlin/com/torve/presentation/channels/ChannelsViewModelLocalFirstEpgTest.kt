@@ -32,8 +32,7 @@ import kotlin.test.assertTrue
  * Locks down three invariants:
  * 1. Persisted EPG renders the guide without a blocking network refresh.
  * 2. getEpg() hydrates the in-memory cache from the DB result.
- * 3. Background EPG refresh does not put the guide back into Loading state
- *    when a renderable local catalog already exists.
+ * 3. A renderable local guide never starts an automatic foreground refresh.
  */
 @OptIn(ExperimentalCoroutinesApi::class)
 class ChannelsViewModelLocalFirstEpgTest {
@@ -81,9 +80,7 @@ class ChannelsViewModelLocalFirstEpgTest {
         assertIs<EpgState.Loaded>(state.epgState, "EPG state should be Loaded, not ${state.epgState}")
         assertFalse(state.isLoadingGuide, "Guide should not be in loading state")
         assertTrue(state.guideProgrammes.isNotEmpty(), "Guide programmes should be populated from local EPG")
-        // refreshEpg was called only by the background refresh, never as a blocking call
-        // before the guide was rendered. The key assertion: epgState reached Loaded
-        // before any network call was needed.
+        assertEquals(0, repo.epgRefreshCalls, "Cached EPG must not start a provider download")
         assertEquals(0, repo.blockingEpgRefreshCalls, "No blocking EPG refresh should occur when local EPG exists")
     }
 
@@ -118,9 +115,7 @@ class ChannelsViewModelLocalFirstEpgTest {
         assertEquals(dbReadsBefore, repo.epgDbReads, "Second getEpg() call should use cache, not re-read DB")
     }
 
-    // ── Case 3: background EPG refresh does not set Loading state ──
-    // When local catalog exists, the background EPG refresh must update
-    // guideProgrammes without ever setting epgState back to Loading.
+    // ── Case 3: cached EPG remains foreground-only ──
     @Test
     fun background_epg_refresh_does_not_block_guide_when_local_catalog_exists() = runTest(dispatcher) {
         val channel = sampleChannel("p1", "ARD HD", tvgId = "ard.hd")
@@ -165,10 +160,12 @@ class ChannelsViewModelLocalFirstEpgTest {
         advanceUntilIdle()
         collectJob.cancel()
 
-        // After full startup + background refresh, guide should be Loaded.
+        // After startup, the persisted guide is loaded without provider IO.
         val finalState = vm.state.value
         assertIs<EpgState.Loaded>(finalState.epgState)
         assertFalse(finalState.isLoadingGuide)
+        assertEquals(0, repo.epgRefreshCalls)
+        assertEquals("Tagesschau (stale)", finalState.guideProgrammes[epgKey]?.firstOrNull()?.title)
 
         // Verify that once epgState reached Loaded, it never went back to Loading.
         val loadingAfterFirstLoaded = observedEpgStates.any { it is EpgState.Loading }
