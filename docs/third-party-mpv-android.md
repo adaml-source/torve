@@ -54,5 +54,10 @@ then writes:
 - `androidApp/build/outputs/native-debug-symbols/googleTvRelease/native-debug-symbols.zip`
 
 Each ZIP has the ABI directories at its root, as required by Google Play. Upload the matching ZIP
-for each app in Play Console's App bundle explorer. `libc++_shared.so` is not included because the
-upstream release does not publish its matching unstripped library.
+for each app in Play Console's App bundle explorer.
+
+The archive covers Torve's 18 mpv/FFmpeg/player libraries. It does not include dependency-owned
+`libandroidx.graphics.path.so`, `libbarhopper_v3.so`, `libc++_shared.so`, `libffmpegJNI.so`,
+`libimage_processing_util_jni.so`, or `libsurface_util_jni.so`, because the current dependency
+artifacts do not provide their matching unstripped libraries. Never substitute the stripped AAB
+copies: Play could not use them to recover source-level crash information.
