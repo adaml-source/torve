@@ -1,5 +1,7 @@
 import java.util.Properties
 import java.io.FileInputStream
+import java.security.MessageDigest
+import java.util.zip.ZipFile
 import org.gradle.api.tasks.bundling.Zip
 
 plugins {
@@ -12,6 +14,21 @@ plugins {
 
 fun String.toBuildConfigStringLiteral(): String =
     "\"" + replace("\\", "\\\\").replace("\"", "\\\"") + "\""
+
+fun File.sha256(): String {
+    val digest = MessageDigest.getInstance("SHA-256")
+    inputStream().buffered().use { input ->
+        val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+        while (true) {
+            val count = input.read(buffer)
+            if (count < 0) break
+            digest.update(buffer, 0, count)
+        }
+    }
+    return digest.digest().joinToString("") {
+        (it.toInt() and 0xff).toString(16).padStart(2, '0')
+    }
+}
 
 val torveLocalProperties = Properties().apply {
     val file = rootProject.file("local.properties")
@@ -71,8 +88,8 @@ android {
 
         // Default: both ARM ABIs.  Pass -PabiOverride=arm64-v8a for fast dev builds.
         ndk {
-            // Include native debug symbol metadata for release bundles so
-            // Play Console can symbolicate native crashes/ANRs.
+            // Applies to native code built by AGP. The vendored mpv/FFmpeg
+            // libraries use the separately validated archive below.
             debugSymbolLevel = "FULL"
             val override = providers.gradleProperty("abiOverride").orNull
             if (override != null) {
@@ -132,11 +149,8 @@ android {
             isShrinkResources = true
             signingConfig = signingConfigs.getByName("release")
             manifestPlaceholders["torveAllowBackup"] = "false"
-            // Bundle native debug symbols (libmpv, FFmpeg) so Play Console
-            // can symbolicate native crashes and ANRs. FULL includes full
-            // DWARF info (~50–200 MB extra in the AAB but stripped from
-            // the installed APK); SYMBOL_TABLE is smaller but only gives
-            // function names with no source mapping.
+            // Keep full metadata for native code built by AGP. Prebuilt
+            // mpv/FFmpeg symbols are uploaded using the task below.
             ndk {
                 debugSymbolLevel = "FULL"
             }
@@ -159,31 +173,92 @@ android {
     }
 }
 
-fun registerGooglePlayNativeSymbolsTask(variantName: String, mergeTaskName: String) {
+val mpvDebugObjectsZip = providers.gradleProperty("mpvDebugObjectsZip")
+    .orElse(providers.environmentVariable("TORVE_MPV_DEBUG_OBJECTS_ZIP"))
+
+val expectedMpvDebugObjectsSha256 =
+    "407a4d3c1b1b930d47504716e7d699a3ec79a5585fd5f9dec0401c4f19ed1559"
+
+// SHA-256 values of the stripped delivery binaries from the pinned upstream
+// APKs. A native update must update the runtime libraries and this manifest.
+val expectedMpvRuntimeSha256 = mapOf(
+    "arm64-v8a/libavcodec.so" to "7f073b0611a993d138abcced96b1c9df8befabcac2383ea4e96661e8b5cbfbea",
+    "arm64-v8a/libavdevice.so" to "a08ad923f05886d31640ad6236966e71e11dc9d32424912ff18e13b7473e2d39",
+    "arm64-v8a/libavfilter.so" to "87e40d632719f7eac632fabf45ebbe6cfc804ca696485181f6aa409abffcbe64",
+    "arm64-v8a/libavformat.so" to "45dfbaf01c7eeabc1a3db16940bef76971172dec6cf1a9944fdf6ad68994b40f",
+    "arm64-v8a/libavutil.so" to "469b8b65a7f14fbedf08a4f4928cfca0055ab6736af8f994bf4367a1da2f6676",
+    "arm64-v8a/libmpv.so" to "e985a6f8ca12c1554ca73bcc1335c657ec1a1d0773ee94448db7f2b8301ebaef",
+    "arm64-v8a/libplayer.so" to "83e2a4874c82d96ba66adc6504910f1f042144371d047177f993a105e777cab1",
+    "arm64-v8a/libswresample.so" to "e0eb87523d877cb258f17c7a99522134a4fe121a79ea1ebc25ac967e1590781b",
+    "arm64-v8a/libswscale.so" to "811ef19dc2d44f54eecb9eefa8b8901396aa06cc220fb159b686a1bf5f9cefb2",
+    "armeabi-v7a/libavcodec.so" to "d60cc10596b5b7692e92e8b047296e93e9e73455b1d84175ada2e71b73437e13",
+    "armeabi-v7a/libavdevice.so" to "e19c8906b7bff22b70f0c15421e8dbe6a9e82f8fdc334078f12cbc1ee0741ac7",
+    "armeabi-v7a/libavfilter.so" to "d272fe2ac837706378f73cac1a3c5f52bbbd067c36e22f291f7de15880046fe6",
+    "armeabi-v7a/libavformat.so" to "704df1cc12aa5b1bfa3b441faaf82239adc566b5594d44c3c1f3438340dc1389",
+    "armeabi-v7a/libavutil.so" to "5da96d857289758af096eb343972fe3f0aa22391bb253637c409b533ea1ece9f",
+    "armeabi-v7a/libmpv.so" to "10ca5468e8538e37eb27c8f564133411f6186819ec3c20daa4fa41f8f6082456",
+    "armeabi-v7a/libplayer.so" to "cea6abd22ff90e7a7b5297f474f3e9d0909cb92954190ac852fae402eab8c20e",
+    "armeabi-v7a/libswresample.so" to "a176d01ffbec4ac5a2ad76a9dc5e377d289f3cc31a338e154ecbe8c3fbf920f5",
+    "armeabi-v7a/libswscale.so" to "6f1258c48a8912fd53faaf2d5fa9ac0de64a127d8c6f45e718aa6087b91b56a4",
+)
+
+fun registerGooglePlayNativeSymbolsTask(variantName: String) {
     val capitalizedVariant = variantName.replaceFirstChar { it.uppercaseChar() }
     tasks.register<Zip>("package${capitalizedVariant}NativeSymbols") {
         group = "distribution"
-        description = "Packages native debug symbols for manual Google Play upload for $variantName."
-        dependsOn(mergeTaskName)
-        val mergedLibs = layout.buildDirectory.dir(
-            "intermediates/merged_native_libs/$variantName/$mergeTaskName/out/lib",
-        )
-        from(mergedLibs) {
-            include("arm64-v8a/**", "armeabi-v7a/**")
+        description = "Validates and packages matching mpv debug symbols for $variantName."
+
+        doFirst {
+            val configuredPath = mpvDebugObjectsZip.orNull
+                ?: throw GradleException(
+                    "Set -PmpvDebugObjectsZip=<path-to-debug-objs.zip> or " +
+                        "TORVE_MPV_DEBUG_OBJECTS_ZIP. See docs/third-party-mpv-android.md.",
+                )
+            val sourceArchive = rootProject.file(configuredPath)
+            check(sourceArchive.isFile) { "Native symbol archive does not exist: $sourceArchive" }
+            check(sourceArchive.sha256() == expectedMpvDebugObjectsSha256) {
+                "Native symbol archive SHA-256 does not match mpv-android 2025-12-27."
+            }
+
+            expectedMpvRuntimeSha256.forEach { (relativePath, expectedSha256) ->
+                val runtimeLibrary = file("src/main/jniLibs/$relativePath")
+                check(runtimeLibrary.isFile) { "Missing runtime library: $runtimeLibrary" }
+                check(runtimeLibrary.sha256() == expectedSha256) {
+                    "Runtime library no longer matches the pinned symbol set: $relativePath"
+                }
+            }
+
+            ZipFile(sourceArchive).use { archive ->
+                expectedMpvRuntimeSha256.keys.forEach { relativePath ->
+                    val symbolEntry = archive.getEntry(relativePath)
+                        ?: error("Native symbol archive is missing $relativePath")
+                    val runtimeSize = file("src/main/jniLibs/$relativePath").length()
+                    check(symbolEntry.size > runtimeSize) {
+                        "Expected an unstripped symbol library for $relativePath"
+                    }
+                }
+            }
+        }
+
+        from(providers.provider {
+            val configuredPath = mpvDebugObjectsZip.orNull
+                ?: throw GradleException(
+                    "Set -PmpvDebugObjectsZip=<path-to-debug-objs.zip> or " +
+                        "TORVE_MPV_DEBUG_OBJECTS_ZIP.",
+                )
+            zipTree(rootProject.file(configuredPath))
+        }) {
+            include(expectedMpvRuntimeSha256.keys)
         }
         destinationDirectory.set(layout.buildDirectory.dir("outputs/native-debug-symbols/$variantName"))
         archiveFileName.set("native-debug-symbols.zip")
+        isPreserveFileTimestamps = false
+        isReproducibleFileOrder = true
     }
 }
 
-registerGooglePlayNativeSymbolsTask(
-    variantName = "googleMobileRelease",
-    mergeTaskName = "mergeGoogleMobileReleaseNativeLibs",
-)
-registerGooglePlayNativeSymbolsTask(
-    variantName = "googleTvRelease",
-    mergeTaskName = "mergeGoogleTvReleaseNativeLibs",
-)
+registerGooglePlayNativeSymbolsTask("googleMobileRelease")
+registerGooglePlayNativeSymbolsTask("googleTvRelease")
 
 tasks.register("packageGooglePlayNativeSymbols") {
     group = "distribution"
