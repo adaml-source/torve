@@ -15,6 +15,7 @@ import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import com.torve.android.deeplink.TorveAppLink
 import com.torve.android.deeplink.TorveAppLinkParser
 import com.torve.android.tv.TvRoot
+import com.torve.android.ui.player.ActivePlaybackState
 import com.torve.android.ui.system.configureTorveEdgeToEdge
 import com.torve.android.ui.theme.TorveTheme
 import com.torve.data.auth.AuthEvent
@@ -36,6 +37,7 @@ class TvMainActivity : AppCompatActivity() {
     companion object {
         private const val DIRECTIONAL_REPEAT_THROTTLE_MS = 90L
         private const val DIRECTIONAL_REPEAT_THROTTLE_AFTER_COUNT = 2
+        private const val BACKGROUND_PLAYBACK_LONG_BACK_MS = 650L
     }
 
     private val handler = Handler(Looper.getMainLooper())
@@ -46,8 +48,17 @@ class TvMainActivity : AppCompatActivity() {
     private var pendingAppLink by mutableStateOf<TorveAppLink?>(null)
     private var lastDirectionalRepeatKeyCode = 0
     private var lastDirectionalRepeatAtMs = 0L
+    private var backgroundPlaybackBackHeld = false
+    private var backgroundPlaybackLongBackTriggered = false
+    private val backgroundPlaybackLongBack = Runnable {
+        if (backgroundPlaybackBackHeld && hasBackgroundPlayback()) {
+            backgroundPlaybackLongBackTriggered = true
+            ActivePlaybackState.requestReturnToPlayer()
+        }
+    }
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        if (handleBackgroundPlaybackBack(event)) return true
         if (shouldThrottleDirectionalRepeat(event)) return true
         return try {
             super.dispatchKeyEvent(event)
@@ -58,6 +69,58 @@ class TvMainActivity : AppCompatActivity() {
             android.util.Log.w("TvMainActivity", "Focus dispatch error swallowed", e)
             true
         }
+    }
+
+    private fun handleBackgroundPlaybackBack(event: KeyEvent): Boolean {
+        if (event.keyCode != KeyEvent.KEYCODE_BACK) return false
+        // Once this Activity accepts the initial DOWN, keep ownership through
+        // every repeat and the matching UP. The long-press navigation can make
+        // the full-screen player visible before the user releases the button;
+        // passing those trailing repeats through would immediately exit again.
+        if (!backgroundPlaybackBackHeld && !hasBackgroundPlayback()) {
+            cancelBackgroundPlaybackLongBack()
+            return false
+        }
+
+        return when (event.action) {
+            KeyEvent.ACTION_DOWN -> {
+                if (event.repeatCount == 0) {
+                    backgroundPlaybackBackHeld = true
+                    backgroundPlaybackLongBackTriggered = false
+                    handler.removeCallbacks(backgroundPlaybackLongBack)
+                    handler.postDelayed(backgroundPlaybackLongBack, BACKGROUND_PLAYBACK_LONG_BACK_MS)
+                } else if (event.isLongPress && !backgroundPlaybackLongBackTriggered) {
+                    handler.removeCallbacks(backgroundPlaybackLongBack)
+                    backgroundPlaybackLongBack.run()
+                }
+                true
+            }
+
+            KeyEvent.ACTION_UP -> {
+                val returnWasTriggered = backgroundPlaybackLongBackTriggered
+                cancelBackgroundPlaybackLongBack()
+                if (!returnWasTriggered) {
+                    // Preserve ordinary short-Back behavior while waiting long
+                    // enough to distinguish the explicit return shortcut.
+                    onBackPressedDispatcher.onBackPressed()
+                }
+                true
+            }
+
+            else -> {
+                cancelBackgroundPlaybackLongBack()
+                true
+            }
+        }
+    }
+
+    private fun hasBackgroundPlayback(): Boolean =
+        ActivePlaybackState.session != null && !ActivePlaybackState.isFullScreenPlayerVisible
+
+    private fun cancelBackgroundPlaybackLongBack() {
+        handler.removeCallbacks(backgroundPlaybackLongBack)
+        backgroundPlaybackBackHeld = false
+        backgroundPlaybackLongBackTriggered = false
     }
 
     private fun shouldThrottleDirectionalRepeat(event: KeyEvent): Boolean {
@@ -160,6 +223,7 @@ class TvMainActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        cancelBackgroundPlaybackLongBack()
         activityScope.cancel()
         super.onDestroy()
     }

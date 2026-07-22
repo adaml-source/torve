@@ -116,6 +116,7 @@ import com.torve.android.ui.theme.Charcoal
 import com.torve.android.ui.theme.Emerald
 import com.torve.android.ui.theme.Ruby
 import com.torve.android.ui.theme.Snow
+import com.torve.android.ui.player.ActivePlaybackState
 import com.torve.domain.model.MediaItem
 import com.torve.domain.model.MediaType
 import com.torve.domain.model.ratingEnrichmentLookupKeys
@@ -2809,14 +2810,15 @@ fun TvRoot(
                 /* ── Layer 2: Sub-route NavHost (details, player, see-all, sub-screens) ── */
                 // When no sub-route is active, block focus from entering the empty NavHost
                 // so it cannot steal focus from the keep-alive tab screens.
+                val exposeSubRouteLayer = isSubRouteActive || ActivePlaybackState.session != null
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
-                        .zIndex(if (isSubRouteActive) 2f else -1f)
-                        .alpha(if (isSubRouteActive) 1f else 0f)
-                        .offset(x = if (isSubRouteActive) 0.dp else 10000.dp)
+                        .zIndex(if (exposeSubRouteLayer) 2f else -1f)
+                        .alpha(if (exposeSubRouteLayer) 1f else 0f)
+                        .offset(x = if (exposeSubRouteLayer) 0.dp else 10000.dp)
                         .focusProperties {
-                            if (!isSubRouteActive) {
+                            if (!exposeSubRouteLayer) {
                                 enter = { FocusRequester.Cancel }
                             }
                         },

@@ -81,6 +81,7 @@ import com.torve.android.ui.detail.StreamExperienceBadges
 import com.torve.android.ui.detail.StreamReadinessLabel
 import com.torve.android.ui.detail.groupPlaybackOptionStreams
 import com.torve.android.ui.detail.streamUiKey
+import com.torve.android.ui.player.ActivePlaybackState
 import com.torve.android.ui.components.getRatingValue
 import com.torve.android.ui.components.mediaItemLazyKey
 import com.torve.android.ui.components.ratingSourceIconRes
@@ -298,6 +299,10 @@ fun TvDetailsScreen(
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
                 detailViewModel.refreshWatchState()
+                // Leaving the full-screen player intentionally gives focus to
+                // the persistent playback card. Do not steal it back with the
+                // normal details-screen restore while that engine is retained.
+                if (ActivePlaybackState.session != null) return@LifecycleEventObserver
                 // Scroll list to top so the Play button is in the viewport, then focus it.
                 // The button label changes (Play → Resume) after refreshWatchState; without
                 // scrolling, the button is off-screen in LazyColumn and requestFocus fails silently.

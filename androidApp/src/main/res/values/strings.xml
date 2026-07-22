@@ -1723,6 +1723,9 @@
     <string name="player_sent_to">Playback sent to %s</string>
     <string name="player_picture_format">Picture Format</string>
     <string name="player_enter_applies">Enter applies instantly. Back closes.</string>
+    <string name="player_background_playing">Playing in background · Press Select to return</string>
+    <string name="player_background_paused">Paused · Press Select to return</string>
+    <string name="player_background_hold_back_hint">Hold Back anywhere to return to the player</string>
 
     <!-- Detail Screen -->
     <string name="detail_in_library">In Library</string>

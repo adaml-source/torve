@@ -7,6 +7,7 @@ import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -59,11 +60,14 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.zIndex
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -2286,14 +2290,29 @@ internal fun PersistentPlaybackBar(
     onResume: () -> Unit,
     onTogglePlayback: () -> Unit,
     onStop: () -> Unit,
+    requestInitialFocus: Boolean = false,
 ) {
     var focused by remember { mutableStateOf(false) }
+    val resumeFocusRequester = remember { FocusRequester() }
     val progress = if (session.durationMs > 0L) {
         (session.positionMs.toFloat() / session.durationMs).coerceIn(0f, 1f)
     } else {
         0f
     }
     val widthModifier = if (isTv) Modifier.width(440.dp) else Modifier.fillMaxWidth()
+
+    LaunchedEffect(requestInitialFocus, session.url) {
+        if (!isTv || !requestInitialFocus) return@LaunchedEffect
+        repeat(5) { attempt ->
+            withFrameNanos { }
+            if (attempt > 0) delay(120L)
+            runCatching { resumeFocusRequester.requestFocus() }
+            // The destination screen also restores its previous focus after
+            // player disposal. Keep claiming the new playback card through
+            // that brief restoration window before considering focus stable.
+            if (attempt >= 2 && focused) return@LaunchedEffect
+        }
+    }
 
     Column(
         modifier = widthModifier
@@ -2304,9 +2323,15 @@ internal fun PersistentPlaybackBar(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
+                .focusRequester(resumeFocusRequester)
                 .onFocusChanged { focused = it.isFocused }
                 .focusable()
                 .clickable(onClick = onResume)
+                .border(
+                    width = if (focused) 2.dp else 1.dp,
+                    color = if (focused) Amber else Color.White.copy(alpha = 0.18f),
+                    shape = RoundedCornerShape(14.dp),
+                )
                 .padding(horizontal = 14.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -2319,11 +2344,22 @@ internal fun PersistentPlaybackBar(
                     maxLines = 1,
                 )
                 Text(
-                    text = if (session.isPlaying) "Playing in background · Open player" else "Paused · Open player",
+                    text = stringResource(
+                        if (session.isPlaying) R.string.player_background_playing
+                        else R.string.player_background_paused,
+                    ),
                     color = Color.White.copy(alpha = 0.68f),
                     style = MaterialTheme.typography.labelSmall,
                     maxLines = 1,
                 )
+                if (isTv) {
+                    Text(
+                        text = stringResource(R.string.player_background_hold_back_hint),
+                        color = Amber,
+                        style = MaterialTheme.typography.labelSmall,
+                        maxLines = 1,
+                    )
+                }
             }
             Icon(
                 imageVector = if (session.isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,

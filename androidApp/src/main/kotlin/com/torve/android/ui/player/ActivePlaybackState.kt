@@ -46,6 +46,15 @@ object ActivePlaybackState {
     var session by mutableStateOf<ActivePlaybackSession?>(null)
         private set
 
+    /** Lets TV key handling distinguish the player from retained background playback. */
+    @Volatile
+    var isFullScreenPlayerVisible: Boolean = false
+        internal set
+
+    /** Monotonic event observed by TV navigation to reopen retained playback. */
+    var returnToPlayerRequestId by mutableStateOf(0L)
+        private set
+
     private var retainedEngine: ExoPlayerEngine? = null
     private val retainedListener = object : PlayerListener {
         override fun onStateChanged(state: PlayerState) {
@@ -87,6 +96,11 @@ object ActivePlaybackState {
     fun togglePlayback() {
         val engine = retainedEngine ?: return
         if (engine.state.isPlaying) engine.pause() else engine.resume()
+    }
+
+    fun requestReturnToPlayer() {
+        if (session == null || isFullScreenPlayerVisible) return
+        returnToPlayerRequestId += 1L
     }
 
     fun stopAndClear() {

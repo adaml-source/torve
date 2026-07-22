@@ -1,7 +1,9 @@
 package com.torve.android.tv.nav
 
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
@@ -33,6 +35,7 @@ import com.torve.android.tv.screens.stats.TvWatchStatsScreen
 import com.torve.android.tv.premium.TvEntitledFeature
 import com.torve.android.ui.player.PlayerScreen
 import com.torve.android.ui.player.ActivePlaybackState
+import com.torve.android.ui.player.ActivePlaybackSession
 import com.torve.android.ui.navigation.PersistentPlaybackBar
 import com.torve.domain.model.MediaItem
 import com.torve.domain.model.MediaType
@@ -45,6 +48,24 @@ import org.koin.compose.koinInject
 private const val TV_STREAM_RESOLVING_NOTIFICATION_TAG = "tv_stream_resolving"
 private const val TV_RESUME_MIN_POSITION_MS = 20_000L
 private const val TV_RESUME_MAX_PROGRESS = 0.85
+
+private fun ActivePlaybackSession.tvPlayerRoute(): String = TvRoutes.player(
+    url = url,
+    fallbackUrl = fallbackUrl,
+    title = title,
+    mediaId = mediaId,
+    mediaType = mediaType,
+    posterUrl = posterUrl,
+    backdropUrl = backdropUrl,
+    seasonNumber = seasonNumber,
+    episodeNumber = episodeNumber,
+    showTmdbId = showTmdbId,
+    showImdbId = showImdbId,
+    // The retained engine is already at the live position. Supplying its
+    // position again would incorrectly show the resume/start-over prompt.
+    startPositionMs = 0L,
+    autoSourceSelection = autoSourceSelection,
+)
 
 private fun NavHostController.navigateToTvDetails(item: MediaItem, autoPlay: Boolean = false) {
     val id = item.tmdbId ?: item.id.toIntOrNull() ?: item.id.extractTmdbIdOrNull() ?: return
@@ -103,6 +124,22 @@ internal fun TvNavHost(
     val watchProgressRepo: WatchProgressRepository = koinInject()
     val navScope = rememberCoroutineScope()
     val currentBackStackEntry = navController.currentBackStackEntryAsState().value
+    val currentRoute = currentBackStackEntry?.destination?.route
+    val returnToPlayerRequestId = ActivePlaybackState.returnToPlayerRequestId
+
+    SideEffect {
+        ActivePlaybackState.isFullScreenPlayerVisible = currentRoute == TvRoutes.PLAYER
+    }
+    DisposableEffect(Unit) {
+        onDispose { ActivePlaybackState.isFullScreenPlayerVisible = false }
+    }
+    LaunchedEffect(returnToPlayerRequestId) {
+        val activeSession = ActivePlaybackState.session ?: return@LaunchedEffect
+        if (currentRoute != TvRoutes.PLAYER && returnToPlayerRequestId > 0L) {
+            navController.navigate(activeSession.tvPlayerRoute()) { launchSingleTop = true }
+        }
+    }
+
     Box(modifier = Modifier.fillMaxSize()) {
         NavHost(
             navController = navController,
@@ -471,26 +508,13 @@ internal fun TvNavHost(
                     session = activePlaybackSession,
                     isTv = true,
                     onResume = {
-                        navController.navigate(
-                            TvRoutes.player(
-                                url = activePlaybackSession.url,
-                                fallbackUrl = activePlaybackSession.fallbackUrl,
-                                title = activePlaybackSession.title,
-                                mediaId = activePlaybackSession.mediaId,
-                                mediaType = activePlaybackSession.mediaType,
-                                posterUrl = activePlaybackSession.posterUrl,
-                                backdropUrl = activePlaybackSession.backdropUrl,
-                                seasonNumber = activePlaybackSession.seasonNumber,
-                                episodeNumber = activePlaybackSession.episodeNumber,
-                                showTmdbId = activePlaybackSession.showTmdbId,
-                                showImdbId = activePlaybackSession.showImdbId,
-                                startPositionMs = activePlaybackSession.positionMs,
-                                autoSourceSelection = activePlaybackSession.autoSourceSelection,
-                            ),
-                        ) { launchSingleTop = true }
+                        navController.navigate(activePlaybackSession.tvPlayerRoute()) {
+                            launchSingleTop = true
+                        }
                     },
                     onTogglePlayback = ActivePlaybackState::togglePlayback,
                     onStop = ActivePlaybackState::stopAndClear,
+                    requestInitialFocus = true,
                 )
             }
         }
