@@ -10,9 +10,11 @@ import io.ktor.client.statement.HttpResponse
 import io.ktor.client.statement.bodyAsChannel
 import io.ktor.http.HttpHeaders
 import io.ktor.utils.io.readAvailable
+import kotlinx.serialization.DeserializationStrategy
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.serializer
 import kotlinx.serialization.descriptors.PrimitiveKind
 import kotlinx.serialization.descriptors.PrimitiveSerialDescriptor
 import kotlinx.serialization.descriptors.SerialDescriptor
@@ -35,6 +37,8 @@ private const val XTREAM_ALL_STREAM_MAX_JSON_BODY_BYTES = 16 * 1024 * 1024
 private const val XTREAM_SERIES_INFO_MAX_JSON_BODY_BYTES = 4 * 1024 * 1024
 private const val XTREAM_READ_CHUNK_BYTES = 32 * 1024
 private const val XTREAM_INITIAL_BODY_BUFFER_BYTES = 64 * 1024
+private const val XTREAM_WRAPPED_LIST_MAX_JSON_BODY_BYTES = 2 * 1024 * 1024
+private const val XTREAM_MAX_JSON_ITEM_BYTES = 512 * 1024
 
 class XtreamResponseTooLargeException(
     val limitBytes: Int,
@@ -218,25 +222,18 @@ class XtreamClient(
         extraParams: Map<String, String> = emptyMap(),
         maxBytes: Int = XTREAM_MAX_JSON_BODY_BYTES,
     ): List<T> {
-        val raw = xtreamHttpClient.get("${server.trimEnd('/')}/player_api.php") {
+        val response = xtreamHttpClient.get("${server.trimEnd('/')}/player_api.php") {
             parameter("username", username)
             parameter("password", password)
             parameter("action", action)
             parameter("_t", Clock.System.now().toEpochMilliseconds().toString())
             extraParams.forEach { (key, value) -> parameter(key, value) }
-        }.safeXtreamBodyAsText(maxBytes = maxBytes)
-        return decodeFlexibleList<T>(raw)
-    }
-
-    private inline fun <reified T> decodeFlexibleList(raw: String): List<T> {
-        return runCatching {
-            json.decodeFromString<List<T>>(raw)
-        }.getOrElse {
-            val element = json.parseToJsonElement(raw)
-            element.flexRows().mapNotNull { row ->
-                runCatching { json.decodeFromJsonElement<T>(row) }.getOrNull()
-            }
         }
+        return response.decodeXtreamJsonList(
+            json = json,
+            deserializer = serializer<T>(),
+            maxBytes = maxBytes,
+        )
     }
 
     private suspend fun HttpResponse.safeXtreamBodyAsText(
@@ -276,6 +273,32 @@ class XtreamClient(
             total = newTotal
         }
         return bytes.decodeToString(0, total)
+    }
+
+    private suspend fun <T> HttpResponse.decodeXtreamJsonList(
+        json: Json,
+        deserializer: DeserializationStrategy<T>,
+        maxBytes: Int,
+    ): List<T> {
+        val declaredLength = headers[HttpHeaders.ContentLength]?.toLongOrNull()
+        if (declaredLength != null && declaredLength > maxBytes) {
+            throw XtreamResponseTooLargeException(maxBytes, declaredLength)
+        }
+
+        val decoder = XtreamJsonListStreamDecoder(
+            json = json,
+            deserializer = deserializer,
+            maxBytes = maxBytes,
+        )
+        val channel = bodyAsChannel()
+        val chunk = ByteArray(minOf(XTREAM_READ_CHUNK_BYTES, maxBytes + 1))
+        while (true) {
+            val read = channel.readAvailable(chunk, 0, chunk.size)
+            if (read < 0) break
+            if (read == 0) continue
+            decoder.consume(chunk, 0, read)
+        }
+        return decoder.finish()
     }
 
     /**
@@ -399,6 +422,201 @@ class XtreamClient(
             )
         }
     }
+}
+
+/**
+ * Incrementally decodes the normal Xtream top-level JSON array one row at a
+ * time. This intentionally avoids holding the complete response as both a
+ * ByteArray and a UTF-16 String, which can exhaust the 192 MB Fire TV heap.
+ * Small non-standard object-wrapped responses retain the compatibility path.
+ */
+internal class XtreamJsonListStreamDecoder<T>(
+    private val json: Json,
+    private val deserializer: DeserializationStrategy<T>,
+    private val maxBytes: Int,
+) {
+    private enum class Mode {
+        BEFORE_ROOT,
+        ARRAY_BETWEEN_ITEMS,
+        ARRAY_ITEM,
+        ARRAY_SCALAR,
+        WRAPPED_OBJECT,
+        DONE,
+    }
+
+    private var mode = Mode.BEFORE_ROOT
+    private var totalBytes = 0
+    private var itemDepth = 0
+    private var inString = false
+    private var escaped = false
+    private var seenItems = 0
+    private var failedItems = 0
+    private val decoded = mutableListOf<T>()
+    private val itemBuffer = GrowingXtreamByteBuffer(XTREAM_MAX_JSON_ITEM_BYTES)
+    private val wrappedBuffer = GrowingXtreamByteBuffer(
+        minOf(maxBytes, XTREAM_WRAPPED_LIST_MAX_JSON_BODY_BYTES),
+    )
+
+    fun consume(bytes: ByteArray, offset: Int = 0, length: Int = bytes.size - offset) {
+        require(offset >= 0 && length >= 0 && offset + length <= bytes.size)
+        repeat(length) { index ->
+            consumeByte(bytes[offset + index])
+        }
+    }
+
+    fun finish(): List<T> {
+        when (mode) {
+            Mode.BEFORE_ROOT -> return emptyList()
+            Mode.ARRAY_BETWEEN_ITEMS, Mode.ARRAY_SCALAR, Mode.ARRAY_ITEM -> {
+                error("Incomplete Xtream JSON array response.")
+            }
+            Mode.WRAPPED_OBJECT -> {
+                val raw = wrappedBuffer.decodeToString()
+                val rows = json.parseToJsonElement(raw).flexRows()
+                return rows.mapNotNull { row ->
+                    runCatching { json.decodeFromJsonElement(deserializer, row) }.getOrNull()
+                }
+            }
+            Mode.DONE -> Unit
+        }
+        if (seenItems > 0 && decoded.isEmpty() && failedItems > 0) {
+            error("Xtream JSON response contained no decodable rows.")
+        }
+        return decoded
+    }
+
+    private fun consumeByte(byte: Byte) {
+        totalBytes++
+        if (totalBytes > maxBytes) {
+            throw XtreamResponseTooLargeException(maxBytes)
+        }
+
+        when (mode) {
+            Mode.BEFORE_ROOT -> consumeBeforeRoot(byte)
+            Mode.ARRAY_BETWEEN_ITEMS -> consumeBetweenItems(byte)
+            Mode.ARRAY_ITEM -> consumeArrayItem(byte)
+            Mode.ARRAY_SCALAR -> consumeArrayScalar(byte)
+            Mode.WRAPPED_OBJECT -> wrappedBuffer.append(byte)
+            Mode.DONE -> if (!byte.isJsonWhitespace()) {
+                error("Unexpected data after Xtream JSON array.")
+            }
+        }
+    }
+
+    private fun consumeBeforeRoot(byte: Byte) {
+        if (byte.isJsonWhitespace() || byte.isUtf8BomByte()) return
+        when (byte.toInt().toChar()) {
+            '[' -> mode = Mode.ARRAY_BETWEEN_ITEMS
+            '{' -> {
+                mode = Mode.WRAPPED_OBJECT
+                wrappedBuffer.append(byte)
+            }
+            else -> error("Xtream list response must be a JSON array or object.")
+        }
+    }
+
+    private fun consumeBetweenItems(byte: Byte) {
+        if (byte.isJsonWhitespace() || byte.toInt().toChar() == ',') return
+        when (byte.toInt().toChar()) {
+            ']' -> mode = Mode.DONE
+            '{', '[' -> {
+                mode = Mode.ARRAY_ITEM
+                itemDepth = 1
+                inString = false
+                escaped = false
+                itemBuffer.reset()
+                itemBuffer.append(byte)
+            }
+            else -> {
+                mode = Mode.ARRAY_SCALAR
+                inString = byte.toInt().toChar() == '"'
+                escaped = false
+            }
+        }
+    }
+
+    private fun consumeArrayItem(byte: Byte) {
+        itemBuffer.append(byte)
+        val char = byte.toInt().toChar()
+        if (inString) {
+            when {
+                escaped -> escaped = false
+                char == '\\' -> escaped = true
+                char == '"' -> inString = false
+            }
+            return
+        }
+        when (char) {
+            '"' -> inString = true
+            '{', '[' -> itemDepth++
+            '}', ']' -> {
+                itemDepth--
+                if (itemDepth == 0) {
+                    decodeCurrentItem()
+                    mode = Mode.ARRAY_BETWEEN_ITEMS
+                }
+            }
+        }
+    }
+
+    private fun consumeArrayScalar(byte: Byte) {
+        val char = byte.toInt().toChar()
+        if (inString) {
+            when {
+                escaped -> escaped = false
+                char == '\\' -> escaped = true
+                char == '"' -> inString = false
+            }
+            return
+        }
+        when (char) {
+            '"' -> inString = true
+            ',' -> mode = Mode.ARRAY_BETWEEN_ITEMS
+            ']' -> mode = Mode.DONE
+        }
+    }
+
+    private fun decodeCurrentItem() {
+        seenItems++
+        val row = runCatching {
+            json.decodeFromString(deserializer, itemBuffer.decodeToString())
+        }.getOrNull()
+        if (row == null) {
+            failedItems++
+        } else {
+            decoded += row
+        }
+        itemBuffer.reset()
+    }
+}
+
+private class GrowingXtreamByteBuffer(private val maxBytes: Int) {
+    private var bytes = ByteArray(minOf(1024, maxBytes.coerceAtLeast(1)))
+    private var size = 0
+
+    fun append(byte: Byte) {
+        if (size >= maxBytes) error("Xtream JSON value exceeded $maxBytes bytes.")
+        if (size == bytes.size) {
+            bytes = bytes.copyOf(minOf(maxBytes, bytes.size * 2))
+        }
+        bytes[size++] = byte
+    }
+
+    fun reset() {
+        size = 0
+    }
+
+    fun decodeToString(): String = bytes.decodeToString(0, size)
+}
+
+private fun Byte.isJsonWhitespace(): Boolean = when (toInt().toChar()) {
+    ' ', '\t', '\r', '\n' -> true
+    else -> false
+}
+
+private fun Byte.isUtf8BomByte(): Boolean {
+    val value = toInt() and 0xff
+    return value == 0xef || value == 0xbb || value == 0xbf
 }
 
 // --- API Response Models ---
