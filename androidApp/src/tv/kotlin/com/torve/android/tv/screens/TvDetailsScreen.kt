@@ -326,21 +326,25 @@ fun TvDetailsScreen(
     }
 
     // Surface stream errors as visible notifications
-    LaunchedEffect(state.streamsError) {
-        state.streamsError?.let { error ->
-            TvNotificationQueue.clear(TV_USENET_PREPARING_NOTIFICATION_TAG)
-            TvNotificationQueue.clear(TV_STREAM_RESOLVING_NOTIFICATION_TAG)
-            TvNotificationQueue.post(resolveTvDetailMessage(context, error), NotificationType.ERROR)
+    LaunchedEffect(state.streamsError, state.resolvedStream, state.isLoadingStreams, state.isResolving) {
+        val error = state.streamsError ?: return@LaunchedEffect
+        if (state.resolvedStream != null || state.isLoadingStreams || state.isResolving) {
+            return@LaunchedEffect
         }
+        TvNotificationQueue.clear(TV_USENET_PREPARING_NOTIFICATION_TAG)
+        TvNotificationQueue.clear(TV_STREAM_RESOLVING_NOTIFICATION_TAG)
+        TvNotificationQueue.post(resolveTvDetailMessage(context, error), NotificationType.ERROR)
     }
 
-    LaunchedEffect(state.resolveError) {
-        state.resolveError?.let { error ->
-            TvNotificationQueue.clear(TV_USENET_PREPARING_NOTIFICATION_TAG)
-            TvNotificationQueue.clear(TV_STREAM_RESOLVING_NOTIFICATION_TAG)
-            resolvingEpisodeTarget = null
-            TvNotificationQueue.post(resolveTvDetailMessage(context, error), NotificationType.ERROR)
+    LaunchedEffect(state.resolveError, state.resolvedStream, state.isResolving) {
+        val error = state.resolveError ?: return@LaunchedEffect
+        if (state.resolvedStream != null || state.isResolving) {
+            return@LaunchedEffect
         }
+        TvNotificationQueue.clear(TV_USENET_PREPARING_NOTIFICATION_TAG)
+        TvNotificationQueue.clear(TV_STREAM_RESOLVING_NOTIFICATION_TAG)
+        resolvingEpisodeTarget = null
+        TvNotificationQueue.post(resolveTvDetailMessage(context, error), NotificationType.ERROR)
     }
 
     LaunchedEffect(state.isLoadingStreams, state.isResolving, state.showStreamPicker, state.resolvedStream) {

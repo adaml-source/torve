@@ -2,6 +2,8 @@ package com.torve.android.ui.navigation
 
 import android.net.Uri
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutHorizontally
@@ -67,6 +69,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.zIndex
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -1678,6 +1681,15 @@ fun TorveNavGraph(
                     navArgument("fallbackUrl") { type = NavType.StringType; defaultValue = "" },
                     navArgument("autoSourceSelection") { type = NavType.BoolType; defaultValue = false },
                 ),
+                // Player startup is already CPU-, codec-, and allocation-heavy on
+                // older Fire TV hardware. Avoid composing the details screen and
+                // the full player simultaneously during Navigation's default
+                // AnimatedContent transition; that overlap can starve input long
+                // enough for Fire OS to raise an ANR.
+                enterTransition = { EnterTransition.None },
+                exitTransition = { ExitTransition.None },
+                popEnterTransition = { EnterTransition.None },
+                popExitTransition = { ExitTransition.None },
             ) { backStackEntry ->
                 if (isLocked(PremiumFeature.STREAM_PLAYBACK)) {
                     PaywallScreen(
@@ -2292,6 +2304,17 @@ internal fun PersistentPlaybackBar(
     onStop: () -> Unit,
     requestInitialFocus: Boolean = false,
 ) {
+    if (isTv) {
+        TvPersistentPlaybackBar(
+            session = session,
+            onResume = onResume,
+            onTogglePlayback = onTogglePlayback,
+            onStop = onStop,
+            requestInitialFocus = requestInitialFocus,
+        )
+        return
+    }
+
     var focused by remember { mutableStateOf(false) }
     val resumeFocusRequester = remember { FocusRequester() }
     val progress = if (session.durationMs > 0L) {
@@ -2388,6 +2411,153 @@ internal fun PersistentPlaybackBar(
             color = Amber,
             trackColor = Color.White.copy(alpha = 0.12f),
         )
+    }
+}
+
+@Composable
+private fun TvPersistentPlaybackBar(
+    session: ActivePlaybackSession,
+    onResume: () -> Unit,
+    onTogglePlayback: () -> Unit,
+    onStop: () -> Unit,
+    requestInitialFocus: Boolean,
+) {
+    val returnFocusRequester = remember { FocusRequester() }
+    val toggleFocusRequester = remember { FocusRequester() }
+    val stopFocusRequester = remember { FocusRequester() }
+    var focusedAction by remember { mutableStateOf<String?>(null) }
+    val progress = if (session.durationMs > 0L) {
+        (session.positionMs.toFloat() / session.durationMs).coerceIn(0f, 1f)
+    } else {
+        0f
+    }
+
+    LaunchedEffect(requestInitialFocus, session.url) {
+        if (!requestInitialFocus) return@LaunchedEffect
+        repeat(5) { attempt ->
+            withFrameNanos { }
+            if (attempt > 0) delay(120L)
+            runCatching { returnFocusRequester.requestFocus() }
+            if (attempt >= 2 && focusedAction == "return") return@LaunchedEffect
+        }
+    }
+
+    Column(
+        modifier = Modifier
+            .width(480.dp)
+            .clip(RoundedCornerShape(14.dp))
+            .background(Color(0xF2181C25))
+            .border(
+                width = if (focusedAction != null) 2.dp else 1.dp,
+                color = if (focusedAction != null) Amber else Color.White.copy(alpha = 0.18f),
+                shape = RoundedCornerShape(14.dp),
+            ),
+    ) {
+        Column(
+            modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 12.dp),
+        ) {
+            Text(
+                text = session.title.ifBlank { "Now playing" },
+                color = Color.White,
+                style = MaterialTheme.typography.titleSmall,
+                maxLines = 1,
+            )
+            Text(
+                text = stringResource(
+                    if (session.isPlaying) R.string.player_background_playing
+                    else R.string.player_background_paused,
+                ),
+                color = Color.White.copy(alpha = 0.68f),
+                style = MaterialTheme.typography.labelSmall,
+                maxLines = 1,
+            )
+            Text(
+                text = stringResource(R.string.player_background_hold_back_hint),
+                color = Amber,
+                style = MaterialTheme.typography.labelSmall,
+                maxLines = 1,
+            )
+        }
+
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 10.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            TvPlaybackBarButton(
+                label = stringResource(R.string.player_background_return),
+                icon = Icons.Filled.PlayArrow,
+                focused = focusedAction == "return",
+                onFocused = { focusedAction = if (it) "return" else focusedAction.takeUnless { value -> value == "return" } },
+                onClick = onResume,
+                modifier = Modifier
+                    .weight(1.2f)
+                    .focusRequester(returnFocusRequester)
+                    .focusProperties { right = toggleFocusRequester },
+            )
+            TvPlaybackBarButton(
+                label = stringResource(
+                    if (session.isPlaying) R.string.common_pause else R.string.common_play,
+                ),
+                icon = if (session.isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
+                focused = focusedAction == "toggle",
+                onFocused = { focusedAction = if (it) "toggle" else focusedAction.takeUnless { value -> value == "toggle" } },
+                onClick = onTogglePlayback,
+                modifier = Modifier
+                    .weight(1f)
+                    .focusRequester(toggleFocusRequester)
+                    .focusProperties {
+                        left = returnFocusRequester
+                        right = stopFocusRequester
+                    },
+            )
+            TvPlaybackBarButton(
+                label = stringResource(R.string.player_background_stop),
+                icon = Icons.Filled.Close,
+                focused = focusedAction == "stop",
+                onFocused = { focusedAction = if (it) "stop" else focusedAction.takeUnless { value -> value == "stop" } },
+                onClick = onStop,
+                modifier = Modifier
+                    .weight(0.9f)
+                    .focusRequester(stopFocusRequester)
+                    .focusProperties { left = toggleFocusRequester },
+            )
+        }
+
+        LinearProgressIndicator(
+            progress = { progress },
+            modifier = Modifier.fillMaxWidth().height(3.dp),
+            color = Amber,
+            trackColor = Color.White.copy(alpha = 0.12f),
+        )
+    }
+}
+
+@Composable
+private fun TvPlaybackBarButton(
+    label: String,
+    icon: ImageVector,
+    focused: Boolean,
+    onFocused: (Boolean) -> Unit,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    androidx.compose.material3.Button(
+        onClick = onClick,
+        modifier = modifier.onFocusChanged { onFocused(it.isFocused) },
+        colors = androidx.compose.material3.ButtonDefaults.buttonColors(
+            containerColor = if (focused) Amber else Color.White.copy(alpha = 0.10f),
+            contentColor = if (focused) Color.Black else Color.White,
+        ),
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(
+            horizontal = 10.dp,
+            vertical = 8.dp,
+        ),
+    ) {
+        Icon(imageVector = icon, contentDescription = null, modifier = Modifier.size(18.dp))
+        Spacer(modifier = Modifier.width(6.dp))
+        Text(text = label, maxLines = 1)
     }
 }
 

@@ -1259,6 +1259,52 @@ fun PlayerScreen(
         }
     }
 
+    fun stopAndExitPlayer() {
+        if (playerExitInFlight) return
+        playerExitInFlight = true
+        retainPlaybackOnExit = false
+        ActivePlaybackState.stopAndClear()
+        runCatching { engine.stop() }
+        onBack()
+    }
+
+    fun recoverFromPlaybackFailure(reason: String, errorCode: Int) {
+        if (codecFallbackInProgress || playerExitInFlight) return
+        android.util.Log.w(
+            "Player",
+            "$reason error ($errorCode) - attempting silent source fallback",
+        )
+        currentStreamHostKey?.let { StreamRuntimeTelemetry.recordFatalError(it) }
+        codecFallbackInProgress = true
+        scope.launch(kotlinx.coroutines.Dispatchers.Main) {
+            errorMessage = null
+            val switched = if (fallbackUrl.isNotBlank() && !codecFallbackUsed) {
+                val resumePositionMs = maxOf(engine.state.positionMs, currentPosition)
+                    .coerceAtLeast(0L)
+                codecFallbackUsed = true
+                currentUrl = fallbackUrl
+                resetPlaybackHealthWindow()
+                if (resumePositionMs > 0L) {
+                    pendingAutoFallbackResumePositionMs = resumePositionMs
+                    pendingAutoFallbackResumeDeadlineMs =
+                        SystemClock.elapsedRealtime() + 30_000L
+                }
+                engine.stop()
+                requestPlayback(fallbackUrl)
+                true
+            } else if (autoSourceSelection) {
+                trySwitchToStableSource(reason)
+            } else {
+                false
+            }
+            if (!switched) {
+                stopAndExitPlayer()
+            }
+            delay(3_000L)
+            codecFallbackInProgress = false
+        }
+    }
+
     BackHandler {
         if (!handleBackAction()) {
             requestExitPlayer()
@@ -1781,41 +1827,14 @@ fun PlayerScreen(
         }
         engine.addListener(listener)
 
-        // Wire codec-error recovery for ExoPlayer
+        // Wire decoder and malformed-container recovery through the same
+        // source-level fallback path.
         if (engine is ExoPlayerEngine) {
-            // On video decoder failure, silently switch to
-            // fallback URL (HLS transcode) or go back. Never show error to user.
             engine.onCodecError = { errorCode ->
-                android.util.Log.w("Player", "Codec error ($errorCode) — attempting silent fallback")
-                currentStreamHostKey?.let { StreamRuntimeTelemetry.recordFatalError(it) }
-                codecFallbackInProgress = true
-                scope.launch(kotlinx.coroutines.Dispatchers.Main) {
-                    errorMessage = null // clear any error that snuck in
-                    val switched = if (fallbackUrl.isNotBlank() && !codecFallbackUsed) {
-                        val resumePositionMs = maxOf(engine.state.positionMs, currentPosition).coerceAtLeast(0L)
-                        codecFallbackUsed = true
-                        currentUrl = fallbackUrl
-                        resetPlaybackHealthWindow()
-                        if (resumePositionMs > 0L) {
-                            pendingAutoFallbackResumePositionMs = resumePositionMs
-                            pendingAutoFallbackResumeDeadlineMs = SystemClock.elapsedRealtime() + 30_000L
-                        }
-                        engine.stop()
-                        requestPlayback(fallbackUrl)
-                        true
-                    } else if (autoSourceSelection) {
-                        trySwitchToStableSource("codec_error")
-                    } else {
-                        false
-                    }
-                    if (!switched) {
-                        // No fallback available — silently go back
-                        requestExitPlayer()
-                    }
-                    // Allow errors again after a short delay for the new stream to start
-                    kotlinx.coroutines.delay(3000)
-                    codecFallbackInProgress = false
-                }
+                recoverFromPlaybackFailure("codec_error", errorCode)
+            }
+            engine.onRecoverableSourceError = { errorCode ->
+                recoverFromPlaybackFailure("container_error", errorCode)
             }
         }
 
@@ -1965,6 +1984,8 @@ fun PlayerScreen(
             engine.removeListener(listener)
             mpvView = null
             if (engine is ExoPlayerEngine) {
+                engine.onCodecError = null
+                engine.onRecoverableSourceError = null
                 detachExoPlayerView()
             }
             if (!retainPlaybackOnExit) {
@@ -1982,9 +2003,17 @@ fun PlayerScreen(
     }
 
     // Position updates for ExoPlayer (MPV uses property observers)
-    LaunchedEffect(isPlaying, useMpv) {
+    LaunchedEffect(isPlaying, useMpv, isTv, showControls) {
         if (useMpv) return@LaunchedEffect // MPV updates via callbacks
-        val positionUpdateIntervalMs = if (isTv) 1_000L else 500L
+        // The monolithic player tree is expensive to recompose on first-generation
+        // Fire TV hardware. Keep progress fluid while controls are visible, but
+        // avoid rebuilding it every second when only the video surface is shown.
+        val positionUpdateIntervalMs = when {
+            isTv && showControls -> 1_000L
+            isTv -> 3_000L
+            showControls -> 500L
+            else -> 2_000L
+        }
         val progressSaveTickCount = (10_000L / positionUpdateIntervalMs).toInt()
         var saveCounter = 0
         while (isPlaying) {
@@ -2707,7 +2736,7 @@ fun PlayerScreen(
                     runCatching { playerRootFocusRequester.requestFocus() }
                 }
             },
-            onExit = ::requestExitPlayer,
+            onExit = ::stopAndExitPlayer,
             modifier = Modifier
                 .align(Alignment.TopCenter)
                 .padding(top = 72.dp),

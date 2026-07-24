@@ -92,6 +92,14 @@ class ExoPlayerEngine(
     var onCodecError: ((errorCode: Int) -> Unit)? = null
 
     /**
+     * Set by the player screen to recover from a malformed or incorrectly labelled
+     * media container at the stream-selection layer. ExoPlayer reports some MKV
+     * parser failures as ERROR_CODE_UNSPECIFIED, so classification also inspects
+     * the exception chain instead of relying on the numeric error code alone.
+     */
+    var onRecoverableSourceError: ((errorCode: Int) -> Unit)? = null
+
+    /**
      * Gives the live TV screen one last chance to move playback to the alternate engine before
      * ExoPlayer declares the channel audio-incompatible and disables audio.
      */
@@ -187,6 +195,22 @@ class ExoPlayerEngine(
 
         override fun onPlayerError(error: PlaybackException) {
             Log.e(TAG, "Playback failure ${error.playbackFailureSummary()}")
+            val causeChain = error.buildCauseChainSummary()
+            if (
+                currentPlaybackContext == null &&
+                isRecoverableContainerFailure(error.errorCode, causeChain)
+            ) {
+                val callback = onRecoverableSourceError
+                if (callback != null) {
+                    Log.w(
+                        TAG,
+                        "Recoverable container failure; requesting source fallback: " +
+                            causeChain.take(320),
+                    )
+                    callback(error.errorCode)
+                    return
+                }
+            }
             // When no compatibility failure handler is set (TV live playback),
             // skip all custom audio recovery — let ExoPlayer + FFmpeg handle
             // codec fallback automatically via setEnableDecoderFallback(true),
@@ -233,7 +257,6 @@ class ExoPlayerEngine(
             if (isCodecError) {
                 val player = exoPlayer
                 val msg = error.message.orEmpty()
-                val causeChain = error.buildCauseChainSummary()
                 val selectedAudio = player?.selectedAudioTrackSnapshot()
                 val isAudioCodecError = msg.contains("AudioRenderer", ignoreCase = true) ||
                     msg.contains("AudioSink", ignoreCase = true) ||

@@ -1,5 +1,7 @@
 package com.torve.android.ui.player
 
+import android.os.Handler
+import android.os.Looper
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -35,6 +37,8 @@ data class ActivePlaybackSession(
  * automatically when PiP state changes (controls hide/show, immersive restore).
  */
 object ActivePlaybackState {
+    private val mainHandler = Handler(Looper.getMainLooper())
+
     /** True while a video player is actively playing (not paused, not ended). */
     @Volatile
     var isPlaying: Boolean = false
@@ -65,16 +69,34 @@ object ActivePlaybackState {
                 isPlaying = state.isPlaying,
             )
         }
+
+        override fun onError(message: String) {
+            // Defer removal and release until PlayerEngine finishes dispatching
+            // the current listener callback.
+            mainHandler.post {
+                if (retainedEngine != null) stopAndClear()
+            }
+        }
     }
 
     internal fun takeRetainedEngine(url: String): ExoPlayerEngine? {
         val engine = retainedEngine ?: return null
-        if (session?.url == url) return engine
+        if (session?.url == url) {
+            engine.removeListener(retainedListener)
+            retainedEngine = null
+            session = null
+            isPlaying = engine.state.isPlaying
+            return engine
+        }
         stopAndClear()
         return null
     }
 
     internal fun retain(engine: ExoPlayerEngine, descriptor: ActivePlaybackSession) {
+        // Full-screen callbacks close over a disposed navigation composition.
+        // Background playback owns only the retained listener below.
+        engine.onCodecError = null
+        engine.onRecoverableSourceError = null
         if (retainedEngine !== engine) {
             retainedEngine?.let { old ->
                 old.removeListener(retainedListener)
@@ -106,6 +128,8 @@ object ActivePlaybackState {
     fun stopAndClear() {
         retainedEngine?.let { engine ->
             engine.removeListener(retainedListener)
+            engine.onCodecError = null
+            engine.onRecoverableSourceError = null
             runCatching { engine.stop() }
             runCatching { engine.release() }
         }

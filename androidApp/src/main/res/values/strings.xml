@@ -1726,6 +1726,8 @@
     <string name="player_background_playing">Playing in background · Press Select to return</string>
     <string name="player_background_paused">Paused · Press Select to return</string>
     <string name="player_background_hold_back_hint">Hold Back anywhere to return to the player</string>
+    <string name="player_background_return">Return</string>
+    <string name="player_background_stop">Stop</string>
 
     <!-- Detail Screen -->
     <string name="detail_in_library">In Library</string>

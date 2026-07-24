@@ -81,6 +81,7 @@ import com.torve.platform.torveVerboseLog
 import com.torve.presentation.contentpolicy.ContentPolicyFilter
 import com.torve.presentation.settings.SettingsViewModel
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CancellationException
 import kotlinx.datetime.Clock
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -172,6 +173,7 @@ class DetailViewModel(
     private val _state = MutableStateFlow(DetailUiState())
     val state: StateFlow<DetailUiState> = _state.asStateFlow()
     private var warmupJob: Job? = null
+    private var streamFetchJob: Job? = null
     private var currentType: String? = null
     private var currentId: Int? = null
     /**
@@ -806,13 +808,16 @@ class DetailViewModel(
             return
         }
 
-        scope.launch {
+        streamFetchJob?.cancel()
+        streamFetchJob = scope.launch {
             _state.update {
                 it.copy(
                     isLoadingStreams = true,
                     isLoadingMoreSources = false,
                     streamsError = null,
                     streamsErrorHint = null,
+                    resolveError = null,
+                    resolvedStream = null,
                     streamFilterHiddenCount = 0,
                     streams = emptyList(),
                     startupCandidates = emptyList(),
@@ -842,17 +847,20 @@ class DetailViewModel(
                     addons = addons,
                     debridAccounts = debridAccounts,
                 ) ?: return@launch
-                val startupSnapshot = runCatching {
-                    streamRepo.getWarmStartupCandidates(request)
-                        ?: streamRepo.getStartupCandidates(request)
-                }.getOrDefault(
-                    com.torve.domain.model.StartupCandidatesSnapshot(
+                val emptyStartupSnapshot = com.torve.domain.model.StartupCandidatesSnapshot(
                         request = request,
                         readinessState = com.torve.domain.model.ReadinessState.EMPTY,
                         candidates = emptyList(),
-                    ),
-                )
-                val startupFetch = runCatching {
+                    )
+                val startupSnapshot = try {
+                    streamRepo.getWarmStartupCandidates(request)
+                        ?: streamRepo.getStartupCandidates(request)
+                } catch (cancellationException: CancellationException) {
+                    throw cancellationException
+                } catch (_: Exception) {
+                    emptyStartupSnapshot
+                }
+                val startupResult = try {
                     streamRepo.fetchStreamsWithFeedback(
                         type = item.type,
                         imdbId = imdbId,
@@ -865,8 +873,11 @@ class DetailViewModel(
                         preferences = preferences,
                         fetchPolicy = StreamFetchPolicy.PLAYBACK_STARTUP,
                     )
+                } catch (cancellationException: CancellationException) {
+                    throw cancellationException
+                } catch (_: Exception) {
+                    null
                 }
-                val startupResult = startupFetch.getOrNull()
                 val startupStreams = startupResult?.streams.orEmpty()
                 val startupFilterHiddenCount = startupResult?.filterFeedback?.hiddenCount ?: 0
                 val startupPresentation = prioritizeStreamsForPresentation(
@@ -1078,6 +1089,8 @@ class DetailViewModel(
                 } else {
                     _state.update { it.copy(showStreamPicker = true) }
                 }
+            } catch (cancellationException: CancellationException) {
+                throw cancellationException
             } catch (e: Exception) {
                 _state.update {
                     it.copy(
@@ -1687,6 +1700,9 @@ class DetailViewModel(
                         resolvedStream = resolved,
                         isResolving = false,
                         showStreamPicker = false,
+                        resolveError = null,
+                        streamsError = null,
+                        autoPlayFailed = false,
                         autoPlayMessage = if (attemptIndex > 0) {
                             "Switched to a more stable source"
                         } else {
@@ -1703,6 +1719,9 @@ class DetailViewModel(
                             resolvedStream = resolved.copy(url = readiness.finalUrl),
                             isResolving = false,
                             showStreamPicker = false,
+                            resolveError = null,
+                            streamsError = null,
+                            autoPlayFailed = false,
                             autoPlayMessage = if (attemptIndex > 0) {
                                 "Switched to a more stable source"
                             } else {
@@ -1726,6 +1745,8 @@ class DetailViewModel(
                     autoResolveStream(streams, attemptIndex + 1, preferences)
                 }
             }
+        } catch (cancellationException: CancellationException) {
+            throw cancellationException
         } catch (e: Exception) {
             com.torve.data.addon.StreamRuntimeTelemetry.recordFatalError(hostKey)
             streamRepo.reportPlaybackOutcome(stream, provider, success = false)
@@ -1833,6 +1854,9 @@ class DetailViewModel(
                         resolvedStream = resolved,
                         isResolving = false,
                         showStreamPicker = false,
+                        resolveError = null,
+                        streamsError = null,
+                        autoPlayFailed = false,
                         autoPlayMessage = if (attemptIndex > 0) {
                             "Switched to a more stable source"
                         } else {
@@ -1849,6 +1873,9 @@ class DetailViewModel(
                             resolvedStream = resolved.copy(url = readiness.finalUrl),
                             isResolving = false,
                             showStreamPicker = false,
+                            resolveError = null,
+                            streamsError = null,
+                            autoPlayFailed = false,
                             autoPlayMessage = if (attemptIndex > 0) {
                                 "Switched to a more stable source"
                             } else {
@@ -1880,6 +1907,8 @@ class DetailViewModel(
                     )
                 }
             }
+        } catch (cancellationException: CancellationException) {
+            throw cancellationException
         } catch (e: Exception) {
             com.torve.data.addon.StreamRuntimeTelemetry.recordFatalError(hostKey)
             streamRepo.reportPlaybackOutcome(stream, provider, success = false)
@@ -2027,12 +2056,15 @@ class DetailViewModel(
     }
 
     fun resolveStream(stream: ParsedStream, provider: DebridServiceType?, apiKey: String) {
-        scope.launch {
+        streamFetchJob?.cancel()
+        streamFetchJob = scope.launch {
             cancelPreparingLoop()
             _state.update {
                 it.copy(
                     isResolving = true,
                     resolveError = null,
+                    resolvedStream = null,
+                    streamsError = null,
                     autoPlayMessage = resolvingStatusMessage(stream, provider),
                     preparing = null,
                 )
@@ -2055,6 +2087,8 @@ class DetailViewModel(
                     return@launch
                 }
                 dispatchResolved(stream, provider, apiKey, resolved)
+            } catch (cancellationException: CancellationException) {
+                throw cancellationException
             } catch (e: Exception) {
                 println("TORVE_RESOLVE: Exception ${e::class.simpleName}")
                 streamRepo.reportPlaybackOutcome(stream, provider, success = false)
@@ -2107,6 +2141,9 @@ class DetailViewModel(
                     autoPlayMessage = null,
                     showStreamPicker = false,
                     preparing = null,
+                    resolveError = null,
+                    streamsError = null,
+                    autoPlayFailed = false,
                 )
             }
             return
@@ -2120,6 +2157,9 @@ class DetailViewModel(
                         autoPlayMessage = null,
                         showStreamPicker = false,
                         preparing = null,
+                        resolveError = null,
+                        streamsError = null,
+                        autoPlayFailed = false,
                     )
                 }
             }
@@ -2295,6 +2335,9 @@ class DetailViewModel(
                             resolvedStream = resolved,
                             isResolving = false,
                             autoPlayMessage = "Switched to a more stable source",
+                            resolveError = null,
+                            streamsError = null,
+                            autoPlayFailed = false,
                         )
                     }
                 } else {
