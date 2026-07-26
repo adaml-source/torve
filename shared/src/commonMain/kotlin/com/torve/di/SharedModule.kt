@@ -213,6 +213,15 @@ val sharedModule = module {
     single { JellyfinLibraryOverlayService(get(), get(), get()) }
     single { PlexLibraryOverlayService(get(), get(), get()) }
     single<LibraryOverlayService> { CompositeLibraryOverlayService(get(), get(), get(), get()) }
+    single<com.torve.domain.integrations.MediaLifecycleService> {
+        com.torve.data.integrations.SeerrMediaLifecycleService(get(), get(), get())
+    }
+    single<com.torve.domain.integrations.AutomationInstanceRepository> {
+        com.torve.data.integrations.PrefsAutomationInstanceRepository(get(), get())
+    }
+    single<com.torve.data.integrations.AutomationAdminClient> {
+        com.torve.data.integrations.ServarrAdminClient(get())
+    }
 
     // Trakt
     single<TraktAuthScopeProvider> { PersistedTraktAuthScopeProvider(get()) }
@@ -832,6 +841,7 @@ val sharedModule = module {
             telemetry = get(),
             watchStateRemoteSource = getOrNull(),
             watchSessionRecorder = get(),
+            mediaLifecycleService = getOrNull(),
         )
     }
     factoryOf(::PersonViewModel)
@@ -840,6 +850,7 @@ val sharedModule = module {
             get(), get(), get(), get(), get(), get(), get(), get(), get(), get(),
             get(), get(), get(), get(), get(), get(), get(), get(), get(), get(),
             get(),
+            mediaLifecycleService = getOrNull(),
         ).also { vm ->
             // Wire integration save callback — breaks circular dep by using lazy resolution.
             vm.onIntegrationSaved = { type, credential, label ->
@@ -885,6 +896,12 @@ val sharedModule = module {
             baseUrlProvider = { com.torve.data.auth.AuthClient.DEFAULT_BASE_URL },
             installationIdProvider = { get<com.torve.domain.device.DeviceIdProvider>().getDeviceId() },
         )
+    }
+    factory {
+        com.torve.presentation.integrations.AutomationSettingsViewModel(get(), get(), get())
+    }
+    factory {
+        com.torve.presentation.integrations.AutomationAdministrationViewModel(get(), get())
     }
     single {
         com.torve.data.support.SupportApi(

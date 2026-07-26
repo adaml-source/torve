@@ -1,7 +1,5 @@
 package com.torve.android.tv.components
 
-import androidx.compose.animation.Crossfade
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
@@ -29,19 +27,17 @@ fun TvHeroBackground(
         val imageUrl = featuredItem?.backdropUrl ?: featuredItem?.posterUrl
         val scale = ContentScale.Crop
 
-        Crossfade(
-            targetState = imageUrl,
-            animationSpec = tween(500),
-            label = "heroBackdrop",
-        ) { url ->
-            if (url != null) {
-                AsyncImage(
-                    model = url,
-                    contentDescription = null,
-                    modifier = Modifier.fillMaxSize(),
-                    contentScale = scale,
-                )
-            }
+        if (imageUrl != null) {
+            // The root already waits for content readiness and coalesces rapid
+            // route changes before attaching this image. Avoid a Crossfade here:
+            // it keeps two full-screen bitmaps composed during the most
+            // performance-sensitive TV transition window.
+            AsyncImage(
+                model = imageUrl,
+                contentDescription = null,
+                modifier = Modifier.fillMaxSize(),
+                contentScale = scale,
+            )
         }
 
         // Cinematic gradient — same as mobile HeroGradient

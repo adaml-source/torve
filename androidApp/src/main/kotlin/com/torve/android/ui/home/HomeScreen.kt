@@ -35,8 +35,10 @@ import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Bookmark
 import androidx.compose.material.icons.rounded.BookmarkBorder
 import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.LiveTv
 import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.Search
+import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -63,6 +65,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -80,6 +83,7 @@ import com.torve.android.ui.components.ShimmerBox
 import com.torve.android.ui.components.LocalCardStyle
 import com.torve.android.ui.components.LocalRatingPrefs
 import com.torve.android.ui.components.MultiRatingPills
+import com.torve.android.ui.image.MobileImagePrefetcher
 import com.torve.android.ui.subscription.NeedsVerificationBanner
 import com.torve.android.ui.subscription.NeedsVerificationToastEffect
 import com.torve.domain.model.MediaRatings
@@ -126,9 +130,12 @@ fun HomeScreen(
     onSeeAllClick: (String) -> Unit = {},
     onProviderClick: (providerId: Int, providerName: String) -> Unit = { _, _ -> },
     onPersonClick: (Int) -> Unit = {},
+    onChannelsClick: () -> Unit = {},
+    onSettingsClick: () -> Unit = {},
     accessTier: AccessTier = AccessTier.FREE,
     onLockedFeatureClick: (PremiumFeature) -> Unit = {},
     mediaType: String = "all",
+    isActive: Boolean = true,
     resetScrollToTop: Boolean = false,
     onScrollReset: () -> Unit = {},
     viewModel: HomeViewModel = koinInject(),
@@ -156,6 +163,7 @@ fun HomeScreen(
         PremiumAccess.isPremiumLocked(PremiumFeature.WATCHLIST_EDIT, accessTier)
     }
     val homeListState = rememberLazyListState()
+    val context = LocalContext.current
 
     // Snapshot content can arrive before the persisted section layout. Waiting
     // for both avoids LazyColumn key anchoring keeping a later shelf at the top
@@ -189,6 +197,16 @@ fun HomeScreen(
                 }
             })
         }.filter { it.items.isNotEmpty() }
+    }
+    LaunchedEffect(filteredShelves, state.popularActors, state.popularDirectors, isActive) {
+        if (isActive) {
+            MobileImagePrefetcher.prefetchHome(
+                context = context,
+                shelves = filteredShelves,
+                actors = state.popularActors,
+                directors = state.popularDirectors,
+            )
+        }
     }
     val filteredContinueWatching = remember(state.continueWatching, mediaType) {
         if (mediaType == "all") state.continueWatching
@@ -261,6 +279,9 @@ fun HomeScreen(
         presetId = null,
         globalDefaultPresetId = settingsState.globalDefaultPresetId,
     )
+    val showSearchBar = remember(sectionConfigs) {
+        sectionConfigs.any { it.section == HomeSection.SEARCH_BAR && it.enabled }
+    }
     androidx.compose.runtime.CompositionLocalProvider(
         LocalCardStyle provides defaultCardStyle,
         LocalRatingPrefs provides settingsState.ratingPrefs,
@@ -329,6 +350,14 @@ fun HomeScreen(
                     state = homeListState,
                     contentPadding = PaddingValues(bottom = 24.dp),
                 ) {
+                    if (!showSearchBar) {
+                        item(key = "mobile_quick_access") {
+                            MobileHomeQuickAccessHeader(
+                                onChannelsClick = onChannelsClick,
+                                onSettingsClick = onSettingsClick,
+                            )
+                        }
+                    }
                     if (subscriptionState.needsVerification) {
                         item(key = "needs_verification") {
                             NeedsVerificationBanner(
@@ -848,9 +877,6 @@ fun HomeScreen(
         }
 
         // ── Search ──
-        val showSearchBar = remember(sectionConfigs) {
-            sectionConfigs.any { it.section == HomeSection.SEARCH_BAR && it.enabled }
-        }
         val isSearchMode = showSearchBar && state.searchQuery.length >= 2
         if (isSearchMode) {
             LazyVerticalGrid(
@@ -925,22 +951,81 @@ fun HomeScreen(
                     )
                     .statusBarsPadding(),
             ) {
-                Box(
+                Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                        .padding(start = 16.dp, end = 8.dp, top = 8.dp, bottom = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    HomeSearchBar(
-                        searchQuery = state.searchQuery,
-                        onQueryChange = { viewModel.updateSearchQuery(it) },
-                        onClearSearch = { viewModel.clearSearch() },
-                    )
+                    Box(modifier = Modifier.weight(1f)) {
+                        HomeSearchBar(
+                            searchQuery = state.searchQuery,
+                            onQueryChange = { viewModel.updateSearchQuery(it) },
+                            onClearSearch = { viewModel.clearSearch() },
+                        )
+                    }
+                    IconButton(onClick = onChannelsClick) {
+                        Icon(
+                            imageVector = Icons.Rounded.LiveTv,
+                            contentDescription = stringResource(R.string.nav_channels),
+                            tint = Amber,
+                        )
+                    }
+                    IconButton(onClick = onSettingsClick) {
+                        Icon(
+                            imageVector = Icons.Rounded.Settings,
+                            contentDescription = stringResource(R.string.nav_settings),
+                            tint = Torve.colors.textSecondary,
+                        )
+                    }
                 }
             }
         }
 
     }
 } // end CompositionLocalProvider
+}
+
+@Composable
+private fun MobileHomeQuickAccessHeader(
+    onChannelsClick: () -> Unit,
+    onSettingsClick: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .statusBarsPadding()
+            .padding(start = 16.dp, end = 8.dp, top = 8.dp, bottom = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = "Torve",
+                style = MaterialTheme.typography.headlineSmall,
+                color = Torve.colors.textPrimary,
+                fontWeight = FontWeight.Bold,
+            )
+            Text(
+                text = stringResource(R.string.home_outcome_tagline),
+                style = MaterialTheme.typography.bodySmall,
+                color = Torve.colors.textTertiary,
+            )
+        }
+        IconButton(onClick = onChannelsClick) {
+            Icon(
+                imageVector = Icons.Rounded.LiveTv,
+                contentDescription = stringResource(R.string.nav_channels),
+                tint = Amber,
+            )
+        }
+        IconButton(onClick = onSettingsClick) {
+            Icon(
+                imageVector = Icons.Rounded.Settings,
+                contentDescription = stringResource(R.string.nav_settings),
+                tint = Torve.colors.textSecondary,
+            )
+        }
+    }
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

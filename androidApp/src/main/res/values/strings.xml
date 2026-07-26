@@ -40,6 +40,7 @@
     <string name="home_something_went_wrong">Something went wrong</string>
     <string name="home_try_again">Try Again</string>
     <string name="home_search_hint">Search movies &amp; TV shows…</string>
+    <string name="home_outcome_tagline">Find it. Play the best available source.</string>
     <string name="home_continue_watching">Continue Watching</string>
     <string name="home_continue_watching_empty">Start watching a movie or show to track your progress here.</string>
     <string name="home_recommended">Recommended For You</string>
@@ -1295,7 +1296,12 @@
     <string name="tv_iptv_recently_viewed">Recently Viewed</string>
     <string name="tv_iptv_favorites">Favorites</string>
     <string name="tv_iptv_no_playlists_title">No Channels Configured</string>
-    <string name="tv_iptv_no_playlists_subtitle">Add a channel source on your phone, then sync to TV</string>
+    <string name="tv_iptv_no_playlists_subtitle">Sync your saved sources, or manage channel sources in Settings</string>
+    <string name="tv_iptv_sign_in_title">Sign in to restore channels</string>
+    <string name="tv_iptv_sign_in_subtitle">This TV is not signed in. Sign in to securely restore your saved channel sources.</string>
+    <string name="tv_iptv_sign_in_action">Sign in</string>
+    <string name="tv_iptv_sync_sources">Sync sources</string>
+    <string name="tv_iptv_manage_sources">Manage sources</string>
     <string name="tv_iptv_all_channels">All Channels</string>
     <string name="tv_iptv_channels_count">%d channels</string>
     <string name="tv_iptv_now_playing">Now Playing</string>
@@ -2198,6 +2204,8 @@
     <string name="transfer_category_ai_keys_desc">OpenAI, Claude, Gemini, Perplexity, DeepSeek, MDBList, and OMDB keys.</string>
     <string name="transfer_category_panda">Panda / Usenet</string>
     <string name="transfer_category_panda_desc">Panda token, NzbDAV credentials, and locally cached Panda provider keys.</string>
+    <string name="transfer_category_arr_stack">Media automation</string>
+    <string name="transfer_category_arr_stack_desc">Seerr, Sonarr, Radarr, Prowlarr, Bazarr, and Tdarr API keys plus server URLs.</string>
     <string name="transfer_selected_categories">selected categories</string>
     <string name="transfer_send_ready_body">Encrypted %1$d credential record(s) for: %2$s.</string>
     <string name="transfer_send_ready_body_with_config">Encrypted %1$d credential record(s) + %2$d config record(s) for: %3$s.</string>
@@ -2254,5 +2262,27 @@
     <string name="transfer_skipped_unknown_keys">Skipped unknown keys: %1$s.</string>
     <string name="transfer_skipped_config_keys">Skipped config keys not on the receiver allowlist: %1$s.</string>
     <string name="transfer_import_missing_companion_config">Imported credentials but missing companion config for: %1$s. Fill in the matching server URL in Settings to finish setup.</string>
+    <string name="integrations_seerr_title">Seerr requests</string>
+    <string name="integrations_seerr_desc">Request preferred-quality movies and seasons through your household Sonarr and Radarr setup.</string>
+    <string name="integrations_automation_title">Media automation (advanced)</string>
+    <string name="integrations_automation_desc">Configure multiple Sonarr, Radarr, Prowlarr, Bazarr, or Tdarr instances.</string>
+    <string name="integrations_automation_admin_warning">These API keys can administer your media stack. They stay encrypted on this device unless you explicitly use encrypted device transfer.</string>
+    <string name="integrations_automation_service">Service</string>
+    <string name="integrations_automation_name">Instance name</string>
+    <string name="integrations_automation_role">Library role</string>
+    <string name="integrations_automation_standard">Standard library</string>
+    <string name="integrations_automation_uhd">4K / UHD library</string>
+    <string name="integrations_automation_default">Use as default for this service and quality</string>
+    <string name="integrations_tdarr_read_only_probe">Tdarr uses its documented read-only server status endpoint. No API key is required.</string>
+    <string name="integrations_save_test">Save and test</string>
+    <string name="detail_add_to_library">Add to my library</string>
+    <string name="detail_add_season_to_library">Add season %1$d to my library</string>
+    <string name="detail_library_request_pending">Waiting for approval</string>
+    <string name="detail_library_request_approved">Request approved</string>
+    <string name="detail_library_request_processing">Preparing library copy</string>
+    <string name="detail_library_request_partial">Partially available</string>
+    <string name="detail_library_request_available">Available in your library</string>
+    <string name="detail_library_request_retry">Retry library request</string>
+    <string name="detail_library_refresh">Refresh library status</string>
 </resources>
 

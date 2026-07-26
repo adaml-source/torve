@@ -56,6 +56,9 @@ import com.torve.data.mdblist.MdbListApi
 import com.torve.data.mdblist.RatingsEnricher
 import com.torve.domain.integrations.IntegrationSecretKey
 import com.torve.domain.integrations.IntegrationSecretStore
+import com.torve.domain.integrations.MediaLifecycleRequest
+import com.torve.domain.integrations.MediaLifecycleService
+import com.torve.domain.integrations.MediaLifecycleState
 import com.torve.data.usenet.UsenetMapper
 import com.torve.data.usenet.model.UsenetAvailability
 import com.torve.data.usenet.model.UsenetCandidatePayload
@@ -135,6 +138,7 @@ class DetailViewModel(
      */
     private val watchStateRemoteSource: com.torve.domain.integrations.WatchStateRemoteSource? = null,
     private val watchSessionRecorder: WatchSessionRecorder? = null,
+    private val mediaLifecycleService: MediaLifecycleService? = null,
 ) {
     private data class StreamPresentationResult(
         val ordered: List<ParsedStream>,
@@ -303,6 +307,10 @@ class DetailViewModel(
                     autoPlayMessage = null,
                     autoPlayFailed = false,
                     fallbackAttempt = 0,
+                    mediaLifecycleStatus = null,
+                    isLoadingMediaLifecycle = false,
+                    mediaLifecycleError = null,
+                    mediaLifecycleMessage = null,
                 )
             }
             try {
@@ -450,6 +458,7 @@ class DetailViewModel(
                 warmupLikelyPlaybackTarget(ContentWarmupTrigger.DETAIL_OPEN)
                 loadAvailability(item)
                 loadLibraryStatus(item)
+                loadMediaLifecycleStatus(item)
                 detailDiagLog("loadDetail about to call enrichRatings id=${item.id}")
                 enrichRatings(item)
             } catch (e: Exception) {
@@ -590,6 +599,134 @@ class DetailViewModel(
                 libraryOverlayService.isInLibrary(tmdbId, item.type)
             }.getOrDefault(false)
             _state.update { it.copy(isInLibrary = inLibrary) }
+        }
+    }
+
+    private fun loadMediaLifecycleStatus(item: MediaItem) {
+        val service = mediaLifecycleService ?: return
+        val tmdbId = item.tmdbId ?: return
+        scope.launch {
+            _state.update { current ->
+                if (current.mediaItem?.tmdbId == tmdbId) {
+                    current.copy(isLoadingMediaLifecycle = true, mediaLifecycleError = null)
+                } else current
+            }
+            val seasons = if (item.type == MediaType.SERIES) listOf(_state.value.selectedSeason) else emptyList()
+            val status = runCatching { service.getStatus(tmdbId, item.type, seasons = seasons) }
+                .getOrElse {
+                    _state.update { current ->
+                        if (current.mediaItem?.tmdbId == tmdbId) {
+                            current.copy(
+                                isLoadingMediaLifecycle = false,
+                                mediaLifecycleError = "Could not reach the library request service.",
+                            )
+                        } else current
+                    }
+                    return@launch
+                }
+            _state.update { current ->
+                if (current.mediaItem?.tmdbId == tmdbId) {
+                    current.copy(
+                        mediaLifecycleStatus = status,
+                        isLoadingMediaLifecycle = false,
+                        mediaLifecycleError = null,
+                    )
+                } else current
+            }
+        }
+    }
+
+    fun refreshMediaLifecycleStatus() {
+        _state.value.mediaItem?.let(::loadMediaLifecycleStatus)
+    }
+
+    /**
+     * Sends a household-safe Seerr request. For series the current season is
+     * the conservative default; explicit callers can pass multiple seasons.
+     */
+    fun requestPermanentCopy(
+        is4k: Boolean = false,
+        seasons: List<Int>? = null,
+    ) {
+        if (_state.value.isLoadingMediaLifecycle) return
+        val service = mediaLifecycleService ?: return
+        val item = _state.value.mediaItem ?: return
+        val tmdbId = item.tmdbId ?: return
+        val requestedSeasons = when {
+            item.type != MediaType.SERIES -> emptyList()
+            seasons != null -> seasons.distinct().filter { it >= 0 }
+            else -> listOf(_state.value.selectedSeason).filter { it >= 0 }
+        }
+        scope.launch {
+            _state.update {
+                it.copy(
+                    isLoadingMediaLifecycle = true,
+                    mediaLifecycleError = null,
+                    mediaLifecycleMessage = null,
+                )
+            }
+            val status = runCatching {
+                service.request(
+                    MediaLifecycleRequest(
+                        tmdbId = tmdbId,
+                        mediaType = item.type,
+                        seasons = requestedSeasons,
+                        is4k = is4k,
+                    ),
+                )
+            }.getOrElse {
+                _state.update {
+                    it.copy(
+                        isLoadingMediaLifecycle = false,
+                        mediaLifecycleError = "The library request could not be submitted.",
+                    )
+                }
+                return@launch
+            }
+            _state.update {
+                it.copy(
+                    mediaLifecycleStatus = status,
+                    isLoadingMediaLifecycle = false,
+                    mediaLifecycleError = null,
+                    mediaLifecycleMessage = when (status.state) {
+                        MediaLifecycleState.PENDING_APPROVAL -> "Request sent for approval"
+                        MediaLifecycleState.AVAILABLE -> "Already available in your library"
+                        else -> "Added to your library queue"
+                    },
+                )
+            }
+            if (status.state == MediaLifecycleState.AVAILABLE) loadLibraryStatus(item)
+        }
+    }
+
+    fun retryMediaLifecycleRequest() {
+        if (_state.value.isLoadingMediaLifecycle) return
+        val service = mediaLifecycleService ?: return
+        val requestId = _state.value.mediaLifecycleStatus?.requestId ?: return
+        scope.launch {
+            _state.update {
+                it.copy(
+                    isLoadingMediaLifecycle = true,
+                    mediaLifecycleError = null,
+                    mediaLifecycleMessage = null,
+                )
+            }
+            val status = runCatching { service.retry(requestId) }.getOrElse {
+                _state.update {
+                    it.copy(
+                        isLoadingMediaLifecycle = false,
+                        mediaLifecycleError = "The failed library request could not be retried.",
+                    )
+                }
+                return@launch
+            }
+            _state.update {
+                it.copy(
+                    mediaLifecycleStatus = status,
+                    isLoadingMediaLifecycle = false,
+                    mediaLifecycleMessage = "Library request restarted",
+                )
+            }
         }
     }
 

@@ -626,8 +626,9 @@ fun TvRoot(
         }
         logoLoadingByKey[cacheKey] = true
         try {
-            // Short debounce: keeps network usage controlled without delaying UI as much.
-            delay(80)
+            // Let rapid carousel movement settle before a logo/detail request.
+            // The currently focused title remains visible immediately.
+            delay(180)
             // Check if focus already moved on
             if (focusedMediaItem?.let { it.tmdbId ?: it.id.extractTmdbIdOrNull() } != tmdbId) return@LaunchedEffect
             val type = if (item.type == MediaType.MOVIE) "movie" else "tv"
@@ -785,7 +786,10 @@ fun TvRoot(
     }
 
     val contentTopRoute = selectedTopRoute
-    val heroPreviewRoute = if (isRailFocused) highlightedTopRoute else selectedTopRoute
+    // Keep hero work tied to the committed content route. Highlighting several
+    // rail destinations in quick succession must not start full-screen image
+    // decodes and metadata requests for every transient focus target.
+    val heroPreviewRoute = selectedTopRoute
     val heroRoutes = remember { setOf(TvRoutes.HOME, TvRoutes.MOVIES, TvRoutes.SHOWS, TvRoutes.LIBRARY) }
     val showRail = !isPlayerRoute && !isSubRouteActive &&
         !(selectedTopRoute == TvRoutes.IPTV && hideRailForIptv)
@@ -1459,9 +1463,19 @@ fun TvRoot(
     }
 
     /* ── Featured hero item ────────────────────────────────────────────────────────────── */
-    // Use highlightedTopRoute so the hero updates immediately during rail navigation,
-    // not after the 250ms debounce that controls selectedTopRoute.
     val heroRoute = heroPreviewRoute
+    val heroContentReady = firstContentFocusByRoute.containsKey(heroRoute)
+    var heroArtworkReadyRoute by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(heroRoute, showHero, heroContentReady, isSubRouteActive) {
+        heroArtworkReadyRoute = null
+        if (!showHero || !heroContentReady || isSubRouteActive) return@LaunchedEffect
+        // Give cached text/rows and their focus nodes the first render budget.
+        // If focus keeps moving, this effect is cancelled and only the final
+        // destination gets expensive logo/backdrop work.
+        delay(if (heroRoute == TvRoutes.HOME) 320L else 180L)
+        heroArtworkReadyRoute = heroRoute
+    }
+    val heroArtworkReady = showHero && heroArtworkReadyRoute == heroRoute
     val featuredCacheKey = "featured:$heroRoute"
     val featuredInitialValue = remember(featuredCacheKey) {
         TvScreenCache.get<MediaItem>(featuredCacheKey)
@@ -1470,9 +1484,14 @@ fun TvRoot(
     val featuredItems by produceState<List<MediaItem>>(
         initialValue = listOfNotNull(featuredInitialValue),
         heroRoute,
+        heroArtworkReady,
         signedInUserId,
         metadataRepo,
     ) {
+        if (!heroArtworkReady) {
+            value = listOfNotNull(featuredInitialValue)
+            return@produceState
+        }
         val loaded = try {
             when (heroRoute) {
                 TvRoutes.MOVIES -> metadataRepo.getTrending("movie")
@@ -1532,10 +1551,12 @@ fun TvRoot(
     }
 
     LaunchedEffect(
+        heroArtworkReady,
         displayedFeaturedItem?.type,
         displayedFeaturedItem?.id,
         displayedFeaturedItem?.tmdbId,
     ) {
+        if (!heroArtworkReady) return@LaunchedEffect
         val item = displayedFeaturedItem ?: return@LaunchedEffect
         val tmdbId = item.tmdbId ?: item.id.extractTmdbIdOrNull() ?: return@LaunchedEffect
         val cacheKey = "${item.type}:$tmdbId"
@@ -1565,11 +1586,13 @@ fun TvRoot(
 
     /* ── Section titles ────────────────────────────────────────────────────────────────── */
     LaunchedEffect(
+        heroArtworkReady,
         displayedFeaturedItem?.type,
         displayedFeaturedItem?.id,
         displayedFeaturedItem?.tmdbId,
         displayedFeaturedItem?.logoUrl,
     ) {
+        if (!heroArtworkReady) return@LaunchedEffect
         val item = displayedFeaturedItem ?: return@LaunchedEffect
         val tmdbId = item.tmdbId ?: item.id.extractTmdbIdOrNull() ?: return@LaunchedEffect
         val cacheKey = "${item.type}:$tmdbId"
@@ -1639,6 +1662,25 @@ fun TvRoot(
         } else {
             logoCache["${heroBaseItem.type}:$tmdbId"]?.let { logoUrl -> enriched.copy(logoUrl = logoUrl) } ?: enriched
         }
+    }
+
+    var settledHeroArtworkItem by remember { mutableStateOf<MediaItem?>(null) }
+    LaunchedEffect(
+        heroArtworkReady,
+        displayedHeroItem?.type,
+        displayedHeroItem?.tmdbId,
+        displayedHeroItem?.id,
+        displayedHeroItem?.backdropUrl,
+    ) {
+        if (!heroArtworkReady) {
+            settledHeroArtworkItem = null
+            return@LaunchedEffect
+        }
+        val candidate = displayedHeroItem ?: return@LaunchedEffect
+        // Keep the previous backdrop while D-pad focus is moving. Only the item
+        // that remains focused gets handed to Coil for a full-screen decode.
+        delay(160L)
+        settledHeroArtworkItem = candidate
     }
 
     val sectionTitle = when (contentTopRoute) {
@@ -2147,7 +2189,17 @@ fun TvRoot(
                         if (route == selectedTopRoute) return@TvNavRail
                         if (isSubRouteActive) return@TvNavRail
                         pendingNavJob = navDebounceScope.launch {
-                            delay(80)
+                            // Coalesce remote key repeats into one destination.
+                            // Center/Right still commits immediately through
+                            // onMoveToContent; focus-only previews wait briefly.
+                            delay(220)
+                            if (
+                                highlightedTopRoute != route ||
+                                !isRailFocused ||
+                                isSubRouteActive
+                            ) {
+                                return@launch
+                            }
                             visitedTabs = visitedTabs + route
                             if (route == TvRoutes.SETTINGS && selectedTopRoute != TvRoutes.SETTINGS) {
                                 settingsDestination = TvSettingsDestination.MAIN
@@ -2158,10 +2210,8 @@ fun TvRoot(
                 )
         },
         background = {
-            if (showHero) {
-                key(displayedHeroItem?.tmdbId, displayedHeroItem?.type) {
-                    TvHeroBackground(featuredItem = displayedHeroItem)
-                }
+            if (showHero && heroArtworkReady && settledHeroArtworkItem != null) {
+                TvHeroBackground(featuredItem = settledHeroArtworkItem)
             }
         },
         content = {
@@ -2241,6 +2291,7 @@ fun TvRoot(
                             }
                         },
                         logoLookupInFlight = heroLogoLookupInFlight,
+                        allowLogoArtwork = heroArtworkReady,
                     )
                 }
 
@@ -2524,6 +2575,7 @@ fun TvRoot(
                                         TvIptvScreen(
                                             viewModel = channelsViewModel,
                                             railFocusRequester = railFocusRequester,
+                                            isSignedIn = isSignedIn,
                                             onChannelPlay = { channel ->
                                                 if (TvPremiumAccess.isPremiumLocked(TvEntitledFeature.STREAM_PLAYBACK, accessTier)) {
                                                     requestLifetimeUnlock(TvEntitledFeature.STREAM_PLAYBACK)
@@ -2544,6 +2596,24 @@ fun TvRoot(
                                                 pendingSettingsAppLinkItemId = TvSettingsItemIds.LIBRARY_MANAGE_CHANNELS
                                                 settingsDestination = TvSettingsDestination.MAIN
                                                 settingsFocusStateMachine.selectedCategory = TvSettingsCategory.LIBRARY
+                                                pendingNavJob?.cancel()
+                                                pendingNavJob = null
+                                                selectedTopRoute = TvRoutes.SETTINGS
+                                                highlightedTopRoute = TvRoutes.SETTINGS
+                                                confirmedTopRoute = TvRoutes.SETTINGS
+                                                pendingRailEntryRoute = null
+                                                pendingContentEntryRoute = TvRoutes.SETTINGS
+                                                focusRestoreTrigger++
+                                            },
+                                            onOpenAccountSettings = {
+                                                openSettingsToChannels = false
+                                                pendingSettingsAppLinkItemId = TvSettingsItemIds.ACCOUNT_AUTH_EMAIL
+                                                settingsDestination = TvSettingsDestination.MAIN
+                                                settingsFocusStateMachine.selectedCategory = TvSettingsCategory.ACCOUNT
+                                                settingsFocusStateMachine.requestRestore(
+                                                    itemId = TvSettingsItemIds.ACCOUNT_AUTH_EMAIL,
+                                                    reason = "channels_sign_in",
+                                                )
                                                 pendingNavJob?.cancel()
                                                 pendingNavJob = null
                                                 selectedTopRoute = TvRoutes.SETTINGS
@@ -2736,6 +2806,9 @@ fun TvRoot(
                                                 onNavigateToPandaSetup = {
                                                     pendingPandaSetupReturnSettingsItemId = TvSettingsItemIds.ADVANCED_PANDA
                                                     navController.navigate(TvRoutes.PANDA_SETUP)
+                                                },
+                                                onNavigateToAutomationAdmin = {
+                                                    navController.navigate(TvRoutes.AUTOMATION_ADMIN)
                                                 },
                                                 onNavigateToSendCredentials = {
                                                     navController.navigate("transfer_send_tv")

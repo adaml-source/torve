@@ -363,7 +363,30 @@ class SecretsTransferApplier(
         if ((plexTokenShipped && !plexUrlShipped) || (jellyfinKeyShipped && !jellyfinUrlShipped)) {
             missing += SecretCategory.PLEX_JELLYFIN
         }
-        return missing
+        val arrCompanionPairs = listOf(
+            IntegrationSecretKey.SEERR_API_KEY to DefaultConfigKeyAllowlist.SEERR_SERVER_URL,
+            IntegrationSecretKey.SONARR_API_KEY to DefaultConfigKeyAllowlist.SONARR_SERVER_URL,
+            IntegrationSecretKey.RADARR_API_KEY to DefaultConfigKeyAllowlist.RADARR_SERVER_URL,
+            IntegrationSecretKey.PROWLARR_API_KEY to DefaultConfigKeyAllowlist.PROWLARR_SERVER_URL,
+            IntegrationSecretKey.BAZARR_API_KEY to DefaultConfigKeyAllowlist.BAZARR_SERVER_URL,
+            IntegrationSecretKey.TDARR_API_KEY to DefaultConfigKeyAllowlist.TDARR_SERVER_URL,
+        )
+        if (arrCompanionPairs.any { (secretKey, configKey) ->
+                payload.secrets.any { it.key == secretKey.name && it.subKey == null } &&
+                    configKey !in configKeysShipped
+            }
+        ) {
+            missing += SecretCategory.ARR_STACK
+        }
+        val scopedArrSecretShipped = payload.secrets.any {
+            it.category == SecretCategory.ARR_STACK && it.subKey != null
+        }
+        if (scopedArrSecretShipped &&
+            DefaultConfigKeyAllowlist.AUTOMATION_INSTANCES !in configKeysShipped
+        ) {
+            missing += SecretCategory.ARR_STACK
+        }
+        return missing.distinct()
     }
 
     private fun errMsg(t: Throwable): String = t.message ?: t::class.simpleName ?: "error"

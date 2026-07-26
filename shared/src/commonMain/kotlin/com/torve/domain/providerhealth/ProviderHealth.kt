@@ -22,6 +22,7 @@ enum class ProviderHealthCategory {
     TRAKT,
     SIMKL,
     PLAYBACK,
+    REQUEST_MANAGER,
 }
 
 /**

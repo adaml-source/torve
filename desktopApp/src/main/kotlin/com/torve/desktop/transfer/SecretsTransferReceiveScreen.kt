@@ -466,6 +466,7 @@ private fun transferCategoryTitles(): Map<SecretCategory, String> = mapOf(
     SecretCategory.TRAKT_SIMKL to ds("Trakt / SIMKL"),
     SecretCategory.AI_KEYS to ds("AI and metadata keys"),
     SecretCategory.PANDA to ds("Panda / Usenet"),
+    SecretCategory.ARR_STACK to ds("Media automation"),
 )
 
 private fun importTone(result: TransferImportResult): TorveBannerTone = when (result) {

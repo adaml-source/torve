@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
@@ -59,6 +60,7 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -109,12 +111,15 @@ private val genreOptions = listOf(
 @Composable
 fun SearchScreen(
     onMediaClick: (MediaItem) -> Unit,
+    isActive: Boolean = true,
     viewModel: SearchViewModel = koinInject(),
     settingsViewModel: SettingsViewModel = koinInject(),
     syncCoordinator: SyncCoordinator = koinInject(),
 ) {
     val state by viewModel.state.collectAsState()
-    LaunchedEffect(viewModel) { viewModel.ensureDiscovery() }
+    LaunchedEffect(viewModel, isActive) {
+        if (isActive) viewModel.ensureDiscovery()
+    }
     val syncState by syncCoordinator.state.collectAsState()
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -138,7 +143,8 @@ fun SearchScreen(
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .background(MaterialTheme.colorScheme.background),
+                .background(MaterialTheme.colorScheme.background)
+                .statusBarsPadding(),
         ) {
         // ── Search Input Row ──
         Row(
@@ -531,6 +537,7 @@ fun SearchScreen(
                         SearchResultsGrid(
                             items = displayItems,
                             onMediaClick = onMediaClick,
+                            generationKey = "${state.query.trim()}|${state.filter}",
                             hasMore = if (state.query.length >= 2) state.searchHasMore else state.discoverHasMore,
                             isLoadingMore = state.isLoadingMore,
                             onLoadMore = viewModel::loadMore,
@@ -550,6 +557,7 @@ fun SearchScreen(
                     SearchResultsGrid(
                         items = displayItems,
                         onMediaClick = onMediaClick,
+                        generationKey = "${state.query.trim()}|${state.filter}",
                         hasMore = if (state.query.length >= 2) state.searchHasMore else state.discoverHasMore,
                         isLoadingMore = state.isLoadingMore,
                         onLoadMore = viewModel::loadMore,
@@ -659,11 +667,19 @@ fun SearchScreen(
 private fun SearchResultsGrid(
     items: List<com.torve.domain.model.MediaItem>,
     onMediaClick: (com.torve.domain.model.MediaItem) -> Unit,
+    generationKey: String,
     hasMore: Boolean,
     isLoadingMore: Boolean,
     onLoadMore: () -> Unit,
 ) {
     val gridState = rememberLazyGridState()
+    var lastGenerationKey by rememberSaveable { mutableStateOf(generationKey) }
+    LaunchedEffect(generationKey) {
+        if (generationKey != lastGenerationKey) {
+            gridState.scrollToItem(0)
+            lastGenerationKey = generationKey
+        }
+    }
     val shouldLoadMore by remember(items.size, hasMore, isLoadingMore) {
         derivedStateOf {
             val lastVisible = gridState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1

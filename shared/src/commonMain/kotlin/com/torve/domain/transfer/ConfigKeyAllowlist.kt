@@ -32,10 +32,24 @@ class DefaultConfigKeyAllowlist : ConfigKeyAllowlist {
     companion object {
         const val PLEX_SERVER_URL = "plex_server_url"
         const val JELLYFIN_SERVER_URL = "jellyfin_server_url"
+        const val SEERR_SERVER_URL = "seerr_server_url"
+        const val SONARR_SERVER_URL = "sonarr_server_url"
+        const val RADARR_SERVER_URL = "radarr_server_url"
+        const val PROWLARR_SERVER_URL = "prowlarr_server_url"
+        const val BAZARR_SERVER_URL = "bazarr_server_url"
+        const val TDARR_SERVER_URL = "tdarr_server_url"
+        const val AUTOMATION_INSTANCES = "automation_instances_v1"
 
         val ALLOWLIST_V1: Set<String> = setOf(
             PLEX_SERVER_URL,
             JELLYFIN_SERVER_URL,
+            SEERR_SERVER_URL,
+            SONARR_SERVER_URL,
+            RADARR_SERVER_URL,
+            PROWLARR_SERVER_URL,
+            BAZARR_SERVER_URL,
+            TDARR_SERVER_URL,
+            AUTOMATION_INSTANCES,
         )
     }
 }

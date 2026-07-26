@@ -196,6 +196,46 @@ private fun EpgProgramme.matchesIptvSearch(query: String): Boolean =
         description?.contains(query, ignoreCase = true) == true ||
         category?.contains(query, ignoreCase = true) == true
 
+@Composable
+private fun TvEmptyChannelsAction(
+    label: String,
+    onClick: () -> Unit,
+    focusRequester: FocusRequester? = null,
+    onFocused: () -> Unit = {},
+) {
+    var focused by remember { mutableStateOf(false) }
+    Box(
+        modifier = Modifier
+            .width(220.dp)
+            .height(54.dp)
+            .then(
+                if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier,
+            )
+            .clip(RoundedCornerShape(16.dp))
+            .background(
+                if (focused) Amber.copy(alpha = 0.20f) else Graphite.copy(alpha = 0.90f),
+            )
+            .border(
+                width = if (focused) 2.dp else 1.dp,
+                color = if (focused) Amber else Steel.copy(alpha = 0.55f),
+                shape = RoundedCornerShape(16.dp),
+            )
+            .onFocusChanged { state ->
+                focused = state.isFocused
+                if (state.isFocused) onFocused()
+            }
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text = label,
+            color = if (focused) Snow else Silver,
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.SemiBold,
+        )
+    }
+}
+
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
 fun TvIptvScreen(
@@ -203,6 +243,8 @@ fun TvIptvScreen(
     heroOverlay: (@Composable () -> Unit)? = null,
     onChannelPlay: (Channel) -> Unit,
     onOpenEpgSettings: () -> Unit = {},
+    onOpenAccountSettings: () -> Unit = {},
+    isSignedIn: Boolean = true,
     onFirstContentRequester: (FocusRequester) -> Unit,
     onContentFocused: (FocusRequester) -> Unit,
     viewModel: ChannelsViewModel = koinInject(),
@@ -271,8 +313,6 @@ fun TvIptvScreen(
     var restoringShelfNames by remember(liveShelfSessionCacheKey) { mutableStateOf(emptySet<String>()) }
     var requestedListFocusCatalogKey by remember { mutableStateOf<String?>(null) }
 
-    onFirstContentRequester(sidebarFocusRequester)
-
     LaunchedEffect(isActive, focusedZone) {
         TvIptvRailState.hideRail.value = isActive && focusedZone == FocusZone.EPG_GRID
     }
@@ -337,6 +377,16 @@ fun TvIptvScreen(
     }
 
     if (!state.isLoading && !state.isLoadingChannels && state.playlists.isEmpty()) {
+        val primaryActionRequester = remember(isSignedIn) { FocusRequester() }
+        // Publish the requester on every composition so the root never retains
+        // the detached normal-sidebar requester while this empty state is shown.
+        onFirstContentRequester(primaryActionRequester)
+        LaunchedEffect(primaryActionRequester, shouldAutoFocus, isRailFocused) {
+            if (shouldAutoFocus && !isRailFocused) {
+                delay(60L)
+                runCatching { primaryActionRequester.requestFocus() }
+            }
+        }
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -345,18 +395,54 @@ fun TvIptvScreen(
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             Text(
-                text = stringResource(R.string.tv_iptv_no_playlists_title),
+                text = stringResource(
+                    if (isSignedIn) {
+                        R.string.tv_iptv_no_playlists_title
+                    } else {
+                        R.string.tv_iptv_sign_in_title
+                    },
+                ),
                 style = MaterialTheme.typography.headlineMedium,
                 color = Snow,
                 fontWeight = FontWeight.SemiBold,
             )
             Spacer(Modifier.height(12.dp))
             Text(
-                text = stringResource(R.string.tv_iptv_no_playlists_subtitle),
+                text = stringResource(
+                    if (isSignedIn) {
+                        R.string.tv_iptv_no_playlists_subtitle
+                    } else {
+                        R.string.tv_iptv_sign_in_subtitle
+                    },
+                ),
                 style = MaterialTheme.typography.bodyLarge,
                 color = Silver,
                 textAlign = TextAlign.Center,
             )
+            Spacer(Modifier.height(24.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                TvEmptyChannelsAction(
+                    label = stringResource(
+                        if (isSignedIn) R.string.tv_iptv_sync_sources else R.string.tv_iptv_sign_in_action,
+                    ),
+                    focusRequester = primaryActionRequester,
+                    onFocused = { onContentFocused(primaryActionRequester) },
+                    onClick = {
+                        if (isSignedIn) {
+                            viewModel.loadPlaylists(recoverEmptyCatalog = true)
+                            viewModel.loadFavorites()
+                        } else {
+                            onOpenAccountSettings()
+                        }
+                    },
+                )
+                if (isSignedIn) {
+                    TvEmptyChannelsAction(
+                        label = stringResource(R.string.tv_iptv_manage_sources),
+                        onClick = onOpenEpgSettings,
+                    )
+                }
+            }
         }
         return
     }
@@ -375,6 +461,8 @@ fun TvIptvScreen(
         }
         return
     }
+
+    onFirstContentRequester(sidebarFocusRequester)
 
     val allChannelsLabel = stringResource(R.string.tv_iptv_all_channels)
     val favoritesLabel = stringResource(R.string.tv_iptv_favorites)

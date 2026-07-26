@@ -17,6 +17,7 @@ import com.torve.db.TorveDatabase
 import com.torve.domain.integrations.IntegrationSecretKey
 import com.torve.domain.integrations.IntegrationSecretStore
 import com.torve.domain.integrations.LibraryOverlayService
+import com.torve.domain.integrations.MediaLifecycleService
 import com.torve.domain.model.CardOrientation
 import com.torve.domain.model.CardPrefs
 import com.torve.domain.model.CardStyle
@@ -110,6 +111,7 @@ class SettingsViewModel(
     private val settingsRefreshNotifier: SettingsRefreshNotifier,
     private val addonRepo: AddonRepository,
     private val userIdProvider: UserIdProvider,
+    private val mediaLifecycleService: MediaLifecycleService? = null,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private val _state = MutableStateFlow(SettingsUiState())
@@ -217,6 +219,7 @@ class SettingsViewModel(
         const val KEY_MDBLIST_API_KEY = "mdblist_api_key"
         const val KEY_JELLYFIN_SERVER_URL = "jellyfin_server_url"
         const val KEY_PLEX_SERVER_URL = "plex_server_url"
+        const val KEY_SEERR_SERVER_URL = "seerr_server_url"
         const val KEY_REGION_CODE = "content_region_code"
         const val KEY_RATING_PREFS = "rating_display_prefs"
         const val KEY_CARD_PREFS = "card_prefs"
@@ -505,45 +508,11 @@ class SettingsViewModel(
             }
             val dedupeResults = prefsRepo.getString(KEY_DEDUPE_RESULTS)?.toBooleanStrictOrNull() ?: true
 
-            // All integration secrets: secure store is the ONLY source of truth.
-            // Legacy pref keys are migrated once on first read, then deleted.
-            // This prevents stale credentials from surviving logout.
-            migrateSecretPref(KEY_CLAUDE_API_KEY, IntegrationSecretKey.CLAUDE_API_KEY)
-            migrateSecretPref(KEY_CHATGPT_API_KEY, IntegrationSecretKey.CHATGPT_API_KEY)
-            migrateSecretPref(KEY_GEMINI_API_KEY, IntegrationSecretKey.GEMINI_API_KEY)
-            migrateSecretPref(KEY_PERPLEXITY_API_KEY, IntegrationSecretKey.PERPLEXITY_API_KEY)
-            migrateSecretPref(KEY_DEEPSEEK_API_KEY, IntegrationSecretKey.DEEPSEEK_API_KEY)
-            migrateSecretPref(KEY_OMDB_API_KEY, IntegrationSecretKey.OMDB_API_KEY)
-            migrateSecretPref(KEY_MDBLIST_API_KEY, IntegrationSecretKey.MDBLIST_API_KEY)
-            migrateSecretPref("jellyfin_api_key", IntegrationSecretKey.JELLYFIN_API_KEY)
-
-            val aiProvider = prefsRepo.getString(KEY_AI_PROVIDER)?.let {
-                try { AiProvider.valueOf(it) } catch (_: Exception) { null }
-            } ?: AiProvider.CLAUDE
-            val claudeApiKey = integrationSecretStore.get(IntegrationSecretKey.CLAUDE_API_KEY) ?: ""
-            val chatGptApiKey = integrationSecretStore.get(IntegrationSecretKey.CHATGPT_API_KEY) ?: ""
-            val geminiApiKey = integrationSecretStore.get(IntegrationSecretKey.GEMINI_API_KEY) ?: ""
-            val perplexityApiKey = integrationSecretStore.get(IntegrationSecretKey.PERPLEXITY_API_KEY) ?: ""
-            val deepSeekApiKey = integrationSecretStore.get(IntegrationSecretKey.DEEPSEEK_API_KEY) ?: ""
-            val opensubtitlesApiKey = integrationSecretStore.get(IntegrationSecretKey.OPENSUBTITLES_API_KEY) ?: ""
-            val omdbApiKey = integrationSecretStore.get(IntegrationSecretKey.OMDB_API_KEY) ?: ""
-            val mdblistApiKey = integrationSecretStore.get(IntegrationSecretKey.MDBLIST_API_KEY) ?: ""
-            val jellyfinServerUrl = prefsRepo.getString(KEY_JELLYFIN_SERVER_URL) ?: ""
-            val jellyfinApiKey = integrationSecretStore.get(IntegrationSecretKey.JELLYFIN_API_KEY) ?: ""
-            val plexServerUrl = prefsRepo.getString(KEY_PLEX_SERVER_URL) ?: ""
-            val plexAccessToken = integrationSecretStore.get(IntegrationSecretKey.PLEX_ACCESS_TOKEN) ?: ""
-            val regionCode = prefsRepo.getString(KEY_REGION_CODE)?.uppercase()?.takeIf { it.length == 2 } ?: "US"
-            val ratingPrefs = prefsRepo.getString(KEY_RATING_PREFS)?.let {
-                try { jsonParser.decodeFromString<RatingDisplayPrefs>(it) } catch (_: Exception) { null }
-            }?.let(::sanitizeRatingPrefs) ?: RatingDisplayPrefs()
-            val legacyCardPrefs = prefsRepo.getString(KEY_CARD_PREFS)?.let {
-                try { jsonParser.decodeFromString<CardPrefs>(it) } catch (_: Exception) { null }
-            } ?: CardPrefs()
-
-            val (cardStylePresets, globalDefaultPresetId) = loadCardStylePresets(
-                legacyCardPrefs = legacyCardPrefs,
-                ratingPrefs = ratingPrefs,
-            )
+            // Keep integration loading separate from this already-large startup
+            // coroutine. Besides avoiding JVM method-size limits, each future
+            // provider can be added without making the core playback settings
+            // loader harder to review or test.
+            loadSavedIntegrationSettings()
 
             // Derive whether any enabled addon can produce streams — the
             // "stream" resource is the Stremio-addon contract for /stream/…
@@ -628,37 +597,13 @@ class SettingsViewModel(
                     regexPatterns = regexPatterns,
                     streamGroups = streamGroups,
                     dedupeResults = dedupeResults,
-                    aiProvider = aiProvider,
-                    claudeApiKey = claudeApiKey,
-                    chatGptApiKey = chatGptApiKey,
-                    geminiApiKey = geminiApiKey,
-                    perplexityApiKey = perplexityApiKey,
-                    deepSeekApiKey = deepSeekApiKey,
-                    opensubtitlesApiKey = opensubtitlesApiKey,
-                    omdbApiKey = omdbApiKey,
-                    omdbValidationResult = null,
-                    aiKeyValidationResult = null,
-                    mdblistApiKey = mdblistApiKey,
-                    jellyfinServerUrl = jellyfinServerUrl,
-                    jellyfinApiKey = jellyfinApiKey,
-                    jellyfinProfiles = if (jellyfinApiKey.isNotBlank()) it.jellyfinProfiles else emptyList(),
-                    selectedJellyfinUserId = if (jellyfinApiKey.isNotBlank()) it.selectedJellyfinUserId else null,
-                    jellyfinStatusMessage = null,
-                    plexServerUrl = plexServerUrl,
-                    plexAccessToken = plexAccessToken,
-                    plexConnected = plexAccessToken.isNotBlank(),
-                    plexError = null,
-                    regionCode = regionCode,
-                    ratingPrefs = ratingPrefs,
-                    cardStylePresets = cardStylePresets,
-                    globalDefaultPresetId = globalDefaultPresetId,
                 )
             }
 
             // Legacy migration block removed — migrateSecretPref() handles all
             // one-time imports from plaintext prefs → secure store above.
 
-            torveVerboseLog { "[SettingsLoad] debridConnected=${apiKey.isNotBlank()} traktConnected=${traktAccessToken.isNotBlank()} simklConnected=${simklAccessToken.isNotBlank()} ratingPrefs.enabled=${ratingPrefs.enabledProviders} maxRatingsOnCard=${ratingPrefs.maxRatingsOnCard} pillPosition=${ratingPrefs.pillPosition}" }
+            torveVerboseLog { "[SettingsLoad] debridConnected=${apiKey.isNotBlank()} traktConnected=${traktAccessToken.isNotBlank()} simklConnected=${simklAccessToken.isNotBlank()}" }
             if (apiKey.isNotBlank()) {
                 verifyDebridConnection()
             }
@@ -668,6 +613,82 @@ class SettingsViewModel(
             if (simklAccessToken.isNotBlank()) {
                 ensureSimklSessionReady()
             }
+        }
+    }
+
+    private suspend fun loadSavedIntegrationSettings() {
+        // The encrypted store is authoritative. Plaintext keys are migrated
+        // once and removed immediately.
+        migrateSecretPref(KEY_CLAUDE_API_KEY, IntegrationSecretKey.CLAUDE_API_KEY)
+        migrateSecretPref(KEY_CHATGPT_API_KEY, IntegrationSecretKey.CHATGPT_API_KEY)
+        migrateSecretPref(KEY_GEMINI_API_KEY, IntegrationSecretKey.GEMINI_API_KEY)
+        migrateSecretPref(KEY_PERPLEXITY_API_KEY, IntegrationSecretKey.PERPLEXITY_API_KEY)
+        migrateSecretPref(KEY_DEEPSEEK_API_KEY, IntegrationSecretKey.DEEPSEEK_API_KEY)
+        migrateSecretPref(KEY_OMDB_API_KEY, IntegrationSecretKey.OMDB_API_KEY)
+        migrateSecretPref(KEY_MDBLIST_API_KEY, IntegrationSecretKey.MDBLIST_API_KEY)
+        migrateSecretPref("jellyfin_api_key", IntegrationSecretKey.JELLYFIN_API_KEY)
+
+        val aiProvider = prefsRepo.getString(KEY_AI_PROVIDER)?.let {
+            runCatching { AiProvider.valueOf(it) }.getOrNull()
+        } ?: AiProvider.CLAUDE
+        val claudeApiKey = integrationSecretStore.get(IntegrationSecretKey.CLAUDE_API_KEY).orEmpty()
+        val chatGptApiKey = integrationSecretStore.get(IntegrationSecretKey.CHATGPT_API_KEY).orEmpty()
+        val geminiApiKey = integrationSecretStore.get(IntegrationSecretKey.GEMINI_API_KEY).orEmpty()
+        val perplexityApiKey = integrationSecretStore.get(IntegrationSecretKey.PERPLEXITY_API_KEY).orEmpty()
+        val deepSeekApiKey = integrationSecretStore.get(IntegrationSecretKey.DEEPSEEK_API_KEY).orEmpty()
+        val opensubtitlesApiKey = integrationSecretStore.get(IntegrationSecretKey.OPENSUBTITLES_API_KEY).orEmpty()
+        val omdbApiKey = integrationSecretStore.get(IntegrationSecretKey.OMDB_API_KEY).orEmpty()
+        val mdblistApiKey = integrationSecretStore.get(IntegrationSecretKey.MDBLIST_API_KEY).orEmpty()
+        val jellyfinServerUrl = prefsRepo.getString(KEY_JELLYFIN_SERVER_URL).orEmpty()
+        val jellyfinApiKey = integrationSecretStore.get(IntegrationSecretKey.JELLYFIN_API_KEY).orEmpty()
+        val plexServerUrl = prefsRepo.getString(KEY_PLEX_SERVER_URL).orEmpty()
+        val plexAccessToken = integrationSecretStore.get(IntegrationSecretKey.PLEX_ACCESS_TOKEN).orEmpty()
+        val seerrServerUrl = prefsRepo.getString(KEY_SEERR_SERVER_URL).orEmpty()
+        val seerrApiKey = integrationSecretStore.get(IntegrationSecretKey.SEERR_API_KEY).orEmpty()
+        val regionCode = prefsRepo.getString(KEY_REGION_CODE)?.uppercase()?.takeIf { it.length == 2 } ?: "US"
+        val ratingPrefs = prefsRepo.getString(KEY_RATING_PREFS)?.let {
+            runCatching { jsonParser.decodeFromString<RatingDisplayPrefs>(it) }.getOrNull()
+        }?.let(::sanitizeRatingPrefs) ?: RatingDisplayPrefs()
+        val legacyCardPrefs = prefsRepo.getString(KEY_CARD_PREFS)?.let {
+            runCatching { jsonParser.decodeFromString<CardPrefs>(it) }.getOrNull()
+        } ?: CardPrefs()
+        val (cardStylePresets, globalDefaultPresetId) = loadCardStylePresets(legacyCardPrefs, ratingPrefs)
+
+        _state.update {
+            it.copy(
+                aiProvider = aiProvider,
+                claudeApiKey = claudeApiKey,
+                chatGptApiKey = chatGptApiKey,
+                geminiApiKey = geminiApiKey,
+                perplexityApiKey = perplexityApiKey,
+                deepSeekApiKey = deepSeekApiKey,
+                opensubtitlesApiKey = opensubtitlesApiKey,
+                omdbApiKey = omdbApiKey,
+                omdbValidationResult = null,
+                aiKeyValidationResult = null,
+                mdblistApiKey = mdblistApiKey,
+                jellyfinServerUrl = jellyfinServerUrl,
+                jellyfinApiKey = jellyfinApiKey,
+                jellyfinProfiles = if (jellyfinApiKey.isNotBlank()) it.jellyfinProfiles else emptyList(),
+                selectedJellyfinUserId = if (jellyfinApiKey.isNotBlank()) it.selectedJellyfinUserId else null,
+                jellyfinStatusMessage = null,
+                plexServerUrl = plexServerUrl,
+                plexAccessToken = plexAccessToken,
+                plexConnected = plexAccessToken.isNotBlank(),
+                plexError = null,
+                seerrServerUrl = seerrServerUrl,
+                seerrApiKey = seerrApiKey,
+                seerrConnected = seerrServerUrl.isNotBlank() && seerrApiKey.isNotBlank(),
+                seerrStatusMessage = null,
+                regionCode = regionCode,
+                ratingPrefs = ratingPrefs,
+                cardStylePresets = cardStylePresets,
+                globalDefaultPresetId = globalDefaultPresetId,
+            )
+        }
+        torveVerboseLog {
+            "[SettingsLoad] ratingPrefs.enabled=${ratingPrefs.enabledProviders} " +
+                "maxRatingsOnCard=${ratingPrefs.maxRatingsOnCard} pillPosition=${ratingPrefs.pillPosition}"
         }
     }
 
@@ -1878,6 +1899,91 @@ class SettingsViewModel(
                 }
             }
             _state.update { it.copy(isPollingSimkl = false, simklError = com.torve.presentation.error.UserFacingError.INTEGRATION_AUTH_TIMEOUT.defaultMessage()) }
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Seerr household request gateway
+    // -------------------------------------------------------------------------
+
+    fun setSeerrServerUrl(url: String) {
+        _state.update { it.copy(seerrServerUrl = url, seerrStatusMessage = null) }
+    }
+
+    /** UI input only. The key is persisted only when Save and test is pressed. */
+    fun updateSeerrApiKeyInput(apiKey: String) {
+        _state.update { it.copy(seerrApiKey = apiKey, seerrStatusMessage = null) }
+    }
+
+    fun saveAndTestSeerrConnection(
+        storageMode: com.torve.domain.integrations.IntegrationStorageMode =
+            com.torve.domain.integrations.IntegrationStorageMode.DEVICE_ONLY,
+    ) {
+        if (_state.value.seerrLoading) return
+        val service = mediaLifecycleService ?: run {
+            _state.update { it.copy(seerrStatusMessage = "Seerr integration is unavailable in this build") }
+            return
+        }
+        val url = _state.value.seerrServerUrl.trim()
+        val apiKey = _state.value.seerrApiKey.trim()
+        if (url.isBlank() || apiKey.isBlank()) {
+            _state.update { it.copy(seerrStatusMessage = "Enter the Seerr URL and API key") }
+            return
+        }
+        _state.update { it.copy(seerrLoading = true, seerrStatusMessage = null) }
+        scope.launch {
+            val savedUrl = prefsRepo.getString(KEY_SEERR_SERVER_URL).orEmpty()
+            val savedApiKey = integrationSecretStore.get(IntegrationSecretKey.SEERR_API_KEY).orEmpty()
+            val hadWorkingConfiguration = savedUrl.isNotBlank() && savedApiKey.isNotBlank()
+            val ok = service.testConnection(url, apiKey)
+            if (ok) {
+                val normalizedUrl = url.trimEnd('/')
+                prefsRepo.setString(KEY_SEERR_SERVER_URL, normalizedUrl)
+                integrationSecretStore.put(IntegrationSecretKey.SEERR_API_KEY, apiKey)
+                integrationSecretStore.setStorageMode(IntegrationSecretKey.SEERR_API_KEY, storageMode)
+                if (storageMode == com.torve.domain.integrations.IntegrationStorageMode.ACCOUNT) {
+                    runCatching {
+                        onIntegrationSaved?.invoke(
+                            "SEERR_API_KEY",
+                            mapOf("api_key" to apiKey, "server_url" to normalizedUrl),
+                            "Seerr",
+                        )
+                    }
+                }
+            }
+            _state.update {
+                it.copy(
+                    seerrLoading = false,
+                    seerrConnected = ok || hadWorkingConfiguration,
+                    seerrServerUrl = when {
+                        ok -> url.trimEnd('/')
+                        hadWorkingConfiguration -> savedUrl
+                        else -> it.seerrServerUrl
+                    },
+                    seerrApiKey = if (!ok && hadWorkingConfiguration) savedApiKey else it.seerrApiKey,
+                    seerrStatusMessage = when {
+                        ok -> "Connection successful"
+                        hadWorkingConfiguration -> "Connection failed; existing configuration kept"
+                        else -> "Connection failed"
+                    },
+                )
+            }
+        }
+    }
+
+    fun disconnectSeerr() {
+        scope.launch {
+            integrationSecretStore.remove(IntegrationSecretKey.SEERR_API_KEY)
+            prefsRepo.remove(KEY_SEERR_SERVER_URL)
+        }
+        _state.update {
+            it.copy(
+                seerrServerUrl = "",
+                seerrApiKey = "",
+                seerrConnected = false,
+                seerrLoading = false,
+                seerrStatusMessage = null,
+            )
         }
     }
 

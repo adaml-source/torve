@@ -30,8 +30,9 @@ import kotlinx.coroutines.launch
 import org.koin.java.KoinJavaComponent.getKoin
 
 /**
- * TV entry point. The platform splash remains visible until dependency
- * injection is ready, then the Home UI is composed immediately.
+ * TV entry point. The native window background provides an immediate static
+ * shell while dependencies settle; Compose is installed once with the real
+ * TV root so startup does not pay for a redundant placeholder composition.
  */
 class TvMainActivity : AppCompatActivity() {
     companion object {

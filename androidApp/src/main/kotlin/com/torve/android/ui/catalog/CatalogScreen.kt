@@ -88,6 +88,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
@@ -99,6 +100,7 @@ import com.torve.android.ui.components.LocalCardStyle
 import com.torve.android.ui.components.PosterCard
 import com.torve.android.ui.components.ShimmerBox
 import com.torve.android.ui.components.ShimmerPosterCard
+import com.torve.android.ui.image.MobileImagePrefetcher
 import com.torve.android.ui.theme.Amber
 import com.torve.android.ui.theme.AmberSubtle
 import com.torve.android.ui.theme.Gunmetal
@@ -152,6 +154,7 @@ fun CatalogScreen(
     onBack: (() -> Unit)? = null,
     title: String? = null,
     onMediaTypeChange: ((String) -> Unit)? = null,
+    isActive: Boolean = true,
     settingsViewModel: SettingsViewModel = koinInject(),
     homeViewModel: HomeViewModel = koinInject(),
 ) {
@@ -160,6 +163,8 @@ fun CatalogScreen(
     val homeState by homeViewModel.state.collectAsState()
     val genres = if (mediaType == "movie") MOVIE_GENRES else TV_GENRES
     val gridState = rememberLazyGridState()
+    val listState = rememberLazyListState()
+    val context = LocalContext.current
     val mdblistApiKey = settingsState.mdblistApiKey
 
     if (onBack != null) {
@@ -227,6 +232,40 @@ fun CatalogScreen(
         if (mediaType == "tv" && !isSearchMode) homeState.upcomingSchedule else emptyList()
     }
 
+    val contentPositionKey = remember(
+        mediaType,
+        state.selectedCategory,
+        state.selectedGenreId,
+        state.filter,
+        isSearchMode,
+        state.searchQuery,
+    ) {
+        buildString {
+            append(mediaType)
+            append('|').append(state.selectedCategory.name)
+            append('|').append(state.selectedGenreId)
+            append('|').append(state.filter)
+            append('|').append(isSearchMode)
+            if (isSearchMode) append('|').append(state.searchQuery.trim())
+        }
+    }
+    var lastContentPositionKey by rememberSaveable(viewModel) {
+        mutableStateOf(contentPositionKey)
+    }
+    LaunchedEffect(contentPositionKey) {
+        if (contentPositionKey != lastContentPositionKey) {
+            gridState.scrollToItem(0)
+            listState.scrollToItem(0)
+            lastContentPositionKey = contentPositionKey
+        }
+    }
+
+    LaunchedEffect(displayItems, isActive) {
+        if (isActive) {
+            MobileImagePrefetcher.prefetchCatalog(context, displayItems)
+        }
+    }
+
     // Track scroll direction for floating search bar visibility
     val previousScrollOffset = remember { mutableIntStateOf(0) }
     val previousFirstVisibleItem = remember { mutableIntStateOf(0) }
@@ -283,8 +322,6 @@ fun CatalogScreen(
 
             else -> {
                 if (state.viewMode == CatalogViewMode.LIST) {
-                    val listState = rememberLazyListState()
-
                     // Infinite scroll for list mode
                     LaunchedEffect(listState, viewModel) {
                         snapshotFlow {

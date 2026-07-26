@@ -252,6 +252,7 @@ internal fun TvSettingsScreen(
     onNavigateToHomeLayout: () -> Unit = {},
     onNavigateToRatings: () -> Unit = {},
     onNavigateToPandaSetup: () -> Unit = {},
+    onNavigateToAutomationAdmin: () -> Unit = {},
     onNavigateToPairedDevices: (String) -> Unit = {},
     onNavigateToActivatedDevices: (String) -> Unit = {},
     onNavigateToSendCredentials: () -> Unit = {},
@@ -4226,10 +4227,23 @@ internal fun TvSettingsScreen(
                             }
                         }
                     }
-                    item(key = "section_integrations") {
+                item(key = "section_integrations") {
                     TvSectionHeader(
                         text = stringResource(R.string.tv_settings_metadata_providers),
                         description = stringResource(R.string.tv_settings_metadata_keys_desc),
+                    )
+                }
+
+                item(key = "automation_administration") {
+                    val requester = remember("automation_administration") { FocusRequester() }
+                    TvSettingCard(
+                        title = "Automation administration",
+                        subtitle = "Search releases, control queues and indexers, repair subtitles, and run Tdarr jobs.",
+                        modifier = Modifier.fillMaxWidth().focusProperties { left = railFocusRequester },
+                        focusRequester = requester,
+                        onFocused = { onContentFocused(requester) },
+                        onClick = onNavigateToAutomationAdmin,
+                        rowType = TvSettingRowType.ACTION,
                     )
                 }
 
@@ -7523,7 +7537,8 @@ private fun ProviderHealthCategory.isPandaOwnedProviderCategory(): Boolean = whe
     ProviderHealthCategory.EPG,
     ProviderHealthCategory.TRAKT,
     ProviderHealthCategory.SIMKL,
-    ProviderHealthCategory.PLAYBACK -> false
+    ProviderHealthCategory.PLAYBACK,
+    ProviderHealthCategory.REQUEST_MANAGER -> false
 }
 
 private fun buildPandaProviderSummary(

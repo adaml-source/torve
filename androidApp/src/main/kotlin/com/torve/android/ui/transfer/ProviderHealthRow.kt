@@ -148,5 +148,6 @@ fun providerSettingsRouteFor(category: ProviderHealthCategory): String? = when (
     ProviderHealthCategory.IPTV -> "settings"
     ProviderHealthCategory.ADDON -> "addon_catalog"
     ProviderHealthCategory.EPG -> "settings"
+    ProviderHealthCategory.REQUEST_MANAGER -> "integrations"
     ProviderHealthCategory.PLAYBACK -> null
 }

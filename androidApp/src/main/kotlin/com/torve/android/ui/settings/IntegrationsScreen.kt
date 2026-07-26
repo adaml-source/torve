@@ -47,6 +47,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.RadioButtonDefaults
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -76,8 +77,11 @@ import androidx.compose.ui.res.stringResource
 import com.torve.android.R
 import com.torve.domain.integrations.IntegrationSecretKey
 import com.torve.domain.integrations.IntegrationSecretStore
+import com.torve.domain.integrations.AutomationInstanceRole
+import com.torve.domain.integrations.AutomationServiceType
 import com.torve.domain.model.DebridServiceType
 import com.torve.presentation.settings.SettingsViewModel
+import com.torve.presentation.integrations.AutomationSettingsViewModel
 import com.torve.presentation.usenet.NzbdavSetupViewModel
 import com.torve.presentation.usenet.NzbdavStatus
 import com.torve.presentation.usenet.NzbdavTestResult
@@ -87,9 +91,12 @@ import org.koin.compose.koinInject
 @Composable
 fun IntegrationsScreen(
     onBack: () -> Unit,
+    onAutomationAdminClick: () -> Unit = {},
     viewModel: SettingsViewModel = koinInject(),
+    automationViewModel: AutomationSettingsViewModel = koinInject(),
 ) {
     val state by viewModel.state.collectAsState()
+    val automationState by automationViewModel.state.collectAsState()
     val context = LocalContext.current
     val secretStore: IntegrationSecretStore = koinInject()
     val authClient: com.torve.data.auth.AuthClient = koinInject()
@@ -101,6 +108,7 @@ fun IntegrationsScreen(
     var omdbStorageMode by remember(defaultStorageMode) { mutableStateOf(defaultStorageMode) }
     var jellyfinStorageMode by remember(defaultStorageMode) { mutableStateOf(defaultStorageMode) }
     var plexStorageMode by remember(defaultStorageMode) { mutableStateOf(defaultStorageMode) }
+    var seerrStorageMode by remember(defaultStorageMode) { mutableStateOf(defaultStorageMode) }
 
     LaunchedEffect(Unit) {
         secretStore.get(IntegrationSecretKey.JELLYFIN_API_KEY)?.let { stored ->
@@ -109,6 +117,9 @@ fun IntegrationsScreen(
         viewModel.loadJellyfinProfiles()
         secretStore.get(IntegrationSecretKey.PLEX_ACCESS_TOKEN)?.let { stored ->
             viewModel.setPlexAccessToken(stored)
+        }
+        secretStore.get(IntegrationSecretKey.SEERR_API_KEY)?.let { stored ->
+            viewModel.updateSeerrApiKeyInput(stored)
         }
     }
 
@@ -435,6 +446,241 @@ fun IntegrationsScreen(
         Spacer(Modifier.height(12.dp))
 
         // ── Jellyfin ──
+        IntegrationCard(
+            title = stringResource(R.string.integrations_seerr_title),
+            description = stringResource(R.string.integrations_seerr_desc),
+        ) {
+            IntegrationTextField(
+                label = stringResource(R.string.integrations_server_url),
+                value = state.seerrServerUrl,
+                onValueChange = viewModel::setSeerrServerUrl,
+            )
+            Spacer(Modifier.height(8.dp))
+            IntegrationTextField(
+                label = stringResource(R.string.settings_api_key),
+                value = state.seerrApiKey,
+                onValueChange = viewModel::updateSeerrApiKeyInput,
+                isSensitive = true,
+            )
+            Spacer(Modifier.height(4.dp))
+            com.torve.android.ui.components.StorageModeSelector(
+                selected = seerrStorageMode,
+                onModeSelected = { seerrStorageMode = it },
+                isSignedIn = authUser != null,
+            )
+            Spacer(Modifier.height(8.dp))
+            if (!state.seerrConnected) {
+                Button(
+                    onClick = { viewModel.saveAndTestSeerrConnection(seerrStorageMode) },
+                    enabled = !state.seerrLoading && state.seerrServerUrl.isNotBlank() && state.seerrApiKey.isNotBlank(),
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.buttonColors(containerColor = Amber, contentColor = Obsidian),
+                ) {
+                    if (state.seerrLoading) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(18.dp),
+                            strokeWidth = 2.dp,
+                            color = Obsidian,
+                        )
+                        Spacer(Modifier.width(8.dp))
+                    }
+                    Text(stringResource(R.string.integrations_save_test))
+                }
+            } else {
+                OutlinedButton(
+                    onClick = viewModel::disconnectSeerr,
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Silver),
+                ) {
+                    Text(stringResource(R.string.common_disconnect))
+                }
+            }
+            state.seerrStatusMessage?.let { message ->
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    message,
+                    color = if (state.seerrConnected) Emerald else Silver,
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+        }
+
+        Spacer(Modifier.height(12.dp))
+
+        IntegrationCard(
+            title = stringResource(R.string.integrations_automation_title),
+            description = stringResource(R.string.integrations_automation_desc),
+        ) {
+            Button(
+                onClick = onAutomationAdminClick,
+                enabled = automationState.instances.isNotEmpty(),
+                modifier = Modifier.fillMaxWidth(),
+                colors = ButtonDefaults.buttonColors(containerColor = Amber, contentColor = Obsidian),
+            ) {
+                Text("Open administration dashboard")
+            }
+            Spacer(Modifier.height(8.dp))
+            Text(
+                stringResource(R.string.integrations_automation_admin_warning),
+                color = Amber,
+                style = MaterialTheme.typography.bodySmall,
+            )
+            automationState.instances.forEach { instance ->
+                Spacer(Modifier.height(8.dp))
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(Gunmetal, RoundedCornerShape(8.dp))
+                        .padding(10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text(instance.name, color = Snow, fontWeight = FontWeight.SemiBold)
+                        val supportsQualityRole = instance.serviceType == AutomationServiceType.SONARR ||
+                            instance.serviceType == AutomationServiceType.RADARR
+                        Text(
+                            buildString {
+                                append(instance.serviceType.name.lowercase().replaceFirstChar { it.uppercase() })
+                                if (supportsQualityRole) {
+                                    append(" · ")
+                                    append(if (instance.role == AutomationInstanceRole.UHD) "4K" else "Standard")
+                                    if (instance.isDefault) append(" · Default")
+                                }
+                            },
+                            color = Silver,
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    }
+                    TextButton(onClick = { automationViewModel.edit(instance) }) {
+                        Text(stringResource(R.string.common_edit_cd))
+                    }
+                    TextButton(onClick = { automationViewModel.remove(instance) }) {
+                        Text(stringResource(R.string.common_remove), color = Ruby)
+                    }
+                }
+            }
+
+            Spacer(Modifier.height(10.dp))
+            Text(stringResource(R.string.integrations_automation_service), color = Silver)
+            AutomationServiceType.entries.forEach { type ->
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable(enabled = !automationState.isBusy) {
+                            automationViewModel.selectService(type)
+                        },
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    RadioButton(
+                        selected = automationState.serviceType == type,
+                        onClick = { automationViewModel.selectService(type) },
+                        colors = RadioButtonDefaults.colors(selectedColor = Amber),
+                    )
+                    Text(type.name.lowercase().replaceFirstChar { it.uppercase() }, color = Snow)
+                }
+            }
+            IntegrationTextField(
+                label = stringResource(R.string.integrations_automation_name),
+                value = automationState.name,
+                onValueChange = automationViewModel::updateName,
+            )
+            Spacer(Modifier.height(8.dp))
+            IntegrationTextField(
+                label = stringResource(R.string.integrations_server_url),
+                value = automationState.serverUrl,
+                onValueChange = automationViewModel::updateServerUrl,
+            )
+            Spacer(Modifier.height(8.dp))
+            if (automationState.serviceType == AutomationServiceType.TDARR) {
+                Text(
+                    stringResource(R.string.integrations_tdarr_read_only_probe),
+                    color = Silver,
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            } else {
+                IntegrationTextField(
+                    label = stringResource(R.string.settings_api_key),
+                    value = automationState.apiKey,
+                    onValueChange = automationViewModel::updateApiKey,
+                    isSensitive = true,
+                )
+            }
+            val supportsQualityRole = automationState.serviceType == AutomationServiceType.SONARR ||
+                automationState.serviceType == AutomationServiceType.RADARR
+            if (supportsQualityRole) {
+                Spacer(Modifier.height(8.dp))
+                Text(stringResource(R.string.integrations_automation_role), color = Silver)
+                AutomationInstanceRole.entries.forEach { role ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable(enabled = !automationState.isBusy) {
+                                automationViewModel.selectRole(role)
+                            },
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        RadioButton(
+                            selected = automationState.role == role,
+                            onClick = { automationViewModel.selectRole(role) },
+                            colors = RadioButtonDefaults.colors(selectedColor = Amber),
+                        )
+                        Text(
+                            if (role == AutomationInstanceRole.UHD) {
+                                stringResource(R.string.integrations_automation_uhd)
+                            } else {
+                                stringResource(R.string.integrations_automation_standard)
+                            },
+                            color = Snow,
+                        )
+                    }
+                }
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable(enabled = !automationState.isBusy) {
+                            automationViewModel.setDefault(!automationState.isDefault)
+                        },
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    RadioButton(
+                        selected = automationState.isDefault,
+                        onClick = { automationViewModel.setDefault(!automationState.isDefault) },
+                        colors = RadioButtonDefaults.colors(selectedColor = Amber),
+                    )
+                    Text(stringResource(R.string.integrations_automation_default), color = Snow)
+                }
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(
+                    onClick = automationViewModel::saveAndTest,
+                    enabled = !automationState.isBusy,
+                    modifier = Modifier.weight(1f),
+                    colors = ButtonDefaults.buttonColors(containerColor = Amber, contentColor = Obsidian),
+                ) {
+                    if (automationState.isBusy) {
+                        CircularProgressIndicator(Modifier.size(18.dp), color = Obsidian, strokeWidth = 2.dp)
+                        Spacer(Modifier.width(8.dp))
+                    }
+                    Text(stringResource(R.string.integrations_save_test))
+                }
+                if (automationState.editingId != null) {
+                    OutlinedButton(onClick = automationViewModel::cancelEdit) {
+                        Text(stringResource(R.string.common_cancel))
+                    }
+                }
+            }
+            automationState.message?.let {
+                Spacer(Modifier.height(6.dp))
+                Text(it, color = Emerald, style = MaterialTheme.typography.bodySmall)
+            }
+            automationState.error?.let {
+                Spacer(Modifier.height(6.dp))
+                Text(it, color = Ruby, style = MaterialTheme.typography.bodySmall)
+            }
+        }
+
+        Spacer(Modifier.height(12.dp))
+
         IntegrationCard(
             title = "Jellyfin",
             description = stringResource(R.string.integrations_jellyfin_desc),

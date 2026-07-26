@@ -61,6 +61,7 @@ internal fun ProviderHealthCategory.transferableSecretCategory(): SecretCategory
         ProviderHealthCategory.ADDON,
         ProviderHealthCategory.EPG,
         ProviderHealthCategory.PLAYBACK -> null
+        ProviderHealthCategory.REQUEST_MANAGER -> SecretCategory.ARR_STACK
     }
 
 /**

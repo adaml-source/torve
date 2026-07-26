@@ -1148,6 +1148,7 @@ private fun IntegrationsSection(
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
         PandaSection(onOpenPandaSetup = onOpenPandaSetup)
+        DesktopAutomationSection()
         TraktSection(settingsState, settingsViewModel)
         SimklSection(settingsState, settingsViewModel)
         AiSection(settingsState, settingsViewModel, accountSessionCoordinator)
@@ -4329,6 +4330,9 @@ private fun SourcesSection(
                 com.torve.domain.transfer.SecretCategory.PANDA ->
                     "Usenet / Easynews / NZB indexers" to
                         "Usenet warming, downloads, and instant playback for cached items are off."
+                com.torve.domain.transfer.SecretCategory.ARR_STACK ->
+                    "Media automation" to
+                        "Permanent-library requests and automation status are unavailable."
             }
         }
         TorveSectionCard(
@@ -4475,7 +4479,8 @@ private fun SourcesSection(
                         }
                         com.torve.domain.providerhealth.ProviderHealthCategory.PLEX_JELLYFIN,
                         com.torve.domain.providerhealth.ProviderHealthCategory.TRAKT,
-                        com.torve.domain.providerhealth.ProviderHealthCategory.SIMKL -> {
+                        com.torve.domain.providerhealth.ProviderHealthCategory.SIMKL,
+                        com.torve.domain.providerhealth.ProviderHealthCategory.REQUEST_MANAGER -> {
                             redirectNotice = null
                             onSwitchToCategory(SettingsCategory.INTEGRATIONS)
                         }

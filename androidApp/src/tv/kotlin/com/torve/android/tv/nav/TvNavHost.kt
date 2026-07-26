@@ -1,5 +1,7 @@
 package com.torve.android.tv.nav
 
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExitTransition
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -144,6 +146,10 @@ internal fun TvNavHost(
         NavHost(
             navController = navController,
             startDestination = TvRoutes.SUB_NAV_START,
+            enterTransition = { EnterTransition.None },
+            exitTransition = { ExitTransition.None },
+            popEnterTransition = { EnterTransition.None },
+            popExitTransition = { ExitTransition.None },
         ) {
         /* Empty placeholder — visible when no sub-route is active */
         composable(TvRoutes.SUB_NAV_START) { /* nothing */ }
@@ -206,6 +212,19 @@ internal fun TvNavHost(
             TvPandaSetupScreen(
                 onBack = onPandaSetupBack,
                 onComplete = onPandaSetupBack,
+            )
+        }
+
+        composable(TvRoutes.AUTOMATION_ADMIN) {
+            com.torve.android.ui.settings.AutomationAdministrationScreen(
+                onBack = { navController.popBackStack() },
+                onManageConnections = { navController.navigate(TvRoutes.AUTOMATION_CONNECTIONS) },
+            )
+        }
+
+        composable(TvRoutes.AUTOMATION_CONNECTIONS) {
+            com.torve.android.ui.settings.AutomationConnectionsScreen(
+                onBack = { navController.popBackStack() },
             )
         }
 

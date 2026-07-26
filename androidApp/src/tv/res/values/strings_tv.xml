@@ -97,7 +97,12 @@
     <string name="tv_iptv_recently_viewed">Recently Viewed</string>
     <string name="tv_iptv_favorites">Favorites</string>
     <string name="tv_iptv_no_playlists_title">No Channels Configured</string>
-    <string name="tv_iptv_no_playlists_subtitle">Add an M3U playlist on your phone, then sync to TV</string>
+    <string name="tv_iptv_no_playlists_subtitle">Sync your saved sources, or manage channel sources in Settings</string>
+    <string name="tv_iptv_sign_in_title">Sign in to restore channels</string>
+    <string name="tv_iptv_sign_in_subtitle">This TV is not signed in. Sign in to securely restore your saved channel sources.</string>
+    <string name="tv_iptv_sign_in_action">Sign in</string>
+    <string name="tv_iptv_sync_sources">Sync sources</string>
+    <string name="tv_iptv_manage_sources">Manage sources</string>
     <string name="tv_iptv_all_channels">All Channels</string>
     <string name="tv_iptv_channels_count">%d channels</string>
     <string name="tv_iptv_now_playing">Now Playing</string>

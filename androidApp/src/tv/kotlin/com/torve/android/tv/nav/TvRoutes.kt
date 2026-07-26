@@ -36,6 +36,8 @@ object TvRoutes {
     const val WATCH_STATS = "tv_watch_stats"
     const val DEVICE_LIMIT_REACHED = "tv_device_limit_reached"
     const val PANDA_SETUP = "tv_panda_setup"
+    const val AUTOMATION_ADMIN = "tv_automation_admin"
+    const val AUTOMATION_CONNECTIONS = "tv_automation_connections"
 
     const val SEE_ALL = "tv_see_all/{railKey}/{mediaType}/{title}"
     fun seeAll(railKey: String, mediaType: String, title: String): String {

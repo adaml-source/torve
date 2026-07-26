@@ -117,6 +117,7 @@ import com.torve.data.addon.isTorrentOrDebridStream
 import com.torve.data.addon.isUsenetStream
 import com.torve.domain.lanlibrary.NetworkMode
 import com.torve.domain.lanlibrary.PlaybackRoute
+import com.torve.domain.integrations.MediaLifecycleState
 import com.torve.domain.repository.DownloadRepository
 import com.torve.domain.repository.MediaFavoritesRepository
 import com.torve.platform.NetworkMonitor
@@ -220,6 +221,7 @@ fun TvDetailsScreen(
     val markWatchedFocusRequester = remember { FocusRequester() }
     val rateFocusRequester = remember { FocusRequester() }
     val trailerFocusRequester = remember { FocusRequester() }
+    val permanentLibraryFocusRequester = remember { FocusRequester() }
     val downloadMovieFocusRequester = remember { FocusRequester() }
     val downloadAllFocusRequester = remember { FocusRequester() }
     val firstStreamFocusRequester = remember { FocusRequester() }
@@ -299,6 +301,7 @@ fun TvDetailsScreen(
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
                 detailViewModel.refreshWatchState()
+                detailViewModel.refreshMediaLifecycleStatus()
                 // Leaving the full-screen player intentionally gives focus to
                 // the persistent playback card. Do not steal it back with the
                 // normal details-screen restore while that engine is retained.
@@ -902,6 +905,52 @@ fun TvDetailsScreen(
                             }
 
                             // Download buttons removed â€" TV is stream-only
+                        }
+
+                        val lifecycleStatus = state.mediaLifecycleStatus
+                        if (lifecycleStatus?.state != MediaLifecycleState.UNCONFIGURED) {
+                            val lifecycleButtonText = when {
+                                state.isLoadingMediaLifecycle -> stringResource(R.string.common_loading)
+                                lifecycleStatus?.canRetry == true -> stringResource(R.string.detail_library_request_retry)
+                                lifecycleStatus?.canRequest == true && item.type == MediaType.SERIES -> {
+                                    val selectedSeason = state.selectedSeason ?: 1
+                                    stringResource(R.string.detail_add_season_to_library, selectedSeason)
+                                }
+                                lifecycleStatus?.canRequest == true -> stringResource(R.string.detail_add_to_library)
+                                lifecycleStatus?.state == MediaLifecycleState.PENDING_APPROVAL ->
+                                    stringResource(R.string.detail_library_request_pending)
+                                lifecycleStatus?.state == MediaLifecycleState.APPROVED ->
+                                    stringResource(R.string.detail_library_request_approved)
+                                lifecycleStatus?.state == MediaLifecycleState.PROCESSING ->
+                                    stringResource(R.string.detail_library_request_processing)
+                                lifecycleStatus?.state == MediaLifecycleState.PARTIALLY_AVAILABLE ->
+                                    stringResource(R.string.detail_library_request_partial)
+                                lifecycleStatus?.state == MediaLifecycleState.AVAILABLE ->
+                                    stringResource(R.string.detail_library_request_available)
+                                else -> stringResource(R.string.detail_library_refresh)
+                            }
+                            TvActionButton(
+                                text = lifecycleButtonText,
+                                modifier = Modifier.focusRequester(permanentLibraryFocusRequester),
+                                enabled = !state.isLoadingMediaLifecycle &&
+                                    (lifecycleStatus?.canRequest == true || lifecycleStatus?.canRetry == true),
+                                onFocused = { onContentFocused(permanentLibraryFocusRequester) },
+                                onClick = {
+                                    if (lifecycleStatus?.canRetry == true) {
+                                        detailViewModel.retryMediaLifecycleRequest()
+                                    } else {
+                                        detailViewModel.requestPermanentCopy()
+                                    }
+                                },
+                            )
+                            state.mediaLifecycleError?.takeIf { it.isNotBlank() }?.let { error ->
+                                Text(
+                                    text = error,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.error,
+                                    maxLines = 1,
+                                )
+                            }
                         }
                     }
                 }

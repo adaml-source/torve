@@ -124,6 +124,7 @@ import com.torve.android.ui.settings.StreamGroupsScreen
 import com.torve.android.ui.settings.CustomSectionEditorScreen
 import com.torve.android.ui.settings.DiagnosticsScreen
 import com.torve.android.ui.settings.IntegrationsScreen
+import com.torve.android.ui.settings.AutomationAdministrationScreen
 import com.torve.android.ui.settings.HomeLayoutScreen
 import com.torve.android.ui.settings.MdbListSettingsScreen
 import com.torve.android.ui.settings.CardStyleSettingsScreen
@@ -312,9 +313,8 @@ private val navTabDefs = listOf(
     NavTab("home", R.string.nav_home, Icons.Filled.Home, Icons.Outlined.Home),
     NavTab("movies", R.string.nav_movies, Icons.Filled.Movie, Icons.Outlined.Movie),
     NavTab("tv_shows", R.string.nav_tv_shows, Icons.Filled.Tv, Icons.Outlined.Tv),
-    NavTab("live_tv", R.string.nav_channels, Icons.Filled.LiveTv, Icons.Outlined.LiveTv),
+    NavTab("search", R.string.nav_search, Icons.Filled.Search, Icons.Outlined.Search),
     NavTab("watchlist_tab", R.string.nav_library, Icons.Filled.Bookmark, Icons.Outlined.BookmarkBorder),
-    NavTab("profile_tab", R.string.nav_settings, Icons.Filled.Settings, Icons.Outlined.Settings),
 )
 
 private const val MOBILE_ROOT_ROUTE = "mobile_root"
@@ -1109,6 +1109,9 @@ fun TorveNavGraph(
                             onPersonClick = { personId ->
                                 navController.navigate("person/$personId")
                             },
+                            onChannelsClick = { navController.navigate("channels") },
+                            onSettingsClick = { navController.navigate("settings") },
+                            isActive = mobileSelectedTab == MOBILE_HOME_ROUTE,
                             accessTier = accessTier,
                             onLockedFeatureClick = requestLifetimeUnlock,
                             resetScrollToTop = pendingMobileHomeScrollReset,
@@ -1119,6 +1122,7 @@ fun TorveNavGraph(
                         CatalogScreen(
                             viewModel = movieCatalogViewModel,
                             mediaType = "movie",
+                            isActive = mobileSelectedTab == "movies",
                             onMediaClick = { item -> navController.navigateToDetail(item) },
                         )
                     }
@@ -1126,6 +1130,14 @@ fun TorveNavGraph(
                         CatalogScreen(
                             viewModel = tvCatalogViewModel,
                             mediaType = "tv",
+                            isActive = mobileSelectedTab == "tv_shows",
+                            onMediaClick = { item -> navController.navigateToDetail(item) },
+                        )
+                    }
+                    PersistentMobileTabPane(visible = mobileSelectedTab == "search") {
+                        SearchScreen(
+                            viewModel = searchViewModel,
+                            isActive = mobileSelectedTab == "search",
                             onMediaClick = { item -> navController.navigateToDetail(item) },
                         )
                     }
@@ -1352,10 +1364,13 @@ fun TorveNavGraph(
 
             // Search tab — Global search
             composable("search") {
-                SearchScreen(
-                    viewModel = searchViewModel,
-                    onMediaClick = { item -> navController.navigateToDetail(item) },
-                )
+                LaunchedEffect(Unit) {
+                    mobileSelectedTab = "search"
+                    navController.navigate(MOBILE_ROOT_ROUTE) {
+                        popUpTo("search") { inclusive = true }
+                        launchSingleTop = true
+                    }
+                }
             }
 
             // Catalog screen — Genre-filtered browsing (opened from Discover)
@@ -2100,8 +2115,18 @@ fun TorveNavGraph(
                 } else {
                     IntegrationsScreen(
                         onBack = { navController.popBackStack() },
+                        onAutomationAdminClick = { navController.navigate("automation_admin") },
                     )
                 }
+            }
+
+            composable("automation_admin") {
+                AutomationAdministrationScreen(
+                    onBack = { navController.popBackStack() },
+                    onManageConnections = {
+                        navController.popBackStack("integrations", inclusive = false)
+                    },
+                )
             }
 
             composable("diagnostics") {

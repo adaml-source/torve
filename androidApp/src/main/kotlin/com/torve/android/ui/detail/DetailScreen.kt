@@ -40,6 +40,8 @@ import androidx.compose.material.icons.rounded.Visibility
 import androidx.compose.material.icons.rounded.VisibilityOff
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -94,11 +96,14 @@ import com.torve.android.ui.components.MultiRatingPills
 import com.torve.android.ui.components.PosterCard
 import com.torve.android.ui.components.SectionHeader
 import com.torve.android.ui.components.mediaItemLazyKey
+import com.torve.android.ui.image.MobileImagePrefetcher
 import com.torve.android.ui.theme.Amber
 import com.torve.android.ui.theme.Silver
 import com.torve.android.ui.theme.Graphite
+import com.torve.android.ui.theme.Gunmetal
 import com.torve.android.ui.theme.HeroGradient
 import com.torve.android.ui.theme.Obsidian
+import com.torve.android.ui.theme.Ruby
 import com.torve.android.ui.theme.Snow
 import com.torve.android.ui.theme.Torve
 import com.torve.domain.model.CandidateProvenanceKind
@@ -118,6 +123,8 @@ import com.torve.domain.model.canResolveStreams
 import com.torve.domain.model.favoriteMediaKey
 import com.torve.domain.model.AvailabilityOffer
 import com.torve.domain.model.AvailabilityOfferType
+import com.torve.domain.integrations.MediaLifecycleState
+import com.torve.domain.integrations.MediaLifecycleStatus
 import com.torve.domain.model.hasAnyEnabledDisplayValue
 import com.torve.domain.model.resolveCardStyle
 import com.torve.domain.model.calculateTorveScore
@@ -208,6 +215,16 @@ fun DetailScreen(
     val context = LocalContext.current
     val isTvDevice = remember(context) { DeviceFormFactor.isTv(context) }
 
+    LaunchedEffect(state.mediaItem, state.similar) {
+        state.mediaItem?.let { item ->
+            MobileImagePrefetcher.prefetchDetail(
+                context = context,
+                item = item,
+                similar = state.similar,
+            )
+        }
+    }
+
     fun openSourcePickerOrProvider(season: Int? = null, episode: Int? = null) {
         val item = state.mediaItem ?: return
         coroutineScope.launch {
@@ -262,6 +279,7 @@ fun DetailScreen(
                 // Skip the initial resume — loadDetail already handles it.
                 if (resumeCount++ > 0) {
                     viewModel.refreshWatchState()
+                    viewModel.refreshMediaLifecycleStatus()
                 }
             }
         }
@@ -626,6 +644,18 @@ fun DetailScreen(
                                     )
                                 }
                             }
+
+                            MediaLifecycleAction(
+                                status = state.mediaLifecycleStatus,
+                                isLoading = state.isLoadingMediaLifecycle,
+                                error = state.mediaLifecycleError,
+                                message = state.mediaLifecycleMessage,
+                                selectedSeason = state.selectedSeason,
+                                isSeries = item.type == MediaType.SERIES,
+                                onRequest = { viewModel.requestPermanentCopy() },
+                                onRetry = viewModel::retryMediaLifecycleRequest,
+                                onRefresh = viewModel::refreshMediaLifecycleStatus,
+                            )
 
                             // Watch Trailer button
                             state.mediaItem?.trailerKey?.let {
@@ -1354,6 +1384,91 @@ fun DetailScreen(
                     onCancel = { viewModel.cancelPreparing() },
                     modifier = Modifier.zIndex(80f),
                 )
+            }
+        }
+    }
+}
+
+@Composable
+private fun MediaLifecycleAction(
+    status: MediaLifecycleStatus?,
+    isLoading: Boolean,
+    error: String?,
+    message: String?,
+    selectedSeason: Int,
+    isSeries: Boolean,
+    onRequest: () -> Unit,
+    onRetry: () -> Unit,
+    onRefresh: () -> Unit,
+) {
+    if (status?.state == MediaLifecycleState.UNCONFIGURED ||
+        (status == null && error == null && !isLoading)
+    ) return
+
+    Spacer(Modifier.height(10.dp))
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = Gunmetal.copy(alpha = 0.72f)),
+        shape = RoundedCornerShape(12.dp),
+    ) {
+        Column(Modifier.padding(12.dp)) {
+            Text(
+                text = "Permanent library",
+                color = Snow,
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Spacer(Modifier.height(4.dp))
+            val statusText = when (status?.state) {
+                MediaLifecycleState.PENDING_APPROVAL -> stringResource(R.string.detail_library_request_pending)
+                MediaLifecycleState.APPROVED,
+                MediaLifecycleState.PROCESSING -> stringResource(R.string.detail_library_request_processing)
+                MediaLifecycleState.PARTIALLY_AVAILABLE -> stringResource(R.string.detail_library_request_partial)
+                MediaLifecycleState.AVAILABLE -> stringResource(R.string.detail_library_request_available)
+                MediaLifecycleState.DECLINED -> "Request declined"
+                MediaLifecycleState.FAILED -> "Request needs attention"
+                MediaLifecycleState.DELETED -> "Library copy was removed"
+                MediaLifecycleState.UNKNOWN -> "Checking request status"
+                else -> null
+            }
+            (message ?: error ?: statusText)?.let { text ->
+                Text(
+                    text = text,
+                    color = if (error == null) Silver else Ruby,
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                Spacer(Modifier.height(8.dp))
+            }
+
+            when {
+                isLoading -> {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp, color = Amber)
+                        Spacer(Modifier.width(8.dp))
+                        Text("Updating library status...", color = Silver, style = MaterialTheme.typography.bodySmall)
+                    }
+                }
+                status?.canRetry == true -> {
+                    OutlinedButton(onClick = onRetry, modifier = Modifier.fillMaxWidth()) {
+                        Text(stringResource(R.string.detail_library_request_retry))
+                    }
+                }
+                status?.canRequest == true -> {
+                    OutlinedButton(onClick = onRequest, modifier = Modifier.fillMaxWidth()) {
+                        Text(
+                            if (isSeries) {
+                                stringResource(R.string.detail_add_season_to_library, selectedSeason)
+                            } else {
+                                stringResource(R.string.detail_add_to_library)
+                            },
+                        )
+                    }
+                }
+                status?.isInProgress == true || error != null -> {
+                    OutlinedButton(onClick = onRefresh, modifier = Modifier.fillMaxWidth()) {
+                        Text("Refresh status")
+                    }
+                }
             }
         }
     }

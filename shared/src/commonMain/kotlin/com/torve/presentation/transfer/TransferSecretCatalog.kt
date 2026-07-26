@@ -90,6 +90,19 @@ object TransferSecretCatalog {
                 IntegrationSecretKey.PANDA_USENET_PASSWORD,
             ),
         ),
+        TransferCategorySpec(
+            category = SecretCategory.ARR_STACK,
+            title = "Media automation",
+            description = "Seerr, Sonarr, Radarr, Prowlarr, Bazarr, and Tdarr API keys plus server URLs.",
+            keys = listOf(
+                IntegrationSecretKey.SEERR_API_KEY,
+                IntegrationSecretKey.SONARR_API_KEY,
+                IntegrationSecretKey.RADARR_API_KEY,
+                IntegrationSecretKey.PROWLARR_API_KEY,
+                IntegrationSecretKey.BAZARR_API_KEY,
+                IntegrationSecretKey.TDARR_API_KEY,
+            ),
+        ),
     )
 
     /**

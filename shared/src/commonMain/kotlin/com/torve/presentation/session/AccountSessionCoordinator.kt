@@ -1007,6 +1007,19 @@ class AccountSessionCoordinator(
                                 "[IntegrationRestore] ${integration.integrationType} â†’ restored OK (api_key=${apiKey.isNotBlank()} refresh=${refreshToken.isNotBlank()} client=${clientId.isNotBlank()} secret=${clientSecret.isNotBlank()})"
                             }
                         }
+                    } else if (secretKey == IntegrationSecretKey.SEERR_API_KEY) {
+                        val apiKey = credsMap["api_key"].orEmpty()
+                        val serverUrl = credsMap["server_url"].orEmpty().trimEnd('/')
+                        if (apiKey.isNotBlank()) {
+                            integrationSecretStore.put(IntegrationSecretKey.SEERR_API_KEY, apiKey)
+                            if (serverUrl.startsWith("http://") || serverUrl.startsWith("https://")) {
+                                prefsRepo.setString(SettingsViewModel.KEY_SEERR_SERVER_URL, serverUrl)
+                            }
+                            restored++
+                            torveVerboseLog {
+                                "[IntegrationRestore] SEERR_API_KEY -> restored OK (server=${serverUrl.isNotBlank()})"
+                            }
+                        }
                     } else if (secretKey == IntegrationSecretKey.PANDA_TOKEN) {
                         // Panda's synced credential bundle: {token, manifest_url,
                         // config_id, management_token}. Older payloads had only

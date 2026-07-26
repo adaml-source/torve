@@ -61,6 +61,7 @@ fun TvHeroOverlay(
     isInWatchlist: Boolean = false,
     onWatchlistToggle: () -> Unit = {},
     logoLookupInFlight: Boolean = false,
+    allowLogoArtwork: Boolean = true,
     modifier: Modifier = Modifier,
 ) {
     val settingsViewModel: SettingsViewModel = koinInject()
@@ -75,7 +76,9 @@ fun TvHeroOverlay(
         AnimatedContent(
             targetState = featuredItem,
             transitionSpec = {
-                fadeIn(tween(300)) togetherWith fadeOut(tween(200))
+                // Keep the title change legible without retaining two complete
+                // hero trees for hundreds of milliseconds on Fire TV.
+                fadeIn(tween(90)) togetherWith fadeOut(tween(60))
             },
             contentKey = { it?.id },
             label = "heroOverlay",
@@ -87,7 +90,7 @@ fun TvHeroOverlay(
             ) {
                 val logoUrl = item?.logoUrl?.takeIf { it.isNotBlank() }
                 var logoFailed by remember(logoUrl) { mutableStateOf(false) }
-                if (!logoUrl.isNullOrBlank() && !logoFailed) {
+                if (allowLogoArtwork && !logoUrl.isNullOrBlank() && !logoFailed) {
                     AsyncImage(
                         model = logoUrl,
                         contentDescription = item.title,

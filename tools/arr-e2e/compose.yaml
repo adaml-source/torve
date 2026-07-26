@@ -1,0 +1,186 @@
+name: torve-arr-e2e
+
+services:
+  generate-media:
+    image: jrottenberg/ffmpeg:7.1-alpine
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - >-
+        if [ ! -s /fixture/Big.Buck.Bunny.2008.1080p.WEB-DL.x264.REPACK-TORVE-E2E.mkv ]; then
+        ffmpeg -y -f lavfi -i testsrc2=size=854x480:rate=12 -f lavfi -i sine=frequency=1000:sample_rate=48000 -t 660 -c:v libx264 -preset ultrafast -b:v 2M -pix_fmt yuv420p -c:a aac -metadata title='Torve generated E2E fixture' /fixture/Big.Buck.Bunny.2008.1080p.WEB-DL.x264.REPACK-TORVE-E2E.mkv;
+        fi
+    volumes:
+      - ./state/fixture:/fixture
+    restart: "no"
+
+  fixture:
+    image: python:3.12-alpine
+    command: ["python", "/app/fixture_server.py"]
+    volumes:
+      - ./fixture_server.py:/app/fixture_server.py:ro
+      - ./state/fixture:/fixture
+    ports:
+      - "18081:8080"
+    depends_on:
+      generate-media:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  qbit-config-init:
+    image: alpine:3.21
+    command: ["sh", "-c", "mkdir -p /seed-config/qBittorrent /download-config/qBittorrent && cp /source/qbittorrent.conf /seed-config/qBittorrent/qBittorrent.conf && cp /source/qbittorrent.conf /download-config/qBittorrent/qBittorrent.conf"]
+    volumes:
+      - ./qbittorrent.conf:/source/qbittorrent.conf:ro
+      - ./state/qbit-seed:/seed-config
+      - ./state/qbit-download:/download-config
+    restart: "no"
+
+  qbit-seed:
+    image: lscr.io/linuxserver/qbittorrent:latest
+    environment:
+      PUID: "1000"
+      PGID: "1000"
+      TZ: Europe/Berlin
+      WEBUI_PORT: "8080"
+      TORRENTING_PORT: "6881"
+    volumes:
+      - ./state/qbit-seed:/config
+      - ./state/fixture:/seed
+    depends_on:
+      qbit-config-init:
+        condition: service_completed_successfully
+      fixture:
+        condition: service_started
+    restart: unless-stopped
+
+  qbit:
+    image: lscr.io/linuxserver/qbittorrent:latest
+    environment:
+      PUID: "1000"
+      PGID: "1000"
+      TZ: Europe/Berlin
+      WEBUI_PORT: "8080"
+      TORRENTING_PORT: "6881"
+    volumes:
+      - ./state/qbit-download:/config
+      - ./state/downloads:/downloads
+    ports:
+      - "18080:8080"
+    depends_on:
+      qbit-config-init:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  sonarr:
+    image: lscr.io/linuxserver/sonarr:latest
+    environment: &linuxserver_environment
+      PUID: "1000"
+      PGID: "1000"
+      TZ: Europe/Berlin
+    volumes:
+      - ./state/sonarr:/config
+      - ./state:/data
+      - ./state/downloads:/downloads
+    ports:
+      - "18989:8989"
+    restart: unless-stopped
+
+  radarr:
+    image: lscr.io/linuxserver/radarr:latest
+    environment: *linuxserver_environment
+    volumes:
+      - ./state/radarr:/config
+      - ./state:/data
+      - ./state/downloads:/downloads
+    ports:
+      - "17878:7878"
+    restart: unless-stopped
+
+  prowlarr:
+    image: lscr.io/linuxserver/prowlarr:latest
+    environment: *linuxserver_environment
+    volumes:
+      - ./state/prowlarr:/config
+    ports:
+      - "19696:9696"
+    restart: unless-stopped
+
+  bazarr:
+    image: lscr.io/linuxserver/bazarr:latest
+    environment: *linuxserver_environment
+    volumes:
+      - ./state/bazarr:/config
+      - ./state/media:/media
+      - ./state/media:/data/media
+    ports:
+      - "16767:6767"
+    restart: unless-stopped
+
+  tdarr:
+    image: ghcr.io/haveagitgat/tdarr:latest
+    environment:
+      TZ: Europe/Berlin
+      PUID: "1000"
+      PGID: "1000"
+      UMASK_SET: "002"
+      serverIP: 0.0.0.0
+      serverPort: "8266"
+      webUIPort: "8265"
+      internalNode: "false"
+      inContainer: "true"
+    volumes:
+      - ./state/tdarr/server:/app/server
+      - ./state/tdarr/configs:/app/configs
+      - ./state/tdarr/logs:/app/logs
+      - ./state/tdarr/temp:/temp
+      - ./state/media:/media
+    ports:
+      - "18265:8265"
+      - "18266:8266"
+    restart: unless-stopped
+
+  tdarr-node:
+    image: ghcr.io/haveagitgat/tdarr_node:latest
+    environment:
+      TZ: Europe/Berlin
+      PUID: "1000"
+      PGID: "1000"
+      UMASK_SET: "002"
+      nodeName: torve-e2e-cpu
+      serverIP: tdarr
+      serverPort: "8266"
+      inContainer: "true"
+      ffmpegVersion: "7"
+    volumes:
+      - ./state/tdarr/configs:/app/configs
+      - ./state/tdarr/logs:/app/logs
+      - ./state/tdarr/temp:/temp
+      - ./state/media:/media
+    depends_on:
+      - tdarr
+    restart: unless-stopped
+
+  bootstrap:
+    image: python:3.12-alpine
+    environment:
+      BOOTSTRAP_REV: "6"
+    command: ["python", "/app/bootstrap.py"]
+    volumes:
+      - ./bootstrap.py:/app/bootstrap.py:ro
+      - ./state:/state
+      - ./state/fixture:/fixture:ro
+      - ./state/radarr:/arr-config/radarr:ro
+      - ./state/sonarr:/arr-config/sonarr:ro
+      - ./state/prowlarr:/arr-config/prowlarr:ro
+      - ./state/bazarr:/bazarr-config:ro
+    depends_on:
+      - fixture
+      - qbit
+      - qbit-seed
+      - sonarr
+      - radarr
+      - prowlarr
+      - bazarr
+      - tdarr
+      - tdarr-node
+    restart: "no"

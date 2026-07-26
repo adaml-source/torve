@@ -44,7 +44,7 @@ object HttpClientFactory {
             // (Panda manifest + management, Trakt, Simkl, debrid, Torve
             // backend). Redact so HEADERS logging never leaks raw secrets
             // into logcat / stdout / crash reports.
-            sanitizeHeader { it.equals("Authorization", ignoreCase = true) }
+            sanitizeHeader { name -> isSensitiveHeader(name) }
         }
 
         defaultRequest {
@@ -69,7 +69,7 @@ object HttpClientFactory {
             // (Panda manifest + management, Trakt, Simkl, debrid, Torve
             // backend). Redact so HEADERS logging never leaks raw secrets
             // into logcat / stdout / crash reports.
-            sanitizeHeader { it.equals("Authorization", ignoreCase = true) }
+            sanitizeHeader { name -> isSensitiveHeader(name) }
         }
 
         defaultRequest {
@@ -92,4 +92,8 @@ object HttpClientFactory {
             level = LogLevel.NONE
         }
     }
+
+    private fun isSensitiveHeader(name: String): Boolean =
+        name.equals("Authorization", ignoreCase = true) ||
+            name.equals("X-Api-Key", ignoreCase = true)
 }

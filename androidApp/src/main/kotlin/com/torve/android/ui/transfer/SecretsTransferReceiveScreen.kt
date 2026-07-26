@@ -621,6 +621,7 @@ private fun transferCategoryTitle(category: SecretCategory): String = when (cate
     SecretCategory.TRAKT_SIMKL -> stringResource(R.string.transfer_category_trakt_simkl)
     SecretCategory.AI_KEYS -> stringResource(R.string.transfer_category_ai_keys)
     SecretCategory.PANDA -> stringResource(R.string.transfer_category_panda)
+    SecretCategory.ARR_STACK -> stringResource(R.string.transfer_category_arr_stack)
 }
 
 @Composable
@@ -631,6 +632,7 @@ private fun transferCategoryTitles(): Map<SecretCategory, String> = mapOf(
     SecretCategory.TRAKT_SIMKL to stringResource(R.string.transfer_category_trakt_simkl),
     SecretCategory.AI_KEYS to stringResource(R.string.transfer_category_ai_keys),
     SecretCategory.PANDA to stringResource(R.string.transfer_category_panda),
+    SecretCategory.ARR_STACK to stringResource(R.string.transfer_category_arr_stack),
 )
 
 @Composable

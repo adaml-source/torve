@@ -199,6 +199,12 @@ data class SettingsUiState(
     val plexConnected: Boolean = false,
     val plexLoading: Boolean = false,
     val plexError: String? = null,
+    // Integrations - Seerr household request gateway
+    val seerrServerUrl: String = "",
+    val seerrApiKey: String = "",
+    val seerrConnected: Boolean = false,
+    val seerrLoading: Boolean = false,
+    val seerrStatusMessage: String? = null,
     // Region / availability
     val regionCode: String = "US",
     // Ratings

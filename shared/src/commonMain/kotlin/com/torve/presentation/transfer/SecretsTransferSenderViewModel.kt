@@ -372,6 +372,37 @@ class SecretsTransferSenderViewModel(
                 missing += SecretCategory.PLEX_JELLYFIN
             }
         }
+        if (SecretCategory.ARR_STACK in selected) {
+            val scopedInstanceSecretsShipped = shippedSecrets.any {
+                it.category == SecretCategory.ARR_STACK && it.subKey != null
+            }
+            if (scopedInstanceSecretsShipped) {
+                val instances = readConfigKey(DefaultConfigKeyAllowlist.AUTOMATION_INSTANCES)
+                if (instances == null) missing += SecretCategory.ARR_STACK
+                else entries += ConfigEntry(
+                    SecretCategory.ARR_STACK,
+                    DefaultConfigKeyAllowlist.AUTOMATION_INSTANCES,
+                    instances,
+                )
+            }
+            val companionPairs = listOf(
+                IntegrationSecretKey.SEERR_API_KEY to DefaultConfigKeyAllowlist.SEERR_SERVER_URL,
+                IntegrationSecretKey.SONARR_API_KEY to DefaultConfigKeyAllowlist.SONARR_SERVER_URL,
+                IntegrationSecretKey.RADARR_API_KEY to DefaultConfigKeyAllowlist.RADARR_SERVER_URL,
+                IntegrationSecretKey.PROWLARR_API_KEY to DefaultConfigKeyAllowlist.PROWLARR_SERVER_URL,
+                IntegrationSecretKey.BAZARR_API_KEY to DefaultConfigKeyAllowlist.BAZARR_SERVER_URL,
+                IntegrationSecretKey.TDARR_API_KEY to DefaultConfigKeyAllowlist.TDARR_SERVER_URL,
+            )
+            var missingRequiredUrl = false
+            companionPairs.forEach { (secretKey, configKey) ->
+                if (shippedSecrets.any { it.key == secretKey.name && it.subKey == null }) {
+                    val url = readConfigKey(configKey)
+                    if (url == null) missingRequiredUrl = true
+                    else entries += ConfigEntry(SecretCategory.ARR_STACK, configKey, url)
+                }
+            }
+            if (missingRequiredUrl) missing += SecretCategory.ARR_STACK
+        }
         return ConfigSnapshot(entries = entries, categoriesMissingCompanionConfig = missing)
     }
 

@@ -10,6 +10,7 @@ import com.torve.domain.model.ResolvedStream
 import com.torve.domain.model.Season
 import com.torve.domain.model.StartupCandidate
 import com.torve.domain.model.WatchProgress
+import com.torve.domain.integrations.MediaLifecycleStatus
 
 /** Canonical key for episode tracking — single source of truth. */
 fun episodeKey(season: Int, episode: Int): String = "s${season}e${episode}"
@@ -105,6 +106,12 @@ data class DetailUiState(
     // Episode tracking: keys like "s1e1", "s1e2", etc.
     val watchedEpisodes: Set<String> = emptySet(),
     val isInLibrary: Boolean = false,
+    // Seerr -> Sonarr/Radarr permanent-library lifecycle. Kept separate from
+    // stream availability because the user can Play now while this progresses.
+    val mediaLifecycleStatus: MediaLifecycleStatus? = null,
+    val isLoadingMediaLifecycle: Boolean = false,
+    val mediaLifecycleError: String? = null,
+    val mediaLifecycleMessage: String? = null,
     // Track what we're fetching streams for (for download labeling)
     val streamContextSeason: Int? = null,
     val streamContextEpisode: Int? = null,

@@ -126,6 +126,7 @@ class ProviderHealthRecoveryStateProviderTest {
             entry(ProviderHealthCategory.EPG, ProviderHealthStatus.UNCONFIGURED),
             entry(ProviderHealthCategory.IPTV, ProviderHealthStatus.UNCONFIGURED),
             entry(ProviderHealthCategory.PLAYBACK, ProviderHealthStatus.UNCONFIGURED),
+            entry(ProviderHealthCategory.REQUEST_MANAGER, ProviderHealthStatus.UNCONFIGURED),
         )
         val snap = provider.snapshot(healthEntries = healthEntries)
         assertFalse(snap.shouldShowRecoveryCard)
