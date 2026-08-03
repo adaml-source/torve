@@ -254,23 +254,8 @@ internal fun TvCatalogRailsScreen(
     val targetMediaType = if (isMovieCatalog) MediaType.MOVIE else MediaType.SERIES
     var searchActive by rememberSaveable(mediaType) { mutableStateOf(false) }
     var searchQuery by rememberSaveable(mediaType) { mutableStateOf("") }
-    var searchMode by rememberSaveable(mediaType) { mutableStateOf(CatalogSearchMode.STANDARD) }
-    var searchResults by remember { mutableStateOf<List<MediaItem>>(emptyList()) }
-    var searchLoading by remember { mutableStateOf(false) }
-    var searchError by remember { mutableStateOf<String?>(null) }
-    var searchAiTitle by remember { mutableStateOf<String?>(null) }
-    var searchAiFallback by remember { mutableStateOf(false) }
     var restoreSearchEntryFocus by remember { mutableStateOf(false) }
-    var pendingSearchInitialFocusToken by remember { mutableIntStateOf(0) }
     var appliedInitialSearchQuery by rememberSaveable(mediaType) { mutableStateOf<String?>(null) }
-    var searchEntryFocused by rememberSaveable(mediaType) { mutableStateOf(true) }
-    val hasAiSearch = settingsState.activeAiApiKey.isNotBlank()
-
-    LaunchedEffect(hasAiSearch, searchMode) {
-        if (!hasAiSearch && searchMode == CatalogSearchMode.AI) {
-            searchMode = CatalogSearchMode.STANDARD
-        }
-    }
 
     LaunchedEffect(isMovieCatalog, settingsState.traktConnected, settingsState.traktAccessToken) {
         if (!isMovieCatalog && settingsState.traktConnected) {
@@ -280,7 +265,6 @@ internal fun TvCatalogRailsScreen(
 
     LaunchedEffect(searchActive) {
         if (searchActive) {
-            searchEntryFocused = true
             onClearMediaFocus?.invoke()
         }
     }
@@ -291,8 +275,6 @@ internal fun TvCatalogRailsScreen(
         appliedInitialSearchQuery = normalized
         searchQuery = normalized
         searchActive = true
-        searchMode = CatalogSearchMode.STANDARD
-        pendingSearchInitialFocusToken++
     }
 
     val trendingLabel = if (isMovieCatalog) {
@@ -815,113 +797,39 @@ internal fun TvCatalogRailsScreen(
         }
     }
 
-    LaunchedEffect(searchActive, searchQuery, searchMode, mediaType) {
-        if (!searchActive) return@LaunchedEffect
-        val query = searchQuery.trim()
-        searchAiTitle = null
-        searchAiFallback = false
-        if (query.length < 2) {
-            searchResults = emptyList()
-            searchLoading = false
-            searchError = null
-            return@LaunchedEffect
-        }
-        searchLoading = true
-        searchError = null
-        try {
-            delay(if (searchMode == CatalogSearchMode.AI) 300 else 220)
-            val raw = if (searchMode == CatalogSearchMode.AI && hasAiSearch) {
-                val aiResult = keywordSearchService.searchWithAi(
-                    settingsState.aiProvider,
-                    settingsState.activeAiApiKey,
-                    query,
-                )
-                searchAiTitle = aiResult.title
-                resolveCatalogAiSearch(
-                    aiResult = aiResult,
-                    fallbackType = mediaType,
-                    metadataRepo = metadataRepo,
-                ).ifEmpty {
-                    searchAiFallback = true
-                    searchAiTitle = null
-                    metadataRepo.searchMulti(query, 1).take(60)
-                }
-            } else {
-                metadataRepo.searchMulti(query, 1).take(60)
-            }
-            searchResults = raw
-                .filter { it.type == targetMediaType }
-                .take(60)
-        } catch (t: Throwable) {
-            searchResults = emptyList()
-            searchError = t.message ?: "Search failed"
-        } finally {
-            searchLoading = false
-        }
-    }
-
     val preparingMessage = stringResource(
         if (isMovieCatalog) R.string.tv_catalog_movies_preparing else R.string.tv_catalog_shows_preparing,
     )
     val emptyMessage = uiState.error ?: preparingMessage
     val searchEntryRequester = remember(mediaType) { FocusRequester() }
-    val contextualSearchResults = remember(searchQuery, searchResults, filteredRails) {
-        if (searchQuery.trim().length < 2) {
-            filteredRails
-                .flatMap { it.items }
-                .dedupeByStableKey()
-                .take(160)
-        } else {
-            searchResults
-        }
-    }
-    val contextualSearchLoading = searchLoading && searchQuery.trim().length >= 2
     if (searchActive) {
-        TvCatalogContextualSearchSurface(
-            mediaType = targetMediaType,
-            metadataRepo = metadataRepo,
-            genreSpecs = genreSpecs,
-            ratingPrefs = catalogRatingPrefs,
-            query = searchQuery,
-            onQueryChange = { searchQuery = it },
-            searchMode = searchMode,
-            onSearchModeChange = { searchMode = it },
-            hasAiSearch = hasAiSearch,
-            loading = contextualSearchLoading,
-            error = searchError,
-            results = contextualSearchResults,
-            aiTitle = searchAiTitle,
-            aiFallback = searchAiFallback,
+        TvSearchScreen(
             railFocusRequester = railFocusRequester,
+            initialQuery = searchQuery,
+            initialFilterType = mediaType,
+            instanceKey = "catalog_$mediaType",
             onFirstContentRequester = onFirstContentRequester,
             onContentFocused = onContentFocused,
-            onMediaFocused = onMediaFocused,
-            onClearMediaFocus = onClearMediaFocus,
             onMediaClick = onMediaClick,
             onClose = {
                 searchActive = false
                 searchQuery = ""
-                searchResults = emptyList()
-                searchError = null
                 restoreSearchEntryFocus = true
-                searchEntryFocused = true
             },
-            initialFocusToken = pendingSearchInitialFocusToken,
-            onInitialFocusConsumed = { pendingSearchInitialFocusToken = 0 },
+            shouldAutoFocus = true,
+            registerFocusHandle = registerFocusHandle,
         )
     } else {
         LaunchedEffect(restoreSearchEntryFocus, searchActive) {
             if (restoreSearchEntryFocus && !searchActive) {
-                restoreSearchEntryFocus = false
-                searchEntryFocused = true
                 repeat(6) {
                     withFrameNanos { }
                     kotlinx.coroutines.delay(60)
                     if (runCatching { searchEntryRequester.requestFocus() }.isSuccess) {
                         onContentFocused(searchEntryRequester)
-                        return@LaunchedEffect
                     }
                 }
+                restoreSearchEntryFocus = false
             }
         }
         val searchTitle = stringResource(
@@ -955,10 +863,7 @@ internal fun TvCatalogRailsScreen(
             headerFocusRequester = headerFocusRequester,
             onMediaClick = onMediaClick,
             onFirstContentRequester = onFirstContentRequester,
-            onContentFocused = {
-                searchEntryFocused = false
-                onContentFocused(it)
-            },
+            onContentFocused = onContentFocused,
             screenId = if (isMovieCatalog) "movies" else "shows",
             focusMemory = focusMemory,
             loading = uiState.loading,
@@ -969,22 +874,17 @@ internal fun TvCatalogRailsScreen(
             presentationMode = TvRailsPresentationMode.CatalogHero,
             focusExclusive = true,
             leadingContentFocusRequester = searchEntryRequester,
-            leadingContentVisible = searchEntryFocused,
+            leadingContentVisible = true,
             leadingContent = {
                 Column(
                     modifier = Modifier
                         .height(
-                            if (!searchEntryFocused) {
-                                1.dp
-                            } else if (upcomingScheduleMessage != null) {
+                            if (upcomingScheduleMessage != null) {
                                 124.dp
                             } else {
                                 86.dp
                             },
                         )
-                        .clipToBounds()
-                        .graphicsLayer { alpha = if (searchEntryFocused) 1f else 0f }
-                        .then(if (searchEntryFocused) Modifier else Modifier.clearAndSetSemantics { })
                         .padding(start = TV_PAGE_CONTENT_GUTTER, end = TV_PAGE_END_GUTTER),
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
@@ -995,18 +895,14 @@ internal fun TvCatalogRailsScreen(
                         modifier = Modifier
                             .focusRequester(searchEntryRequester)
                             .focusProperties {
-                                canFocus = searchEntryFocused
                                 left = railFocusRequester
                                 headerFocusRequester?.let { up = it }
                             },
                         onFocused = {
-                            searchEntryFocused = true
                             onClearMediaFocus?.invoke()
                             onContentFocused(searchEntryRequester)
                         },
                         onClick = {
-                            searchMode = CatalogSearchMode.STANDARD
-                            pendingSearchInitialFocusToken++
                             searchActive = true
                         },
                     )

@@ -356,8 +356,10 @@ class HomeViewModel(
     fun updateSectionOrder(configs: List<HomeSectionConfig>) {
         _sectionConfigs.value = configs
         saveSectionConfigs(configs)
-        // Sync the layout order so TvHomeScreen picks up the new ordering.
-        val order = configs.sortedBy { it.order }.map { "section:${it.section.name}" }
+        // Keep custom and addon rails in the combined order. Reordering the
+        // built-in rows must not silently discard entries that this editor
+        // does not own.
+        val order = mergeBuiltInHomeLayoutOrder(_homeLayoutOrder.value, configs)
         updateHomeLayoutOrder(order)
     }
 
@@ -2299,4 +2301,25 @@ class HomeViewModel(
         // can't keep the coroutine alive forever. 5 × 60s = 5 min worst case.
         private const val MAX_RATINGS_ENRICHMENT_ITERATIONS = 5
     }
+}
+
+internal fun mergeBuiltInHomeLayoutOrder(
+    existingOrder: List<String>,
+    configs: List<HomeSectionConfig>,
+): List<String> {
+    val orderedBuiltIns = configs
+        .sortedWith(compareBy<HomeSectionConfig> { it.order }.thenBy { it.section.ordinal })
+        .map { "section:${it.section.name}" }
+    if (existingOrder.isEmpty()) return orderedBuiltIns
+
+    val builtInIterator = orderedBuiltIns.iterator()
+    val merged = existingOrder.mapNotNull { key ->
+        if (key.startsWith("section:")) {
+            if (builtInIterator.hasNext()) builtInIterator.next() else null
+        } else {
+            key
+        }
+    }.toMutableList()
+    while (builtInIterator.hasNext()) merged += builtInIterator.next()
+    return merged.distinct()
 }

@@ -30,6 +30,7 @@ import com.torve.domain.model.HomeSectionConfig
 import com.torve.domain.model.MediaItem
 import com.torve.domain.model.MediaRatings
 import com.torve.domain.model.MediaType
+import com.torve.domain.model.PersonSummary
 import com.torve.domain.model.withEnrichedRatingsFrom
 import com.torve.platform.NetworkMonitor
 import com.torve.platform.NetworkType
@@ -160,41 +161,48 @@ internal fun TvHomeScreen(
     // gone away between the snapshot and the tap, we fall back to
     // opening detail rather than crashing or staring at a black screen.
     val handleMediaClick: (MediaItem) -> Unit = { item ->
-        coroutineScope.launch {
-            val networkMode = networkMonitor.currentNetworkType().toLanlibraryMode()
-            val decision = playbackRouter.resolve(
-                item = item,
-                availability = outcomeState.availabilityByTmdbId,
-                lanTitlesLowercase = outcomeState.lanTitlesLowercase,
-                networkMode = networkMode,
-                wifiOnlyForLan = settingsState.lanPlaybackWifiOnly,
-            )
-            when (decision) {
-                is TvHomePlaybackDecision.AutoplayLocal -> {
-                    val launch = onPlayLocalFile
-                    if (launch != null) launch(item, decision.absolutePath)
-                    else onMediaClick(item)
-                }
-                is TvHomePlaybackDecision.AutoplayLan -> {
-                    val launch = onPlayLanRoute
-                    val route = runCatching {
-                        lanLibraryConsumer.findLanRoute(
-                            title = decision.title,
-                            seasonNumber = decision.seasonNumber,
-                            episodeNumber = decision.episodeNumber,
-                        )
-                    }.getOrNull()
-                    if (launch != null && route != null) {
-                        // Stage headers BEFORE navigating so the player
-                        // attaches `X-Torve-Lan-Auth` on the same frame
-                        // it calls play().
-                        PendingLanPlaybackHandoff.stage(route)
-                        launch(item, route.url)
-                    } else {
-                        onMediaClick(item)
+        val personId = item.id.removePrefix(TV_HOME_PERSON_ID_PREFIX)
+            .takeIf { item.id.startsWith(TV_HOME_PERSON_ID_PREFIX) }
+            ?.toIntOrNull()
+        if (personId != null) {
+            onSeeAll?.invoke("person_credits_$personId", item.title)
+        } else {
+            coroutineScope.launch {
+                val networkMode = networkMonitor.currentNetworkType().toLanlibraryMode()
+                val decision = playbackRouter.resolve(
+                    item = item,
+                    availability = outcomeState.availabilityByTmdbId,
+                    lanTitlesLowercase = outcomeState.lanTitlesLowercase,
+                    networkMode = networkMode,
+                    wifiOnlyForLan = settingsState.lanPlaybackWifiOnly,
+                )
+                when (decision) {
+                    is TvHomePlaybackDecision.AutoplayLocal -> {
+                        val launch = onPlayLocalFile
+                        if (launch != null) launch(item, decision.absolutePath)
+                        else onMediaClick(item)
                     }
+                    is TvHomePlaybackDecision.AutoplayLan -> {
+                        val launch = onPlayLanRoute
+                        val route = runCatching {
+                            lanLibraryConsumer.findLanRoute(
+                                title = decision.title,
+                                seasonNumber = decision.seasonNumber,
+                                episodeNumber = decision.episodeNumber,
+                            )
+                        }.getOrNull()
+                        if (launch != null && route != null) {
+                            // Stage headers BEFORE navigating so the player
+                            // attaches `X-Torve-Lan-Auth` on the same frame
+                            // it calls play().
+                            PendingLanPlaybackHandoff.stage(route)
+                            launch(item, route.url)
+                        } else {
+                            onMediaClick(item)
+                        }
+                    }
+                    TvHomePlaybackDecision.OpenDetail -> onMediaClick(item)
                 }
-                TvHomePlaybackDecision.OpenDetail -> onMediaClick(item)
             }
         }
     }
@@ -212,12 +220,16 @@ internal fun TvHomeScreen(
     ) {
         val banner = outcomeState.providerBanner
         val onNow = outcomeState.onNow
+        val showConfiguredHero = sectionConfigs
+            .firstOrNull { it.section == HomeSection.HERO }
+            ?.enabled
+            ?: HomeSection.HERO.defaultEnabled
         val showOnNow = sectionConfigs
             .firstOrNull { it.section == HomeSection.ON_NOW }
             ?.enabled
             ?: HomeSection.ON_NOW.defaultEnabled
         val showOnNowRail = showOnNow && onNow.isNotEmpty() && onLiveChannelClick != null
-        if (banner == null && !showOnNowRail && heroOverlay == null) {
+        if (banner == null && !showOnNowRail && (!showConfiguredHero || heroOverlay == null)) {
             null
         } else {
             @Composable {
@@ -227,7 +239,7 @@ internal fun TvHomeScreen(
                         onClick = { onProviderBannerAction?.invoke() },
                     )
                 }
-                heroOverlay?.invoke()
+                if (showConfiguredHero) heroOverlay?.invoke()
                 if (showOnNowRail) {
                     TvOnNowRail(
                         title = onNowTitle,
@@ -319,7 +331,7 @@ private fun buildOutcomeRails(
     return out
 }
 
-private fun buildTvHomeRails(
+internal fun buildTvHomeRails(
     state: HomeUiState,
     sectionConfigs: List<HomeSectionConfig>,
     customSections: List<CustomSection>,
@@ -335,9 +347,13 @@ private fun buildTvHomeRails(
     }
 
     val renderItems = buildList<TvHomeRenderItem> {
+        val addonSectionEnabled = sectionConfigs
+            .firstOrNull { it.section == HomeSection.ADDON_SHELVES }
+            ?.enabled
+            ?: HomeSection.ADDON_SHELVES.defaultEnabled
         sectionConfigs.filter { it.enabled }.forEach { add(BuiltInHomeItem(it)) }
         customSections.filter { it.enabled }.forEach { add(CustomHomeItem(it)) }
-        state.addonShelves.forEachIndexed { index, shelf ->
+        state.addonShelves.takeIf { addonSectionEnabled }.orEmpty().forEachIndexed { index, shelf ->
             if (addonShelfVisibility[shelf.id] != false) {
                 add(
                     AddonShelfHomeItem(
@@ -382,7 +398,10 @@ private fun buildTvHomeRails(
         }
     }
 
-    return rails.dedupeAcrossRails()
+    // Explicitly enabled Home rails remain visible whenever they have at
+    // least one unique item. The generic 20-item threshold is useful for
+    // discovery pagination, but made Appearance toggles appear broken.
+    return rails.dedupeAcrossRails(minItemsPerRail = 1)
 }
 
 private fun buildBuiltInRails(
@@ -395,11 +414,26 @@ private fun buildBuiltInRails(
         HomeSection.HERO,
         HomeSection.ON_NOW,
         HomeSection.STREAMING_SERVICES,
-        HomeSection.ACTORS,
-        HomeSection.DIRECTORS,
-        HomeSection.UPCOMING_SCHEDULE,
         HomeSection.ADDON_SHELVES -> {
             emptyList()
+        }
+
+        HomeSection.UPCOMING_SCHEDULE -> {
+            val items = state.upcomingSchedule.tvHomeCardItems()
+            if (items.isEmpty()) emptyList()
+            else listOf(TvContentRail(key = "upcoming_schedule", title = title, items = items))
+        }
+
+        HomeSection.ACTORS -> {
+            val items = state.popularActors.map { it.toTvHomePersonItem() }
+            if (items.isEmpty()) emptyList()
+            else listOf(TvContentRail(key = "popular_actors", title = title, items = items))
+        }
+
+        HomeSection.DIRECTORS -> {
+            val items = state.popularDirectors.map { it.toTvHomePersonItem() }
+            if (items.isEmpty()) emptyList()
+            else listOf(TvContentRail(key = "popular_directors", title = title, items = items))
         }
 
         HomeSection.CONTINUE_WATCHING -> {
@@ -524,3 +558,14 @@ private fun MediaItem.isTvHomeDisplayable(): Boolean =
     !isContentPlaceholder &&
         !isStubDetail &&
         title.isNotBlank()
+
+private const val TV_HOME_PERSON_ID_PREFIX = "person:"
+
+private fun PersonSummary.toTvHomePersonItem(): MediaItem = MediaItem(
+    id = "$TV_HOME_PERSON_ID_PREFIX$id",
+    type = MediaType.MOVIE,
+    title = name,
+    overview = knownForDepartment,
+    posterUrl = profileUrl,
+    backdropUrl = profileUrl,
+)

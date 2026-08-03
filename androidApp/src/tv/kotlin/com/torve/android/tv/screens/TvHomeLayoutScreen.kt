@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -60,6 +61,7 @@ import com.torve.domain.model.SpecificTmdbItem
 import com.torve.presentation.home.HomeViewModel
 import com.torve.presentation.settings.SettingsViewModel
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.yield
 import org.koin.compose.koinInject
 import java.util.UUID
 
@@ -82,6 +84,7 @@ fun TvHomeLayoutScreen(
     val settingsState by settingsViewModel.state.collectAsState()
     val sortedConfigs = remember(configs) { configs.sortedBy { it.order } }
     val scope = rememberCoroutineScope()
+    val listState = rememberLazyListState()
 
     // Create custom section form state
     var showCreateCustom by remember { mutableStateOf(false) }
@@ -105,6 +108,7 @@ fun TvHomeLayoutScreen(
     }
 
     LazyColumn(
+        state = listState,
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(start = 40.dp, top = 20.dp, end = 40.dp, bottom = 24.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -165,6 +169,11 @@ fun TvHomeLayoutScreen(
                         mutableList[index - 1] = config.copy(order = prev.order)
                         mutableList[index] = prev.copy(order = config.order)
                         homeViewModel.updateSectionOrder(mutableList)
+                        scope.launch {
+                            yield()
+                            listState.scrollToItem(index - 1 + HOME_LAYOUT_STATIC_ITEM_COUNT)
+                            runCatching { requester.requestFocus() }
+                        }
                     }
                 },
                 onMoveDown = {
@@ -174,6 +183,11 @@ fun TvHomeLayoutScreen(
                         mutableList[index + 1] = config.copy(order = next.order)
                         mutableList[index] = next.copy(order = config.order)
                         homeViewModel.updateSectionOrder(mutableList)
+                        scope.launch {
+                            yield()
+                            listState.scrollToItem(index + 1 + HOME_LAYOUT_STATIC_ITEM_COUNT)
+                            runCatching { requester.requestFocus() }
+                        }
                     }
                 },
             )
@@ -412,6 +426,8 @@ fun TvHomeLayoutScreen(
         }
     }
 }
+
+private const val HOME_LAYOUT_STATIC_ITEM_COUNT = 2
 
 @Composable
 private fun HomeSectionRow(

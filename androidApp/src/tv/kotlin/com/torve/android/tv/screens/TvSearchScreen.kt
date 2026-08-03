@@ -204,6 +204,9 @@ internal fun TvSearchScreen(
     onFirstContentRequester: (FocusRequester) -> Unit,
     onContentFocused: (FocusRequester) -> Unit,
     initialQuery: String = "",
+    initialFilterType: String? = null,
+    instanceKey: String = "main",
+    onClose: (() -> Unit)? = null,
     shouldAutoFocus: Boolean = true,
     registerFocusHandle: ((TvScreenFocusHandle?) -> Unit)? = null,
 ) {
@@ -216,10 +219,14 @@ internal fun TvSearchScreen(
     val availabilityAggregator: SourceAvailabilityAggregator = koinInject()
     val settingsState by settingsViewModel.state.collectAsState()
     val context = LocalContext.current
-    val screenId = remember { "tv_search" }
+    val screenId = remember(instanceKey) { "tv_search:$instanceKey" }
+    val routeCacheKey = remember(instanceKey) {
+        if (instanceKey == "main") TV_SEARCH_ROUTE_CACHE_KEY
+        else "$TV_SEARCH_ROUTE_CACHE_KEY:$instanceKey"
+    }
     val focusRestoreController = rememberTvModalFocusRestoreController(key = screenId)
-    val restoredRouteCache = remember {
-        TvScreenCache.get<TvSearchRouteCacheState>(TV_SEARCH_ROUTE_CACHE_KEY)
+    val restoredRouteCache = remember(routeCacheKey) {
+        TvScreenCache.get<TvSearchRouteCacheState>(routeCacheKey)
             ?.takeIf { it.isFresh() }
             ?.also {
                 Log.d(
@@ -230,13 +237,17 @@ internal fun TvSearchScreen(
     }
     val restoredContentCache = restoredRouteCache?.takeIf { it.results.isNotEmpty() }
 
-    var query by rememberSaveable { mutableStateOf(restoredContentCache?.query ?: initialQuery) }
+    var query by rememberSaveable(instanceKey) {
+        mutableStateOf(restoredContentCache?.query ?: initialQuery)
+    }
     var baseResults by remember { mutableStateOf(restoredContentCache?.baseResults.orEmpty()) }
     var results by remember { mutableStateOf(restoredContentCache?.results.orEmpty()) }
     var loading by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     var searchMode by rememberSaveable { mutableStateOf(restoredContentCache?.searchMode ?: SearchMode.STANDARD) }
-    var filterType by rememberSaveable { mutableStateOf<String?>(restoredContentCache?.filterType) } // "movie", "tv", or null (all)
+    var filterType by rememberSaveable(instanceKey) {
+        mutableStateOf(restoredContentCache?.filterType ?: initialFilterType)
+    } // "movie", "tv", or null (all)
     var selectedGenreIds by remember { mutableStateOf(restoredContentCache?.selectedGenreIds.orEmpty()) }
     var selectedStudioIds by remember { mutableStateOf(restoredContentCache?.selectedStudioIds.orEmpty()) }
     var selectedYear by remember { mutableStateOf(restoredContentCache?.selectedYear) }
@@ -635,6 +646,9 @@ internal fun TvSearchScreen(
     BackHandler(enabled = showFilters) {
         showFilters = false
         focusResultsAfterClosingFilters = true
+    }
+    BackHandler(enabled = onClose != null && !showFilters) {
+        onClose?.invoke()
     }
 
     LaunchedEffect(Unit) {
@@ -1306,7 +1320,7 @@ internal fun TvSearchScreen(
         if (loading || error != null) return@LaunchedEffect
         if (baseResults.isEmpty() && results.isEmpty()) return@LaunchedEffect
         TvScreenCache.put(
-            TV_SEARCH_ROUTE_CACHE_KEY,
+            routeCacheKey,
             TvSearchRouteCacheState(
                 query = query,
                 searchMode = searchMode,

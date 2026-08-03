@@ -23,10 +23,10 @@ import com.torve.android.ui.theme.Obsidian
 
 /** Collapsed rail width — content always starts here, never shifts. */
 internal val TV_NAV_RAIL_WIDTH = 86.dp
-internal val TV_CONTENT_START_INSET = 60.dp
-// TV_CONTENT_START_INSET is the scaffold baseline only. Top-level TV pages
-// add TV_PAGE_CONTENT_GUTTER exactly once so first functional content starts
-// at 88.dp. The edge gutters below define the normal TV page bounds; avoid
+internal val TV_CONTENT_START_INSET = 92.dp
+// Reserve the complete collapsed navigation width plus focus-outline room.
+// Top-level TV pages add TV_PAGE_CONTENT_GUTTER exactly once. The edge
+// gutters below define the normal TV page bounds; avoid
 // custom first-layer 0/12/22/24/32/34/40/48.dp edge values unless a page is
 // intentionally special, or the value is inner card/chip/focus spacing.
 internal val TV_PAGE_CONTENT_GUTTER = 28.dp

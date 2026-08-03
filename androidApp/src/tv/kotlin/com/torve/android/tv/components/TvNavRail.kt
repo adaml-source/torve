@@ -273,6 +273,7 @@ private fun TvNavRailItem(
         else -> Brush.verticalGradient(listOf(Color.Transparent, Color.Transparent))
     }
     val label = shortNavLabel(destination)
+    val showLabel = destination.route != TvRoutes.SETTINGS
 
     Box(
         modifier = modifier
@@ -341,20 +342,30 @@ private fun TvNavRailItem(
                 imageVector = destination.icon,
                 contentDescription = label,
                 tint = tint,
-                modifier = Modifier.size(if (focused) 23.dp else 21.dp),
+                modifier = Modifier.size(
+                    if (!showLabel) {
+                        if (focused) 27.dp else 25.dp
+                    } else if (focused) {
+                        23.dp
+                    } else {
+                        21.dp
+                    },
+                ),
             )
-            Spacer(modifier = Modifier.height(2.dp))
-            Text(
-                text = label,
-                style = MaterialTheme.typography.labelSmall,
-                fontSize = 9.sp,
-                lineHeight = 10.sp,
-                fontWeight = if (focused) FontWeight.SemiBold else FontWeight.Medium,
-                color = labelColor,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                textAlign = TextAlign.Center,
-            )
+            if (showLabel) {
+                Spacer(modifier = Modifier.height(2.dp))
+                Text(
+                    text = label,
+                    style = MaterialTheme.typography.labelSmall,
+                    fontSize = 9.sp,
+                    lineHeight = 10.sp,
+                    fontWeight = if (focused) FontWeight.SemiBold else FontWeight.Medium,
+                    color = labelColor,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    textAlign = TextAlign.Center,
+                )
+            }
         }
     }
 }
