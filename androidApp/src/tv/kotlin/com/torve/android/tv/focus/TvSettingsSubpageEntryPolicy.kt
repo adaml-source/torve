@@ -25,6 +25,26 @@ internal fun resolveContentEntryRoute(
     return if (!isRailFocused) confirmedTopRoute else selectedTopRoute
 }
 
+/**
+ * A restore loop is finished once the active surface has reported focus.
+ * This also applies to implicit sub-route entry where no pending route was
+ * recorded; keeping retries alive in that case can steal focus from a modal.
+ */
+internal fun shouldStopContentFocusRestore(
+    activeRoute: String,
+    focusedContentRoute: String?,
+): Boolean = focusedContentRoute != null && focusedContentRoute == activeRoute
+
+/**
+ * Generic root retries are for top-level content and the two Settings
+ * subpages whose controls attach late. Other sub-routes (Details, See all,
+ * players, etc.) own their entry focus and must not be targeted repeatedly.
+ */
+internal fun shouldRunRootContentFocusRestore(
+    currentSubRoute: String?,
+    isSubRouteActive: Boolean,
+): Boolean = !isSubRouteActive || isSettingsSubpageRoute(currentSubRoute)
+
 internal fun shouldSuppressRailForSettingsSubpageEntry(
     pendingRoute: String?,
     currentSubRoute: String?,

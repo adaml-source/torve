@@ -370,19 +370,25 @@ class DebridClient(
                 )
             }
             DebridServiceType.TORBOX -> {
-                val createResp: TbResponse<TbTorrentData> = httpClient.post("$TB_BASE/webdl/createwebdownload") {
+                val createResp: TbResponse<TbWebDownloadData> = httpClient.submitForm(
+                    url = "$TB_BASE/webdl/createwebdownload",
+                    formParameters = Parameters.build {
+                        append("link", url)
+                    },
+                ) {
                     header("Authorization", "Bearer $apiKey")
-                    contentType(ContentType.Application.Json)
-                    setBody("""{"url":"$url"}""")
                 }.body()
-                val downloadId = createResp.data?.id ?: throw Exception("Download creation failed")
+                val downloadId = createResp.data?.id?.takeIf { it > 0 }
+                    ?: throw Exception(createResp.detail ?: "Download creation failed")
                 // Get the download link
-                val linkResp: TbResponse<TbDownloadLinkData> =
+                val linkResp: TbResponse<String> =
                     httpClient.get("$TB_BASE/webdl/requestdl") {
                         header("Authorization", "Bearer $apiKey")
+                        parameter("token", apiKey)
                         parameter("web_id", downloadId)
                     }.body()
-                val downloadUrl = linkResp.data?.data ?: throw Exception("No download link available")
+                val downloadUrl = linkResp.data?.takeIf { it.isNotBlank() }
+                    ?: throw Exception(linkResp.detail ?: "No download link available")
                 ResolvedStream(
                     url = downloadUrl,
                     service = provider,
@@ -1077,7 +1083,8 @@ class DebridClient(
             header("Authorization", "Bearer $apiKey")
         }.body()
 
-        val torrentId = createResp.data?.id ?: throw Exception("Create download failed")
+        val torrentId = createResp.data?.id?.takeIf { it > 0 }
+            ?: throw Exception(createResp.detail ?: "Create download failed")
 
         // 2. Poll until ready
         for (attempt in 0 until 30) {
@@ -1085,25 +1092,37 @@ class DebridClient(
                 httpClient.get("$TB_BASE/torrents/mylist") {
                     header("Authorization", "Bearer $apiKey")
                     parameter("id", torrentId)
+                    parameter("bypass_cache", true)
                 }.body()
 
             val info = infoResp.data
-            if (info != null && info.downloadState == "downloaded" && info.files.isNotEmpty()) {
+            val ready = info != null && (
+                info.downloadFinished ||
+                    info.downloadPresent ||
+                    info.cached ||
+                    info.downloadState.lowercase() in setOf("downloaded", "cached", "completed", "uploading")
+                )
+            if (info != null && ready && info.files.isNotEmpty()) {
                 // 3. Get download link
-                val targetFile = if (fileIdx != null && fileIdx < info.files.size) {
-                    info.files[fileIdx]
-                } else {
-                    info.files.maxByOrNull { it.size } ?: info.files.first()
+                val videoFiles = info.files.filter { file ->
+                    file.name.substringAfterLast('.', "").lowercase() in VIDEO_EXTENSIONS
                 }
+                val playableFiles = videoFiles.ifEmpty { info.files }
+                val targetFile = fileIdx?.let { requestedIndex ->
+                    playableFiles.firstOrNull { it.id == requestedIndex.toLong() }
+                        ?: playableFiles.getOrNull(requestedIndex)
+                } ?: playableFiles.maxByOrNull { it.size }
+                    ?: throw Exception("No downloadable files found")
 
-                val linkResp: TbResponse<TbDownloadLinkData> =
+                val linkResp: TbResponse<String> =
                     httpClient.get("$TB_BASE/torrents/requestdl") {
                         header("Authorization", "Bearer $apiKey")
+                        parameter("token", apiKey)
                         parameter("torrent_id", torrentId)
                         parameter("file_id", targetFile.id)
                     }.body()
 
-                val downloadUrl = linkResp.data?.data
+                val downloadUrl = linkResp.data?.takeIf { it.isNotBlank() }
                     ?: throw Exception("No download link available")
 
                 return ResolvedStream(

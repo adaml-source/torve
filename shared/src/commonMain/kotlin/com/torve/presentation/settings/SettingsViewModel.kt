@@ -16,8 +16,10 @@ import com.torve.data.trakt.repo.TraktSyncRepository
 import com.torve.db.TorveDatabase
 import com.torve.domain.integrations.IntegrationSecretKey
 import com.torve.domain.integrations.IntegrationSecretStore
+import com.torve.domain.integrations.IntegrationStorageMode
 import com.torve.domain.integrations.LibraryOverlayService
 import com.torve.domain.integrations.MediaLifecycleService
+import com.torve.domain.integrations.buildJellyfinAccountPayload
 import com.torve.domain.model.CardOrientation
 import com.torve.domain.model.CardPrefs
 import com.torve.domain.model.CardStyle
@@ -127,9 +129,10 @@ class SettingsViewModel(
     /**
      * Callback to push an integration credential to the backend.
      * Set by the DI layer after construction to avoid circular dependency.
-     * Signature: (integrationType, credentials map, displayIdentifier) -> Unit
+     * Signature returns true when the encrypted account write succeeds.
      */
-    var onIntegrationSaved: (suspend (String, Map<String, String>, String?) -> Unit)? = null
+    var onIntegrationSaved:
+        (suspend (String, Map<String, String>, String?, Map<String, String>) -> Boolean)? = null
 
     /** Notifies the TMDB client when the user changes the app language. Set by DI. */
     var onLanguageChanged: ((AppLanguage) -> Unit)? = null
@@ -669,6 +672,10 @@ class SettingsViewModel(
                 mdblistApiKey = mdblistApiKey,
                 jellyfinServerUrl = jellyfinServerUrl,
                 jellyfinApiKey = jellyfinApiKey,
+                // Account-backed Jellyfin payloads are stored atomically only after
+                // validation. A complete restored payload is therefore configured,
+                // even though transient presentation messages do not survive restart.
+                jellyfinConnected = jellyfinServerUrl.isNotBlank() && jellyfinApiKey.isNotBlank(),
                 jellyfinProfiles = if (jellyfinApiKey.isNotBlank()) it.jellyfinProfiles else emptyList(),
                 selectedJellyfinUserId = if (jellyfinApiKey.isNotBlank()) it.selectedJellyfinUserId else null,
                 jellyfinStatusMessage = null,
@@ -780,6 +787,7 @@ class SettingsViewModel(
                         "DEBRID_API_KEY_${provider.name}",
                         buildDebridSyncCredentials(provider, apiKey),
                         provider.name,
+                        emptyMap(),
                     )
                 }
             } else {
@@ -849,6 +857,7 @@ class SettingsViewModel(
                             "DEBRID_API_KEY_${provider.name}",
                             buildDebridSyncCredentials(provider, result.apiKey),
                             provider.name,
+                            emptyMap(),
                         )
                     }
                     verifyDebridConnection()
@@ -989,6 +998,7 @@ class SettingsViewModel(
                                     "refresh_token" to result.tokens.refreshToken,
                                 ),
                                 "Trakt",
+                                emptyMap(),
                             )
                         }
                         verifyTraktConnection()
@@ -1517,10 +1527,95 @@ class SettingsViewModel(
         _state.update { it.copy(jellyfinApiKey = key) }
     }
 
-    /** Save Jellyfin credentials to secure store, then test connection. */
-    fun saveAndTestJellyfinConnection() {
-        setJellyfinApiKey(_state.value.jellyfinApiKey)
-        testJellyfinConnection()
+    /**
+     * Validate first, then atomically persist the complete Jellyfin connection.
+     * Account mode is the TV/desktop default so a working setup follows the user.
+     */
+    fun saveAndTestJellyfinConnection(
+        storageMode: IntegrationStorageMode = IntegrationStorageMode.ACCOUNT,
+    ) {
+        val service = jellyfinService
+        if (service == null) {
+            _state.update { it.copy(jellyfinStatusMessage = "Jellyfin service is unavailable") }
+            return
+        }
+        val serverUrl = _state.value.jellyfinServerUrl.trim()
+        val apiKey = _state.value.jellyfinApiKey.trim()
+        val payload = buildJellyfinAccountPayload(
+            serverUrl = serverUrl,
+            apiKey = apiKey,
+            selectedUserId = _state.value.selectedJellyfinUserId,
+        )
+        if (payload == null) {
+            _state.update {
+                it.copy(jellyfinStatusMessage = "Enter a valid Jellyfin URL and API key")
+            }
+            return
+        }
+
+        _state.update { it.copy(jellyfinStatusMessage = "Testing connection...") }
+        scope.launch {
+            val hadWorkingConfiguration = _state.value.jellyfinConnected
+            val connected = service.testConnection(
+                serverUrl = payload.config.getValue("server_url"),
+                apiKey = payload.credentials.getValue("api_key"),
+            )
+            if (!connected) {
+                _state.update {
+                    it.copy(
+                        jellyfinConnected = hadWorkingConfiguration,
+                        jellyfinStatusMessage = if (hadWorkingConfiguration) {
+                            "New details failed. Your existing Jellyfin connection was kept."
+                        } else {
+                            "Connection failed"
+                        },
+                    )
+                }
+                return@launch
+            }
+
+            val normalizedUrl = payload.config.getValue("server_url")
+            val normalizedApiKey = payload.credentials.getValue("api_key")
+            prefsRepo.setString(KEY_JELLYFIN_SERVER_URL, normalizedUrl)
+            integrationSecretStore.put(IntegrationSecretKey.JELLYFIN_API_KEY, normalizedApiKey)
+            integrationSecretStore.setStorageMode(IntegrationSecretKey.JELLYFIN_API_KEY, storageMode)
+
+            val accountSynced = if (storageMode == IntegrationStorageMode.ACCOUNT) {
+                runCatching {
+                    onIntegrationSaved?.invoke(
+                        "JELLYFIN_API_KEY",
+                        payload.credentials,
+                        "Jellyfin",
+                        payload.config,
+                    ) ?: false
+                }.getOrDefault(false)
+            } else {
+                true
+            }
+
+            val profiles = service.getUserProfiles()
+            val selectedUserId = service.getSelectedUserId()
+            val syncedAt = Clock.System.now().toEpochMilliseconds()
+            prefsRepo.setString(KEY_LIBRARY_OVERLAY_LAST_SYNC_TIME, syncedAt.toString())
+            _state.update {
+                it.copy(
+                    jellyfinServerUrl = normalizedUrl,
+                    jellyfinApiKey = normalizedApiKey,
+                    jellyfinConnected = true,
+                    jellyfinProfiles = profiles,
+                    selectedJellyfinUserId = selectedUserId,
+                    libraryOverlayLastSyncTime = syncedAt,
+                    jellyfinStatusMessage = when {
+                        storageMode == IntegrationStorageMode.DEVICE_ONLY ->
+                            "Connection successful - saved on this device"
+                        accountSynced ->
+                            "Connection successful - saved to your Torve account"
+                        else ->
+                            "Connection successful on this device, but Torve account sync failed. Select Test connection to retry."
+                    },
+                )
+            }
+        }
     }
 
     /** Update Plex access token input — UI state only, does NOT persist. */
@@ -1608,20 +1703,14 @@ class SettingsViewModel(
         }
     }
 
+    /** Update the draft only. The complete connection is persisted after a successful test. */
     fun setJellyfinServerUrl(url: String) {
-        _state.update { it.copy(jellyfinServerUrl = url) }
-        scope.launch { prefsRepo.setString(KEY_JELLYFIN_SERVER_URL, url) }
+        _state.update { it.copy(jellyfinServerUrl = url, jellyfinStatusMessage = null) }
     }
 
+    /** Update the draft only. The complete connection is persisted after a successful test. */
     fun setJellyfinApiKey(key: String) {
-        _state.update { it.copy(jellyfinApiKey = key) }
-        scope.launch {
-            if (key.isBlank()) {
-                integrationSecretStore.remove(IntegrationSecretKey.JELLYFIN_API_KEY)
-            } else {
-                integrationSecretStore.put(IntegrationSecretKey.JELLYFIN_API_KEY, key)
-            }
-        }
+        _state.update { it.copy(jellyfinApiKey = key, jellyfinStatusMessage = null) }
     }
 
     private val jellyfinService: com.torve.data.integrations.JellyfinLibraryOverlayService?
@@ -1636,6 +1725,7 @@ class SettingsViewModel(
             val ok = service.testConnection(serverUrl = server, apiKey = key)
             _state.update {
                 it.copy(
+                    jellyfinConnected = ok,
                     jellyfinStatusMessage = if (ok) "Connection successful" else "Connection failed",
                 )
             }
@@ -1659,7 +1749,36 @@ class SettingsViewModel(
     fun selectJellyfinProfile(userId: String?) {
         val service = jellyfinService ?: return
         _state.update { it.copy(selectedJellyfinUserId = userId) }
-        scope.launch { service.setSelectedUserId(userId) }
+        scope.launch {
+            service.setSelectedUserId(userId)
+            if (
+                integrationSecretStore.getStorageMode(IntegrationSecretKey.JELLYFIN_API_KEY) !=
+                IntegrationStorageMode.ACCOUNT
+            ) {
+                return@launch
+            }
+            val payload = buildJellyfinAccountPayload(
+                serverUrl = prefsRepo.getString(KEY_JELLYFIN_SERVER_URL).orEmpty(),
+                apiKey = integrationSecretStore.get(IntegrationSecretKey.JELLYFIN_API_KEY).orEmpty(),
+                selectedUserId = userId,
+            ) ?: return@launch
+            val accountSynced = runCatching {
+                onIntegrationSaved?.invoke(
+                    "JELLYFIN_API_KEY",
+                    payload.credentials,
+                    "Jellyfin",
+                    payload.config,
+                ) ?: false
+            }.getOrDefault(false)
+            if (!accountSynced) {
+                _state.update {
+                    it.copy(
+                        jellyfinStatusMessage =
+                            "Profile saved on this device, but Torve account sync failed. Select it again to retry.",
+                    )
+                }
+            }
+        }
     }
 
     // -------------------------------------------------------------------------
@@ -1891,6 +2010,7 @@ class SettingsViewModel(
                             "SIMKL_ACCESS_TOKEN",
                             mapOf("access_token" to tokens.accessToken),
                             "Simkl",
+                            emptyMap(),
                         )
                     }
                     // Verify by fetching user
@@ -1936,19 +2056,21 @@ class SettingsViewModel(
             val savedApiKey = integrationSecretStore.get(IntegrationSecretKey.SEERR_API_KEY).orEmpty()
             val hadWorkingConfiguration = savedUrl.isNotBlank() && savedApiKey.isNotBlank()
             val ok = service.testConnection(url, apiKey)
+            var accountSynced = storageMode != com.torve.domain.integrations.IntegrationStorageMode.ACCOUNT
             if (ok) {
                 val normalizedUrl = url.trimEnd('/')
                 prefsRepo.setString(KEY_SEERR_SERVER_URL, normalizedUrl)
                 integrationSecretStore.put(IntegrationSecretKey.SEERR_API_KEY, apiKey)
                 integrationSecretStore.setStorageMode(IntegrationSecretKey.SEERR_API_KEY, storageMode)
                 if (storageMode == com.torve.domain.integrations.IntegrationStorageMode.ACCOUNT) {
-                    runCatching {
+                    accountSynced = runCatching {
                         onIntegrationSaved?.invoke(
                             "SEERR_API_KEY",
                             mapOf("api_key" to apiKey, "server_url" to normalizedUrl),
                             "Seerr",
-                        )
-                    }
+                            mapOf("server_url" to normalizedUrl),
+                        ) ?: false
+                    }.getOrDefault(false)
                 }
             }
             _state.update {
@@ -1962,7 +2084,10 @@ class SettingsViewModel(
                     },
                     seerrApiKey = if (!ok && hadWorkingConfiguration) savedApiKey else it.seerrApiKey,
                     seerrStatusMessage = when {
-                        ok -> "Connection successful"
+                        ok && storageMode == com.torve.domain.integrations.IntegrationStorageMode.DEVICE_ONLY ->
+                            "Connection successful; stored only on this device"
+                        ok && accountSynced -> "Connection successful and synced with your account"
+                        ok -> "Connection successful; account sync could not finish. Save and test again to retry."
                         hadWorkingConfiguration -> "Connection failed; existing configuration kept"
                         else -> "Connection failed"
                     },

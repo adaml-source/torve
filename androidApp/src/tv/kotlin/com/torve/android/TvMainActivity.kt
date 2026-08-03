@@ -59,6 +59,7 @@ class TvMainActivity : AppCompatActivity() {
     }
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        if (handleBackgroundPlaybackMenu(event)) return true
         if (handleBackgroundPlaybackBack(event)) return true
         if (shouldThrottleDirectionalRepeat(event)) return true
         return try {
@@ -70,6 +71,15 @@ class TvMainActivity : AppCompatActivity() {
             android.util.Log.w("TvMainActivity", "Focus dispatch error swallowed", e)
             true
         }
+    }
+
+    private fun handleBackgroundPlaybackMenu(event: KeyEvent): Boolean {
+        if (event.keyCode != KeyEvent.KEYCODE_MENU || !hasBackgroundPlayback()) return false
+        if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) {
+            ActivePlaybackState.requestPlaybackBarFocus()
+        }
+        // Own both DOWN and UP so Menu cannot also leak into the focused screen.
+        return true
     }
 
     private fun handleBackgroundPlaybackBack(event: KeyEvent): Boolean {
@@ -151,7 +161,9 @@ class TvMainActivity : AppCompatActivity() {
             activityScope.launch {
                 val authClient: AuthClient = getKoin().get()
                 val accountSessionCoordinator: AccountSessionCoordinator = getKoin().get()
-                accountSessionCoordinator.onAppForeground()
+                accountSessionCoordinator.onAppForeground(
+                    promoteLegacyTvJellyfin = true,
+                )
                 val user = authClient.getCurrentUser()
                 if (user != null && !user.isVerified) {
                     authClient.checkVerificationStatus()

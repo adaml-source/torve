@@ -722,11 +722,13 @@ private fun bootstrapDesktop(): BootstrapState {
                 metadataRepository = metadataRepository,
                 ratingsEnricher = koin.get<com.torve.data.mdblist.RatingsEnricher>(),
                 integrationSecretStore = koin.get<com.torve.domain.integrations.IntegrationSecretStore>(),
+                mediaLifecycleService = koin.get<com.torve.domain.integrations.MediaLifecycleService>(),
             ),
             searchController = DesktopSearchController(
                 metadataRepository = metadataRepository,
                 ratingsEnricher = koin.get<com.torve.data.mdblist.RatingsEnricher>(),
                 integrationSecretStore = koin.get<com.torve.domain.integrations.IntegrationSecretStore>(),
+                mediaLifecycleService = koin.get<com.torve.domain.integrations.MediaLifecycleService>(),
             ),
             channelRepository = channelRepository,
             channelsViewModel = channelsViewModel,

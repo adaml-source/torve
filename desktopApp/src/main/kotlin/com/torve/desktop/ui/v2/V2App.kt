@@ -1208,6 +1208,7 @@ fun V2App(
                                 },
                                 onToggleWatchlist = { item -> watchlistViewModel.toggleWatchlist(item) },
                                 onToggleFavorite = { item -> mediaFavoritesRepository.toggleFavorite(item) },
+                                onAddToLibrary = { detailControllerFor(route.controllerKey).requestPermanentCopy() },
                                 onSelectSeason = { detailControllerFor(route.controllerKey).selectSeason(it) },
                                 onSelectEpisode = { episode -> detailControllerFor(route.controllerKey).selectEpisode(episode.episodeNumber) },
                                 onOpenRelated = { pushFullDetail(it, route.controllerKey) },

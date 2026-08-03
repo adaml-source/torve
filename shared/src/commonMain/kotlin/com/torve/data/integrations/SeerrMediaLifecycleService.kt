@@ -6,12 +6,15 @@ import com.torve.domain.integrations.MediaLifecycleRequest
 import com.torve.domain.integrations.MediaLifecycleService
 import com.torve.domain.integrations.MediaLifecycleState
 import com.torve.domain.integrations.MediaLifecycleStatus
+import com.torve.domain.integrations.MediaLifecycleEntry
 import com.torve.domain.model.MediaType
 import com.torve.domain.repository.PreferencesRepository
 import io.ktor.client.HttpClient
 import io.ktor.client.call.body
+import io.ktor.client.request.delete
 import io.ktor.client.request.get
 import io.ktor.client.request.header
+import io.ktor.client.request.parameter
 import io.ktor.client.request.post
 import io.ktor.client.request.setBody
 import io.ktor.http.ContentType
@@ -19,6 +22,9 @@ import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.contentType
 import io.ktor.http.isSuccess
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
@@ -34,7 +40,9 @@ class SeerrMediaLifecycleService(
         val base = normalizeBaseUrl(serverUrl) ?: return false
         if (apiKey.isBlank()) return false
         return runCatching {
-            httpClient.get("$base/api/v1/status") {
+            // /status is public and would accept any key. /auth/me proves the
+            // supplied API key can actually perform authenticated requests.
+            httpClient.get("$base/api/v1/auth/me") {
                 header(API_KEY_HEADER, apiKey.trim())
                 header(HttpHeaders.Accept, ContentType.Application.Json)
             }.status.isSuccess()
@@ -102,6 +110,65 @@ class SeerrMediaLifecycleService(
         val response: SeerrRequestDto = httpResponse.body()
         val type = if (response.type.equals("tv", ignoreCase = true)) MediaType.SERIES else MediaType.MOVIE
         return deriveSeerrLifecycleStatus(response.media?.tmdbId ?: 0, type, response.media, response)
+    }
+
+    override suspend fun deleteRequest(requestId: Int): Boolean {
+        val connection = configuredConnection() ?: return false
+        val response = httpClient.delete("${connection.baseUrl}/api/v1/request/$requestId") {
+            authorized(connection.apiKey)
+        }
+        return response.status.isSuccess() || response.status == HttpStatusCode.NotFound
+    }
+
+    override suspend fun listRecent(limit: Int): List<MediaLifecycleEntry> {
+        val connection = configuredConnection() ?: return emptyList()
+        val response = httpClient.get("${connection.baseUrl}/api/v1/request") {
+            authorized(connection.apiKey)
+            parameter("take", limit.coerceIn(1, 100))
+            parameter("skip", 0)
+            parameter("filter", "all")
+            parameter("sort", "modified")
+            parameter("sortDirection", "desc")
+            parameter("mediaType", "all")
+        }
+        check(response.status.isSuccess()) { "Seerr request list failed" }
+        val page: SeerrRequestPageDto = response.body()
+        return coroutineScope {
+            page.results.mapNotNull { request ->
+                val media = request.media ?: return@mapNotNull null
+                val tmdbId = media.tmdbId.takeIf { it > 0 } ?: return@mapNotNull null
+                val mediaType = when {
+                    request.type.equals("tv", ignoreCase = true) ||
+                        media.mediaType.equals("tv", ignoreCase = true) -> MediaType.SERIES
+                    else -> MediaType.MOVIE
+                }
+                async {
+                    val route = if (mediaType == MediaType.MOVIE) "movie" else "tv"
+                    val details = runCatching {
+                        httpClient.get("${connection.baseUrl}/api/v1/$route/$tmdbId") {
+                            authorized(connection.apiKey)
+                        }.body<SeerrMediaDetailsDto>()
+                    }.getOrNull()
+                    MediaLifecycleEntry(
+                        status = deriveSeerrLifecycleStatus(
+                            tmdbId = tmdbId,
+                            mediaType = mediaType,
+                            media = media,
+                            fallbackRequest = request,
+                            is4k = request.is4k,
+                        ),
+                        title = details?.displayTitle
+                            ?: if (mediaType == MediaType.MOVIE) "Movie $tmdbId" else "Series $tmdbId",
+                        year = details?.displayDate?.take(4)?.toIntOrNull(),
+                        overview = details?.overview,
+                        posterUrl = details?.posterPath.toTmdbImageUrl("w500"),
+                        backdropUrl = details?.backdropPath.toTmdbImageUrl("w1280"),
+                        rating = details?.voteAverage?.takeIf { it > 0.0 },
+                        tvdbId = media.tvdbId,
+                    )
+                }
+            }.awaitAll()
+        }
     }
 
     private suspend fun configuredConnection(): Connection? {
@@ -186,6 +253,7 @@ internal data class SeerrMediaInfoDto(
     val id: Int = 0,
     val tmdbId: Int = 0,
     val tvdbId: Int? = null,
+    val mediaType: String? = null,
     val status: Int = 1,
     val status4k: Int? = null,
     val requests: List<SeerrRequestDto> = emptyList(),
@@ -202,6 +270,37 @@ internal data class SeerrRequestDto(
     val updatedAt: String? = null,
     @SerialName("type") val type: String? = null,
 )
+
+@Serializable
+private data class SeerrRequestPageDto(
+    val results: List<SeerrRequestDto> = emptyList(),
+)
+
+@Serializable
+private data class SeerrMediaDetailsDto(
+    val title: String? = null,
+    val name: String? = null,
+    val overview: String? = null,
+    val posterPath: String? = null,
+    val backdropPath: String? = null,
+    val voteAverage: Double? = null,
+    val releaseDate: String? = null,
+    val firstAirDate: String? = null,
+) {
+    val displayTitle: String?
+        get() = title?.takeIf { it.isNotBlank() } ?: name?.takeIf { it.isNotBlank() }
+    val displayDate: String?
+        get() = releaseDate?.takeIf { it.isNotBlank() } ?: firstAirDate?.takeIf { it.isNotBlank() }
+}
+
+private fun String?.toTmdbImageUrl(size: String): String? {
+    val path = this?.trim()?.takeIf { it.isNotEmpty() } ?: return null
+    return when {
+        path.startsWith("http://") || path.startsWith("https://") -> path
+        path.startsWith('/') -> "https://image.tmdb.org/t/p/$size$path"
+        else -> "https://image.tmdb.org/t/p/$size/$path"
+    }
+}
 
 @Serializable
 internal data class SeerrRequestSeasonDto(

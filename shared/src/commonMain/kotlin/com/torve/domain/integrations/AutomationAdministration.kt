@@ -102,6 +102,9 @@ data class AutomationQueueItem(
     val id: Long,
     val title: String,
     val status: String,
+    /** Radarr movie id or Sonarr series id when supplied by Servarr. */
+    val mediaId: Int? = null,
+    val mediaKind: AutomationMediaKind? = null,
     val trackedStatus: String? = null,
     val progressPercent: Double? = null,
     val sizeBytes: Long? = null,

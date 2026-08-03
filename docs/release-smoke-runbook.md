@@ -353,3 +353,13 @@ When a case fails, append a row in the result file:
 The next fix prompt should be small enough to drop into a single
 follow-up task. Avoid "investigate X"; prefer "check that Y is set
 when Z happens".
+# Two-hour TV playback soak
+
+Start playback on the target TV, then run the soak collector from the repository
+root. It samples process/activity/memory state and captures crash or ANR
+evidence without sending remote-control input that could disturb playback.
+
+    powershell -ExecutionPolicy Bypass -File tools/tv-playback-soak.ps1 -Serial FIRE_TV_SERIAL
+
+Use PackageName com.torve.app for Google TV. The default duration is 7200
+seconds. Reports are written under build/reports/tv-soak.

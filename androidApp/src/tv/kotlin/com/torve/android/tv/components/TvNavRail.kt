@@ -367,6 +367,7 @@ private fun shortNavLabel(destination: TvTopDestination): String = when (destina
     TvRoutes.SEARCH -> "Search"
     TvRoutes.IPTV -> "Channels"
     TvRoutes.SPORTS -> "Sports"
+    TvRoutes.JELLYFIN -> "Jellyfin"
     TvRoutes.LIBRARY -> "Library"
     TvRoutes.SETTINGS -> "Settings"
     else -> stringResource(destination.labelResId)

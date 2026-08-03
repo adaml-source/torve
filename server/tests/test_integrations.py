@@ -1,4 +1,5 @@
 """Tests for account-scoped integration credential management with storage modes."""
+import json
 import uuid
 
 from app.security import create_access_token
@@ -73,6 +74,87 @@ def test_account_mode_credentials_returns_decrypted(client, test_user, auth_head
     assert r.status_code == 200
     assert r.json()["storage_mode"] == "account"
     assert r.json()["credentials"]["api_key"] == "my_secret_key_123"
+
+
+def test_seerr_account_bundle_round_trip_matches_all_device_restore_contract(
+    client, test_user, auth_header,
+):
+    payload = {
+        "integration_type": "SEERR_API_KEY",
+        "credentials": {
+            "api_key": "seerr-secret",
+            "server_url": "http://192.168.1.20:5055",
+        },
+        "config": {"server_url": "http://192.168.1.20:5055"},
+        "display_identifier": "Seerr request management",
+        "storage_mode": "account",
+    }
+    saved = client.put(
+        "/me/integrations/SEERR_API_KEY", headers=auth_header, json=payload,
+    )
+    assert saved.status_code == 200
+    assert "credentials" not in saved.json()
+
+    restored = client.get(
+        "/me/integrations/SEERR_API_KEY/credentials", headers=auth_header,
+    )
+    assert restored.status_code == 200
+    assert restored.json()["credentials"] == payload["credentials"]
+
+
+def test_arr_stack_account_bundle_round_trip_matches_all_device_restore_contract(
+    client, test_user, auth_header,
+):
+    instances = [
+        {
+            "id": "radarr-main",
+            "serviceType": "RADARR",
+            "name": "Movies",
+            "serverUrl": "http://192.168.1.20:7878",
+            "role": "STANDARD",
+            "enabled": True,
+            "isDefault": True,
+            "storageMode": "ACCOUNT",
+        },
+        {
+            "id": "sonarr-uhd",
+            "serviceType": "SONARR",
+            "name": "Shows 4K",
+            "serverUrl": "http://192.168.1.20:8990",
+            "role": "UHD",
+            "enabled": True,
+            "isDefault": False,
+            "storageMode": "ACCOUNT",
+        },
+    ]
+    credentials = {
+        "schema_version": "1",
+        "instances_json": json.dumps(instances, separators=(",", ":")),
+        "api_key__radarr-main": "radarr-secret",
+        "api_key__sonarr-uhd": "sonarr-secret",
+    }
+    payload = {
+        "integration_type": "ARR_STACK_V1",
+        "credentials": credentials,
+        "config": {"schema_version": "1", "connection_count": "2"},
+        "display_identifier": "*Arr media automation",
+        "storage_mode": "account",
+    }
+    saved = client.put(
+        "/me/integrations/ARR_STACK_V1", headers=auth_header, json=payload,
+    )
+    assert saved.status_code == 200
+    assert saved.json()["config"]["connection_count"] == "2"
+    assert "credentials" not in saved.json()
+
+    restored = client.get(
+        "/me/integrations/ARR_STACK_V1/credentials", headers=auth_header,
+    )
+    assert restored.status_code == 200
+    restored_credentials = restored.json()["credentials"]
+    assert json.loads(restored_credentials["instances_json"]) == instances
+    assert restored_credentials["api_key__radarr-main"] == "radarr-secret"
+    assert restored_credentials["api_key__sonarr-uhd"] == "sonarr-secret"
 
 
 def test_account_mode_requires_credentials(client, test_user, auth_header):

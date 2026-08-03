@@ -84,6 +84,24 @@ internal class TvModalFocusRestoreController {
         }
     }
 
+    /**
+     * Drops cached requesters that no longer belong to the current content model.
+     * Active targets are deliberately retained until their DisposableEffect has
+     * unregistered them, avoiding a race between lazy-list recomposition and focus
+     * restoration.
+     */
+    fun pruneInactiveTargets(validTargets: Set<TvFocusTargetId>) {
+        val staleTargets = requesterByTarget.keys.filter { target ->
+            target !in validTargets && target !in activeTargets
+        }
+        staleTargets.forEach(requesterByTarget::remove)
+        focusedTarget?.let { target ->
+            if (target !in validTargets && target !in activeTargets) {
+                focusedTarget = null
+            }
+        }
+    }
+
     fun markFocused(target: TvFocusTargetId) {
         focusedTarget = target
         debugLog(

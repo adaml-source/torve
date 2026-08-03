@@ -39,7 +39,15 @@ class StremioAddonClient(
                     "Got HTML or non-JSON response. Check the addon URL or try again later."
             )
         }
-        return json.decodeFromString(body)
+        val manifest = json.decodeFromString<StremioManifest>(body)
+        val report = StremioManifestCompatibility.validate(manifest)
+        if (!report.isCompatible) {
+            val reason = report.issues
+                .filter { it.severity == ManifestCompatibilitySeverity.ERROR }
+                .joinToString("; ") { "${it.field}: ${it.message}" }
+            throw IllegalArgumentException("Addon manifest is incompatible: $reason")
+        }
+        return manifest
     }
 
     /**

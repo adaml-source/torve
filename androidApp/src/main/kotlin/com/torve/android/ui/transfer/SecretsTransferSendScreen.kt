@@ -30,7 +30,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -51,6 +50,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.torve.android.R
+import com.torve.android.ui.components.TvBrowseOutlinedTextField
 import com.torve.domain.transfer.SecretCategory
 import com.torve.presentation.transfer.RelayDeliveryState
 import com.torve.presentation.transfer.SecretsTransferSenderViewModel
@@ -140,6 +140,7 @@ fun SecretsTransferSendScreen(
             PasteSection(
                 value = state.receiverSessionString,
                 onChange = viewModel::updateReceiverSessionString,
+                tvEnabled = preferPaste,
             )
 
             if (preferPaste && hasCamera) {
@@ -257,6 +258,7 @@ private fun ScanSection(
 private fun PasteSection(
     value: String,
     onChange: (String) -> Unit,
+    tvEnabled: Boolean,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Text(
@@ -264,9 +266,10 @@ private fun PasteSection(
             style = MaterialTheme.typography.titleSmall,
             fontWeight = FontWeight.SemiBold,
         )
-        OutlinedTextField(
+        TvBrowseOutlinedTextField(
             value = value,
             onValueChange = onChange,
+            tvEnabled = tvEnabled,
             label = { Text(stringResource(R.string.transfer_send_receiver_field_placeholder)) },
             singleLine = false,
             modifier = Modifier.fillMaxWidth().heightIn(min = 90.dp),

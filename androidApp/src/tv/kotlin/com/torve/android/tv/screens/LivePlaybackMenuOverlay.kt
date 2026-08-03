@@ -104,6 +104,9 @@ internal fun LivePlaybackMenuOverlay(
     sleepTimerRemainingLabel: String?,
     pipSupported: Boolean,
     multiviewAvailable: Boolean,
+    timeshiftAvailable: Boolean,
+    timeshiftPaused: Boolean,
+    liveOffsetMs: Long,
     selectedBufferPreset: LiveBufferPreset,
     onDismiss: () -> Unit,
     onOpenChannelList: () -> Unit,
@@ -112,6 +115,9 @@ internal fun LivePlaybackMenuOverlay(
     onToggleFavorite: () -> Unit,
     onReloadStream: () -> Unit,
     onEnterPip: () -> Unit,
+    onToggleMultiview: () -> Unit,
+    onToggleTimeshiftPause: () -> Unit,
+    onGoLive: () -> Unit,
     onSelectPictureFormat: (String) -> Unit,
     onSelectAudioTrack: (Int) -> Unit,
     onSelectSubtitleTrack: (Int) -> Unit,
@@ -204,20 +210,36 @@ internal fun LivePlaybackMenuOverlay(
                                 PlaybackMenuItem(
                                     "multiview",
                                     "Multiview",
-                                    if (multiviewAvailable) "Open multiview" else "Unavailable",
+                                    if (multiviewAvailable) "Open two-channel view" else "Requires two channels and a supported TV",
                                     enabled = multiviewAvailable,
                                 ),
                             )
                         }
 
-                        PlaybackMenuRoute.PLAYBACK_OPTIONS -> listOf(
-                            PlaybackMenuItem("audio_tracks", "Audio Track", selectedAudioSummary(audioTracks)),
-                            PlaybackMenuItem("subtitle_tracks", "Subtitle Track", selectedSubtitleSummary(subtitleTracks)),
-                            PlaybackMenuItem("display_mode", "Aspect Ratio / Display Mode", selectedPictureFormatLabel(pictureFormats, selectedPictureFormatKey)),
-                            PlaybackMenuItem("audio_output", "Audio Output Mode", playbackRuntimeInfo.outputMode?.storageValue?.replace('_', ' ') ?: "Unknown"),
-                            PlaybackMenuItem("buffer_size", "Buffer Size", selectedBufferPreset.label),
-                            PlaybackMenuItem("decoder_info", stringResource(R.string.tv_menu_decoder_info), decoderSummary(playbackRuntimeInfo)),
-                        )
+                        PlaybackMenuRoute.PLAYBACK_OPTIONS -> buildList {
+                            if (timeshiftAvailable) {
+                                add(
+                                    PlaybackMenuItem(
+                                        "timeshift_pause",
+                                        if (timeshiftPaused) "Resume live TV" else "Pause live TV",
+                                        if (timeshiftPaused) "Continue from the paused position" else "This channel provides a seekable live window",
+                                    ),
+                                )
+                                add(
+                                    PlaybackMenuItem(
+                                        "go_live",
+                                        "Go to live",
+                                        if (liveOffsetMs >= 1_000L) "${liveOffsetMs / 1_000L}s behind live" else "At the live edge",
+                                    ),
+                                )
+                            }
+                            add(PlaybackMenuItem("audio_tracks", "Audio Track", selectedAudioSummary(audioTracks)))
+                            add(PlaybackMenuItem("subtitle_tracks", "Subtitle Track", selectedSubtitleSummary(subtitleTracks)))
+                            add(PlaybackMenuItem("display_mode", "Aspect Ratio / Display Mode", selectedPictureFormatLabel(pictureFormats, selectedPictureFormatKey)))
+                            add(PlaybackMenuItem("audio_output", "Audio Output Mode", playbackRuntimeInfo.outputMode?.storageValue?.replace('_', ' ') ?: "Unknown"))
+                            add(PlaybackMenuItem("buffer_size", "Buffer Size", selectedBufferPreset.label))
+                            add(PlaybackMenuItem("decoder_info", stringResource(R.string.tv_menu_decoder_info), decoderSummary(playbackRuntimeInfo)))
+                        }
 
                         PlaybackMenuRoute.CHANNEL_OPTIONS -> listOf(
                             PlaybackMenuItem("favorite", if (isFavorite) "Remove from Favorites" else "Add to Favorites", currentChannel?.name),
@@ -312,6 +334,7 @@ internal fun LivePlaybackMenuOverlay(
                         sleepTimerMinutes = sleepTimerMinutes,
                         sleepTimerRemainingLabel = sleepTimerRemainingLabel,
                         selectedBufferPreset = selectedBufferPreset,
+                        multiviewAvailable = multiviewAvailable,
                         onFocusItem = { focusedItemId = it },
                         onSelectItem = { item ->
                             when (route) {
@@ -332,10 +355,16 @@ internal fun LivePlaybackMenuOverlay(
                                         onDismiss()
                                         onEnterPip()
                                     }
+                                    "multiview" -> {
+                                        onDismiss()
+                                        onToggleMultiview()
+                                    }
                                     else -> Unit
                                 }
 
                                 PlaybackMenuRoute.PLAYBACK_OPTIONS -> when (item.id) {
+                                    "timeshift_pause" -> onToggleTimeshiftPause()
+                                    "go_live" -> onGoLive()
                                     "audio_tracks" -> route = PlaybackMenuRoute.AUDIO_TRACKS
                                     "subtitle_tracks" -> route = PlaybackMenuRoute.SUBTITLE_TRACKS
                                     "display_mode" -> route = PlaybackMenuRoute.DISPLAY_MODE
@@ -429,6 +458,7 @@ private fun PlaybackMenuShell(
     sleepTimerMinutes: Int?,
     sleepTimerRemainingLabel: String?,
     selectedBufferPreset: LiveBufferPreset = LiveBufferPreset.HIGH,
+    multiviewAvailable: Boolean,
     onFocusItem: (String) -> Unit,
     onSelectItem: (PlaybackMenuItem) -> Unit,
 ) {
@@ -494,6 +524,7 @@ private fun PlaybackMenuShell(
             sleepTimerRemainingLabel = sleepTimerRemainingLabel,
             sleepTimerMinutes = sleepTimerMinutes,
             selectedBufferPreset = selectedBufferPreset,
+            multiviewAvailable = multiviewAvailable,
         )
     }
 }
@@ -570,6 +601,7 @@ private fun PlaybackMenuDetailPane(
     sleepTimerRemainingLabel: String?,
     sleepTimerMinutes: Int?,
     selectedBufferPreset: LiveBufferPreset = LiveBufferPreset.HIGH,
+    multiviewAvailable: Boolean,
 ) {
     Column(modifier = modifier) {
         Text(
@@ -591,7 +623,11 @@ private fun PlaybackMenuDetailPane(
                         "sleep_timer" -> "Stop playback automatically after a selected delay."
                         "playback_info" -> "Inspect engine, codecs, decoder mode, output mode, and selected tracks."
                         "pip" -> "Enter picture-in-picture if the device supports it."
-                        "multiview" -> "Multiview is not available in this build yet."
+                        "multiview" -> if (multiviewAvailable) {
+                            "Open a two-channel view. Left or right swaps which channel has audio."
+                        } else {
+                            "Multiview requires two channels and a TV with enough memory and decoder capacity."
+                        }
                         else -> "Use the Menu button for quick live-TV controls."
                     },
                 )

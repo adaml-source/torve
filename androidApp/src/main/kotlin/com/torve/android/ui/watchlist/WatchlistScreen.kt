@@ -27,8 +27,12 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -57,6 +61,7 @@ import com.torve.android.ui.theme.Amber
 import com.torve.android.ui.theme.Gunmetal
 import com.torve.android.ui.theme.Obsidian
 import com.torve.android.ui.theme.Snow
+import com.torve.android.ui.theme.Ruby
 import com.torve.android.ui.theme.Torve
 import com.torve.data.integrations.JellyfinBrowseItem
 import com.torve.domain.model.resolveCardStyle
@@ -68,6 +73,9 @@ import com.torve.domain.model.WatchProgress
 import com.torve.domain.repository.MediaFavoritesRepository
 import com.torve.data.mdblist.RatingsEnricher
 import com.torve.presentation.jellyfin.JellyfinBrowserViewModel
+import com.torve.presentation.library.AcquisitionLifecycleItem
+import com.torve.presentation.library.AcquisitionStage
+import com.torve.presentation.library.PermanentLibraryViewModel
 import com.torve.presentation.settings.SettingsViewModel
 import com.torve.presentation.watchlist.WatchlistViewModel
 import kotlinx.coroutines.Dispatchers
@@ -86,6 +94,7 @@ fun WatchlistScreen(
     settingsViewModel: SettingsViewModel = koinInject(),
     ratingsEnricher: RatingsEnricher = koinInject(),
     jellyfinBrowserViewModel: JellyfinBrowserViewModel = koinInject(),
+    permanentLibraryViewModel: PermanentLibraryViewModel = koinInject(),
     mediaFavoritesRepository: MediaFavoritesRepository = koinInject(),
 ) {
     val watchlistState by watchlistViewModel.state.collectAsState()
@@ -100,6 +109,7 @@ fun WatchlistScreen(
     val tabs = buildList {
         add(stringResource(R.string.watchlist_title))
         add(stringResource(R.string.channels_favorites))
+        add("Requests & downloads")
         add(stringResource(R.string.download_title))
         if (isJellyfinConnected) add(stringResource(R.string.watchlist_jellyfin))
     }
@@ -210,13 +220,17 @@ fun WatchlistScreen(
                 emptyTitle = "No favorites yet",
                 emptyDescription = "Movies and shows you favorite appear here.",
             )
-            2 -> {
+            2 -> RequestsTab(
+                viewModel = permanentLibraryViewModel,
+                onMediaClick = onMediaClick,
+            )
+            3 -> {
                 LaunchedEffect(Unit) {
                     onDownloadsClick()
                     selectedTab = 0
                 }
             }
-            3 -> if (isJellyfinConnected) {
+            4 -> if (isJellyfinConnected) {
                 JellyfinTab(
                     viewModel = jellyfinBrowserViewModel,
                     onItemPlay = onJellyfinItemPlay,
@@ -224,6 +238,152 @@ fun WatchlistScreen(
             }
         }
     }
+    }
+}
+
+@Composable
+private fun RequestsTab(
+    viewModel: PermanentLibraryViewModel,
+    onMediaClick: (MediaItem) -> Unit,
+) {
+    val state by viewModel.state.collectAsState()
+    val snackbarHostState = remember { SnackbarHostState() }
+    DisposableEffect(viewModel) {
+        viewModel.startPolling()
+        onDispose { viewModel.stopPolling() }
+    }
+
+    LaunchedEffect(state.newlyAvailable) {
+        state.newlyAvailable.firstOrNull()?.let { item ->
+            snackbarHostState.showSnackbar("${item.title} is now available in your library")
+            viewModel.acknowledgeAvailable(item.stableId)
+        }
+    }
+
+    LaunchedEffect(state.actionMessage) {
+        state.actionMessage?.let { message ->
+            snackbarHostState.showSnackbar(message)
+            viewModel.clearActionMessage()
+        }
+    }
+
+    Box(modifier = Modifier.fillMaxSize()) {
+        when {
+            state.isLoading && state.items.isEmpty() -> Box(
+            modifier = Modifier.fillMaxSize(),
+            contentAlignment = Alignment.Center,
+            ) { CircularProgressIndicator(color = Amber) }
+
+            state.activeItems.isEmpty() -> Box(
+            modifier = Modifier.fillMaxSize().padding(24.dp),
+            contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    text = if (state.isConfigured) {
+                        "Nothing is being prepared. Use Add to library on any movie or show."
+                    } else {
+                        "Connect Seerr in Settings to save movies and shows permanently."
+                    },
+                    color = Torve.colors.textSecondary,
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                )
+            }
+
+            else -> LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                items(state.activeItems, key = AcquisitionLifecycleItem::stableId) { item ->
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(Gunmetal)
+                        .clickable(enabled = item.tmdbId != null) {
+                            item.tmdbId?.let {
+                                onMediaClick(
+                                    MediaItem(
+                                        id = item.stableId,
+                                        tmdbId = it,
+                                        type = item.mediaType,
+                                        title = item.title,
+                                        year = item.year,
+                                        overview = item.overview,
+                                        posterUrl = item.posterUrl,
+                                        backdropUrl = item.backdropUrl,
+                                        rating = item.rating,
+                                        status = item.statusLabel,
+                                    ),
+                                )
+                            }
+                        }
+                        .padding(12.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    AsyncImage(
+                        model = item.posterUrl,
+                        contentDescription = item.title,
+                        modifier = Modifier
+                            .width(72.dp)
+                            .aspectRatio(2f / 3f)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(Obsidian),
+                        contentScale = ContentScale.Crop,
+                    )
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(item.title, color = Snow, fontWeight = FontWeight.SemiBold, maxLines = 2)
+                        item.year?.let { Text(it.toString(), color = Torve.colors.textTertiary) }
+                        Spacer(Modifier.height(6.dp))
+                        Text(
+                            item.statusLabel,
+                            color = if (item.stage == AcquisitionStage.NEEDS_ATTENTION) Ruby else Amber,
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                        item.progressPercent?.let { value ->
+                            Spacer(Modifier.height(8.dp))
+                            LinearProgressIndicator(
+                                progress = { (value / 100.0).toFloat().coerceIn(0f, 1f) },
+                                modifier = Modifier.fillMaxWidth(),
+                                color = Amber,
+                                trackColor = Obsidian,
+                            )
+                        }
+                        item.timeLeft?.takeIf { it.isNotBlank() }?.let {
+                            Text("$it remaining", color = Torve.colors.textTertiary, style = MaterialTheme.typography.labelSmall)
+                        }
+                        if (item.canRetry || item.canCancel) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.End,
+                            ) {
+                                if (item.canRetry) {
+                                    TextButton(
+                                        enabled = state.actionInProgressStableId == null,
+                                        onClick = { viewModel.retryAcquisition(item.stableId) },
+                                    ) {
+                                        Text("Retry", color = Amber)
+                                    }
+                                }
+                                if (item.canCancel) {
+                                    TextButton(
+                                        enabled = state.actionInProgressStableId == null,
+                                        onClick = { viewModel.cancelAcquisition(item.stableId) },
+                                    ) {
+                                        Text("Cancel download", color = Ruby)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                }
+            }
+        }
+        SnackbarHost(
+            hostState = snackbarHostState,
+            modifier = Modifier.align(Alignment.BottomCenter).padding(16.dp),
+        )
     }
 }
 
@@ -606,12 +766,80 @@ private fun HistoryEntryCard(
     }
 }
 
+private enum class JellyfinMobileScope(val label: String) {
+    ALL("Overview"),
+    MOVIES("Movies"),
+    SERIES("Series"),
+    RECENT("Recent"),
+    TOP_RATED("Top rated"),
+    DECADES("Decades"),
+}
+
+private fun buildMobileJellyfinRows(
+    allItems: List<JellyfinBrowseItem>,
+    scope: JellyfinMobileScope,
+): List<Pair<String, List<JellyfinBrowseItem>>> {
+    val scoped = when (scope) {
+        JellyfinMobileScope.MOVIES -> allItems.filter { it.type.equals("Movie", true) }
+        JellyfinMobileScope.SERIES -> allItems.filter { it.type.equals("Series", true) }
+        else -> allItems
+    }
+    val alphabetical = scoped.sortedBy { it.name.lowercase() }
+    val recent = scoped.sortedByDescending { it.dateCreated.orEmpty() }
+    val topRated = scoped.filter { (it.communityRating ?: 0.0) > 0.0 }
+        .sortedByDescending { it.communityRating }
+
+    return buildList {
+        when (scope) {
+            JellyfinMobileScope.ALL -> {
+                scoped.filter {
+                    val user = it.userData
+                    user != null && user.playbackPositionTicks > 0L && !user.played
+                }.takeIf { it.isNotEmpty() }?.let { add("Continue watching" to it) }
+                add("Recently added" to recent.take(30))
+                alphabetical.filter { it.type.equals("Movie", true) }
+                    .takeIf { it.isNotEmpty() }?.let { add("Movies" to it) }
+                alphabetical.filter { it.type.equals("Series", true) }
+                    .takeIf { it.isNotEmpty() }?.let { add("Series" to it) }
+            }
+            JellyfinMobileScope.MOVIES -> {
+                add("Recently added movies" to recent.take(30))
+                add("All movies A–Z" to alphabetical)
+            }
+            JellyfinMobileScope.SERIES -> {
+                add("Recently added series" to recent.take(30))
+                add("All series A–Z" to alphabetical)
+            }
+            JellyfinMobileScope.RECENT -> add("Recently added" to recent)
+            JellyfinMobileScope.TOP_RATED -> add("Top rated" to topRated)
+            JellyfinMobileScope.DECADES -> scoped
+                .filter { it.productionYear != null }
+                .groupBy { (it.productionYear!! / 10) * 10 }
+                .toSortedMap(compareByDescending { it })
+                .forEach { (decade, items) -> add("${decade}s" to items) }
+        }
+
+        if (scope == JellyfinMobileScope.ALL ||
+            scope == JellyfinMobileScope.MOVIES ||
+            scope == JellyfinMobileScope.SERIES
+        ) {
+            scoped.flatMap { item -> item.genres.distinct().map { it to item } }
+                .groupBy(keySelector = { it.first }, valueTransform = { it.second })
+                .entries
+                .sortedByDescending { it.value.size }
+                .take(8)
+                .forEach { add(it.key to it.value.distinctBy(JellyfinBrowseItem::id)) }
+        }
+    }.filter { it.second.isNotEmpty() }
+}
+
 @Composable
 private fun JellyfinTab(
     viewModel: JellyfinBrowserViewModel,
     onItemPlay: (streamUrl: String, title: String) -> Unit,
 ) {
     val state by viewModel.state.collectAsState()
+    var selectedScope by rememberSaveable { mutableStateOf(JellyfinMobileScope.ALL) }
 
     LaunchedEffect(Unit) { viewModel.loadLibrary() }
 
@@ -640,24 +868,60 @@ private fun JellyfinTab(
         return
     }
 
+    val allItems = remember(state.sections, state.sectionItems) {
+        state.sections
+            .flatMap { state.sectionItems[it.id].orEmpty() }
+            .filterNot(JellyfinBrowseItem::isEpisode)
+            .distinctBy(JellyfinBrowseItem::id)
+    }
+    val managedRows = remember(allItems, selectedScope) {
+        buildMobileJellyfinRows(allItems, selectedScope)
+    }
+
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(bottom = 24.dp),
     ) {
-        for (section in state.sections) {
-            val items = state.sectionItems[section.id] ?: continue
-            if (items.isEmpty()) continue
+        item(key = "jellyfin_filters") {
+            LazyRow(
+                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                items(JellyfinMobileScope.entries, key = { it.name }) { scope ->
+                    val selected = selectedScope == scope
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(
+                                if (selected) Amber.copy(alpha = 0.18f)
+                                else MaterialTheme.colorScheme.surfaceVariant,
+                            )
+                            .clickable { selectedScope = scope }
+                            .padding(horizontal = 14.dp, vertical = 9.dp),
+                    ) {
+                        Text(
+                            text = scope.label,
+                            color = if (selected) Amber else Torve.colors.textSecondary,
+                            style = MaterialTheme.typography.labelLarge,
+                            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
+                        )
+                    }
+                }
+            }
+        }
 
-            item(key = "header_${section.id}") {
+        for ((index, row) in managedRows.withIndex()) {
+            val (title, items) = row
+            item(key = "header_${index}_$title") {
                 Text(
-                    "${section.name} (${items.size})",
+                    "$title (${items.size})",
                     style = MaterialTheme.typography.titleMedium,
                     color = Amber,
                     fontWeight = FontWeight.SemiBold,
                     modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
                 )
             }
-            item(key = "row_${section.id}") {
+            item(key = "row_${index}_$title") {
                 LazyRow(
                     contentPadding = PaddingValues(horizontal = 16.dp),
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -671,7 +935,7 @@ private fun JellyfinTab(
                     }
                 }
             }
-            item(key = "spacer_${section.id}") { Spacer(Modifier.height(16.dp)) }
+            item(key = "spacer_${index}_$title") { Spacer(Modifier.height(16.dp)) }
         }
     }
 }
@@ -683,7 +947,9 @@ private fun JellyfinItemCard(
     onPlay: (streamUrl: String, title: String) -> Unit,
 ) {
     val imageUrl by produceState<String?>(null, item.id) {
-        value = viewModel.buildImageUrl(item.id)
+        value = item.fallbackPosterUrl ?: viewModel.buildImageUrl(
+            if (item.isEpisode) item.seriesId ?: item.id else item.id,
+        )
     }
     val scope = androidx.compose.runtime.rememberCoroutineScope()
 
@@ -709,12 +975,21 @@ private fun JellyfinItemCard(
         )
         Spacer(Modifier.height(6.dp))
         Text(
-            text = item.name,
+            text = item.displayTitle,
             style = MaterialTheme.typography.bodySmall,
             color = Snow,
             maxLines = 2,
             overflow = TextOverflow.Ellipsis,
         )
+        item.displaySubtitle?.let { subtitle ->
+            Text(
+                text = subtitle,
+                style = MaterialTheme.typography.labelSmall,
+                color = Amber,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
         item.productionYear?.let { year ->
             Text(
                 text = year.toString(),

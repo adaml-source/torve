@@ -78,6 +78,7 @@ fun TvEpisodePicker(
     seasonDetailError: String? = null,
     watchedEpisodes: Set<String>,
     watchProgress: WatchProgress?,
+    availableInJellyfinEpisodes: Set<Pair<Int, Int>> = emptySet(),
     ratingPrefs: RatingDisplayPrefs = RatingDisplayPrefs(),
     seriesBackdropUrl: String? = null,
     seriesPosterUrl: String? = null,
@@ -91,6 +92,9 @@ fun TvEpisodePicker(
     onContentFocused: (FocusRequester) -> Unit,
     autoFocusFirstSeason: Boolean = false,
     resolvingEpisode: Pair<Int, Int>? = null,
+    preferredEpisode: Pair<Int, Int>? = null,
+    restoreFocusEpisode: Pair<Int, Int>? = null,
+    onEpisodeFocusRestored: () -> Unit = {},
 ) {
     val seasonsLabel = stringResource(R.string.tv_episodes_title)
     val seasonNumbers = remember(seasons) {
@@ -104,13 +108,29 @@ fun TvEpisodePicker(
         ?.let { seasonRequesters[it] }
         ?: fallbackSeasonRequester
     val selectedSeasonRequester = seasonRequesters[selectedSeason] ?: firstSeasonRequester
-    val firstEpisodeRequester = remember { FocusRequester() }
     val retryEpisodeRequester = remember { FocusRequester() }
+    val seasonsListState = rememberLazyListState()
     val episodesListState = rememberLazyListState()
     val scope = rememberCoroutineScope()
-    val selectedSeasonDetail = seasonDetail?.takeIf {
-        it.seasonNumber == selectedSeason || it.episodes.isNotEmpty()
+    // Never render the previous season while a newly selected season is loading.
+    val selectedSeasonDetail = seasonDetail?.takeIf { it.seasonNumber == selectedSeason }
+    val episodeNumbers = remember(selectedSeason, selectedSeasonDetail?.episodes) {
+        selectedSeasonDetail?.episodes.orEmpty().map { it.episodeNumber }
     }
+    val episodeRequesters = remember(selectedSeason, episodeNumbers) {
+        episodeNumbers.associateWith { FocusRequester() }
+    }
+    val fallbackEpisodeRequester = remember { FocusRequester() }
+    val firstEpisodeRequester = episodeNumbers.firstOrNull()
+        ?.let { episodeRequesters[it] }
+        ?: fallbackEpisodeRequester
+    val preferredEpisodeNumber = preferredEpisode
+        ?.takeIf { it.first == selectedSeason }
+        ?.second
+        ?.takeIf { it in episodeNumbers }
+    val preferredEpisodeRequester = preferredEpisodeNumber
+        ?.let { episodeRequesters[it] }
+        ?: firstEpisodeRequester
     val selectedSeasonEpisodeCount = selectedSeasonDetail
         ?.takeIf { it.seasonNumber == selectedSeason }
         ?.episodes
@@ -124,9 +144,31 @@ fun TvEpisodePicker(
     }
     val selectedSeasonFullyWatched = selectedSeasonEpisodeCount > 0 &&
         selectedSeasonWatchedCount >= selectedSeasonEpisodeCount
-    // Reset episode scroll whenever the season changes
-    androidx.compose.runtime.LaunchedEffect(selectedSeason) {
-        episodesListState.scrollToItem(0)
+    androidx.compose.runtime.LaunchedEffect(selectedSeason, seasonNumbers) {
+        val selectedIndex = seasonNumbers.indexOf(selectedSeason).coerceAtLeast(0)
+        seasonsListState.scrollToItem(selectedIndex)
+    }
+    // Show the resolved resume/first-unwatched episode without stealing focus
+    // from the detail page's current action.
+    androidx.compose.runtime.LaunchedEffect(selectedSeason, preferredEpisodeNumber, episodeNumbers) {
+        val preferredIndex = episodeNumbers.indexOf(preferredEpisodeNumber).takeIf { it >= 0 } ?: 0
+        episodesListState.scrollToItem(preferredIndex)
+    }
+    androidx.compose.runtime.LaunchedEffect(restoreFocusEpisode, selectedSeason, episodeNumbers) {
+        val target = restoreFocusEpisode ?: return@LaunchedEffect
+        if (target.first != selectedSeason) return@LaunchedEffect
+        val index = episodeNumbers.indexOf(target.second)
+        val requester = episodeRequesters[target.second]
+        if (index < 0 || requester == null) return@LaunchedEffect
+
+        episodesListState.scrollToItem(index)
+        repeat(3) { attempt ->
+            if (attempt > 0) kotlinx.coroutines.delay(60)
+            if (runCatching { requester.requestFocus() }.isSuccess) {
+                onEpisodeFocusRestored()
+                return@LaunchedEffect
+            }
+        }
     }
     androidx.compose.runtime.LaunchedEffect(autoFocusFirstSeason) {
         if (autoFocusFirstSeason) {
@@ -136,10 +178,11 @@ fun TvEpisodePicker(
     }
     fun requestEpisodeAreaFocus() {
         scope.launch {
-            episodesListState.scrollToItem(0)
+            val preferredIndex = episodeNumbers.indexOf(preferredEpisodeNumber).takeIf { it >= 0 } ?: 0
+            episodesListState.scrollToItem(preferredIndex)
             kotlinx.coroutines.delay(80)
             val target = if (!selectedSeasonDetail?.episodes.isNullOrEmpty()) {
-                firstEpisodeRequester
+                preferredEpisodeRequester
             } else if (seasonDetailError != null && onRetrySeason != null) {
                 retryEpisodeRequester
             } else {
@@ -162,6 +205,7 @@ fun TvEpisodePicker(
 
         // Season tabs
         LazyRow(
+            state = seasonsListState,
             horizontalArrangement = Arrangement.spacedBy(10.dp),
             contentPadding = PaddingValues(end = 12.dp),
         ) {
@@ -242,6 +286,8 @@ fun TvEpisodePicker(
                             episode = episode,
                             seasonNumber = selectedSeason,
                             isWatched = isWatched,
+                            isAvailableInJellyfin =
+                                (selectedSeason to episode.episodeNumber) in availableInJellyfinEpisodes,
                             isResolving = resolvingEpisode == (selectedSeason to episode.episodeNumber),
                             progress = episodeProgress,
                             ratingPrefs = ratingPrefs,
@@ -251,7 +297,11 @@ fun TvEpisodePicker(
                             onClick = { onEpisodeSelected(selectedSeason, episode.episodeNumber) },
                             onLongClick = { onToggleEpisodeWatched(selectedSeason, episode.episodeNumber) },
                             modifier = Modifier
-                                .then(if (index == 0) Modifier.focusRequester(firstEpisodeRequester) else Modifier)
+                                .then(
+                                    episodeRequesters[episode.episodeNumber]
+                                        ?.let { Modifier.focusRequester(it) }
+                                        ?: Modifier,
+                                )
                                 .focusProperties { up = selectedSeasonRequester },
                         )
                     }
@@ -523,6 +573,7 @@ private fun TvEpisodeCard(
     episode: Episode,
     seasonNumber: Int,
     isWatched: Boolean,
+    isAvailableInJellyfin: Boolean,
     isResolving: Boolean,
     progress: Float?,
     ratingPrefs: RatingDisplayPrefs,
@@ -761,7 +812,7 @@ private fun TvEpisodeCard(
         if (isWatched) {
             Box(
                 modifier = Modifier
-                    .align(Alignment.TopEnd)
+                    .align(Alignment.TopStart)
                     .padding(8.dp)
                     .background(Charcoal.copy(alpha = 0.8f), RoundedCornerShape(6.dp))
                     .padding(horizontal = 6.dp, vertical = 3.dp),
@@ -770,6 +821,23 @@ private fun TvEpisodeCard(
                     text = stringResource(R.string.tv_watched),
                     style = MaterialTheme.typography.labelSmall,
                     color = AmberLight,
+                )
+            }
+        }
+
+        if (isAvailableInJellyfin) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(8.dp)
+                    .background(Amber.copy(alpha = 0.88f), RoundedCornerShape(6.dp))
+                    .padding(horizontal = 7.dp, vertical = 3.dp),
+            ) {
+                Text(
+                    text = "In Jellyfin",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = Obsidian,
+                    fontWeight = FontWeight.SemiBold,
                 )
             }
         }

@@ -40,6 +40,19 @@ class PendingLanPlaybackHandoffTest {
     }
 
     @Test
+    fun `Jellyfin token travels as header and is consumed once`() {
+        val route = PlaybackRoute.JellyfinStream(
+            url = "http://media.local/Videos/42/stream?static=true",
+            headers = mapOf("X-Emby-Token" to "library-secret"),
+        )
+        PendingLanPlaybackHandoff.stage(route)
+        val out = PendingLanPlaybackHandoff.consumeFor(route.url)
+        assertNotNull(out)
+        assertEquals("library-secret", out["X-Emby-Token"])
+        assertNull(PendingLanPlaybackHandoff.consumeFor(route.url))
+    }
+
+    @Test
     fun `consume clears the holder so the next stream gets nothing`() {
         PendingLanPlaybackHandoff.stage(lan)
         val first = PendingLanPlaybackHandoff.consumeFor(lan.url)

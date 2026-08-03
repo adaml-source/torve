@@ -59,6 +59,7 @@ import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.LocalOffer
+import androidx.compose.material.icons.filled.LibraryAdd
 import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PlayArrow
@@ -119,6 +120,7 @@ import com.torve.domain.model.MediaType
 import com.torve.domain.model.Season
 import com.torve.domain.model.favoriteMediaKey
 import com.torve.domain.model.withFallbackTmdbScore
+import com.torve.domain.integrations.MediaLifecycleState
 import com.torve.presentation.watchlist.containsMedia
 import com.torve.presentation.watchlist.isMutatingMedia
 import com.torve.presentation.watchlist.WatchlistUiState
@@ -149,6 +151,7 @@ fun V2DetailPage(
     canDownloadShows: Boolean = true,
     onToggleWatchlist: (MediaItem) -> Unit,
     onToggleFavorite: (MediaItem) -> Unit = {},
+    onAddToLibrary: () -> Unit,
     onSelectSeason: (Int) -> Unit,
     onSelectEpisode: (Episode) -> Unit,
     onOpenRelated: (MediaItem) -> Unit,
@@ -216,6 +219,7 @@ fun V2DetailPage(
                 onDownloadMovie = onDownloadMovie,
                 onToggleWatchlist = onToggleWatchlist,
                 onToggleFavorite = onToggleFavorite,
+                onAddToLibrary = onAddToLibrary,
                 onOpenRelated = onOpenRelated,
                 onOpenPerson = onOpenPerson,
                 onTrailer = { trailerKey = it },
@@ -243,6 +247,7 @@ fun V2DetailPage(
                     onDownloadEpisode = onDownloadEpisode,
                     onToggleWatchlist = onToggleWatchlist,
                     onToggleFavorite = onToggleFavorite,
+                    onAddToLibrary = onAddToLibrary,
                     onSelectSeason = onSelectSeason,
                     onSelectEpisode = onSelectEpisode,
                     onOpenRelated = onOpenRelated,
@@ -818,6 +823,7 @@ private fun DesktopPremiumMovieDetailsPage(
     onDownloadMovie: (MediaItem) -> Unit,
     onToggleWatchlist: (MediaItem) -> Unit,
     onToggleFavorite: (MediaItem) -> Unit,
+    onAddToLibrary: () -> Unit,
     onOpenRelated: (MediaItem) -> Unit,
     onOpenPerson: (Int) -> Unit,
     onTrailer: (String) -> Unit,
@@ -914,6 +920,7 @@ private fun DesktopPremiumMovieDetailsPage(
                     isInWatchlist = isInWatchlist,
                     isWatchlistUpdating = isWatchlistUpdating,
                     isFavorite = isFavorite,
+                    detailState = detailState,
                     canDownloadMovies = canDownloadMovies,
                     addWatchlistLabel = addWatchlistLabel,
                     removeWatchlistLabel = removeWatchlistLabel,
@@ -924,6 +931,7 @@ private fun DesktopPremiumMovieDetailsPage(
                     onDownloadMovie = onDownloadMovie,
                     onToggleWatchlist = onToggleWatchlist,
                     onToggleFavorite = onToggleFavorite,
+                    onAddToLibrary = onAddToLibrary,
                     onOpenPerson = onOpenPerson,
                     onTrailer = onTrailer,
                     modifier = Modifier
@@ -1036,6 +1044,7 @@ private fun DesktopPremiumTvShowDetailsPage(
     onDownloadEpisode: (MediaItem, Int, Int) -> Unit,
     onToggleWatchlist: (MediaItem) -> Unit,
     onToggleFavorite: (MediaItem) -> Unit,
+    onAddToLibrary: () -> Unit,
     onSelectSeason: (Int) -> Unit,
     onSelectEpisode: (Episode) -> Unit,
     onOpenRelated: (MediaItem) -> Unit,
@@ -1146,6 +1155,7 @@ private fun DesktopPremiumTvShowDetailsPage(
                         isInWatchlist = isInWatchlist,
                         isWatchlistUpdating = isWatchlistUpdating,
                         isFavorite = isFavorite,
+                        detailState = detailState,
                         canDownloadShows = canDownloadShows,
                         addWatchlistLabel = addWatchlistLabel,
                         removeWatchlistLabel = removeWatchlistLabel,
@@ -1158,6 +1168,7 @@ private fun DesktopPremiumTvShowDetailsPage(
                         onDownloadEpisode = onDownloadEpisode,
                         onToggleWatchlist = onToggleWatchlist,
                         onToggleFavorite = onToggleFavorite,
+                        onAddToLibrary = onAddToLibrary,
                         onOpenPerson = onOpenPerson,
                         onTrailer = onTrailer,
                         modifier = Modifier
@@ -1345,6 +1356,7 @@ private fun DesktopPremiumTvShowDetailsPage(
 private fun DesktopTvHeroContentCluster(
     item: MediaItem,
     selection: TvEpisodeSelection?,
+    detailState: DesktopSearchDetailUiState,
     isInWatchlist: Boolean,
     isWatchlistUpdating: Boolean,
     isFavorite: Boolean,
@@ -1360,13 +1372,14 @@ private fun DesktopTvHeroContentCluster(
     onDownloadEpisode: (MediaItem, Int, Int) -> Unit,
     onToggleWatchlist: (MediaItem) -> Unit,
     onToggleFavorite: (MediaItem) -> Unit,
+    onAddToLibrary: () -> Unit,
     onOpenPerson: (Int) -> Unit,
     onTrailer: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val colors = TorveDesktopThemeTokens.colors
     val logo = rememberCachedBitmap(item.logoUrl)
-    val playLabel = selection?.let { "Play ${tvEpisodeShortLabel(it)}" } ?: "Choose episode"
+    val playLabel = selection?.let { "Watch now · ${tvEpisodeShortLabel(it)}" } ?: "Choose episode"
     Column(
         modifier = modifier,
         verticalArrangement = Arrangement.spacedBy(13.dp),
@@ -1473,6 +1486,15 @@ private fun DesktopTvHeroContentCluster(
                     selection?.let { onDownloadEpisode(item, it.season.seasonNumber, it.episode.episodeNumber) }
                 },
             )
+            mediaLifecycleActionLabel(detailState, item)?.let { label ->
+                CinematicIconActionButton(
+                    text = label,
+                    contentDescription = "Add selected season to the permanent library",
+                    icon = Icons.Filled.LibraryAdd,
+                    enabled = detailState.mediaLifecycleStatus?.canRequest == true && !detailState.isLoadingMediaLifecycle,
+                    onClick = onAddToLibrary,
+                )
+            }
             CinematicCompactIconAction(
                 icon = if (isInWatchlist) Icons.Filled.Bookmark else Icons.Filled.BookmarkBorder,
                 contentDescription = if (isInWatchlist) removeWatchlistLabel else addWatchlistLabel,
@@ -1487,6 +1509,7 @@ private fun DesktopTvHeroContentCluster(
                 onClick = { onToggleFavorite(item) },
             )
         }
+        MediaLifecycleFeedback(detailState)
 
         item.director?.takeIf { it.isNotBlank() }?.let { creator ->
             TvCreatorMiniCredit(
@@ -1886,6 +1909,7 @@ private fun PremiumEpisodeCard(
 @Composable
 private fun DesktopMovieHeroContentCluster(
     item: MediaItem,
+    detailState: DesktopSearchDetailUiState,
     isInWatchlist: Boolean,
     isWatchlistUpdating: Boolean,
     isFavorite: Boolean,
@@ -1899,6 +1923,7 @@ private fun DesktopMovieHeroContentCluster(
     onDownloadMovie: (MediaItem) -> Unit,
     onToggleWatchlist: (MediaItem) -> Unit,
     onToggleFavorite: (MediaItem) -> Unit,
+    onAddToLibrary: () -> Unit,
     onOpenPerson: (Int) -> Unit,
     onTrailer: (String) -> Unit,
     modifier: Modifier = Modifier,
@@ -1968,7 +1993,7 @@ private fun DesktopMovieHeroContentCluster(
 
         FlowRow(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             CinematicIconActionButton(
-                text = ds("Play"),
+                text = "Watch now",
                 contentDescription = "Play movie",
                 icon = Icons.Filled.PlayArrow,
                 primary = true,
@@ -1997,6 +2022,15 @@ private fun DesktopMovieHeroContentCluster(
                 enabled = canDownloadMovies,
                 onClick = { onDownloadMovie(item) },
             )
+            mediaLifecycleActionLabel(detailState, item)?.let { label ->
+                CinematicIconActionButton(
+                    text = label,
+                    contentDescription = "Add movie to the permanent library",
+                    icon = Icons.Filled.LibraryAdd,
+                    enabled = detailState.mediaLifecycleStatus?.canRequest == true && !detailState.isLoadingMediaLifecycle,
+                    onClick = onAddToLibrary,
+                )
+            }
             CinematicCompactIconAction(
                 icon = if (isInWatchlist) Icons.Filled.Bookmark else Icons.Filled.BookmarkBorder,
                 contentDescription = if (isInWatchlist) removeWatchlistLabel else addWatchlistLabel,
@@ -2011,6 +2045,7 @@ private fun DesktopMovieHeroContentCluster(
                 onClick = { onToggleFavorite(item) },
             )
         }
+        MediaLifecycleFeedback(detailState)
 
         item.director?.takeIf { it.isNotBlank() }?.let { director ->
             DirectorMiniCredit(
@@ -2020,6 +2055,38 @@ private fun DesktopMovieHeroContentCluster(
                 onOpenPerson = onOpenPerson,
             )
         }
+    }
+}
+
+private fun mediaLifecycleActionLabel(
+    state: DesktopSearchDetailUiState,
+    item: MediaItem,
+): String? = when (state.mediaLifecycleStatus?.state) {
+    null, MediaLifecycleState.UNCONFIGURED -> null
+    MediaLifecycleState.NOT_REQUESTED,
+    MediaLifecycleState.DECLINED,
+    MediaLifecycleState.FAILED,
+    MediaLifecycleState.DELETED,
+    MediaLifecycleState.UNKNOWN -> if (item.type == MediaType.SERIES) {
+        "Add season ${state.selectedSeasonNumber ?: 1} to my library"
+    } else {
+        "Add to my library"
+    }
+    MediaLifecycleState.PENDING_APPROVAL -> "Library request pending"
+    MediaLifecycleState.APPROVED -> "Library request approved"
+    MediaLifecycleState.PROCESSING -> "Preparing library copy"
+    MediaLifecycleState.PARTIALLY_AVAILABLE -> "Partly in my library"
+    MediaLifecycleState.AVAILABLE -> "In my library"
+}
+
+@Composable
+private fun MediaLifecycleFeedback(state: DesktopSearchDetailUiState) {
+    val colors = TorveDesktopThemeTokens.colors
+    state.mediaLifecycleMessage?.let {
+        Text(it, style = MaterialTheme.typography.bodySmall, color = colors.success)
+    }
+    state.mediaLifecycleError?.let {
+        Text(it, style = MaterialTheme.typography.bodySmall, color = colors.error)
     }
 }
 

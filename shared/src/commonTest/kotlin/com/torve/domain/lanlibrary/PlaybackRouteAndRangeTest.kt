@@ -23,6 +23,19 @@ class PlaybackRouteAndRangeTest {
     }
 
     @Test
+    fun `pick prefers Jellyfin permanent copy over LAN and provider`() {
+        val jellyfin = PlaybackRoute.JellyfinStream("http://media.local/Videos/42/stream")
+        val pref = PlaybackRoutePreference(
+            candidates = listOf(
+                PlaybackRoute.ProviderStream("https://upstream/a"),
+                PlaybackRoute.LanDesktopStream("http://lan/local/stream/x"),
+                jellyfin,
+            ),
+        )
+        assertEquals(jellyfin, pref.pick())
+    }
+
+    @Test
     fun `pick falls through when local missing`() {
         val pref = PlaybackRoutePreference(
             candidates = listOf(

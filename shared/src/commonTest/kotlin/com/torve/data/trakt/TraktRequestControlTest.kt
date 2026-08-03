@@ -19,7 +19,9 @@ import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
 import io.ktor.serialization.kotlinx.json.json
 import kotlinx.coroutines.async
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.datetime.Clock
 import kotlinx.datetime.Instant
@@ -138,16 +140,22 @@ class TraktRequestControlTest {
     fun identical_concurrent_get_calls_coalesce_into_one_network_call() = runTest {
         var networkCalls = 0
         val events = mutableListOf<String>()
+        val requestStarted = CompletableDeferred<Unit>()
+        val releaseRequest = CompletableDeferred<Unit>()
         val client = client(
             diagnostics = TraktDiagnosticsLogger { event, _ -> events += event },
         ) { _ ->
             networkCalls += 1
-            delay(50)
+            requestStarted.complete(Unit)
+            releaseRequest.await()
             respondJson("[]")
         }
 
         val first = async { client.getWatchlist("access") }
+        requestStarted.await()
         val second = async { client.getWatchlist("access") }
+        runCurrent()
+        releaseRequest.complete(Unit)
 
         assertEquals(emptyList(), first.await())
         assertEquals(emptyList(), second.await())

@@ -1731,7 +1731,7 @@
     <string name="player_enter_applies">Enter applies instantly. Back closes.</string>
     <string name="player_background_playing">Playing in background · Press Select to return</string>
     <string name="player_background_paused">Paused · Press Select to return</string>
-    <string name="player_background_hold_back_hint">Hold Back anywhere to return to the player</string>
+    <string name="player_background_hold_back_hint">Menu: playback controls · Hold Back: return to player</string>
     <string name="player_background_return">Return</string>
     <string name="player_background_stop">Stop</string>
 
@@ -2275,8 +2275,8 @@
     <string name="integrations_automation_default">Use as default for this service and quality</string>
     <string name="integrations_tdarr_read_only_probe">Tdarr uses its documented read-only server status endpoint. No API key is required.</string>
     <string name="integrations_save_test">Save and test</string>
-    <string name="detail_add_to_library">Add to my library</string>
-    <string name="detail_add_season_to_library">Add season %1$d to my library</string>
+    <string name="detail_add_to_library">Download to my library</string>
+    <string name="detail_add_season_to_library">Monitor &amp; download season %1$d</string>
     <string name="detail_library_request_pending">Waiting for approval</string>
     <string name="detail_library_request_approved">Request approved</string>
     <string name="detail_library_request_processing">Preparing library copy</string>

@@ -8,6 +8,7 @@ import android.net.Uri
 import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.pm.PackageInfoCompat
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -256,6 +257,7 @@ fun SettingsScreen(
     var refreshAllQueued by remember { mutableStateOf(false) }
     var refreshAllRunId by remember { mutableIntStateOf(0) }
     var refreshAllStatus by remember { mutableStateOf<RefreshAllUiStatus?>(null) }
+    var refreshAllDetails by remember { mutableStateOf(emptyList<String>()) }
     val refreshAllStartedText = stringResource(R.string.settings_refresh_all_started)
     LaunchedEffect(refreshAllRunId) {
         if (refreshAllRunId == 0) return@LaunchedEffect
@@ -651,6 +653,40 @@ fun SettingsScreen(
 
         Spacer(Modifier.height(12.dp))
 
+        if (!BuildConfig.HAS_BILLING) {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = Charcoal),
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(16.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Product access",
+                            style = MaterialTheme.typography.titleSmall,
+                            color = Snow,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                        Text(
+                            text = "Torve has no subscription or paid feature tier.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Torve.colors.textSecondary,
+                        )
+                    }
+                    Text(
+                        text = "Free",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = Emerald,
+                        fontWeight = FontWeight.Bold,
+                    )
+                }
+            }
+            Spacer(Modifier.height(12.dp))
+        }
+
         // Quick links. The dedicated Subscription button is no longer
         // shown for signed-in users on billing-enabled builds — the top
         // Subscription card already exposes Manage Subscription / Upgrade
@@ -735,6 +771,7 @@ fun SettingsScreen(
             OutlinedButton(
                 onClick = {
                     refreshAllQueued = true
+                    refreshAllDetails = emptyList()
                     refreshAllStatus = RefreshAllUiStatus(
                         label = "Syncing account data...",
                         progress = 0f,
@@ -742,11 +779,13 @@ fun SettingsScreen(
                         failed = false,
                     )
                     scope.launch {
-                        runCatching {
+                        val accountRefresh = runCatching {
                             accountSessionCoordinator.refreshAccountDataAfterCredentialTransfer(
                                 initialMessage = "Refreshing account data...",
                             )
                         }
+                        val accountResult = accountRefresh.getOrNull()
+                        refreshAllDetails = if (accountResult == null) emptyList() else accountResult.issues
                         viewModel.refreshSettings()
                         subscriptionViewModel.refreshAccess()
                         syncCoordinator.refreshDevices()
@@ -765,6 +804,14 @@ fun SettingsScreen(
             if (refreshAllQueued) {
                 Spacer(Modifier.height(6.dp))
                 RefreshAllStatusView(refreshAllStatus)
+                refreshAllDetails.forEach { issue ->
+                    Text(
+                        text = issue,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Ruby,
+                        modifier = Modifier.padding(top = 2.dp),
+                    )
+                }
             }
         }
         Spacer(Modifier.height(8.dp))
@@ -2001,8 +2048,9 @@ fun SettingsScreen(
                                 context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: "unknown"
                             } catch (_: Exception) { "unknown" }
                             val versionCode = try {
-                                @Suppress("DEPRECATION")
-                                context.packageManager.getPackageInfo(context.packageName, 0).longVersionCode.toString()
+                                PackageInfoCompat.getLongVersionCode(
+                                    context.packageManager.getPackageInfo(context.packageName, 0),
+                                ).toString()
                             } catch (_: Exception) { "unknown" }
                             val transferSnapshot = runCatching { transferCollector.collect(probeRelay = false) }.getOrNull()
                             val bundle = com.torve.domain.diagnostics.DiagnosticsBundleBuilder.build(

@@ -103,6 +103,7 @@ fun V2EpgGrid(
     recordingStatusFor: (Channel, EpgProgramme) -> com.torve.presentation.recording.RecordingSlotStatus =
         { _, _ -> com.torve.presentation.recording.RecordingSlotStatus.NONE },
     onToggleRecord: (Channel, EpgProgramme) -> Unit = { _, _ -> },
+    onRecordSeries: (Channel, EpgProgramme) -> Unit = { _, _ -> },
     searchQuery: String = "",
     onSearchQueryChange: (String) -> Unit = {},
     sortMode: GuideSortMode = GuideSortMode.NUMBER,
@@ -309,6 +310,7 @@ fun V2EpgGrid(
                         onToggleReminder = { p -> onToggleReminder(enriched.channel, p) },
                         recordingStatusFor = { p -> recordingStatusFor(enriched.channel, p) },
                         onToggleRecord = { p -> onToggleRecord(enriched.channel, p) },
+                        onRecordSeries = { p -> onRecordSeries(enriched.channel, p) },
                         onFindOtherAirings = { p -> otherAiringsTitle = p.title },
                         onCopyInfo = { p ->
                             val text = buildString {
@@ -513,6 +515,7 @@ private fun GuideRow(
     onToggleReminder: (EpgProgramme) -> Unit,
     recordingStatusFor: (EpgProgramme) -> com.torve.presentation.recording.RecordingSlotStatus,
     onToggleRecord: (EpgProgramme) -> Unit,
+    onRecordSeries: (EpgProgramme) -> Unit,
     onFindOtherAirings: (EpgProgramme) -> Unit,
     onCopyInfo: (EpgProgramme) -> Unit,
     onClickChannel: () -> Unit,
@@ -550,6 +553,7 @@ private fun GuideRow(
                 onToggleReminder = onToggleReminder,
                 recordingStatusFor = recordingStatusFor,
                 onToggleRecord = onToggleRecord,
+                onRecordSeries = onRecordSeries,
                 onFindOtherAirings = onFindOtherAirings,
                 onCopyInfo = onCopyInfo,
             )
@@ -634,6 +638,7 @@ private fun ProgrammeTrack(
     onToggleReminder: (EpgProgramme) -> Unit,
     recordingStatusFor: (EpgProgramme) -> com.torve.presentation.recording.RecordingSlotStatus,
     onToggleRecord: (EpgProgramme) -> Unit,
+    onRecordSeries: (EpgProgramme) -> Unit,
     onFindOtherAirings: (EpgProgramme) -> Unit,
     onCopyInfo: (EpgProgramme) -> Unit,
 ) {
@@ -681,6 +686,7 @@ private fun ProgrammeTrack(
                 onToggleFavorite = onToggleFavorite,
                 onToggleReminder = { onToggleReminder(programme) },
                 onToggleRecord = { onToggleRecord(programme) },
+                onRecordSeries = { onRecordSeries(programme) },
                 onFindOtherAirings = { onFindOtherAirings(programme) },
                 onCopyInfo = { onCopyInfo(programme) },
             )
@@ -708,6 +714,7 @@ private fun ProgrammeCell(
     onToggleFavorite: () -> Unit,
     onToggleReminder: () -> Unit,
     onToggleRecord: () -> Unit,
+    onRecordSeries: () -> Unit,
     onFindOtherAirings: () -> Unit,
     onCopyInfo: () -> Unit,
 ) {
@@ -821,6 +828,10 @@ private fun ProgrammeCell(
                     text = { Text(recordLabel) },
                     onClick = { menuOpen = false; onToggleRecord() },
                     enabled = recordingStatus != com.torve.presentation.recording.RecordingSlotStatus.COMPLETED,
+                )
+                DropdownMenuItem(
+                    text = { Text("Record every future episode") },
+                    onClick = { menuOpen = false; onRecordSeries() },
                 )
             }
             HorizontalDivider()

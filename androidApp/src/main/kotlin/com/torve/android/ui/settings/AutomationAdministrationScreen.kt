@@ -1,7 +1,9 @@
 package com.torve.android.ui.settings
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -18,22 +20,16 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -44,6 +40,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusProperties
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
@@ -76,21 +75,37 @@ import com.torve.presentation.integrations.AutomationAdminSection
 import com.torve.presentation.integrations.AutomationAdministrationUiState
 import com.torve.presentation.integrations.AutomationAdministrationViewModel
 import com.torve.presentation.integrations.AutomationConfirmationKind
+import kotlinx.coroutines.delay
 import org.koin.compose.koinInject
 
 @Composable
 fun AutomationAdministrationScreen(
     onBack: () -> Unit,
     onManageConnections: () -> Unit = onBack,
+    initialFocusRequester: FocusRequester? = null,
     viewModel: AutomationAdministrationViewModel = koinInject(),
 ) {
     val state by viewModel.state.collectAsState()
     var profileIndex by remember { mutableIntStateOf(0) }
     var rootIndex by remember { mutableIntStateOf(0) }
+    val tvBackFocusRequester = remember { FocusRequester() }
+    val tvRefreshFocusRequester = remember { FocusRequester() }
+    val tvContentFocusRequester = remember { FocusRequester() }
+    val isTvFocusMode = initialFocusRequester != null
+
+    // Always let one remote Back press leave this TV-only administration page.
+    BackHandler(enabled = isTvFocusMode, onBack = onBack)
 
     LaunchedEffect(state.selectedInstanceId, state.qualityProfiles.size, state.rootFolders.size) {
         profileIndex = profileIndex.coerceIn(0, (state.qualityProfiles.size - 1).coerceAtLeast(0))
         rootIndex = rootIndex.coerceIn(0, (state.rootFolders.size - 1).coerceAtLeast(0))
+    }
+
+    LaunchedEffect(initialFocusRequester) {
+        initialFocusRequester?.let { requester ->
+            delay(120)
+            runCatching { requester.requestFocus() }
+        }
     }
 
     Column(
@@ -101,18 +116,59 @@ fun AutomationAdministrationScreen(
             .padding(horizontal = 20.dp, vertical = 16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            IconButton(onClick = onBack) {
-                Icon(Icons.Default.ArrowBack, contentDescription = "Back", tint = Snow)
+        Row(
+            modifier = if (isTvFocusMode) Modifier.focusGroup() else Modifier,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            IconButton(
+                onClick = onBack,
+                modifier = if (isTvFocusMode) {
+                    Modifier
+                        .focusRequester(tvBackFocusRequester)
+                        .focusProperties {
+                            right = initialFocusRequester
+                            down = tvContentFocusRequester
+                        }
+                } else {
+                    Modifier
+                },
+            ) {
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = Snow)
             }
             Column(Modifier.weight(1f)) {
-                Text("Automation administration", color = Snow, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
-                Text("Search, acquire, repair subtitles and control transcodes", color = Silver, style = MaterialTheme.typography.bodySmall)
+                Text("*Arr media automation", color = Snow, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+                Text("Sonarr, Radarr, Prowlarr, Bazarr and Tdarr", color = Silver, style = MaterialTheme.typography.bodySmall)
             }
-            OutlinedButton(onClick = onManageConnections) {
+            OutlinedButton(
+                onClick = onManageConnections,
+                modifier = initialFocusRequester
+                    ?.let {
+                        Modifier
+                            .focusRequester(it)
+                            .focusProperties {
+                                left = tvBackFocusRequester
+                                right = tvRefreshFocusRequester
+                                down = tvContentFocusRequester
+                            }
+                    }
+                    ?: Modifier,
+            ) {
                 Text("Connections", color = Snow)
             }
-            IconButton(onClick = viewModel::refresh, enabled = !state.isRefreshing) {
+            IconButton(
+                onClick = viewModel::refresh,
+                enabled = !state.isRefreshing,
+                modifier = if (isTvFocusMode) {
+                    Modifier
+                        .focusRequester(tvRefreshFocusRequester)
+                        .focusProperties {
+                            left = initialFocusRequester
+                            down = tvContentFocusRequester
+                        }
+                } else {
+                    Modifier
+                },
+            ) {
                 if (state.isRefreshing) {
                     CircularProgressIndicator(Modifier.size(22.dp), color = Amber, strokeWidth = 2.dp)
                 } else {
@@ -123,42 +179,54 @@ fun AutomationAdministrationScreen(
 
         if (state.instances.isEmpty()) {
             AdminCard {
-                Text("No automation services are configured on this device.", color = Snow)
+                Text("No *Arr or media automation services are configured on this device.", color = Snow)
                 Spacer(Modifier.height(8.dp))
-                Button(onClick = onManageConnections, colors = adminButtonColors()) { Text("Add connection") }
+                Button(
+                    onClick = onManageConnections,
+                    modifier = if (isTvFocusMode) {
+                        Modifier
+                            .focusRequester(tvContentFocusRequester)
+                            .focusProperties { up = initialFocusRequester }
+                    } else {
+                        Modifier
+                    },
+                    colors = adminButtonColors(),
+                ) { Text("Add connection") }
             }
         } else {
             Text("Service", color = Silver, style = MaterialTheme.typography.labelLarge)
             Row(
-                modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                modifier = Modifier.fillMaxWidth().focusGroup().horizontalScroll(rememberScrollState()),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                state.instances.forEach { instance ->
+                state.instances.forEachIndexed { index, instance ->
                     val selected = state.selectedInstanceId == instance.id
-                    if (selected) {
-                        Button(onClick = { viewModel.selectInstance(instance.id) }, colors = adminButtonColors()) {
-                            Text(instance.name)
-                        }
+                    val serviceModifier = if (isTvFocusMode && index == 0) {
+                        Modifier.focusRequester(tvContentFocusRequester)
                     } else {
-                        OutlinedButton(onClick = { viewModel.selectInstance(instance.id) }) {
-                            Text(instance.name, color = Snow)
-                        }
+                        Modifier
+                    }
+                    OutlinedButton(
+                        onClick = { viewModel.selectInstance(instance.id) },
+                        modifier = serviceModifier,
+                        colors = adminChoiceButtonColors(selected),
+                    ) {
+                        Text(instance.name)
                     }
                 }
             }
 
             val sections = supportedSections(state)
             Row(
-                modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                modifier = Modifier.fillMaxWidth().focusGroup().horizontalScroll(rememberScrollState()),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 sections.forEach { section ->
                     val label = section.name.lowercase().replaceFirstChar(Char::uppercase)
-                    if (state.section == section) {
-                        Button(onClick = { viewModel.selectSection(section) }, colors = adminButtonColors()) { Text(label) }
-                    } else {
-                        OutlinedButton(onClick = { viewModel.selectSection(section) }) { Text(label, color = Snow) }
-                    }
+                    OutlinedButton(
+                        onClick = { viewModel.selectSection(section) },
+                        colors = adminChoiceButtonColors(state.section == section),
+                    ) { Text(label) }
                 }
             }
 
@@ -319,7 +387,7 @@ private fun QueueRow(item: AutomationQueueItem, viewModel: AutomationAdministrat
             color = if (item.errorMessage == null) Silver else Ruby,
             style = MaterialTheme.typography.bodySmall,
         )
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(modifier = Modifier.focusGroup(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedButton(onClick = { viewModel.retryQueueItem(item) }) { Text("Retry", color = Amber) }
             OutlinedButton(onClick = { viewModel.requestRemoveQueueItem(item) }) { Text("Remove", color = Ruby) }
         }
@@ -336,14 +404,13 @@ private fun IndexerAdmin(indexers: List<AutomationIndexer>, viewModel: Automatio
     AdminCard {
         Text("Add generic indexer", color = Snow, fontWeight = FontWeight.SemiBold)
         Text("Supports Torznab torrent and Newznab usenet endpoints.", color = Silver, style = MaterialTheme.typography.bodySmall)
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(modifier = Modifier.focusGroup(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             AutomationIndexerProtocol.entries.forEach { choice ->
                 val label = if (choice == AutomationIndexerProtocol.TORRENT) "Torznab" else "Newznab"
-                if (protocol == choice) {
-                    Button(onClick = { protocol = choice }, colors = adminButtonColors()) { Text(label) }
-                } else {
-                    OutlinedButton(onClick = { protocol = choice }) { Text(label, color = Snow) }
-                }
+                OutlinedButton(
+                    onClick = { protocol = choice },
+                    colors = adminChoiceButtonColors(protocol == choice),
+                ) { Text(label) }
             }
         }
         OutlinedTextField(name, { name = it }, Modifier.fillMaxWidth(), label = { Text("Name") }, singleLine = true)
@@ -383,7 +450,7 @@ private fun IndexerAdmin(indexers: List<AutomationIndexer>, viewModel: Automatio
                 }
                 Switch(checked = indexer.enabled, onCheckedChange = { viewModel.setIndexerEnabled(indexer, it) })
             }
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(modifier = Modifier.focusGroup(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedButton(onClick = { viewModel.testIndexer(indexer) }) { Text("Test", color = Amber) }
                 OutlinedButton(onClick = { viewModel.requestDeleteIndexer(indexer) }) { Text("Delete", color = Ruby) }
             }
@@ -407,7 +474,7 @@ private fun SubtitleTargetRow(target: AutomationSubtitleTarget, viewModel: Autom
     AdminCard {
         Text(target.title, color = Snow, fontWeight = FontWeight.SemiBold)
         Text("Missing: ${target.missingLanguages.joinToString().ifBlank { "configured languages" }}", color = Silver, style = MaterialTheme.typography.bodySmall)
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(modifier = Modifier.focusGroup(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Button(onClick = { viewModel.searchSubtitles(target) }, colors = adminButtonColors()) { Text("Interactive search") }
             OutlinedButton(onClick = { viewModel.searchMissingSubtitle(target, target.missingLanguages.firstOrNull().orEmpty()) }) {
                 Text("Auto search", color = Amber)
@@ -468,7 +535,7 @@ private fun TdarrAdmin(state: AutomationAdministrationUiState, viewModel: Automa
     tdarr.nodes.forEach { node ->
         AdminCard {
             Text("${node.name} · ${if (node.online) "online" else "offline"}", color = if (node.online) Emerald else Ruby, fontWeight = FontWeight.SemiBold)
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(modifier = Modifier.focusGroup(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedButton(onClick = {
                     viewModel.changeTdarrWorkerLimit(TdarrWorkerLimitRequest(node.id, "transcodecpu", TdarrWorkerLimitChange.DECREASE))
                 }) { Text("CPU −", color = Snow) }
@@ -492,7 +559,7 @@ private fun TdarrAdmin(state: AutomationAdministrationUiState, viewModel: Automa
             Text(job.file.substringAfterLast('/').substringAfterLast('\\'), color = Snow, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Text(listOfNotNull(job.status, job.progressPercent?.let { "${it.toInt()}%" }).joinToString(" · "), color = Silver, style = MaterialTheme.typography.bodySmall)
             Row(
-                modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                modifier = Modifier.fillMaxWidth().focusGroup().horizontalScroll(rememberScrollState()),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 tdarrJobActions(job).forEach { action ->
@@ -546,6 +613,12 @@ private fun EmptyHint(show: Boolean, text: String) {
 
 @Composable
 private fun adminButtonColors() = ButtonDefaults.buttonColors(containerColor = Amber, contentColor = Obsidian)
+
+@Composable
+private fun adminChoiceButtonColors(selected: Boolean) = ButtonDefaults.outlinedButtonColors(
+    containerColor = if (selected) Amber else androidx.compose.ui.graphics.Color.Transparent,
+    contentColor = if (selected) Obsidian else Snow,
+)
 
 private fun supportedSections(state: AutomationAdministrationUiState): List<AutomationAdminSection> = buildList {
     if (AutomationCapability.LIBRARY_LOOKUP in state.capabilities) add(AutomationAdminSection.LIBRARY)

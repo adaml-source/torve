@@ -31,6 +31,7 @@ import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
@@ -62,6 +63,7 @@ fun TvHeroOverlay(
     onWatchlistToggle: () -> Unit = {},
     logoLookupInFlight: Boolean = false,
     allowLogoArtwork: Boolean = true,
+    topPadding: Dp = 56.dp,
     modifier: Modifier = Modifier,
 ) {
     val settingsViewModel: SettingsViewModel = koinInject()
@@ -71,7 +73,7 @@ fun TvHeroOverlay(
     }
 
     Column(modifier = modifier.fillMaxWidth()) {
-        Spacer(modifier = Modifier.height(56.dp))
+        Spacer(modifier = Modifier.height(topPadding))
 
         AnimatedContent(
             targetState = featuredItem,

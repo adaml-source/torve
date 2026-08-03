@@ -1,6 +1,7 @@
 package com.torve.desktop.diagnostics
 
 import com.torve.desktop.platform.desktopDataDir
+import com.torve.domain.telemetry.AcquisitionRuntimeTelemetry
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -126,6 +127,21 @@ object DiagnosticsExporter {
         appendLine()
         appendLine("# Data directory")
         appendLine("  ${desktopDataDir().absolutePath}")
+        appendLine()
+        val acquisition = AcquisitionRuntimeTelemetry.snapshot()
+        appendLine("# Acquisition health (in-session, no titles or IDs)")
+        appendLine("  refresh.successes=${acquisition.refreshSuccesses}")
+        appendLine("  refresh.failures=${acquisition.refreshFailures}")
+        appendLine("  retry.requested=${acquisition.retryRequested}")
+        appendLine("  retry.succeeded=${acquisition.retrySucceeded}")
+        appendLine("  retry.failed=${acquisition.retryFailed}")
+        appendLine("  cancel.requested=${acquisition.cancelRequested}")
+        appendLine("  cancel.succeeded=${acquisition.cancelSucceeded}")
+        appendLine("  cancel.failed=${acquisition.cancelFailed}")
+        appendLine("  stage.transitions=${acquisition.stageTransitions}")
+        appendLine("  became.available=${acquisition.becameAvailable}")
+        appendLine("  active.items=${acquisition.activeItems}")
+        appendLine("  attention.items=${acquisition.attentionItems}")
         appendLine()
         appendLine("# Excluded from this bundle by design")
         appendLine("  - desktop secret-store files (tokens, debrid keys, addon tokens)")

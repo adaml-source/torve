@@ -32,8 +32,13 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.viewinterop.AndroidView
 import coil3.compose.AsyncImage
 import com.torve.android.R
+import com.torve.android.player.TorvePlayerView
+import com.torve.android.player.clearPlayerSafely
+import com.torve.android.player.setPlayerSafely
+import com.torve.android.ui.player.ActivePlaybackState
 import com.torve.android.ui.theme.Amber
 import com.torve.android.ui.theme.Charcoal
 import com.torve.android.ui.theme.Graphite
@@ -58,6 +63,12 @@ internal fun TvEpgPreviewPanel(
     modifier: Modifier = Modifier,
 ) {
     val channel = focusedChannel?.channel
+    val activeLiveSession = ActivePlaybackState.session?.takeIf { ActivePlaybackState.isLiveSession }
+    val activeLivePlayer = if (isActive && activeLiveSession != null) {
+        ActivePlaybackState.retainedLivePlayer()
+    } else {
+        null
+    }
     var nowMs by remember { mutableLongStateOf(System.currentTimeMillis()) }
 
     LaunchedEffect(Unit) {
@@ -112,7 +123,35 @@ internal fun TvEpgPreviewPanel(
                 .border(1.dp, Steel.copy(alpha = 0.28f), RoundedCornerShape(20.dp)),
             contentAlignment = Alignment.Center,
         ) {
-            if (channelLogo != null) {
+            if (activeLivePlayer != null) {
+                AndroidView(
+                    factory = { context ->
+                        TorvePlayerView(context).apply {
+                            useController = false
+                            setPlayerSafely(activeLivePlayer, "tv_iptv_retained_preview_factory")
+                        }
+                    },
+                    update = { view ->
+                        view.setPlayerSafely(activeLivePlayer, "tv_iptv_retained_preview_update")
+                    },
+                    onRelease = { view ->
+                        view.clearPlayerSafely("tv_iptv_retained_preview_release")
+                    },
+                    modifier = Modifier.fillMaxHeight().fillMaxWidth(),
+                )
+                Text(
+                    text = "LIVE · ${activeLiveSession?.title.orEmpty()}",
+                    color = Snow,
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier
+                        .align(Alignment.BottomStart)
+                        .background(Obsidian.copy(alpha = 0.78f), RoundedCornerShape(topEnd = 8.dp))
+                        .padding(horizontal = 8.dp, vertical = 4.dp),
+                )
+            } else if (channelLogo != null) {
                 AsyncImage(
                     model = channelLogo,
                     contentDescription = channel.name,

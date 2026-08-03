@@ -31,7 +31,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -65,6 +64,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.torve.android.R
 import com.torve.android.session.PostSignInRefresh
+import com.torve.android.ui.components.TvBrowseOutlinedTextField
 import com.torve.domain.transfer.SecretCategory
 import com.torve.domain.transfer.TransferApplyResult
 import com.torve.domain.transfer.TransferDecryptResult
@@ -284,6 +284,7 @@ private fun ActiveBlock(
         importing = state.importing,
         importResult = state.importResult,
         relayStatus = state.relayStatus,
+        tvEnabled = largeQr,
         onChange = onEnvelopeChanged,
         onImport = onImport,
     )
@@ -410,6 +411,7 @@ private fun AdvancedPasteSection(
     importing: Boolean,
     importResult: TransferImportResult?,
     relayStatus: RelayStatus,
+    tvEnabled: Boolean,
     onChange: (String) -> Unit,
     onImport: () -> Unit,
 ) {
@@ -429,9 +431,10 @@ private fun AdvancedPasteSection(
             }
         }
         if (advancedOpen) {
-            OutlinedTextField(
+            TvBrowseOutlinedTextField(
                 value = envelopeText,
                 onValueChange = onChange,
+                tvEnabled = tvEnabled,
                 label = { Text(stringResource(R.string.transfer_sealed_code_from_sender)) },
                 placeholder = { Text(stringResource(R.string.transfer_sealed_code_placeholder)) },
                 singleLine = false,

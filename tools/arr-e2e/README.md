@@ -1,7 +1,7 @@
 # Torve automation E2E stack
 
 This fixture validates Torve's production automation client against real Sonarr,
-Radarr, Prowlarr, Bazarr, Tdarr and qBittorrent containers. It never downloads
+Radarr, Prowlarr, Bazarr, Tdarr, Seerr and qBittorrent containers. It never downloads
 third-party media: FFmpeg generates an 11-minute test-pattern video with a tone,
 and the local Torznab/tracker service publishes only that generated file.
 
@@ -34,13 +34,32 @@ containers, read locally by the opt-in test, and never printed or committed.
 | --- | --- |
 | Sonarr | http://127.0.0.1:18989 |
 | Radarr | http://127.0.0.1:17878 |
+| Seerr | http://127.0.0.1:15055 |
 | Prowlarr | http://127.0.0.1:19696 |
 | Bazarr | http://127.0.0.1:16767 |
 | Tdarr UI | http://127.0.0.1:18265 |
 | Tdarr API | http://127.0.0.1:18266 |
 | qBittorrent | http://127.0.0.1:18080 |
+| SABnzbd | http://127.0.0.1:18082 |
 | Local Torznab/tracker | http://127.0.0.1:18081 |
 
 Runtime configs, generated media, downloads, keys and the live-test flag are all
 under the ignored `state/` directory. To remove the containers while retaining
 the test data, run `docker compose down`.
+
+## One-time Seerr setup
+
+Seerr is the safe request layer used by Torve's **Add to my library** action. Open
+`http://127.0.0.1:15055`, sign in with the existing Jellyfin administrator, then
+use these addresses inside Seerr:
+
+- Jellyfin: `host.docker.internal`, port `8096`
+- Sonarr: `sonarr`, port `8989`
+- Radarr: `radarr`, port `7878`
+
+Choose the existing root folders and quality profiles, make each Sonarr/Radarr
+server the default for its quality role, and enable automatic search. Then copy
+a Seerr API key into Torve's Settings → Integrations → Seerr requests and choose
+**Sync with my account**. Torve restores that request connection and the account-
+enabled ARR connection bundle on other signed-in devices; device-only choices
+are excluded.

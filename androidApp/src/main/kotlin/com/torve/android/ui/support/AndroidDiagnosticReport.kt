@@ -8,12 +8,15 @@ import android.net.NetworkCapabilities
 import android.os.Build
 import android.os.StatFs
 import android.os.SystemClock
+import androidx.core.content.pm.PackageInfoCompat
 import com.torve.android.BuildConfig
 import com.torve.android.diagnostics.AndroidDiagnosticsRecorder
+import com.torve.data.addon.StreamRuntimeTelemetry
 import com.torve.data.auth.AuthClient
 import com.torve.data.support.SupportBugReportPayload
 import com.torve.domain.diagnostics.BugReportBundleBuilder
 import com.torve.domain.diagnostics.DiagnosticsRedactor
+import com.torve.domain.telemetry.AcquisitionRuntimeTelemetry
 import com.torve.domain.providerhealth.ProviderHealthCategory
 import com.torve.domain.providerhealth.ProviderHealthEntry
 import com.torve.domain.providerhealth.ProviderHealthStatus
@@ -147,8 +150,7 @@ internal fun androidBugReportVersionParts(context: Context): AndroidBugReportVer
         context.packageManager.getPackageInfo(context.packageName, 0)
     }.getOrNull()
     val versionName = packageInfo?.versionName ?: "unknown"
-    @Suppress("DEPRECATION")
-    val versionCode = packageInfo?.longVersionCode?.toString() ?: "unknown"
+    val versionCode = packageInfo?.let(PackageInfoCompat::getLongVersionCode)?.toString() ?: "unknown"
     return AndroidBugReportVersionParts(
         versionName = versionName,
         versionCode = versionCode,
@@ -245,6 +247,7 @@ private fun buildDiagnosticsObject(
         })
         put("network", buildNetworkObject(context))
         put("playback", buildPlaybackObject())
+        put("acquisition", buildAcquisitionObject())
         put("focus", AndroidDiagnosticsRecorder.focusJson())
         put("performance", buildPerformanceObject())
         put("crashes", AndroidDiagnosticsRecorder.crashesJson(context))
@@ -262,6 +265,7 @@ private fun minimalDiagnosticsObject(now: Long): JsonObject = buildJsonObject {
     put("performance", JsonObject(emptyMap()))
     put("focus", JsonObject(emptyMap()))
     put("playback", JsonObject(emptyMap()))
+    put("acquisition", JsonObject(emptyMap()))
 }
 
 private fun buildNetworkObject(context: Context): JsonObject {
@@ -289,6 +293,22 @@ private fun buildNetworkObject(context: Context): JsonObject {
 }
 
 private fun buildPlaybackObject(): JsonObject = buildJsonObject {
+    val startup = StreamRuntimeTelemetry.performanceSnapshot()
+    put("startupPerformance", buildJsonObject {
+        put("sampleCount", startup.sampleCount)
+        put("successfulStarts", startup.successfulStarts)
+        put("failedStarts", startup.failedStarts)
+        startup.successRate?.let { put("successRate", it) } ?: put("successRate", JsonNull)
+        putNullable("p50StartupMs", startup.p50StartupMs)
+        putNullable("p95StartupMs", startup.p95StartupMs)
+        put("targetStatus", startup.status.name)
+        put("targets", buildJsonObject {
+            put("minimumSamples", 20)
+            put("successRate", 0.98)
+            put("p50StartupMs", 4_000)
+            put("p95StartupMs", 10_000)
+        })
+    })
     put("lastPlaybackAttempt", buildJsonObject {
         put("contentType", "unknown")
         put("providerCategory", "unknown")
@@ -303,6 +323,23 @@ private fun buildPlaybackObject(): JsonObject = buildJsonObject {
         put("errorMessage", JsonNull)
     })
     put("recentPlaybackErrors", AndroidDiagnosticsRecorder.recentPlaybackErrorsJson())
+}
+
+private fun buildAcquisitionObject(): JsonObject = buildJsonObject {
+    val acquisition = AcquisitionRuntimeTelemetry.snapshot()
+    put("refreshSuccesses", acquisition.refreshSuccesses)
+    put("refreshFailures", acquisition.refreshFailures)
+    put("retryRequested", acquisition.retryRequested)
+    put("retrySucceeded", acquisition.retrySucceeded)
+    put("retryFailed", acquisition.retryFailed)
+    put("cancelRequested", acquisition.cancelRequested)
+    put("cancelSucceeded", acquisition.cancelSucceeded)
+    put("cancelFailed", acquisition.cancelFailed)
+    put("stageTransitions", acquisition.stageTransitions)
+    put("becameAvailable", acquisition.becameAvailable)
+    put("activeItems", acquisition.activeItems)
+    put("attentionItems", acquisition.attentionItems)
+    putNullable("lastUpdatedAtMs", acquisition.lastUpdatedAtMs)
 }
 
 private fun buildPerformanceObject(): JsonObject = buildJsonObject {
@@ -399,6 +436,7 @@ private fun buildMarkdownSummary(
         appendLine("diagnostics.performance: ${diagnostics["performance"]}")
         appendLine("diagnostics.focus: ${diagnostics["focus"]}")
         appendLine("diagnostics.playback: ${diagnostics["playback"]}")
+        appendLine("diagnostics.acquisition: ${diagnostics["acquisition"]}")
         appendLine("logs.attached: ${logs.size}")
     }
     return BugReportBundleBuilder.build(

@@ -74,6 +74,11 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
@@ -2328,6 +2333,8 @@ internal fun PersistentPlaybackBar(
     onTogglePlayback: () -> Unit,
     onStop: () -> Unit,
     requestInitialFocus: Boolean = false,
+    focusRequestId: Long = 0L,
+    onNavigateAway: () -> Unit = {},
 ) {
     if (isTv) {
         TvPersistentPlaybackBar(
@@ -2336,6 +2343,8 @@ internal fun PersistentPlaybackBar(
             onTogglePlayback = onTogglePlayback,
             onStop = onStop,
             requestInitialFocus = requestInitialFocus,
+            focusRequestId = focusRequestId,
+            onNavigateAway = onNavigateAway,
         )
         return
     }
@@ -2446,6 +2455,8 @@ private fun TvPersistentPlaybackBar(
     onTogglePlayback: () -> Unit,
     onStop: () -> Unit,
     requestInitialFocus: Boolean,
+    focusRequestId: Long,
+    onNavigateAway: () -> Unit,
 ) {
     val returnFocusRequester = remember { FocusRequester() }
     val toggleFocusRequester = remember { FocusRequester() }
@@ -2457,7 +2468,7 @@ private fun TvPersistentPlaybackBar(
         0f
     }
 
-    LaunchedEffect(requestInitialFocus, session.url) {
+    LaunchedEffect(requestInitialFocus, session.url, focusRequestId) {
         if (!requestInitialFocus) return@LaunchedEffect
         repeat(5) { attempt ->
             withFrameNanos { }
@@ -2470,6 +2481,14 @@ private fun TvPersistentPlaybackBar(
     Column(
         modifier = Modifier
             .width(480.dp)
+            .onPreviewKeyEvent { event ->
+                if (event.type == KeyEventType.KeyDown && event.key == Key.DirectionUp) {
+                    onNavigateAway()
+                    true
+                } else {
+                    false
+                }
+            }
             .clip(RoundedCornerShape(14.dp))
             .background(Color(0xF2181C25))
             .border(

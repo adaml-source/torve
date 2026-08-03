@@ -81,6 +81,9 @@ import com.torve.domain.integrations.AutomationInstanceRole
 import com.torve.domain.integrations.AutomationServiceType
 import com.torve.domain.model.DebridServiceType
 import com.torve.presentation.settings.SettingsViewModel
+import com.torve.presentation.settings.IntegrationReadinessStatus
+import com.torve.presentation.settings.IntegrationReadinessSummary
+import com.torve.presentation.settings.buildIntegrationReadinessSummary
 import com.torve.presentation.integrations.AutomationSettingsViewModel
 import com.torve.presentation.usenet.NzbdavSetupViewModel
 import com.torve.presentation.usenet.NzbdavStatus
@@ -97,6 +100,9 @@ fun IntegrationsScreen(
 ) {
     val state by viewModel.state.collectAsState()
     val automationState by automationViewModel.state.collectAsState()
+    val readiness = remember(state, automationState.instances) {
+        buildIntegrationReadinessSummary(state, automationState.instances)
+    }
     val context = LocalContext.current
     val secretStore: IntegrationSecretStore = koinInject()
     val authClient: com.torve.data.auth.AuthClient = koinInject()
@@ -113,6 +119,8 @@ fun IntegrationsScreen(
     LaunchedEffect(Unit) {
         secretStore.get(IntegrationSecretKey.JELLYFIN_API_KEY)?.let { stored ->
             viewModel.setJellyfinApiKey(stored)
+            jellyfinStorageMode =
+                secretStore.getStorageMode(IntegrationSecretKey.JELLYFIN_API_KEY)
         }
         viewModel.loadJellyfinProfiles()
         secretStore.get(IntegrationSecretKey.PLEX_ACCESS_TOKEN)?.let { stored ->
@@ -147,6 +155,10 @@ fun IntegrationsScreen(
             style = MaterialTheme.typography.bodySmall,
             color = Silver,
         )
+
+        Spacer(Modifier.height(16.dp))
+
+        IntegrationReadinessCard(readiness)
 
         Spacer(Modifier.height(16.dp))
 
@@ -706,17 +718,7 @@ fun IntegrationsScreen(
             Spacer(Modifier.height(8.dp))
             OutlinedButton(
                 onClick = {
-                    viewModel.saveAndTestJellyfinConnection()
-                    if (jellyfinStorageMode == com.torve.domain.integrations.IntegrationStorageMode.ACCOUNT) {
-                        scope.launch {
-                            accountSessionCoordinator.saveIntegrationToBackend(
-                                integrationType = "JELLYFIN_API_KEY",
-                                credentials = mapOf("api_key" to state.jellyfinApiKey),
-                                displayIdentifier = "Jellyfin",
-                                config = mapOf("server_url" to state.jellyfinServerUrl),
-                            )
-                        }
-                    }
+                    viewModel.saveAndTestJellyfinConnection(jellyfinStorageMode)
                 },
                 modifier = Modifier.fillMaxWidth(),
                 colors = ButtonDefaults.outlinedButtonColors(contentColor = Amber),
@@ -1054,6 +1056,62 @@ private fun DeviceCodeSection(
         )
         Spacer(Modifier.width(8.dp))
         Text(stringResource(R.string.integrations_open_browser))
+    }
+}
+
+@Composable
+private fun IntegrationReadinessCard(summary: IntegrationReadinessSummary) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = Gunmetal),
+    ) {
+        Column(
+            modifier = Modifier.padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Text(
+                text = "Your media setup",
+                color = Snow,
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+            )
+            Text(
+                text = "See what is ready before opening individual connection settings.",
+                color = Silver,
+                style = MaterialTheme.typography.bodySmall,
+            )
+            summary.items.forEach { item ->
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalAlignment = Alignment.Top,
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = item.title,
+                            color = Snow,
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                        Text(
+                            text = item.detail,
+                            color = Silver,
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    }
+                    Text(
+                        text = item.statusLabel,
+                        color = when (item.status) {
+                            IntegrationReadinessStatus.READY -> Emerald
+                            IntegrationReadinessStatus.NEEDS_ATTENTION -> Amber
+                            IntegrationReadinessStatus.NOT_CONFIGURED -> Silver
+                        },
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                }
+            }
+        }
     }
 }
 

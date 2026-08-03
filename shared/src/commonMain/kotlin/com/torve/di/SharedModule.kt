@@ -222,6 +222,7 @@ val sharedModule = module {
     single<com.torve.data.integrations.AutomationAdminClient> {
         com.torve.data.integrations.ServarrAdminClient(get())
     }
+    single { com.torve.data.integrations.AutomationAccountSyncService(get(), get(), get()) }
 
     // Trakt
     single<TraktAuthScopeProvider> { PersistedTraktAuthScopeProvider(get()) }
@@ -241,7 +242,14 @@ val sharedModule = module {
 
     // OMDB + Ratings
     single { OmdbClient(get(), get(), get()) }
-    single { RatingsEnricher(get(), get(), get(), get(), get()) }
+    single {
+        com.torve.data.ratings.BackendRatingsApi(
+            httpClient = get(),
+            baseUrlProvider = { com.torve.data.auth.AuthClient.DEFAULT_BASE_URL },
+            accessTokenProvider = { get<com.torve.data.auth.AuthClient>().getValidAccessToken() },
+        )
+    }
+    single { RatingsEnricher(get(), get(), get(), get(), get(), get()) }
 
     // Catalog top-cache: pre-paginated top-1000 per genre (movie/tv).
     single { com.torve.data.catalog.CatalogTopCacheRepository(get(), get()) }
@@ -462,7 +470,7 @@ val sharedModule = module {
             authClient = get(),
         )
     }
-    single { AccountSessionCoordinator(get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get()) }
+    single { AccountSessionCoordinator(get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get()) }
 
     // Provider-health primitives. Repository hydrates from prefs on first
     // load; the coordinator holds in-memory checker registrations and is
@@ -760,8 +768,47 @@ val sharedModule = module {
     single {
         com.torve.data.recording.EpgCorrectionRepository(prefs = get())
     }
+    single<com.torve.domain.recording.SeriesPassResolver> {
+        val channels = get<com.torve.domain.repository.ChannelRepository>()
+        val recordings = get<com.torve.domain.recording.RecordingRepository>()
+        com.torve.domain.recording.EpgSeriesPassResolver(
+            programmesForChannel = { playlistId, channelId ->
+                val channel = channels.getChannels(playlistId).firstOrNull {
+                    it.url == channelId ||
+                        it.tvgId == channelId ||
+                        com.torve.domain.model.channelMatchesIdentity(it, channelId)
+                }
+                channels.getProgrammes(
+                    channel?.let { com.torve.domain.model.stableChannelId(it) } ?: channelId,
+                )
+            },
+            existingRecordingsForPass = { passId ->
+                recordings.listAll().filter { it.seriesPassId == passId }
+            },
+            channelNameForId = { playlistId, channelId ->
+                channels.getChannels(playlistId).firstOrNull {
+                    it.url == channelId ||
+                        it.tvgId == channelId ||
+                        com.torve.domain.model.channelMatchesIdentity(it, channelId)
+                }?.name
+            },
+            streamUrlForChannelId = { playlistId, channelId ->
+                channels.getChannels(playlistId).firstOrNull {
+                    it.url == channelId ||
+                        it.tvgId == channelId ||
+                        com.torve.domain.model.channelMatchesIdentity(it, channelId)
+                }?.url
+            },
+        )
+    }
     single {
-        com.torve.domain.recording.RecordingScheduler(repository = get())
+        com.torve.domain.recording.RecordingScheduler(
+            repository = get(),
+            passResolver = get(),
+        )
+    }
+    single {
+        com.torve.data.recording.RecordingSeriesPassStore(preferences = get())
     }
     single {
         com.torve.presentation.recording.RecordingsViewModel(
@@ -772,6 +819,7 @@ val sharedModule = module {
             // before recording lands there).
             starter = getOrNull()
                 ?: object : com.torve.presentation.recording.RecordingStarter {},
+            seriesPassStore = get(),
         )
     }
     single {
@@ -830,7 +878,18 @@ val sharedModule = module {
     // The database is pre-warmed on a background thread in TorveApp.onCreate so the
     // first koinInject() doesn't block the main thread with schema DDL.
     single { HomeViewModel(get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get()) }
-    single { SearchViewModel(get(), get(), get(), get(), get(), get(), get()) }
+    single {
+        SearchViewModel(
+            metadataRepo = get(),
+            prefsRepo = get(),
+            contentPolicyRepository = get(),
+            contentPolicyFilter = get(),
+            invalidationCoordinator = get(),
+            ratingsEnricher = get(),
+            integrationSecretStore = get(),
+            profileRepository = get(),
+        )
+    }
     factory {
         DetailViewModel(
             get(), get(), get(), get(), get(), get(), get(), get(), get(),
@@ -842,6 +901,7 @@ val sharedModule = module {
             watchStateRemoteSource = getOrNull(),
             watchSessionRecorder = get(),
             mediaLifecycleService = getOrNull(),
+            profileRepository = get(),
         )
     }
     factoryOf(::PersonViewModel)
@@ -853,8 +913,8 @@ val sharedModule = module {
             mediaLifecycleService = getOrNull(),
         ).also { vm ->
             // Wire integration save callback — breaks circular dep by using lazy resolution.
-            vm.onIntegrationSaved = { type, credential, label ->
-                get<AccountSessionCoordinator>().saveIntegrationToBackend(type, credential, label)
+            vm.onIntegrationSaved = { type, credential, label, config ->
+                get<AccountSessionCoordinator>().saveIntegrationToBackend(type, credential, label, config)
             }
             // Sync app language → TMDB content language.
             val tmdb = get<TmdbApiClient>()
@@ -898,7 +958,7 @@ val sharedModule = module {
         )
     }
     factory {
-        com.torve.presentation.integrations.AutomationSettingsViewModel(get(), get(), get())
+        com.torve.presentation.integrations.AutomationSettingsViewModel(get(), get(), get(), get())
     }
     factory {
         com.torve.presentation.integrations.AutomationAdministrationViewModel(get(), get())
@@ -970,7 +1030,7 @@ val sharedModule = module {
     }
     factory { DownloadViewModel(get(), contentPolicyRepository = get(), contentPolicyFilter = ContentPolicyFilter()) }
     factory { DownloadCatalogueViewModel(get(), get(), get(), get(), contentPolicyRepository = get(), contentPolicyFilter = ContentPolicyFilter()) }
-    factoryOf(::ProfileViewModel)
+    factory { ProfileViewModel(profileRepo = get()) }
     // Singleton so NavGraph, PaywallScreen, and all other screens share
     // the same premium state — avoids stale locks after purchase/login.
     single {
@@ -1010,7 +1070,17 @@ val sharedModule = module {
         )
     }
     factory { SensitiveMaterialSettingsViewModel(get()) }
-    factory { com.torve.presentation.jellyfin.JellyfinBrowserViewModel(get()) }
+    // One paged library cache is shared by TV/mobile surfaces. Recreating this
+    // per composition can download the same large Jellyfin library repeatedly.
+    single { com.torve.presentation.jellyfin.JellyfinBrowserViewModel(get(), get()) }
+    factory {
+        com.torve.presentation.library.PermanentLibraryViewModel(
+            lifecycleService = get(),
+            instanceRepository = get(),
+            adminClient = get(),
+            telemetry = get(),
+        )
+    }
 }
 
 /**

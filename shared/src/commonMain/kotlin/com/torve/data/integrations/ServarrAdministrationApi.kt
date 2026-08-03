@@ -792,10 +792,18 @@ internal class ServarrAdministrationApi(private val httpClient: HttpClient) {
         } else null
         val error = row.array("statusMessages")?.mapNotNull { it as? JsonObject }
             ?.firstOrNull()?.let { it.stringAny("title", "message") }
+        val movieId = row.int("movieId")
+        val seriesId = row.int("seriesId")
         return AutomationQueueItem(
             id = id,
             title = row.string("title") ?: "Queue item $id",
             status = row.string("status") ?: "unknown",
+            mediaId = movieId ?: seriesId,
+            mediaKind = when {
+                movieId != null -> AutomationMediaKind.MOVIE
+                seriesId != null -> AutomationMediaKind.SERIES
+                else -> null
+            },
             trackedStatus = row.stringAny("trackedDownloadStatus", "trackedDownloadState"),
             progressPercent = progress,
             sizeBytes = size,

@@ -34,6 +34,8 @@ data class AutomationInstance(
     val role: AutomationInstanceRole = AutomationInstanceRole.STANDARD,
     val enabled: Boolean = true,
     val isDefault: Boolean = false,
+    /** Controls whether this connection is restored with the signed-in Torve account. */
+    val storageMode: IntegrationStorageMode = IntegrationStorageMode.DEVICE_ONLY,
 ) {
     val permissions: Set<AutomationPermission>
         get() = when (serviceType) {
@@ -50,8 +52,8 @@ interface AutomationInstanceRepository {
 
     /**
      * Saves non-secret metadata and, when supplied, the encrypted API key.
-     * Direct admin keys are intentionally device-only; users can move them
-     * through Torve's explicitly encrypted device-transfer flow.
+     * Account-mode keys are also mirrored into Torve's encrypted account bundle;
+     * device-only keys never leave the device.
      */
     suspend fun save(instance: AutomationInstance, apiKey: String? = null)
     suspend fun remove(instanceId: String)

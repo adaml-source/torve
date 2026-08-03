@@ -176,7 +176,7 @@ class ExoPlayerEngine(
                     liveTuneStateMachine.onPlaybackBuffering(SystemClock.elapsedRealtime()),
                 )
                 Player.STATE_READY -> {
-                    _state = _state.copy(durationMs = exoPlayer?.duration ?: 0)
+                    exoPlayer?.let(::refreshPlaybackWindowState)
                     if (!_state.isEngineFallbackAllowed) {
                         applyTuneSnapshot(
                             liveTuneStateMachine.onPlaybackReady(SystemClock.elapsedRealtime()),
@@ -434,6 +434,11 @@ class ExoPlayerEngine(
         ) {
             applyTuneSnapshot(liveTuneStateMachine.onVideoReady(SystemClock.elapsedRealtime()))
             maybeConfirmTune("rendered_first_frame")
+            notifyStateChanged()
+        }
+
+        override fun onTimelineChanged(eventTime: AnalyticsListener.EventTime, reason: Int) {
+            exoPlayer?.let(::refreshPlaybackWindowState)
             notifyStateChanged()
         }
 
@@ -1935,7 +1940,30 @@ class ExoPlayerEngine(
 
     fun updatePosition() {
         val player = exoPlayer ?: return
-        _state = _state.copy(positionMs = player.currentPosition)
+        refreshPlaybackWindowState(player)
+        _state = _state.copy(positionMs = player.currentPosition.coerceAtLeast(0L))
+        notifyStateChanged()
+    }
+
+    /**
+     * Copies Media3's active-window facts into the platform-neutral state. A
+     * seekable live window is the capability gate for provider-backed
+     * timeshift; a normal IPTV stream must never advertise controls that its
+     * manifest cannot support.
+     */
+    private fun refreshPlaybackWindowState(player: Player) {
+        val safeDuration = player.duration
+            .takeUnless { it == C.TIME_UNSET || it < 0L }
+            ?: 0L
+        val safeLiveOffset = player.currentLiveOffset
+            .takeUnless { it == C.TIME_UNSET || it < 0L }
+            ?: 0L
+        _state = _state.copy(
+            durationMs = safeDuration,
+            isLive = player.isCurrentMediaItemLive,
+            isSeekable = player.isCurrentMediaItemSeekable,
+            liveOffsetMs = safeLiveOffset,
+        )
     }
 
     private fun applyTuneSnapshot(snapshot: LiveTuneSnapshot) {

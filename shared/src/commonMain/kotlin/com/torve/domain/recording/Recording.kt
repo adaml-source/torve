@@ -39,10 +39,9 @@ enum class RecordingFailureReason {
 }
 
 /**
- * Schedule shape. [SERIES] is schema-only for this slice — see
- * `RecordingSeriesPass` for the data class. The scheduler refuses to
- * schedule series passes unless the platform's series-resolver hook is
- * provided; UI surfaces the disabled state with a "coming soon" copy.
+ * Schedule shape. [SERIES_EPG] rows are concrete future episodes created by
+ * a [RecordingSeriesPass]. The scheduler keeps the resolver injectable so a
+ * platform without guide data can disable series-pass creation safely.
  */
 @Serializable
 enum class RecordingKind {
@@ -113,10 +112,9 @@ data class Recording(
 }
 
 /**
- * Schema for series passes. **Not active in this slice** — the
- * scheduler refuses to enqueue passes unless the platform supplies a
- * resolver that turns the pass into concrete one-off [Recording] rows.
- * Kept here so the UI / DB schema is forward-compatible.
+ * A recurring EPG recording rule. The configured resolver expands this rule
+ * into concrete future [Recording] rows and the scheduler de-duplicates and
+ * conflict-checks them before persistence.
  */
 @Serializable
 data class RecordingSeriesPass(

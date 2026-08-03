@@ -1204,3 +1204,35 @@ class DesktopRelease(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_now, nullable=False
     )
+
+
+class GlobalMediaRating(Base):
+    """Shared provider-rating cache, keyed by canonical TMDB identity."""
+
+    __tablename__ = "global_media_ratings"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    media_type: Mapped[str] = mapped_column(String(10), nullable=False)
+    tmdb_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    imdb_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    imdb_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    imdb_votes: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    tmdb_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    rotten_tomatoes_score: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    rt_audience_score: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    metacritic_score: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    letterboxd_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    trakt_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    mdblist_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    mal_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    fetched_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_now, onupdate=_now, nullable=False
+    )
+
+    __table_args__ = (
+        Index("uq_global_media_ratings_identity", "media_type", "tmdb_id", unique=True),
+        Index("ix_global_media_ratings_fetched_at", "fetched_at"),
+    )

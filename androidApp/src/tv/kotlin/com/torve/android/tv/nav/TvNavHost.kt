@@ -51,23 +51,31 @@ private const val TV_STREAM_RESOLVING_NOTIFICATION_TAG = "tv_stream_resolving"
 private const val TV_RESUME_MIN_POSITION_MS = 20_000L
 private const val TV_RESUME_MAX_PROGRESS = 0.85
 
-private fun ActivePlaybackSession.tvPlayerRoute(): String = TvRoutes.player(
-    url = url,
-    fallbackUrl = fallbackUrl,
-    title = title,
-    mediaId = mediaId,
-    mediaType = mediaType,
-    posterUrl = posterUrl,
-    backdropUrl = backdropUrl,
-    seasonNumber = seasonNumber,
-    episodeNumber = episodeNumber,
-    showTmdbId = showTmdbId,
-    showImdbId = showImdbId,
-    // The retained engine is already at the live position. Supplying its
-    // position again would incorrectly show the resume/start-over prompt.
-    startPositionMs = 0L,
-    autoSourceSelection = autoSourceSelection,
-)
+private fun ActivePlaybackSession.tvPlayerRoute(): String = if (ActivePlaybackState.isLiveSession) {
+    TvRoutes.livePlayer(
+        channelUrl = url,
+        channelName = title,
+        groupName = ActivePlaybackState.retainedLiveGroupName,
+    )
+} else {
+    TvRoutes.player(
+        url = url,
+        fallbackUrl = fallbackUrl,
+        title = title,
+        mediaId = mediaId,
+        mediaType = mediaType,
+        posterUrl = posterUrl,
+        backdropUrl = backdropUrl,
+        seasonNumber = seasonNumber,
+        episodeNumber = episodeNumber,
+        showTmdbId = showTmdbId,
+        showImdbId = showImdbId,
+        // The retained engine is already at its playback position. Supplying
+        // it again would incorrectly show the resume/start-over prompt.
+        startPositionMs = 0L,
+        autoSourceSelection = autoSourceSelection,
+    )
+}
 
 private fun NavHostController.navigateToTvDetails(item: MediaItem, autoPlay: Boolean = false) {
     val id = item.tmdbId ?: item.id.toIntOrNull() ?: item.id.extractTmdbIdOrNull() ?: return
@@ -113,6 +121,7 @@ internal fun TvNavHost(
     onRequestLifetimeUnlock: (TvEntitledFeature) -> Unit = {},
     onWatchedStatusChanged: (MediaItem, Boolean) -> Unit = { _, _ -> },
     isStreamPlaybackLocked: Boolean = false,
+    onPlaybackFocusRestoreRequest: () -> Unit = {},
     onFirstContentRequester: (FocusRequester) -> Unit = {},
     onContentFocused: (FocusRequester) -> Unit = {},
     registerSeeAllFocusHandle: ((TvScreenFocusHandle?) -> Unit)? = null,
@@ -130,14 +139,15 @@ internal fun TvNavHost(
     val returnToPlayerRequestId = ActivePlaybackState.returnToPlayerRequestId
 
     SideEffect {
-        ActivePlaybackState.isFullScreenPlayerVisible = currentRoute == TvRoutes.PLAYER
+        ActivePlaybackState.isFullScreenPlayerVisible =
+            currentRoute == TvRoutes.PLAYER || currentRoute == TvRoutes.LIVE_PLAYER
     }
     DisposableEffect(Unit) {
         onDispose { ActivePlaybackState.isFullScreenPlayerVisible = false }
     }
     LaunchedEffect(returnToPlayerRequestId) {
         val activeSession = ActivePlaybackState.session ?: return@LaunchedEffect
-        if (currentRoute != TvRoutes.PLAYER && returnToPlayerRequestId > 0L) {
+        if (currentRoute != TvRoutes.PLAYER && currentRoute != TvRoutes.LIVE_PLAYER && returnToPlayerRequestId > 0L) {
             navController.navigate(activeSession.tvPlayerRoute()) { launchSingleTop = true }
         }
     }
@@ -216,16 +226,24 @@ internal fun TvNavHost(
         }
 
         composable(TvRoutes.AUTOMATION_ADMIN) {
-            com.torve.android.ui.settings.AutomationAdministrationScreen(
-                onBack = { navController.popBackStack() },
-                onManageConnections = { navController.navigate(TvRoutes.AUTOMATION_CONNECTIONS) },
-            )
+            val initialFocusRequester = androidx.compose.runtime.remember { FocusRequester() }
+            com.torve.android.ui.settings.AutomationControlMode(tvEnabled = true) {
+                com.torve.android.ui.settings.AutomationAdministrationScreen(
+                    onBack = { navController.popBackStack() },
+                    onManageConnections = { navController.navigate(TvRoutes.AUTOMATION_CONNECTIONS) },
+                    initialFocusRequester = initialFocusRequester,
+                )
+            }
         }
 
         composable(TvRoutes.AUTOMATION_CONNECTIONS) {
-            com.torve.android.ui.settings.AutomationConnectionsScreen(
-                onBack = { navController.popBackStack() },
-            )
+            val initialFocusRequester = androidx.compose.runtime.remember { FocusRequester() }
+            com.torve.android.ui.settings.AutomationControlMode(tvEnabled = true) {
+                com.torve.android.ui.settings.AutomationConnectionsScreen(
+                    onBack = { navController.popBackStack() },
+                    initialFocusRequester = initialFocusRequester,
+                )
+            }
         }
 
         composable("transfer_send_tv") {
@@ -388,6 +406,9 @@ internal fun TvNavHost(
                     navController.popBackStack()
                     onSettingsClick()
                 },
+                onLibraryAutomationClick = {
+                    navController.navigate(TvRoutes.AUTOMATION_CONNECTIONS)
+                },
                 onRequestLifetimeUnlock = onRequestLifetimeUnlock,
                 onWatchedStatusChanged = onWatchedStatusChanged,
                 onCastClick = { castId, castName ->
@@ -511,13 +532,21 @@ internal fun TvNavHost(
                     },
                     // Focus state cleanup handled in TvRoot via isSubRouteActive LaunchedEffect
                     onBack = { navController.popBackStack() },
+                    onStop = {
+                        navController.popBackStack()
+                        onPlaybackFocusRestoreRequest()
+                    },
                 )
             }
         }
         }
 
         val activePlaybackSession = ActivePlaybackState.session
-        if (currentBackStackEntry?.destination?.route != TvRoutes.PLAYER && activePlaybackSession != null) {
+        if (
+            currentBackStackEntry?.destination?.route != TvRoutes.PLAYER &&
+            currentBackStackEntry?.destination?.route != TvRoutes.LIVE_PLAYER &&
+            activePlaybackSession != null
+        ) {
             Box(
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
@@ -532,8 +561,13 @@ internal fun TvNavHost(
                         }
                     },
                     onTogglePlayback = ActivePlaybackState::togglePlayback,
-                    onStop = ActivePlaybackState::stopAndClear,
+                    onStop = {
+                        ActivePlaybackState.stopAndClear()
+                        onPlaybackFocusRestoreRequest()
+                    },
                     requestInitialFocus = true,
+                    focusRequestId = ActivePlaybackState.focusPlaybackBarRequestId,
+                    onNavigateAway = onPlaybackFocusRestoreRequest,
                 )
             }
         }

@@ -3,6 +3,7 @@ package com.torve.data.integrations
 import com.torve.domain.integrations.IntegrationSecretKey
 import com.torve.domain.integrations.IntegrationSecretStore
 import com.torve.domain.integrations.LibraryOverlayService
+import com.torve.domain.lanlibrary.PlaybackRoute
 import com.torve.domain.model.MediaType
 import com.torve.domain.model.WatchProgress
 import com.torve.domain.repository.PreferencesRepository
@@ -62,9 +63,17 @@ class JellyfinLibraryOverlayService(
                 parameter("Recursive", "true")
                 parameter("AnyProviderIdEquals", "Tmdb.$tmdbId")
                 parameter("IncludeItemTypes", includeType)
+                parameter("Fields", "ProviderIds")
                 parameter("Limit", 1)
             }.body()
-            response.items.isNotEmpty()
+            // Do not trust a merely non-empty response. Older or proxied
+            // Jellyfin servers can ignore an unsupported query parameter and
+            // return the first library item, which would mark every title as
+            // present. Verify both identity and type from the returned item.
+            response.items.any { item ->
+                item.type.equals(includeType, ignoreCase = true) &&
+                    item.providerIds?.tmdb?.toIntOrNull() == tmdbId
+            }
         }.getOrDefault(false)
     }
 
@@ -177,10 +186,15 @@ class JellyfinLibraryOverlayService(
                 header("X-Emby-Token", apiKey)
                 parameter("ParentId", parentId)
                 parameter("Recursive", "true")
-                parameter("IncludeItemTypes", "Movie,Series,Video,Episode,MusicVideo")
+                // Library browsing is parent-level. Episodes are discovered from
+                // the selected series detail and must not flood the main library.
+                parameter("IncludeItemTypes", "Movie,Series,Video,MusicVideo")
                 parameter("SortBy", "SortName")
                 parameter("SortOrder", "Ascending")
-                parameter("Fields", "Overview,PrimaryImageTag,ProductionYear,Path")
+                parameter(
+                    "Fields",
+                    "Overview,ImageTags,PrimaryImageTag,BackdropImageTags,ProductionYear,Path,ProviderIds,CommunityRating,OfficialRating,Genres,Studios,SeriesName,SeriesId,DateCreated,RunTimeTicks,UserData",
+                )
                 parameter("Limit", limit)
                 parameter("StartIndex", startIndex)
             }.body()
@@ -194,15 +208,100 @@ class JellyfinLibraryOverlayService(
         return "$server/Items/$itemId/Images/Primary?maxHeight=$maxHeight&quality=90"
     }
 
+    suspend fun buildBackdropImageUrl(itemId: String, maxWidth: Int = 1280): String? {
+        val (server, _) = serverAndKey() ?: return null
+        return "$server/Items/$itemId/Images/Backdrop/0?maxWidth=$maxWidth&quality=90"
+    }
+
     suspend fun buildStreamUrl(itemId: String): String? {
         val (server, apiKey) = serverAndKey() ?: return null
         // Direct stream — static=true bypasses transcoding entirely
         return "$server/Videos/$itemId/stream?static=true&api_key=$apiKey"
     }
 
+    suspend fun findAvailableEpisodes(tmdbId: Int): Set<Pair<Int, Int>> {
+        val (server, apiKey) = serverAndKey() ?: return emptySet()
+        val userId = resolveUserId() ?: return emptySet()
+        val series = runCatching {
+            httpClient.get("$server/Users/$userId/Items") {
+                header("X-Emby-Token", apiKey)
+                parameter("Recursive", "true")
+                parameter("AnyProviderIdEquals", "Tmdb.$tmdbId")
+                parameter("IncludeItemTypes", "Series")
+                parameter("Fields", "ProviderIds")
+                parameter("Limit", 10)
+            }.body<JellyfinBrowseItemsResponse>()
+        }.getOrNull()?.items?.firstOrNull { item ->
+            item.type.equals("Series", ignoreCase = true) &&
+                item.providerIds?.tmdb?.toIntOrNull() == tmdbId
+        } ?: return emptySet()
+
+        return runCatching {
+            httpClient.get("$server/Shows/${series.id}/Episodes") {
+                header("X-Emby-Token", apiKey)
+                parameter("UserId", userId)
+                parameter("Fields", "ProviderIds")
+            }.body<JellyfinBrowseItemsResponse>()
+        }.getOrNull()?.items.orEmpty().mapNotNull { episode ->
+            val season = episode.parentIndexNumber ?: return@mapNotNull null
+            val number = episode.indexNumber ?: return@mapNotNull null
+            season to number
+        }.toSet()
+    }
+
+    /**
+     * Resolves a catalog title to its permanent Jellyfin copy. Authentication
+     * travels as a one-shot player header, never in the navigation URL or logs.
+     */
+    suspend fun findPlaybackRoute(
+        tmdbId: Int,
+        mediaType: MediaType,
+        seasonNumber: Int? = null,
+        episodeNumber: Int? = null,
+    ): PlaybackRoute.JellyfinStream? {
+        val (server, apiKey) = serverAndKey() ?: return null
+        val userId = resolveUserId() ?: return null
+        val topLevelType = if (mediaType == MediaType.MOVIE) "Movie" else "Series"
+        val topLevel = runCatching {
+            httpClient.get("$server/Users/$userId/Items") {
+                header("X-Emby-Token", apiKey)
+                parameter("Recursive", "true")
+                parameter("AnyProviderIdEquals", "Tmdb.$tmdbId")
+                parameter("IncludeItemTypes", topLevelType)
+                parameter("Fields", "ProviderIds")
+                parameter("Limit", 10)
+            }.body<JellyfinBrowseItemsResponse>()
+        }.getOrNull()?.items?.firstOrNull { item ->
+            item.type.equals(topLevelType, ignoreCase = true) &&
+                item.providerIds?.tmdb?.toIntOrNull() == tmdbId
+        } ?: return null
+
+        val playableId = if (mediaType == MediaType.MOVIE) {
+            topLevel.id
+        } else {
+            val season = seasonNumber ?: return null
+            val episode = episodeNumber ?: return null
+            runCatching {
+                httpClient.get("$server/Shows/${topLevel.id}/Episodes") {
+                    header("X-Emby-Token", apiKey)
+                    parameter("UserId", userId)
+                    parameter("Season", season)
+                    parameter("Fields", "ProviderIds")
+                }.body<JellyfinBrowseItemsResponse>()
+            }.getOrNull()?.items?.firstOrNull {
+                it.parentIndexNumber == season && it.indexNumber == episode
+            }?.id ?: return null
+        }
+
+        return PlaybackRoute.JellyfinStream(
+            url = "$server/Videos/$playableId/stream?static=true",
+            headers = mapOf("X-Emby-Token" to apiKey),
+        )
+    }
+
     companion object {
         private const val KEY_SERVER_URL = "jellyfin_server_url"
-        private const val KEY_SELECTED_USER_ID = "jellyfin_selected_user_id"
+        internal const val KEY_SELECTED_USER_ID = "jellyfin_selected_user_id"
         private const val KEY_LIBRARY_OVERLAY_LAST_SYNC = "library_overlay_last_sync_time"
     }
 }
@@ -229,7 +328,46 @@ data class JellyfinBrowseItem(
     @SerialName("Type") val type: String = "",
     @SerialName("Overview") val overview: String? = null,
     @SerialName("ProductionYear") val productionYear: Int? = null,
+    @SerialName("ImageTags") val imageTags: Map<String, String> = emptyMap(),
     @SerialName("PrimaryImageTag") val primaryImageTag: String? = null,
+    @SerialName("BackdropImageTags") val backdropImageTags: List<String> = emptyList(),
+    @SerialName("ProviderIds") val providerIds: JellyfinProviderIds? = null,
+    @SerialName("CommunityRating") val communityRating: Double? = null,
+    @SerialName("OfficialRating") val officialRating: String? = null,
+    @SerialName("Genres") val genres: List<String> = emptyList(),
+    @SerialName("Studios") val studios: List<JellyfinStudio> = emptyList(),
+    @SerialName("DateCreated") val dateCreated: String? = null,
+    @SerialName("RunTimeTicks") val runTimeTicks: Long? = null,
+    @SerialName("UserData") val userData: JellyfinBrowseUserData? = null,
+    @SerialName("IndexNumber") val indexNumber: Int? = null,
+    @SerialName("ParentIndexNumber") val parentIndexNumber: Int? = null,
+    @SerialName("SeriesName") val seriesName: String? = null,
+    @SerialName("SeriesId") val seriesId: String? = null,
+    @kotlinx.serialization.Transient val fallbackPosterUrl: String? = null,
+    @kotlinx.serialization.Transient val fallbackBackdropUrl: String? = null,
+) {
+    val resolvedPrimaryImageTag: String?
+        get() = imageTags["Primary"] ?: primaryImageTag
+
+    val isEpisode: Boolean
+        get() = type.equals("Episode", ignoreCase = true)
+
+    val displayTitle: String
+        get() = if (isEpisode) seriesName?.takeIf { it.isNotBlank() } ?: name else name
+
+    val displaySubtitle: String?
+        get() = if (isEpisode) {
+            val season = parentIndexNumber?.toString()?.padStart(2, '0') ?: "??"
+            val episode = indexNumber?.toString()?.padStart(2, '0') ?: "??"
+            "S${season}E$episode · $name"
+        } else {
+            null
+        }
+}
+
+@Serializable
+data class JellyfinStudio(
+    @SerialName("Name") val name: String = "",
 )
 
 // ── Private DTOs ──
@@ -237,6 +375,13 @@ data class JellyfinBrowseItem(
 @Serializable
 private data class JellyfinPublicInfo(
     @SerialName("ServerName") val serverName: String = "",
+)
+
+@Serializable
+data class JellyfinBrowseUserData(
+    @SerialName("PlaybackPositionTicks") val playbackPositionTicks: Long = 0L,
+    @SerialName("PlayedPercentage") val playedPercentage: Double? = null,
+    @SerialName("Played") val played: Boolean = false,
 )
 
 @Serializable
@@ -282,8 +427,9 @@ private data class JellyfinItem(
 )
 
 @Serializable
-private data class JellyfinProviderIds(
+data class JellyfinProviderIds(
     @SerialName("Tmdb") val tmdb: String? = null,
+    @SerialName("Imdb") val imdb: String? = null,
 )
 
 @Serializable

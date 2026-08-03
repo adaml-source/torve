@@ -34,6 +34,7 @@ object TvDetailsSourcePickerStateBuilder {
 
     fun build(
         localFilePath: String?,
+        jellyfinRoute: PlaybackRoute.JellyfinStream? = null,
         lanRoute: PlaybackRoute.LanDesktopStream?,
         providerAvailable: Boolean,
         networkMode: NetworkMode,
@@ -58,6 +59,7 @@ object TvDetailsSourcePickerStateBuilder {
         }
         return TvSourcePicker.build(
             localFile = localFile,
+            jellyfinStream = jellyfinRoute,
             lanStream = lanRoute,
             providerStream = provider,
             networkMode = networkMode,

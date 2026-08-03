@@ -6,6 +6,7 @@ import android.content.Context
 import android.content.Intent
 import android.os.Build
 import android.widget.Toast
+import androidx.core.content.pm.PackageInfoCompat
 import com.torve.android.BuildConfig
 import com.torve.android.R
 import com.torve.domain.diagnostics.BugReportBundleBuilder
@@ -47,8 +48,7 @@ internal fun buildAndroidBugReport(
         context.packageManager.getPackageInfo(context.packageName, 0)
     }.getOrNull()
     val versionName = packageInfo?.versionName ?: "unknown"
-    @Suppress("DEPRECATION")
-    val versionCode = packageInfo?.longVersionCode?.toString() ?: "unknown"
+    val versionCode = packageInfo?.let(PackageInfoCompat::getLongVersionCode)?.toString() ?: "unknown"
     val diagnostics = if (includeDiagnostics) {
         DiagnosticsBundleBuilder.build(
             app = DiagnosticsBundleBuilder.AppInfo(

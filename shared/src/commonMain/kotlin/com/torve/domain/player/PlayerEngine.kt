@@ -132,6 +132,12 @@ data class PlayerState(
     val isPlaying: Boolean = false,
     val positionMs: Long = 0,
     val durationMs: Long = 0,
+    /** True when the active media item represents a live stream. */
+    val isLive: Boolean = false,
+    /** True when the active item exposes a seekable playback window. */
+    val isSeekable: Boolean = false,
+    /** Distance from the live edge when known; zero for VOD/unknown. */
+    val liveOffsetMs: Long = 0,
     val isBuffering: Boolean = false,
     val isIdle: Boolean = true,
     val liveTuneState: LiveTuneState = LiveTuneState.IDLE,

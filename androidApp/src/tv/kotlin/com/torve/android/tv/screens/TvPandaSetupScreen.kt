@@ -70,8 +70,13 @@ fun TvPandaSetupScreen(
 ) {
     val state by viewModel.state.collectAsState()
 
-    BackHandler(enabled = state.currentStep != PandaSetupStep.SETUP_TYPE) {
-        viewModel.previousStep()
+    BackHandler(enabled = true) {
+        when {
+            state.currentStep == PandaSetupStep.AUTH &&
+                (state.deviceCode != null || state.authLoading) -> viewModel.cancelOAuth()
+            state.currentStep != PandaSetupStep.SETUP_TYPE -> viewModel.previousStep()
+            else -> onBack()
+        }
     }
 
     val stepNumber = state.progressStepNumber()

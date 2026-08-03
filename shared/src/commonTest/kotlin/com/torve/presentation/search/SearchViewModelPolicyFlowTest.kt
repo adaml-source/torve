@@ -6,13 +6,16 @@ import com.torve.data.metadata.TmdbPerson
 import com.torve.domain.model.CatalogShelf
 import com.torve.domain.model.ContentAgeBand
 import com.torve.domain.model.ContentPolicyState
+import com.torve.domain.model.ContentRating
 import com.torve.domain.model.MediaItem
 import com.torve.domain.model.MediaType
 import com.torve.domain.model.PagedResult
 import com.torve.domain.model.PersonSummary
 import com.torve.domain.model.Season
+import com.torve.domain.model.UserProfile
 import com.torve.domain.repository.MetadataRepository
 import com.torve.domain.repository.PreferencesRepository
+import com.torve.domain.repository.ProfileRepository
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -41,6 +44,33 @@ class SearchViewModelPolicyFlowTest {
     @AfterTest
     fun tearDown() {
         Dispatchers.resetMain()
+    }
+
+    @Test
+    fun activeProfileLimitAlsoAppliesToSearchResults() = runTest(dispatcher) {
+        val familyItem = mediaItem(id = "tmdb-1", title = "Family Movie", adult = false)
+            .copy(genreIds = listOf(16))
+        val restrictedItem = mediaItem(id = "tmdb-2", title = "Horror Movie", adult = false)
+            .copy(genreIds = listOf(27))
+        val viewModel = SearchViewModel(
+            metadataRepo = FakeMetadataRepository(listOf(familyItem, restrictedItem)),
+            prefsRepo = FakePreferencesRepository(),
+            contentPolicyRepository = FakeContentPolicyRepository(ContentPolicyState.unrestricted()),
+            profileRepository = FixedProfileRepository(
+                UserProfile(
+                    id = "child",
+                    name = "Child",
+                    isActive = true,
+                    maxContentRating = ContentRating.PG_13,
+                ),
+            ),
+        )
+
+        viewModel.updateQuery("movie")
+        advanceTimeBy(350L)
+        advanceUntilIdle()
+
+        assertEquals(listOf(familyItem), viewModel.state.value.results)
     }
 
     @Test
@@ -268,6 +298,20 @@ class SearchViewModelPolicyFlowTest {
         override suspend fun remove(key: String) {
             store.remove(key)
         }
+    }
+
+    private class FixedProfileRepository(
+        private val profile: UserProfile,
+    ) : ProfileRepository {
+        override suspend fun getAllProfiles(): List<UserProfile> = listOf(profile)
+        override suspend fun getActiveProfile(): UserProfile = profile
+        override suspend fun getProfile(id: String): UserProfile? = profile.takeIf { it.id == id }
+        override suspend fun createProfile(profile: UserProfile) = Unit
+        override suspend fun setActiveProfile(id: String) = Unit
+        override suspend fun updateName(id: String, name: String) = Unit
+        override suspend fun updatePin(id: String, pin: String?) = Unit
+        override suspend fun updateContentRating(id: String, rating: ContentRating?) = Unit
+        override suspend fun deleteProfile(id: String) = Unit
     }
 
     private class FakeMetadataRepository(

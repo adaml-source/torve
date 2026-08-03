@@ -105,9 +105,12 @@ import com.torve.presentation.channels.ChannelsUiState
 import com.torve.presentation.channels.ChannelsViewModel
 import com.torve.presentation.session.AccountSessionCoordinator
 import com.torve.presentation.settings.AppLanguage
+import com.torve.presentation.settings.IntegrationReadinessStatus
+import com.torve.presentation.settings.IntegrationReadinessSummary
 import com.torve.presentation.settings.SettingsUiState
 import com.torve.presentation.settings.SettingsViewModel
 import com.torve.presentation.settings.ThemeMode
+import com.torve.presentation.settings.buildIntegrationReadinessSummary
 import com.torve.domain.streams.StreamRulePatternValidator
 import java.time.Instant
 import java.time.ZoneId
@@ -1146,7 +1149,48 @@ private fun IntegrationsSection(
     onKodiPortChange: (String) -> Unit,
     onOpenPandaSetup: () -> Unit,
 ) {
+    val accountSyncScope = rememberCoroutineScope()
+    val automationSettingsViewModel = remember {
+        org.koin.mp.KoinPlatform.getKoin()
+            .get<com.torve.presentation.integrations.AutomationSettingsViewModel>()
+    }
+    val automationSettingsState by automationSettingsViewModel.state.collectAsState()
+    val readiness = remember(settingsState, automationSettingsState.instances) {
+        buildIntegrationReadinessSummary(settingsState, automationSettingsState.instances)
+    }
+    var accountSyncBusy by remember { mutableStateOf(false) }
+    var accountSyncMessage by remember { mutableStateOf<String?>(null) }
     Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+        DesktopIntegrationReadinessCard(readiness)
+        TorveSectionCard(
+            title = ds("Account setup sync"),
+            supportingText = ds("Refresh saved providers, Seerr and account-enabled ARR connections on this computer."),
+        ) {
+            TorvePrimaryButton(
+                text = if (accountSyncBusy) ds("Refreshing...") else ds("Refresh all"),
+                enabled = !accountSyncBusy,
+                onClick = {
+                    accountSyncBusy = true
+                    accountSyncMessage = null
+                    accountSyncScope.launch {
+                        val result = accountSessionCoordinator.refreshAccountDataAfterCredentialTransfer(
+                            initialMessage = "Refreshing account setup...",
+                        )
+                        settingsViewModel.refreshSettings()
+                        accountSyncMessage = result.error ?: "Account setup refreshed"
+                        accountSyncBusy = false
+                    }
+                },
+            )
+            accountSyncMessage?.let {
+                TorveBanner(
+                    title = ds("Account sync"),
+                    description = it,
+                    tone = if (it.contains("issue", ignoreCase = true)) TorveBannerTone.Error else TorveBannerTone.Success,
+                )
+            }
+            if (accountSyncBusy) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+        }
         PandaSection(onOpenPandaSetup = onOpenPandaSetup)
         DesktopAutomationSection()
         TraktSection(settingsState, settingsViewModel)
@@ -1164,6 +1208,43 @@ private fun IntegrationsSection(
             kodiPort = kodiPort,
             onKodiPortChange = onKodiPortChange,
         )
+    }
+}
+
+@Composable
+private fun DesktopIntegrationReadinessCard(summary: IntegrationReadinessSummary) {
+    TorveSectionCard(
+        title = ds("Your media setup"),
+        supportingText = ds("One status view for immediate playback, personal media, library requests, tracking and advanced automation."),
+    ) {
+        summary.items.forEach { item ->
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = ds(item.title),
+                        color = TorveDesktopThemeTokens.colors.textPrimary,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    Text(
+                        text = ds(item.detail),
+                        color = TorveDesktopThemeTokens.colors.textSecondary,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+                TorveBadge(
+                    text = ds(item.statusLabel),
+                    tone = when (item.status) {
+                        IntegrationReadinessStatus.READY -> TorveBadgeTone.Success
+                        IntegrationReadinessStatus.NEEDS_ATTENTION -> TorveBadgeTone.Warning
+                        IntegrationReadinessStatus.NOT_CONFIGURED -> TorveBadgeTone.Neutral
+                    },
+                )
+            }
+        }
     }
 }
 
@@ -1445,8 +1526,8 @@ private fun MediaServersSection(
     val scope = rememberCoroutineScope()
     val noneLabel = ds("None")
     TorveSectionCard(
-        title = ds("Jellyfin and Plex"),
-        supportingText = ds("Server URLs and auth tokens are configurable directly in the desktop shell."),
+        title = ds("Jellyfin, Plex and Seerr"),
+        supportingText = ds("Connect playback libraries and the request service used by Add to my library."),
     ) {
         TorveTextField(
             value = settingsState.jellyfinServerUrl,
@@ -1464,20 +1545,7 @@ private fun MediaServersSection(
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             TorvePrimaryButton(
                 text = ds("Save and Test Jellyfin"),
-                onClick = {
-                    settingsViewModel.saveAndTestJellyfinConnection()
-                    val apiKey = settingsState.jellyfinApiKey
-                    if (apiKey.isNotBlank()) {
-                        scope.launch {
-                            accountSessionCoordinator.saveIntegrationToBackend(
-                                integrationType = "JELLYFIN_API_KEY",
-                                credentials = mapOf("api_key" to apiKey),
-                                displayIdentifier = "Jellyfin",
-                                config = mapOf("server_url" to settingsState.jellyfinServerUrl),
-                            )
-                        }
-                    }
-                },
+                onClick = { settingsViewModel.saveAndTestJellyfinConnection() },
                 enabled = settingsState.jellyfinServerUrl.isNotBlank() && settingsState.jellyfinApiKey.isNotBlank(),
             )
         }
@@ -1543,6 +1611,51 @@ private fun MediaServersSection(
         if (settingsState.plexLoading) {
             LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
         }
+        Text(ds("Seerr library requests"), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+        Text(
+            ds("Seerr safely sends movie and selected-season requests to Radarr and Sonarr while Watch now keeps streaming immediately."),
+            style = MaterialTheme.typography.bodySmall,
+            color = TorveDesktopThemeTokens.colors.textSecondary,
+        )
+        TorveTextField(
+            value = settingsState.seerrServerUrl,
+            onValueChange = settingsViewModel::setSeerrServerUrl,
+            label = ds("Seerr Server URL"),
+            modifier = Modifier.fillMaxWidth(),
+        )
+        TorveTextField(
+            value = settingsState.seerrApiKey,
+            onValueChange = settingsViewModel::updateSeerrApiKeyInput,
+            label = ds("Seerr API Key"),
+            modifier = Modifier.fillMaxWidth(),
+            visualTransformation = PasswordVisualTransformation(),
+        )
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            TorvePrimaryButton(
+                text = ds("Save and Test Seerr"),
+                onClick = {
+                    settingsViewModel.saveAndTestSeerrConnection(
+                        com.torve.domain.integrations.IntegrationStorageMode.ACCOUNT,
+                    )
+                },
+                enabled = settingsState.seerrServerUrl.isNotBlank() &&
+                    settingsState.seerrApiKey.isNotBlank() &&
+                    !settingsState.seerrLoading,
+            )
+            TorveGhostButton(
+                text = ds("Disconnect Seerr"),
+                onClick = settingsViewModel::disconnectSeerr,
+                enabled = settingsState.seerrConnected,
+            )
+        }
+        settingsState.seerrStatusMessage?.let {
+            TorveBanner(
+                title = ds("Seerr status"),
+                description = it,
+                tone = if (settingsState.seerrConnected) TorveBannerTone.Success else TorveBannerTone.Info,
+            )
+        }
+        if (settingsState.seerrLoading) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
     }
 }
 

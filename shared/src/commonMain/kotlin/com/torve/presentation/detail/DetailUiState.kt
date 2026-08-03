@@ -15,6 +15,19 @@ import com.torve.domain.integrations.MediaLifecycleStatus
 /** Canonical key for episode tracking — single source of truth. */
 fun episodeKey(season: Int, episode: Int): String = "s${season}e${episode}"
 
+/** Pure selection policy shared by the detail model and regression tests. */
+internal fun firstUnwatchedEpisode(
+    seasons: List<com.torve.domain.model.Season>,
+    watchedEpisodes: Set<String>,
+): Pair<Int, Int>? = seasons
+    .asSequence()
+    .filter { it.seasonNumber > 0 }
+    .sortedBy { it.seasonNumber }
+    .flatMap { season ->
+        (1..season.episodeCount).asSequence().map { episode -> season.seasonNumber to episode }
+    }
+    .firstOrNull { (season, episode) -> episodeKey(season, episode) !in watchedEpisodes }
+
 /**
  * UI-facing snapshot of an in-flight "preparing" session. The VM owns the
  * retry coroutine; this state is strictly what the overlay needs to paint

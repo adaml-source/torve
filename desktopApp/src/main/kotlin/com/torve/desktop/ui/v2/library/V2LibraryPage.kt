@@ -26,9 +26,13 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.rememberScrollbarAdapter
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -71,16 +75,21 @@ import com.torve.domain.repository.ChannelRepository
 import com.torve.presentation.download.DownloadCatalogueUiState
 import com.torve.presentation.download.DownloadUiState
 import com.torve.presentation.home.HomeUiState
+import com.torve.presentation.library.AcquisitionLifecycleItem
+import com.torve.presentation.library.AcquisitionStage
+import com.torve.presentation.library.PermanentLibraryViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.text.DecimalFormat
+import org.koin.mp.KoinPlatform
 
 private enum class LibraryViewTab(
     val label: String,
 ) {
     OVERVIEW("Overview"),
     FAVORITES("Favorites"),
+    REQUESTS("Requests & downloads"),
     VOD("IPTV VOD"),
     STORED("Stored Media"),
     LOCAL("Local Files"),
@@ -114,9 +123,32 @@ fun V2LibraryPage(
     onPlayVodChannel: (Channel) -> Unit = {},
 ) {
     val colors = TorveDesktopThemeTokens.colors
+    val permanentLibraryViewModel = remember {
+        KoinPlatform.getKoin().get<PermanentLibraryViewModel>()
+    }
+    val permanentLibraryState by permanentLibraryViewModel.state.collectAsState()
+    val availabilityNoticeHost = remember { SnackbarHostState() }
+    DisposableEffect(permanentLibraryViewModel) {
+        permanentLibraryViewModel.startPolling()
+        onDispose { permanentLibraryViewModel.stopPolling() }
+    }
+    LaunchedEffect(permanentLibraryState.newlyAvailable) {
+        permanentLibraryState.newlyAvailable.firstOrNull()?.let { item ->
+            availabilityNoticeHost.showSnackbar("${item.title} is now available in your library")
+            permanentLibraryViewModel.acknowledgeAvailable(item.stableId)
+        }
+    }
+    LaunchedEffect(permanentLibraryState.actionMessage) {
+        permanentLibraryState.actionMessage?.let { message ->
+            availabilityNoticeHost.showSnackbar(message)
+            permanentLibraryViewModel.clearActionMessage()
+        }
+    }
     var selectedTab by remember { mutableStateOf(LibraryViewTab.OVERVIEW) }
-    val heroBackdropUrl = remember(homeState) {
-        homeState.continueWatching.firstOrNull()?.backdropUrl
+    val heroBackdropUrl = remember(homeState, selectedTab, permanentLibraryState.items) {
+        permanentLibraryState.activeItems.firstOrNull()?.backdropUrl
+            ?.takeIf { selectedTab == LibraryViewTab.REQUESTS }
+            ?: homeState.continueWatching.firstOrNull()?.backdropUrl
             ?: homeState.watchlistItems.firstOrNull()?.backdropUrl
             ?: favoriteItems.firstOrNull()?.backdropUrl
             ?: homeState.recentlyWatched.firstOrNull()?.backdropUrl
@@ -178,6 +210,16 @@ fun V2LibraryPage(
                         favoriteItems = favoriteItems,
                         onOpenDetail = onOpenDetail,
                     )
+                    LibraryViewTab.REQUESTS -> DesktopRequestsView(
+                        items = permanentLibraryState.activeItems,
+                        configured = permanentLibraryState.isConfigured,
+                        isLoading = permanentLibraryState.isLoading,
+                        error = permanentLibraryState.error,
+                        onOpenDetail = onOpenDetail,
+                        actionInProgressStableId = permanentLibraryState.actionInProgressStableId,
+                        onRetry = permanentLibraryViewModel::retryAcquisition,
+                        onCancel = permanentLibraryViewModel::cancelAcquisition,
+                    )
                     LibraryViewTab.VOD -> DesktopVodLibraryView(
                         channelRepository = channelRepository,
                         onPlayVodChannel = onPlayVodChannel,
@@ -208,7 +250,123 @@ fun V2LibraryPage(
                     .padding(end = 4.dp),
             )
         }
+        SnackbarHost(
+            hostState = availabilityNoticeHost,
+            modifier = Modifier.align(Alignment.TopCenter).padding(top = 24.dp),
+        )
     }
+}
+
+@Composable
+private fun DesktopRequestsView(
+    items: List<AcquisitionLifecycleItem>,
+    configured: Boolean,
+    isLoading: Boolean,
+    error: String?,
+    onOpenDetail: (MediaItem) -> Unit,
+    actionInProgressStableId: String?,
+    onRetry: (String) -> Unit,
+    onCancel: (String) -> Unit,
+) {
+    TorveSectionCard(
+        title = ds("Requests & downloads"),
+        supportingText = ds("One view from request through download, processing and library availability."),
+    ) {
+        when {
+            isLoading && items.isEmpty() -> TorvePlaceholderState(
+                title = ds("Refreshing library status"),
+                description = ds("Checking Seerr, Radarr and Sonarr."),
+                emoji = "↻",
+            )
+            items.isEmpty() -> TorvePlaceholderState(
+                title = ds(if (configured) "Nothing is being prepared" else "Save to library is not configured"),
+                description = ds(
+                    if (configured) {
+                        "Use Add to library on any movie or show. Progress will appear here automatically."
+                    } else {
+                        "Connect Seerr in Settings. Radarr and Sonarr progress is merged automatically when available."
+                    },
+                ),
+                emoji = "Library",
+            )
+            else -> items.forEach { item ->
+                TorveListRow(
+                    title = item.title,
+                    subtitle = listOfNotNull(
+                        item.year?.toString(),
+                        item.statusLabel,
+                        item.timeLeft?.takeIf { it.isNotBlank() }?.let { "$it remaining" },
+                        item.errorMessage,
+                    ).joinToString(" · "),
+                    onClick = item.tmdbId?.let { tmdbId ->
+                        {
+                            onOpenDetail(
+                                MediaItem(
+                                    id = item.stableId,
+                                    tmdbId = tmdbId,
+                                    type = item.mediaType,
+                                    title = item.title,
+                                    year = item.year,
+                                    overview = item.overview,
+                                    posterUrl = item.posterUrl,
+                                    backdropUrl = item.backdropUrl,
+                                    rating = item.rating,
+                                    status = item.statusLabel,
+                                ),
+                            )
+                        }
+                    },
+                    trailing = {
+                        Column(
+                            horizontalAlignment = Alignment.End,
+                            verticalArrangement = Arrangement.spacedBy(6.dp),
+                        ) {
+                            TorveBadge(
+                                text = item.progressPercent?.let { "${it.toInt()}%" }
+                                    ?: item.stage.desktopLabel(),
+                                tone = when (item.stage) {
+                                    AcquisitionStage.NEEDS_ATTENTION -> TorveBadgeTone.Error
+                                    AcquisitionStage.AVAILABLE -> TorveBadgeTone.Success
+                                    AcquisitionStage.DOWNLOADING -> TorveBadgeTone.Accent
+                                    else -> TorveBadgeTone.Warning
+                                },
+                            )
+                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                if (item.canRetry) {
+                                    TorveGhostButton(
+                                        text = ds("Retry"),
+                                        enabled = actionInProgressStableId == null,
+                                        onClick = { onRetry(item.stableId) },
+                                    )
+                                }
+                                if (item.canCancel) {
+                                    TorveGhostButton(
+                                        text = ds("Cancel"),
+                                        enabled = actionInProgressStableId == null,
+                                        onClick = { onCancel(item.stableId) },
+                                    )
+                                }
+                            }
+                        }
+                    },
+                )
+            }
+        }
+        error?.takeIf { it.isNotBlank() }?.let {
+            Text(it, color = TorveDesktopThemeTokens.colors.textSecondary)
+        }
+    }
+}
+
+private fun AcquisitionStage.desktopLabel(): String = when (this) {
+    AcquisitionStage.REQUESTED -> "Requested"
+    AcquisitionStage.APPROVED -> "Approved"
+    AcquisitionStage.SEARCHING -> "Searching"
+    AcquisitionStage.DOWNLOADING -> "Downloading"
+    AcquisitionStage.PROCESSING -> "Processing"
+    AcquisitionStage.PARTIALLY_AVAILABLE -> "Partial"
+    AcquisitionStage.AVAILABLE -> "Available"
+    AcquisitionStage.NEEDS_ATTENTION -> "Attention"
 }
 
 @Composable

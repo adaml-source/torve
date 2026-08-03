@@ -11,6 +11,7 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.SportsSoccer
 import androidx.compose.material.icons.filled.Tv
+import androidx.compose.material.icons.filled.VideoLibrary
 import androidx.compose.ui.graphics.vector.ImageVector
 import com.torve.android.R
 
@@ -30,6 +31,7 @@ object TvRoutes {
     const val IPTV = "tv_iptv"
     const val SPORTS = "tv_sports"
     const val LIBRARY = "tv_library"
+    const val JELLYFIN = "tv_jellyfin"
     const val SETTINGS = "tv_settings"
     const val HOME_LAYOUT = "tv_home_layout"
     const val RATINGS_SETTINGS = "tv_ratings_settings"
@@ -115,6 +117,7 @@ val tvTopDestinations = listOf(
     TvTopDestination(TvRoutes.SEARCH, R.string.tv_nav_search, Icons.Filled.Search),
     TvTopDestination(TvRoutes.IPTV, R.string.tv_nav_iptv, Icons.Filled.LiveTv),
     TvTopDestination(TvRoutes.SPORTS, R.string.tv_nav_sports, Icons.Filled.SportsSoccer),
+    TvTopDestination(TvRoutes.JELLYFIN, R.string.watchlist_jellyfin, Icons.Filled.VideoLibrary),
     TvTopDestination(TvRoutes.LIBRARY, R.string.tv_nav_library, Icons.Filled.Bookmark),
     TvTopDestination(TvRoutes.SETTINGS, R.string.tv_nav_settings, Icons.Filled.Settings),
 )

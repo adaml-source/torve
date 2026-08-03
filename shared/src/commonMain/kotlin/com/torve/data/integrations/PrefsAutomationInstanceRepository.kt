@@ -46,6 +46,7 @@ class PrefsAutomationInstanceRepository(
             )
             val targetKey = secretKeyFor(normalized.serviceType)
             val previousTargetSecret = suppliedSecret?.let { secretStore.get(targetKey, subKey = normalized.id) }
+            val previousTargetMode = secretStore.getStorageMode(targetKey)
             val oldKey = previous
                 ?.takeIf { it.serviceType != normalized.serviceType }
                 ?.let { secretKeyFor(it.serviceType) }
@@ -53,8 +54,11 @@ class PrefsAutomationInstanceRepository(
             try {
                 suppliedSecret?.let { secret ->
                     secretStore.put(targetKey, secret, subKey = normalized.id)
-                    secretStore.setStorageMode(targetKey, IntegrationStorageMode.DEVICE_ONLY)
                 }
+                // Storage scope belongs to the connection, not only to newly entered
+                // secrets. This is essential when promoting an existing device-local
+                // *Arr setup to account sync without asking for every key again.
+                secretStore.setStorageMode(targetKey, normalized.storageMode)
                 oldKey?.let { secretStore.remove(it, subKey = normalized.id) }
                 prefs.setString(KEY_INSTANCES, json.encodeToString(ListSerializer(AutomationInstance.serializer()), updated))
             } catch (failure: Throwable) {
@@ -62,6 +66,7 @@ class PrefsAutomationInstanceRepository(
                     if (previousTargetSecret == null) secretStore.remove(targetKey, subKey = normalized.id)
                     else secretStore.put(targetKey, previousTargetSecret, subKey = normalized.id)
                 }
+                secretStore.setStorageMode(targetKey, previousTargetMode)
                 oldKey?.let { key ->
                     previousOldSecret?.let { secretStore.put(key, it, subKey = normalized.id) }
                 }

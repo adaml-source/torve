@@ -57,6 +57,7 @@ import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -75,6 +76,9 @@ import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.window.Popup
+import androidx.compose.ui.window.PopupProperties
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
@@ -164,7 +168,7 @@ private const val TV_SEARCH_RATING_DISCOVER_PAGE_COUNT = 6
 private const val TV_SEARCH_MAX_RESULTS = 300
 private const val TV_SEARCH_PREFETCH_RESULT_COUNT = 96
 private const val TV_SEARCH_RATING_CACHE_COUNT = 180
-private const val TV_SEARCH_RATING_ENRICH_COUNT = 40
+private const val TV_SEARCH_RATING_ENRICH_COUNT = 12
 private const val TV_SEARCH_DETAIL_HYDRATE_COUNT = 12
 private const val TV_SEARCH_LOAD_AHEAD_ROWS = 2
 private const val TV_SEARCH_TOP_RATED_LOAD_AHEAD_ROWS = 4
@@ -177,6 +181,7 @@ internal const val TV_SEARCH_TOP_RATED_FILTER = -1.0
 internal const val TV_SEARCH_TOP_RATED_MIN_SCORE = 7.0
 internal const val TV_SEARCH_TOP_RATED_MIN_VOTES = 500
 private val TV_SEARCH_IMDB_VOTE_THRESHOLDS = listOf(1_000, 5_000, 10_000, 25_000, 50_000, 100_000)
+private val TV_SEARCH_YEAR_RANGE_STARTS = listOf(2020, 2010, 2000, 1990, 1980, 1970, 0)
 
 private data class TvSearchCandidatePage(
     val items: List<MediaItem>,
@@ -280,6 +285,7 @@ internal fun TvSearchScreen(
     val allTypeRequester = remember { FocusRequester() }
     val movieTypeRequester = remember { FocusRequester() }
     val tvTypeRequester = remember { FocusRequester() }
+    val sortRequester = remember { FocusRequester() }
     val firstFilterRequester = remember { FocusRequester() }
     val firstResultRequester = remember { FocusRequester() }
     val resultRequesters = remember { mutableMapOf<String, FocusRequester>() }
@@ -294,7 +300,6 @@ internal fun TvSearchScreen(
     }
     val activeDensityRequester = densityRequesters.getValue(density)
     var lastVisibleFilterRequester by remember { mutableStateOf<FocusRequester?>(null) }
-    var lastDrawerFocusRequester by remember { mutableStateOf<FocusRequester?>(null) }
 
     DisposableEffect(registerFocusHandle, focusRestoreController, screenId) {
         registerFocusHandle?.invoke(
@@ -348,7 +353,23 @@ internal fun TvSearchScreen(
         return false
     }
 
-    LaunchedEffect(resultFocusRequestNonce, results.size, density.columns) {
+    fun requestSearchHeaderDownFocus(): Boolean {
+        val requester = when {
+            showFilters -> closeFiltersRequester
+            filtersVisible -> allTypeRequester
+            else -> filterToggleRequester
+        }
+        val focused = runCatching { requester.requestFocus() }.isSuccess
+        if (focused) {
+            onContentFocused(requester)
+        }
+        return focused
+    }
+
+    // A result-focus request is a one-shot response to an explicit Down press.
+    // Keying this effect to results.size caused every later filter refresh or
+    // paging update to replay the old request and steal focus from the chips.
+    LaunchedEffect(resultFocusRequestNonce) {
         if (resultFocusRequestNonce == 0 || results.isEmpty()) return@LaunchedEffect
 
         repeat(8) {
@@ -381,19 +402,10 @@ internal fun TvSearchScreen(
             .ifEmpty { tvSearchDefaultGenres(filterType) }
             .take(18)
     }
-    val availableYears = remember(baseResults) {
-        val fromResults = baseResults.mapNotNull { it.year }
-            .filter { it in 1900..2100 }
-            .distinct()
-            .sortedDescending()
-            .take(12)
-        if (fromResults.isNotEmpty()) {
-            fromResults
-        } else {
-            val currentYear = Calendar.getInstance().get(Calendar.YEAR)
-            (currentYear downTo (currentYear - 24)).toList()
-        }
-    }
+    // Keep these choices fixed while results hydrate/page. Exact years made the
+    // drawer both incomplete and unstable because they were derived from only
+    // the currently loaded result page.
+    val availableYears = remember { TV_SEARCH_YEAR_RANGE_STARTS }
 
     val popularQueries = remember {
         listOf("Action", "Comedy", "Sci-Fi", "Drama", "Thriller", "Animation")
@@ -409,7 +421,9 @@ internal fun TvSearchScreen(
         selectedResultKey = selectedResult?.tvSearchStableKey()
     }
 
-    LaunchedEffect(results, selectedSort) {
+    // Sorting is an explicit user action. Re-sorting whenever ratings or other
+    // metadata hydrate moves posters underneath the current D-pad focus.
+    LaunchedEffect(selectedSort) {
         val sorted = results.sortedForTvSearch(selectedSort)
         if (sorted != results) results = sorted
     }
@@ -459,28 +473,6 @@ internal fun TvSearchScreen(
         if (showFilters) {
             kotlinx.coroutines.delay(90)
             runCatching { firstFilterRequester.requestFocus() }
-        }
-    }
-
-    LaunchedEffect(
-        showFilters,
-        results.isEmpty(),
-        selectedGenreIds,
-        selectedStudioIds,
-        selectedYear,
-        selectedMinRating,
-        selectedMinImdbVotes,
-        selectedRuntimeFilter,
-        selectedLanguageFilter,
-        selectedAvailabilityFilter,
-        filterType,
-    ) {
-        if (!showFilters) return@LaunchedEffect
-        kotlinx.coroutines.delay(60)
-        val requester = lastDrawerFocusRequester ?: firstFilterRequester
-        val restored = runCatching { requester.requestFocus() }.isSuccess
-        if (!restored) {
-            runCatching { closeFiltersRequester.requestFocus() }
         }
     }
 
@@ -562,6 +554,30 @@ internal fun TvSearchScreen(
                 )
             }
         }
+    }
+
+    // Enrich only the newly focused card beyond the initial visible batch.
+    // The debounce prevents fast D-pad navigation from producing requests,
+    // and the result is merged in place so neither focus nor poster order moves.
+    LaunchedEffect(focusedResultKey) {
+        val itemKey = focusedResultKey ?: return@LaunchedEffect
+        delay(320)
+        val currentItem = results.firstOrNull { it.tvSearchStableKey() == itemKey }
+            ?: return@LaunchedEffect
+        if (currentItem.ratings?.imdbScore != null) return@LaunchedEffect
+        val apiKey = withContext(Dispatchers.IO) {
+            runCatching {
+                secretStore.get(IntegrationSecretKey.MDBLIST_API_KEY)
+                    ?: prefsRepo.getString(SettingsViewModel.KEY_MDBLIST_API_KEY)
+                    ?: MdbListApi.DEFAULT_API_KEY
+            }.getOrDefault(MdbListApi.DEFAULT_API_KEY)
+        }
+        val enriched = withContext(Dispatchers.IO) {
+            ratingsEnricher.enrichList(listOf(currentItem), apiKey).firstOrNull()
+        } ?: return@LaunchedEffect
+        if (enriched.ratings == currentItem.ratings) return@LaunchedEffect
+        baseResults = baseResults.map { if (it.tvSearchStableKey() == itemKey) enriched else it }
+        results = results.map { if (it.tvSearchStableKey() == itemKey) enriched else it }
     }
 
     LaunchedEffect(resultHydrationKey, selectedMinRating, selectedMinImdbVotes) {
@@ -1397,10 +1413,10 @@ internal fun TvSearchScreen(
                 railFocusRequester = railFocusRequester,
                 downFocusRequester = when {
                     showFilters -> closeFiltersRequester
-                    filtersVisible -> lastVisibleFilterRequester ?: advancedFiltersRequester
+                    filtersVisible -> allTypeRequester
                     else -> filterToggleRequester
                 },
-                onMoveDown = ::requestSearchBodyFocus,
+                onMoveDown = ::requestSearchHeaderDownFocus,
                 onContentFocused = onContentFocused,
             )
 
@@ -1415,6 +1431,8 @@ internal fun TvSearchScreen(
                 selectedGenreIds = selectedGenreIds,
                 selectedYear = selectedYear,
                 selectedMinRating = selectedMinRating,
+                selectedSort = selectedSort,
+                onSelectSort = { selectedSort = it },
                 onQuickDiscovery = { quick ->
                     when (quick) {
                         "trending" -> {
@@ -1485,6 +1503,7 @@ internal fun TvSearchScreen(
                 allTypeRequester = allTypeRequester,
                 movieTypeRequester = movieTypeRequester,
                 tvTypeRequester = tvTypeRequester,
+                sortRequester = sortRequester,
                 filterToggleRequester = filterToggleRequester,
                 advancedFiltersRequester = advancedFiltersRequester,
                 inputFocusRequester = inputFocusRequester,
@@ -1704,12 +1723,25 @@ internal fun TvSearchScreen(
             }
         }
         if (showFilters) {
-            Box(
-                modifier = Modifier
-                    .matchParentSize()
-                    .background(Obsidian.copy(alpha = 0.42f)),
-            )
-            TvSearchAdvancedFilterDrawer(
+            Popup(
+                alignment = Alignment.TopStart,
+                properties = PopupProperties(
+                    focusable = true,
+                    dismissOnBackPress = true,
+                    dismissOnClickOutside = false,
+                ),
+                onDismissRequest = {
+                    lastVisibleFilterRequester = advancedFiltersRequester
+                    showFilters = false
+                    focusResultsAfterClosingFilters = true
+                },
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(Obsidian.copy(alpha = 0.42f)),
+                ) {
+                    TvSearchAdvancedFilterDrawer(
                 availableGenres = availableGenres,
                 availableYears = availableYears,
                 selectedGenreIds = selectedGenreIds,
@@ -1720,7 +1752,6 @@ internal fun TvSearchScreen(
                 selectedRuntimeFilter = selectedRuntimeFilter,
                 selectedLanguageFilter = selectedLanguageFilter,
                 selectedAvailabilityFilter = selectedAvailabilityFilter,
-                selectedSort = selectedSort,
                 activeFilterCount = activeFilterCount,
                 closeFiltersRequester = closeFiltersRequester,
                 clearFiltersRequester = clearFiltersRequester,
@@ -1749,7 +1780,6 @@ internal fun TvSearchScreen(
                     lastLoadedSearchStateKey = null
                     browseRefreshNonce += 1
                 },
-                onSelectSort = { selectedSort = it },
                 onClearAll = {
                     selectedGenreIds = emptySet()
                     selectedStudioIds = emptySet()
@@ -1771,13 +1801,14 @@ internal fun TvSearchScreen(
                     focusResultsAfterClosingFilters = true
                 },
                 onContentFocused = { requester ->
-                    lastDrawerFocusRequester = requester
                     onContentFocused(requester)
                 },
-                modifier = Modifier
-                    .align(Alignment.TopStart)
-                    .padding(start = TV_PAGE_CONTENT_GUTTER, top = 148.dp),
-            )
+                        modifier = Modifier
+                            .align(Alignment.TopStart)
+                            .padding(start = TV_PAGE_CONTENT_GUTTER, top = 148.dp),
+                    )
+                }
+            }
         }
     }
     return
@@ -2577,6 +2608,8 @@ private fun TvSearchRefinementArea(
     selectedGenreIds: Set<Int>,
     selectedYear: Int?,
     selectedMinRating: Double?,
+    selectedSort: TvSearchSort,
+    onSelectSort: (TvSearchSort) -> Unit,
     onQuickDiscovery: (String) -> Unit,
     filtersVisible: Boolean,
     advancedFiltersOpen: Boolean,
@@ -2586,6 +2619,7 @@ private fun TvSearchRefinementArea(
     allTypeRequester: FocusRequester,
     movieTypeRequester: FocusRequester,
     tvTypeRequester: FocusRequester,
+    sortRequester: FocusRequester,
     filterToggleRequester: FocusRequester,
     advancedFiltersRequester: FocusRequester,
     inputFocusRequester: FocusRequester,
@@ -2595,6 +2629,19 @@ private fun TvSearchRefinementArea(
     onFilterFocused: (FocusRequester) -> Unit,
     onContentFocused: (FocusRequester) -> Unit,
 ) {
+    val focusScope = rememberCoroutineScope()
+    var sortOptionsVisible by remember { mutableStateOf(false) }
+
+    fun activateAndRetainFocus(requester: FocusRequester, action: () -> Unit) {
+        action()
+        focusScope.launch {
+            repeat(4) { attempt ->
+                if (attempt == 0) kotlinx.coroutines.yield() else delay(40)
+                runCatching { requester.requestFocus() }
+            }
+        }
+    }
+
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         if (!filtersVisible) {
             Row(
@@ -2658,7 +2705,9 @@ private fun TvSearchRefinementArea(
                     onFilterFocused(allTypeRequester)
                     onContentFocused(allTypeRequester)
                 },
-                onClick = { onFilterTypeChange(null) },
+                onClick = {
+                    activateAndRetainFocus(allTypeRequester) { onFilterTypeChange(null) }
+                },
             )
             }
             item("movies") {
@@ -2677,7 +2726,11 @@ private fun TvSearchRefinementArea(
                     onFilterFocused(movieTypeRequester)
                     onContentFocused(movieTypeRequester)
                 },
-                onClick = { onFilterTypeChange(if (filterType == "movie") null else "movie") },
+                onClick = {
+                    activateAndRetainFocus(movieTypeRequester) {
+                        onFilterTypeChange(if (filterType == "movie") null else "movie")
+                    }
+                },
             )
             }
             item("tv") {
@@ -2695,7 +2748,11 @@ private fun TvSearchRefinementArea(
                     onFilterFocused(tvTypeRequester)
                     onContentFocused(tvTypeRequester)
                 },
-                onClick = { onFilterTypeChange(if (filterType == "tv") null else "tv") },
+                onClick = {
+                    activateAndRetainFocus(tvTypeRequester) {
+                        onFilterTypeChange(if (filterType == "tv") null else "tv")
+                    }
+                },
             )
             }
             item("separator") {
@@ -2733,6 +2790,51 @@ private fun TvSearchRefinementArea(
                     },
                     onClick = { onQuickDiscovery(key) },
                 )
+            }
+            item("sort") {
+                TvSearchChip(
+                    text = "Sort · ${selectedSort.label}",
+                    selected = sortOptionsVisible || selectedSort != TvSearchSort.RELEVANCE,
+                    modifier = Modifier
+                        .focusRequester(sortRequester)
+                        .focusProperties {
+                            up = inputFocusRequester
+                            down = bodyTopRequester
+                        },
+                    onFocused = {
+                        onFilterFocused(sortRequester)
+                        onContentFocused(sortRequester)
+                    },
+                    onClick = {
+                        activateAndRetainFocus(sortRequester) {
+                            sortOptionsVisible = !sortOptionsVisible
+                        }
+                    },
+                )
+            }
+            if (sortOptionsVisible) {
+                items(TvSearchSort.entries, key = { "sort-option:${it.name}" }) { option ->
+                    val requester = remember(option) { FocusRequester() }
+                    TvSearchChip(
+                        text = option.label,
+                        selected = selectedSort == option,
+                        modifier = Modifier
+                            .focusRequester(requester)
+                            .focusProperties {
+                                up = inputFocusRequester
+                                down = bodyTopRequester
+                            },
+                        onFocused = {
+                            onFilterFocused(requester)
+                            onContentFocused(requester)
+                        },
+                        onClick = {
+                            onSelectSort(option)
+                            sortOptionsVisible = false
+                            activateAndRetainFocus(sortRequester) {}
+                        },
+                    )
+                }
             }
             item("advanced") {
                 TvSearchChip(
@@ -2851,7 +2953,6 @@ private fun TvSearchAdvancedFilterDrawer(
     selectedRuntimeFilter: TvSearchRuntimeFilter?,
     selectedLanguageFilter: TvSearchLanguageFilter?,
     selectedAvailabilityFilter: TvSearchAvailabilityFilter?,
-    selectedSort: TvSearchSort,
     activeFilterCount: Int,
     closeFiltersRequester: FocusRequester,
     clearFiltersRequester: FocusRequester,
@@ -2864,7 +2965,6 @@ private fun TvSearchAdvancedFilterDrawer(
     onSelectRuntime: (TvSearchRuntimeFilter?) -> Unit,
     onSelectLanguage: (TvSearchLanguageFilter?) -> Unit,
     onSelectAvailability: (TvSearchAvailabilityFilter?) -> Unit,
-    onSelectSort: (TvSearchSort) -> Unit,
     onClearAll: () -> Unit,
     onClose: () -> Unit,
     onContentFocused: (FocusRequester) -> Unit,
@@ -2872,15 +2972,79 @@ private fun TvSearchAdvancedFilterDrawer(
 ) {
     val drawerScrollState = rememberScrollState()
     val ratingFirstRequester = remember { FocusRequester() }
-    val sortFirstRequester = remember { FocusRequester() }
     val votesFirstRequester = remember { FocusRequester() }
     val runtimeFirstRequester = remember { FocusRequester() }
     val languageFirstRequester = remember { FocusRequester() }
     val availabilityFirstRequester = remember { FocusRequester() }
+    // Results are allowed to update while the drawer is open, but its controls
+    // must not reorder or disappear underneath the user's focus.
+    val stableDrawerGenres = remember { availableGenres }
+    val stableDrawerYears = remember { availableYears }
+    val focusManager = LocalFocusManager.current
+    val focusScope = rememberCoroutineScope()
+    var retainedFocusRequester by remember { mutableStateOf<FocusRequester?>(null) }
+    var drawerHadFocus by remember { mutableStateOf(false) }
+
+    fun retainFocus(requester: FocusRequester) {
+        retainedFocusRequester = requester
+        onContentFocused(requester)
+        focusScope.launch {
+            repeat(4) { attempt ->
+                if (attempt == 0) kotlinx.coroutines.yield() else delay(36)
+                runCatching { requester.requestFocus() }
+            }
+        }
+    }
+
+    // Search/result updates can recompose the content behind this drawer after
+    // a filter click. Reassert the clicked chip after the new filter state is
+    // committed so focus never escapes the modal.
+    LaunchedEffect(
+        selectedGenreIds,
+        selectedStudioIds,
+        selectedYear,
+        selectedMinRating,
+        selectedMinImdbVotes,
+        selectedRuntimeFilter,
+        selectedLanguageFilter,
+        selectedAvailabilityFilter,
+    ) {
+        val requester = retainedFocusRequester ?: return@LaunchedEffect
+        repeat(3) { attempt ->
+            if (attempt == 0) kotlinx.coroutines.yield() else delay(48)
+            runCatching { requester.requestFocus() }
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        // The drawer can be composed while the underlying results/grid is also
+        // settling. A single early request is unreliable on Fire TV, so keep
+        // asserting the entry target during that short composition window.
+        focusManager.clearFocus(force = true)
+        repeat(8) { attempt ->
+            delay(if (attempt == 0) 40L else 35L)
+            runCatching { firstFilterRequester.requestFocus() }
+        }
+    }
+
     Column(
         modifier = modifier
             .width(720.dp)
             .heightIn(max = 470.dp)
+            .onFocusChanged { focusState ->
+                if (focusState.hasFocus) {
+                    drawerHadFocus = true
+                } else if (drawerHadFocus) {
+                    focusScope.launch {
+                        delay(24)
+                        val requester = retainedFocusRequester ?: firstFilterRequester
+                        repeat(3) {
+                            runCatching { requester.requestFocus() }
+                            delay(32)
+                        }
+                    }
+                }
+            }
             .focusGroup()
             .clip(RoundedCornerShape(26.dp))
             .background(Charcoal.copy(alpha = 0.90f))
@@ -2920,7 +3084,10 @@ private fun TvSearchAdvancedFilterDrawer(
                         down = firstFilterRequester
                     },
                 onFocused = { onContentFocused(clearFiltersRequester) },
-                onClick = onClearAll,
+                onClick = {
+                    retainFocus(clearFiltersRequester)
+                    onClearAll()
+                },
             )
             TvSearchChip(
                 text = "Close",
@@ -2945,13 +3112,13 @@ private fun TvSearchAdvancedFilterDrawer(
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
                 TvSearchFilterRows(
-                    genres = availableGenres,
+                    genres = stableDrawerGenres,
                     selectedGenreIds = selectedGenreIds,
                     onToggleGenre = onToggleGenre,
                     studios = emptyList(),
                     selectedStudioIds = selectedStudioIds,
                     onToggleStudio = onToggleStudio,
-                    years = availableYears.take(14),
+                    years = stableDrawerYears.take(14),
                     selectedYear = selectedYear,
                     onSelectYear = onSelectYear,
                     selectedMinRating = selectedMinRating,
@@ -2961,29 +3128,19 @@ private fun TvSearchAdvancedFilterDrawer(
                     upRequester = closeFiltersRequester,
                     resultsRequester = null,
                     lastFilterRowRequester = ratingFirstRequester,
-                    bottomRequester = sortFirstRequester,
+                    bottomRequester = votesFirstRequester,
                     onContentFocused = onContentFocused,
-                )
-                TvSearchDrawerChoiceSection(
-                    title = "Sort by",
-                    labels = TvSearchSort.entries.map { it.label },
-                    selectedIndex = TvSearchSort.entries.indexOf(selectedSort),
-                    firstRequester = sortFirstRequester,
-                    upRequester = ratingFirstRequester,
-                    downRequester = votesFirstRequester,
-                    onContentFocused = onContentFocused,
-                    onSelectIndex = { index ->
-                        TvSearchSort.entries.getOrNull(index)?.let(onSelectSort)
-                    },
+                    onFilterActivated = ::retainFocus,
                 )
                 TvSearchDrawerChoiceSection(
                     title = "Minimum IMDb votes",
                     labels = listOf("Default") + TV_SEARCH_IMDB_VOTE_THRESHOLDS.map { it.tvSearchCompactCount() + "+" },
                     selectedIndex = selectedMinImdbVotes?.let { TV_SEARCH_IMDB_VOTE_THRESHOLDS.indexOf(it) + 1 } ?: 0,
                     firstRequester = votesFirstRequester,
-                    upRequester = sortFirstRequester,
+                    upRequester = ratingFirstRequester,
                     downRequester = runtimeFirstRequester,
                     onContentFocused = onContentFocused,
+                    onChoiceActivated = ::retainFocus,
                     onSelectIndex = { index ->
                         onSelectMinImdbVotes(TV_SEARCH_IMDB_VOTE_THRESHOLDS.getOrNull(index - 1))
                     },
@@ -2996,6 +3153,7 @@ private fun TvSearchAdvancedFilterDrawer(
                     upRequester = votesFirstRequester,
                     downRequester = languageFirstRequester,
                     onContentFocused = onContentFocused,
+                    onChoiceActivated = ::retainFocus,
                     onSelectIndex = { index ->
                         onSelectRuntime(TvSearchRuntimeFilter.entries.getOrNull(index - 1))
                     },
@@ -3008,6 +3166,7 @@ private fun TvSearchAdvancedFilterDrawer(
                     upRequester = runtimeFirstRequester,
                     downRequester = availabilityFirstRequester,
                     onContentFocused = onContentFocused,
+                    onChoiceActivated = ::retainFocus,
                     onSelectIndex = { index ->
                         onSelectLanguage(TvSearchLanguageFilter.entries.getOrNull(index - 1))
                     },
@@ -3020,6 +3179,7 @@ private fun TvSearchAdvancedFilterDrawer(
                     upRequester = languageFirstRequester,
                     downRequester = closeFiltersRequester,
                     onContentFocused = onContentFocused,
+                    onChoiceActivated = ::retainFocus,
                     onSelectIndex = { index ->
                         onSelectAvailability(TvSearchAvailabilityFilter.entries.getOrNull(index - 1))
                     },
@@ -3049,6 +3209,7 @@ private fun TvSearchDrawerChoiceSection(
     upRequester: FocusRequester,
     downRequester: FocusRequester,
     onContentFocused: (FocusRequester) -> Unit,
+    onChoiceActivated: (FocusRequester) -> Unit,
     onSelectIndex: (Int) -> Unit,
 ) {
     Text(
@@ -3076,7 +3237,10 @@ private fun TvSearchDrawerChoiceSection(
                         down = downRequester
                     },
                 onFocused = { onContentFocused(requester) },
-                onClick = { onSelectIndex(index) },
+                onClick = {
+                    onChoiceActivated(requester)
+                    onSelectIndex(index)
+                },
             )
         }
     }
@@ -3800,17 +3964,6 @@ private fun TvSearchChip(
                 focused = it.isFocused
                 if (it.isFocused) onFocused()
             }
-            .onPreviewKeyEvent { event ->
-                if (
-                    event.type == KeyEventType.KeyUp &&
-                    (event.key == Key.DirectionCenter || event.key == Key.Enter || event.key == Key.NumPadEnter)
-                ) {
-                    onClick()
-                    true
-                } else {
-                    false
-                }
-            }
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null,
@@ -3851,6 +4004,7 @@ private fun TvSearchFilterRows(
     lastFilterRowRequester: FocusRequester? = null,
     bottomRequester: FocusRequester? = resultsRequester,
     onContentFocused: (FocusRequester) -> Unit,
+    onFilterActivated: (FocusRequester) -> Unit = {},
 ) {
     val columns = 5
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -3858,7 +4012,9 @@ private fun TvSearchFilterRows(
             buildList {
                 if (genres.isNotEmpty()) add(TvSearchFilterGroup("genre", "Genre", genres))
                 if (studios.isNotEmpty()) add(TvSearchFilterGroup("studio", "Network / Studio", studios))
-                if (years.isNotEmpty()) add(TvSearchFilterGroup("year", "Year", years.map { it to it.toString() }))
+                if (years.isNotEmpty()) {
+                    add(TvSearchFilterGroup("year", "Year", years.map { it to tvSearchYearRangeLabel(it) }))
+                }
                 add(TvSearchFilterGroup("rating", "Rating", listOf(7 to "7+", 8 to "8+", 9 to "9+")))
             }
         }
@@ -3936,6 +4092,7 @@ private fun TvSearchFilterRows(
                         },
                     onFocused = { onContentFocused(requester) },
                     onClick = {
+                        onFilterActivated(requester)
                         when (chip.groupKey) {
                             "genre" -> onToggleGenre(chip.id)
                             "studio" -> onToggleStudio(chip.id)
@@ -4216,8 +4373,8 @@ private suspend fun MetadataRepository.loadTvSearchBrowsePage(
                 sortBy = sortBy,
                 withGenres = genres,
                 minRating = null,
-                year = year,
-                yearTo = year,
+                year = year.tvSearchYearFromForApi(),
+                yearTo = year.tvSearchYearToForApi(),
                 runtimeGte = runtimeFilter?.minMinutes,
                 runtimeLte = runtimeFilter?.maxMinutes,
                 originalLanguage = languageFilter?.code,
@@ -4522,23 +4679,41 @@ private fun List<MediaItem>.filterTvSearchItems(
     filter { item ->
             (genreIds.isEmpty() || item.genreIds.any { it in genreIds } || item.genres.any { it.id in genreIds }) &&
             (studioIds.isEmpty() || item.studios.any { it.id in studioIds }) &&
-            (year == null || item.year == year) &&
+            item.matchesTvSearchYear(year) &&
             item.matchesTvSearchMinRating(minRating, minImdbVotes) &&
             item.matchesTvSearchRuntime(runtimeFilter) &&
             item.matchesTvSearchAvailability(availabilityFilter, sourceAvailabilityByTmdbId)
         }
         .dedupeTvSearchResults()
-        .sortedWith(
-            if (minRating == TV_SEARCH_TOP_RATED_FILTER) {
-                compareByDescending<MediaItem> { it.tvSearchSortRating() ?: -1.0 }
-                    .thenByDescending { it.ratings?.imdbVotes ?: it.voteCount ?: 0 }
-                    .thenByDescending { it.popularity ?: 0.0 }
-            } else {
-                compareByDescending<MediaItem> { it.popularity ?: 0.0 }
-                    .thenByDescending { it.ratings?.imdbScore?.toDouble() ?: it.rating ?: 0.0 }
-                    .thenByDescending { it.year ?: 0 }
-            },
-        )
+
+private fun MediaItem.matchesTvSearchYear(selectedYear: Int?): Boolean {
+    selectedYear ?: return true
+    val itemYear = year ?: return false
+    return when (selectedYear) {
+        2020 -> itemYear >= 2020
+        2010, 2000, 1990, 1980, 1970 -> itemYear in selectedYear..(selectedYear + 9)
+        0 -> itemYear < 1970
+        else -> itemYear == selectedYear
+    }
+}
+
+private fun tvSearchYearRangeLabel(start: Int): String = when (start) {
+    2020 -> "2020+"
+    0 -> "Before 1970"
+    else -> "${start}–${start + 9}"
+}
+
+private fun Int?.tvSearchYearFromForApi(): Int? = when (this) {
+    0, null -> null
+    else -> this
+}
+
+private fun Int?.tvSearchYearToForApi(): Int? = when (this) {
+    null, 2020 -> null
+    0 -> 1969
+    2010, 2000, 1990, 1980, 1970 -> this + 9
+    else -> this
+}
 
 internal fun MediaItem.matchesTvSearchMinRating(minRating: Double?, minImdbVotes: Int?): Boolean {
     if (minRating == TV_SEARCH_TOP_RATED_FILTER) {

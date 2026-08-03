@@ -157,6 +157,11 @@ fun V2LivePage(
             .get<com.torve.presentation.recording.RecordingsViewModel>()
     }
     val recordingsState by recordingsVm.state.collectAsState()
+    LaunchedEffect(channelsState.selectedPlaylistId, channelsState.guideProgrammes) {
+        if (channelsState.guideProgrammes.isNotEmpty()) {
+            recordingsVm.materializeSeriesPasses()
+        }
+    }
     // Load recording prefs once on entry; refresh when settings change.
     val prefsRepo = remember {
         org.koin.mp.KoinPlatform.getKoin()
@@ -231,6 +236,54 @@ fun V2LivePage(
                 metadata = metadata,
             )
             onRecordingEvent("Recording scheduled: ${p.title}")
+        }
+    }
+    val onRecordSeries: (com.torve.domain.model.Channel, com.torve.domain.model.EpgProgramme) -> Unit = { ch, p ->
+        val playlistId = channelsState.selectedPlaylistId.orEmpty()
+        when {
+            !ensureRecordingFolderReady() -> Unit
+            playlistId.isBlank() -> onRecordingEvent("Series pass unavailable: select an IPTV playlist first.")
+            p.title.isBlank() -> onRecordingEvent("Series pass unavailable: this programme has no title.")
+            else -> {
+                val normalizedTitle = p.title.trim()
+                val pass = com.torve.domain.recording.RecordingSeriesPass(
+                    id = "series_${playlistId.hashCode()}_${ch.url.hashCode()}_${normalizedTitle.lowercase().hashCode()}",
+                    playlistId = playlistId,
+                    channelId = ch.url,
+                    titleMatch = normalizedTitle,
+                    recordOnlyNew = true,
+                    createdAtMs = System.currentTimeMillis(),
+                )
+                recordingsVm.scheduleSeriesPass(pass) { result ->
+                    val message = when (result) {
+                        is com.torve.domain.recording.RecordingScheduler.ScheduleResult.SeriesScheduled -> {
+                            buildString {
+                                append("Series pass saved: ")
+                                append(result.recordings.size)
+                                append(" upcoming episode")
+                                if (result.recordings.size != 1) append('s')
+                                append(" scheduled")
+                                if (result.skippedConflicts > 0) {
+                                    append("; ")
+                                    append(result.skippedConflicts)
+                                    append(" conflict")
+                                    if (result.skippedConflicts != 1) append('s')
+                                    append(" skipped")
+                                }
+                            }
+                        }
+                        is com.torve.domain.recording.RecordingScheduler.ScheduleResult.Invalid ->
+                            "Series pass not saved: ${result.reason}"
+                        is com.torve.domain.recording.RecordingScheduler.ScheduleResult.Conflict ->
+                            "Series pass not saved because it conflicts with ${result.existing.displayTitle}."
+                        com.torve.domain.recording.RecordingScheduler.ScheduleResult.InThePast ->
+                            "Series pass not saved because this programme has ended."
+                        is com.torve.domain.recording.RecordingScheduler.ScheduleResult.Scheduled ->
+                            "Series pass saved."
+                    }
+                    onRecordingEvent(message)
+                }
+            }
         }
     }
     // Variant of onToggleRecord that adds an explicit extra "overrun"
@@ -489,6 +542,7 @@ fun V2LivePage(
                 onToggleReminder = toggleReminder,
                 recordingStatusFor = recordingStatusFor,
                 onToggleRecord = onToggleRecord,
+                onRecordSeries = onRecordSeries,
                 searchQuery = channelsState.guideSearchQuery,
                 onSearchQueryChange = channelsViewModel::setGuideSearchQuery,
                 sortMode = channelsState.guideSortMode,
@@ -545,6 +599,7 @@ fun V2LivePage(
                     toggleReminder = toggleReminder,
                     recordingStatusFor = recordingStatusFor,
                     onToggleRecord = onToggleRecord,
+                    onRecordSeries = onRecordSeries,
                     onSwitchToChannels = {
                         mode = DesktopLiveMode.CHANNELS
                         channelsViewModel.selectSubTab(ChannelsSubTab.LIVE)
@@ -641,6 +696,7 @@ private fun LiveTvEpgPanel(
     toggleReminder: (Channel, com.torve.domain.model.EpgProgramme) -> Unit,
     recordingStatusFor: (Channel, com.torve.domain.model.EpgProgramme) -> com.torve.presentation.recording.RecordingSlotStatus,
     onToggleRecord: (Channel, com.torve.domain.model.EpgProgramme) -> Unit,
+    onRecordSeries: (Channel, com.torve.domain.model.EpgProgramme) -> Unit,
     onSwitchToChannels: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -684,6 +740,7 @@ private fun LiveTvEpgPanel(
                 onToggleReminder = toggleReminder,
                 recordingStatusFor = recordingStatusFor,
                 onToggleRecord = onToggleRecord,
+                onRecordSeries = onRecordSeries,
                 searchQuery = channelsState.guideSearchQuery,
                 onSearchQueryChange = channelsViewModel::setGuideSearchQuery,
                 sortMode = channelsState.guideSortMode,

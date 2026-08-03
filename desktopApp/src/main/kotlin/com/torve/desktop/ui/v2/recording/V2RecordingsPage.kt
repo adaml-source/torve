@@ -76,6 +76,7 @@ import com.torve.domain.recording.RecordingEpgMatchStatus
 import com.torve.domain.recording.RecordingFailureReason
 import com.torve.domain.recording.RecordingKind
 import com.torve.domain.recording.RecordingStatus
+import com.torve.domain.recording.RecordingSeriesPass
 import com.torve.presentation.recording.RecordingsViewModel
 import org.koin.mp.KoinPlatform
 import java.awt.Desktop
@@ -93,6 +94,7 @@ fun V2RecordingsPage(
 ) {
     val vm = remember { KoinPlatform.getKoin().get<RecordingsViewModel>() }
     val state by vm.state.collectAsState()
+    val seriesPasses by vm.seriesPasses.collectAsState()
     var filter by remember { mutableStateOf(RecordingFilter.ALL) }
     var selectedId by remember { mutableStateOf<String?>(null) }
     val allRows = state.allRows().sortedByDescending { it.startedAtMs ?: it.startMs }
@@ -132,6 +134,12 @@ fun V2RecordingsPage(
                     selectedId = null
                 },
             )
+            if (seriesPasses.isNotEmpty()) {
+                SeriesPassPanel(
+                    passes = seriesPasses,
+                    onCancel = vm::cancelSeriesPass,
+                )
+            }
             if (allRows.isEmpty()) {
                 LiveTvGlassPanel(Modifier.fillMaxSize()) {
                     Column(
@@ -169,6 +177,49 @@ fun V2RecordingsPage(
                         onDelete = { row -> vm.delete(row.id) },
                         onCancel = { row -> vm.cancel(row.id) },
                         modifier = Modifier.weight(1f).fillMaxHeight(),
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SeriesPassPanel(
+    passes: List<RecordingSeriesPass>,
+    onCancel: (String) -> Unit,
+) {
+    LiveTvGlassPanel(Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.fillMaxWidth().padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            LiveTvPanelTitle(
+                title = "Series passes",
+                subtitle = "Saved rules are checked again whenever the programme guide refreshes.",
+            )
+            passes.forEach { pass ->
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = pass.titleMatch,
+                            color = Color.White.copy(alpha = 0.94f),
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                        Text(
+                            text = if (pass.recordOnlyNew) "New episodes only" else "All matching airings",
+                            color = Color.White.copy(alpha = 0.62f),
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    }
+                    LiveTvGlassButton(
+                        text = "Cancel pass",
+                        onClick = { onCancel(pass.id) },
+                        contentDescription = "Cancel series pass for ${pass.titleMatch}",
                     )
                 }
             }

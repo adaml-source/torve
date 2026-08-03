@@ -10,6 +10,7 @@ import com.torve.domain.model.ContentAccessContext
 import com.torve.domain.model.ContentPolicyState
 import com.torve.domain.model.ContentSourceType
 import com.torve.domain.model.MediaItem
+import com.torve.domain.model.ParentalFilter
 import com.torve.domain.model.PagedResult
 import com.torve.domain.model.SensitiveClassification
 import com.torve.domain.model.dedupeByStableKey
@@ -17,6 +18,7 @@ import com.torve.domain.model.calculateTorveScore
 import com.torve.domain.model.defaultTorveWeights
 import com.torve.domain.repository.MetadataRepository
 import com.torve.domain.repository.PreferencesRepository
+import com.torve.domain.repository.ProfileRepository
 import com.torve.presentation.catalog.SortOption
 import com.torve.presentation.contentpolicy.ContentPolicyFilter
 import com.torve.presentation.settings.SettingsViewModel
@@ -49,6 +51,7 @@ class SearchViewModel(
     invalidationCoordinator: ContentPolicyCacheInvalidationCoordinator? = null,
     private val ratingsEnricher: RatingsEnricher? = null,
     private val integrationSecretStore: IntegrationSecretStore? = null,
+    private val profileRepository: ProfileRepository? = null,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
 
@@ -250,9 +253,10 @@ class SearchViewModel(
             // them visible) and SAFE/SENSITIVE land in the slice tagged
             // with their verdict. The visible projection below picks SAFE
             // (always) plus SENSITIVE (only when the live policy allows).
+            val profileFilteredResults = applyActiveProfileLimit(sortedResults)
             val policy = currentPolicySnapshot()
-            val slice = buildSlice(sortedResults, policy)
-            println("[SearchVM] performSearch end gen=$generation query='$query' -> ${sortedResults.size} raw, ${slice.ordered.size} resolved, ${slice.unresolvedHiddenCount} unresolved")
+            val slice = buildSlice(profileFilteredResults, policy)
+            println("[SearchVM] performSearch end gen=$generation query='$query' -> ${sortedResults.size} raw, ${profileFilteredResults.size} profile-safe, ${slice.ordered.size} resolved, ${slice.unresolvedHiddenCount} unresolved")
             val committed = updateIfLatest(generation) { current ->
                 // Re-read policy inside the update so the projection
                 // reflects the most recent policy snapshot, even if it
@@ -543,12 +547,19 @@ class SearchViewModel(
             genreMatch && ratingMatch && imdbMatch && tmdbMatch && torveMatch && yearFromMatch && yearToMatch
         }
         val deduped = if (shouldDedupe()) filtered.dedupeByStableKey() else filtered
-        return when (filter.sortBy) {
+        val sorted = when (filter.sortBy) {
             SortOption.TORVE_SCORE_DESC -> deduped.sortedByDescending { item ->
                 item.ratings?.let { calculateTorveScore(it, defaultTorveWeights()) } ?: Float.MIN_VALUE
             }
             else -> deduped
         }
+        return applyActiveProfileLimit(sorted)
+    }
+
+    private suspend fun applyActiveProfileLimit(items: List<MediaItem>): List<MediaItem> {
+        val repository = profileRepository ?: return items
+        val maxRating = runCatching { repository.getActiveProfile()?.maxContentRating }.getOrNull()
+        return ParentalFilter.filter(items, maxRating)
     }
 
     fun toggleFilterSheet() {

@@ -43,6 +43,7 @@ import com.torve.domain.integrations.AutomationIndexerCreateRequest
 import com.torve.domain.integrations.AutomationIndexerProtocol
 import com.torve.domain.integrations.AutomationLibraryItem
 import com.torve.domain.integrations.AutomationServiceType
+import com.torve.domain.integrations.IntegrationStorageMode
 import com.torve.domain.integrations.TdarrRunAutomationRequest
 import com.torve.domain.integrations.TdarrJob
 import com.torve.domain.integrations.TdarrJobAction
@@ -82,7 +83,7 @@ internal fun DesktopAutomationSection() {
     AutomationConnectionsCard(settings, settingsViewModel)
 
     TorveSectionCard(
-        title = "Automation administration",
+        title = "*Arr media automation",
         supportingText = "The same search, queue, indexer, subtitle and Tdarr controls used by Torve mobile and TV.",
     ) {
         if (admin.instances.isEmpty()) {
@@ -161,8 +162,15 @@ private fun AutomationConnectionsCard(
 ) {
     TorveSectionCard(
         title = "Sonarr, Radarr, Prowlarr, Bazarr and Tdarr",
-        supportingText = "URLs are saved as metadata. API keys stay encrypted on this device and never enter dashboard state.",
+        supportingText = "Connections can be encrypted with your Torve account for automatic restore, or kept only on this computer.",
     ) {
+        if (state.instances.any { it.storageMode == IntegrationStorageMode.DEVICE_ONLY }) {
+            TorveSecondaryButton(
+                text = "Sync all existing connections with my account",
+                onClick = viewModel::syncAllWithAccount,
+                enabled = !state.isBusy,
+            )
+        }
         state.instances.forEach { instance ->
             TorveListRow(
                 title = instance.name,
@@ -172,6 +180,8 @@ private fun AutomationConnectionsCard(
                         append(" · ")
                         append(if (instance.role == AutomationInstanceRole.UHD) "4K" else "Standard")
                     }
+                    append(" · ")
+                    append(if (instance.storageMode == IntegrationStorageMode.ACCOUNT) "Account synced" else "This computer only")
                 },
                 trailing = {
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -210,6 +220,28 @@ private fun AutomationConnectionsCard(
             label = if (state.serviceType == AutomationServiceType.TDARR) "Optional API key" else "API key",
             modifier = Modifier.fillMaxWidth(),
             visualTransformation = PasswordVisualTransformation(),
+        )
+        Text("Connection storage", fontWeight = FontWeight.SemiBold)
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            TorveFilterChip(
+                text = "Sync with my account",
+                selected = state.storageMode == IntegrationStorageMode.ACCOUNT,
+                onClick = { viewModel.selectStorageMode(IntegrationStorageMode.ACCOUNT) },
+            )
+            TorveFilterChip(
+                text = "Only on this computer",
+                selected = state.storageMode == IntegrationStorageMode.DEVICE_ONLY,
+                onClick = { viewModel.selectStorageMode(IntegrationStorageMode.DEVICE_ONLY) },
+            )
+        }
+        Text(
+            if (state.storageMode == IntegrationStorageMode.ACCOUNT) {
+                "The URL and API key are encrypted in your Torve account and restored on signed-in devices."
+            } else {
+                "The URL and API key never leave this computer."
+            },
+            style = MaterialTheme.typography.bodySmall,
+            color = TorveDesktopThemeTokens.colors.textSecondary,
         )
         if (state.serviceType == AutomationServiceType.SONARR || state.serviceType == AutomationServiceType.RADARR) {
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {

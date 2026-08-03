@@ -14,9 +14,9 @@ import kotlinx.datetime.Clock
  * Storage IO is delegated to [RecordingRepository]; the actual stream
  * pull is delegated to a [RecordingService] (desktop only).
  *
- * Series passes: schema only. [scheduleSeriesPass] refuses unless
- * `passResolver` is wired; default null = disabled. UI surfaces the
- * "coming soon" copy by checking [seriesPassesEnabled].
+ * Series passes are expanded through [passResolver], de-duplicated against
+ * recording history, conflict-checked, and persisted as scheduled rows.
+ * A missing resolver remains an explicit capability-off state.
  */
 class RecordingScheduler(
     private val repository: RecordingRepository,
@@ -40,6 +40,11 @@ class RecordingScheduler(
      */
     sealed interface ScheduleResult {
         data class Scheduled(val recording: Recording) : ScheduleResult
+        data class SeriesScheduled(
+            val passId: String,
+            val recordings: List<Recording>,
+            val skippedConflicts: Int,
+        ) : ScheduleResult
         data class Conflict(val candidate: Recording, val existing: Recording) : ScheduleResult
         data object InThePast : ScheduleResult
         data class Invalid(val reason: String) : ScheduleResult
@@ -95,17 +100,49 @@ class RecordingScheduler(
         return ScheduleResult.Scheduled(candidate)
     }
 
-    /**
-     * Series passes are schema-only this slice. Always returns Disabled
-     * unless [passResolver] is wired (deferred to a future slice).
-     */
-    suspend fun scheduleSeriesPass(@Suppress("UNUSED_PARAMETER") pass: RecordingSeriesPass): ScheduleResult {
+    /** Resolve and persist every future, non-conflicting episode for a pass. */
+    suspend fun scheduleSeriesPass(pass: RecordingSeriesPass): ScheduleResult {
         if (passResolver == null) {
             return ScheduleResult.Invalid(
                 "Series-pass scheduling isn't enabled yet. Use one-off recordings for now.",
             )
         }
-        return ScheduleResult.Invalid("Not yet implemented.")
+        if (pass.titleMatch.isBlank()) {
+            return ScheduleResult.Invalid("Enter a programme title for the series pass.")
+        }
+        val resolved = passResolver.resolve(pass, nowMs())
+            .filter { it.endMs > nowMs() && it.endMs > it.startMs && it.streamUrl.isNotBlank() }
+            .distinctBy { Triple(it.channelId, it.startMs, it.endMs) }
+            .sortedBy { it.startMs }
+        if (resolved.isEmpty()) {
+            return ScheduleResult.Invalid("No future matching episodes were found in the current guide.")
+        }
+
+        val occupied = repository.listAll().toMutableList()
+        val accepted = mutableListOf<Recording>()
+        var skippedConflicts = 0
+        for (candidate in resolved) {
+            val normalized = candidate.copy(
+                scheduleKind = RecordingScheduleKind.SERIES,
+                seriesPassId = pass.id,
+                status = RecordingStatus.SCHEDULED,
+            )
+            if (RecordingConflictDetector.firstConflict(normalized, occupied) != null) {
+                skippedConflicts += 1
+                continue
+            }
+            repository.upsert(normalized)
+            occupied += normalized
+            accepted += normalized
+        }
+        if (accepted.isEmpty()) {
+            return ScheduleResult.Invalid("Matching episodes conflict with existing recordings.")
+        }
+        return ScheduleResult.SeriesScheduled(
+            passId = pass.id,
+            recordings = accepted,
+            skippedConflicts = skippedConflicts,
+        )
     }
 
     /**

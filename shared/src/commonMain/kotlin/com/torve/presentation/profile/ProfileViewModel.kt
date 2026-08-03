@@ -15,10 +15,13 @@ import kotlinx.datetime.Clock
 
 class ProfileViewModel(
     private val profileRepo: ProfileRepository,
+    private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Main),
+    private val nowMs: () -> Long = { Clock.System.now().toEpochMilliseconds() },
 ) {
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private val _state = MutableStateFlow(ProfileUiState())
     val state: StateFlow<ProfileUiState> = _state.asStateFlow()
+    private val failedPinAttempts = mutableMapOf<String, Int>()
+    private val pinLockedUntilMs = mutableMapOf<String, Long>()
 
     init {
         loadProfiles()
@@ -66,12 +69,21 @@ class ProfileViewModel(
     fun createProfile(name: String, avatarIndex: Int = 0) {
         scope.launch {
             try {
-                val id = Clock.System.now().toEpochMilliseconds().toString()
+                val safeName = name.trim()
+                if (safeName.isBlank()) {
+                    _state.update { it.copy(error = "Enter a profile name") }
+                    return@launch
+                }
+                if (_state.value.profiles.size >= MAX_PROFILES) {
+                    _state.update { it.copy(error = "You can create up to $MAX_PROFILES profiles") }
+                    return@launch
+                }
+                val id = nowMs().toString()
                 val profile = UserProfile(
                     id = id,
-                    name = name,
+                    name = safeName.take(MAX_PROFILE_NAME_LENGTH),
                     avatarIndex = avatarIndex,
-                    createdAt = Clock.System.now().toEpochMilliseconds(),
+                    createdAt = nowMs(),
                 )
                 profileRepo.createProfile(profile)
                 loadProfiles()
@@ -87,7 +99,13 @@ class ProfileViewModel(
                 val profile = profileRepo.getProfile(id) ?: return@launch
                 // Check if PIN is required
                 if (!profile.pin.isNullOrBlank()) {
-                    _state.update { it.copy(pinPromptProfileId = id) }
+                    val remainingMs = (pinLockedUntilMs[id] ?: 0L) - nowMs()
+                    _state.update {
+                        it.copy(
+                            pinPromptProfileId = id,
+                            pinError = if (remainingMs > 0L) pinLockMessage(remainingMs) else null,
+                        )
+                    }
                     return@launch
                 }
                 profileRepo.setActiveProfile(id)
@@ -102,12 +120,29 @@ class ProfileViewModel(
         scope.launch {
             try {
                 val profile = profileRepo.getProfile(profileId) ?: return@launch
-                if (profile.pin == pin) {
+                val remainingMs = (pinLockedUntilMs[profileId] ?: 0L) - nowMs()
+                if (remainingMs > 0L) {
+                    _state.update { it.copy(pinError = pinLockMessage(remainingMs)) }
+                    return@launch
+                }
+                if (profile.pin == pin.trim()) {
+                    failedPinAttempts.remove(profileId)
+                    pinLockedUntilMs.remove(profileId)
                     _state.update { it.copy(pinPromptProfileId = null, pinError = null) }
                     profileRepo.setActiveProfile(profileId)
                     loadProfiles()
                 } else {
-                    _state.update { it.copy(pinError = "Incorrect PIN") }
+                    val attempts = (failedPinAttempts[profileId] ?: 0) + 1
+                    if (attempts >= MAX_PIN_ATTEMPTS) {
+                        failedPinAttempts.remove(profileId)
+                        pinLockedUntilMs[profileId] = nowMs() + PIN_LOCKOUT_MS
+                        _state.update { it.copy(pinError = pinLockMessage(PIN_LOCKOUT_MS)) }
+                    } else {
+                        failedPinAttempts[profileId] = attempts
+                        _state.update {
+                            it.copy(pinError = "Incorrect PIN. ${MAX_PIN_ATTEMPTS - attempts} attempts remaining")
+                        }
+                    }
                 }
             } catch (e: Exception) {
                 _state.update { it.copy(error = com.torve.presentation.error.UserFacingError.PROFILE_FAILED.messageKey) }
@@ -122,7 +157,12 @@ class ProfileViewModel(
     fun updateProfileName(id: String, name: String) {
         scope.launch {
             try {
-                profileRepo.updateName(id, name)
+                val safeName = name.trim()
+                if (safeName.isBlank()) {
+                    _state.update { it.copy(error = "Enter a profile name") }
+                    return@launch
+                }
+                profileRepo.updateName(id, safeName.take(MAX_PROFILE_NAME_LENGTH))
                 loadProfiles()
             } catch (e: Exception) {
                 _state.update { it.copy(error = com.torve.presentation.error.UserFacingError.PROFILE_FAILED.messageKey) }
@@ -133,7 +173,14 @@ class ProfileViewModel(
     fun setProfilePin(id: String, pin: String?) {
         scope.launch {
             try {
-                profileRepo.updatePin(id, pin?.takeIf { it.isNotBlank() })
+                val safePin = pin?.trim()?.takeIf(String::isNotBlank)
+                if (safePin != null && !safePin.matches(Regex("[0-9]{4}"))) {
+                    _state.update { it.copy(error = "PIN must be exactly 4 digits") }
+                    return@launch
+                }
+                profileRepo.updatePin(id, safePin)
+                failedPinAttempts.remove(id)
+                pinLockedUntilMs.remove(id)
                 loadProfiles()
             } catch (e: Exception) {
                 _state.update { it.copy(error = com.torve.presentation.error.UserFacingError.PROFILE_FAILED.messageKey) }
@@ -182,6 +229,18 @@ class ProfileViewModel(
 
     fun clearError() {
         _state.update { it.copy(error = null) }
+    }
+
+    private fun pinLockMessage(remainingMs: Long): String {
+        val seconds = ((remainingMs + 999L) / 1_000L).coerceAtLeast(1L)
+        return "Too many incorrect attempts. Try again in $seconds seconds"
+    }
+
+    companion object {
+        const val MAX_PROFILES = 8
+        const val MAX_PROFILE_NAME_LENGTH = 32
+        const val MAX_PIN_ATTEMPTS = 5
+        const val PIN_LOCKOUT_MS = 30_000L
     }
 }
 

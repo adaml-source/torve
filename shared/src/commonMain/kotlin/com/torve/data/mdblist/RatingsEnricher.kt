@@ -2,6 +2,7 @@ package com.torve.data.mdblist
 
 import com.torve.data.metadata.TmdbApiClient
 import com.torve.data.ratings.OmdbClient
+import com.torve.data.ratings.BackendRatingsApi
 import com.torve.data.trakt.TraktClient
 import com.torve.domain.model.MediaItem
 import com.torve.domain.model.MediaRatings
@@ -26,6 +27,7 @@ class RatingsEnricher(
     private val traktClient: TraktClient,
     private val cacheRepo: RatingsCacheRepository,
     private val omdbClient: OmdbClient,
+    private val backendRatingsApi: BackendRatingsApi? = null,
 ) {
 
     private val imdbCache = mutableMapOf<String, String?>()
@@ -249,6 +251,17 @@ class RatingsEnricher(
 
     suspend fun enrichList(items: List<MediaItem>, apiKey: String): List<MediaItem> = withContext(Dispatchers.Default) {
         if (items.isEmpty()) return@withContext items
+        val backend = backendRatingsApi?.fetch(items)
+        if (backend?.reachable == true) {
+            if (backend.ratings.isEmpty()) return@withContext items
+            return@withContext items.map { item ->
+                val tmdbId = item.tmdbId ?: return@map item
+                val key = "${item.type.name}:$tmdbId"
+                val remote = backend.ratings[key] ?: return@map item
+                cacheRepo.put(key, remote)
+                item.copy(ratings = mergeRatings(item.ratings, remote))
+            }
+        }
         coroutineScope {
         val enriched = items.map { item ->
             async {

@@ -39,6 +39,7 @@ class RatingsCacheRepository(
 
     /** A cached entry is considered complete if it has at least 2 non-null rating fields. */
     private fun isComplete(ratings: MediaRatings): Boolean {
+        if (ratings.imdbScore != null && ratings.imdbVotes != null) return true
         var count = 0
         if (ratings.imdbScore != null) count++
         if (ratings.rottenTomatoesScore != null) count++

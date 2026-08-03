@@ -54,6 +54,35 @@ class PrefsAutomationInstanceRepositoryTest {
     }
 
     @Test
+    fun `account storage choice survives descriptor reload and marks the encrypted key`() = runTest {
+        val prefs = MemoryPrefs()
+        val secrets = MemorySecrets()
+        val repository = PrefsAutomationInstanceRepository(prefs, secrets)
+        val synced = instance("synced-series").copy(storageMode = IntegrationStorageMode.ACCOUNT)
+
+        repository.save(synced, "account-key")
+
+        assertEquals(IntegrationStorageMode.ACCOUNT, repository.list().single().storageMode)
+        assertEquals(IntegrationStorageMode.ACCOUNT, secrets.modes[IntegrationSecretKey.SONARR_API_KEY])
+        assertEquals("account-key", repository.apiKey(repository.list().single()))
+    }
+
+    @Test
+    fun `promoting an existing connection keeps its key and updates secret scope`() = runTest {
+        val secrets = MemorySecrets()
+        val repository = PrefsAutomationInstanceRepository(MemoryPrefs(), secrets)
+        val local = instance("existing-series")
+        repository.save(local, "existing-key")
+
+        repository.save(local.copy(storageMode = IntegrationStorageMode.ACCOUNT))
+
+        val promoted = repository.list().single()
+        assertEquals(IntegrationStorageMode.ACCOUNT, promoted.storageMode)
+        assertEquals("existing-key", repository.apiKey(promoted))
+        assertEquals(IntegrationStorageMode.ACCOUNT, secrets.modes[IntegrationSecretKey.SONARR_API_KEY])
+    }
+
+    @Test
     fun `changing service type requires and moves the encrypted key`() = runTest {
         val secrets = MemorySecrets()
         val repository = PrefsAutomationInstanceRepository(MemoryPrefs(), secrets)

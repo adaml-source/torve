@@ -110,12 +110,23 @@ tv_focus_audit.txt
 /desktop_login_fullscreen_check.png
 /tv_landing_*.png
 /tv_validation_screen.png
+/black_window.xml
+/window_home.xml
+/torve_home_fixed_final.xml
+/fire*_diag.png
+/latest_*_data_app_anr.txt
 /docs_extract_frontend.zip
 
 # Per-host Gradle/Android scratch dirs (siblings of the already-ignored .gradle / .android/)
 .gradle-*/
 .android-*/
 .codex_tmp/
+/.codex*/
+/.codex*.png
+/.codex*.txt
+/.public-export/
+/pytest-cache-files-*/
+**/.pytest_cache/
 
 # Build outputs not yet covered
 desktopApp/build/

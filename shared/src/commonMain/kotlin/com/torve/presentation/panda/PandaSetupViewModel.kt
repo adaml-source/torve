@@ -530,6 +530,11 @@ class PandaSetupViewModel(
         }
     }
 
+    /** Stops an in-progress browser/device-code authorization without removing credentials. */
+    fun cancelOAuth() {
+        setAuthMethod("apikey")
+    }
+
     private fun toDebridServiceType(providerId: String): DebridServiceType? {
         return when (providerId) {
             "realdebrid" -> DebridServiceType.REAL_DEBRID
@@ -696,11 +701,76 @@ class PandaSetupViewModel(
     }
 
     fun disconnectSelectedDebrid() {
-        val provider = _state.value.selectedProvider ?: return
+        val before = _state.value
+        if (before.authLoading) return
+        val provider = before.selectedProvider ?: return
         val debridType = toDebridServiceType(provider.id)
         pollJob?.cancel()
-        if (debridType != null) {
-            scope.launch {
+        val updatedKeys = before.debridApiKeys - provider.id
+        val disconnected = before.copy(
+                debridApiKeys = updatedKeys,
+                debridApiKey = "",
+                apiKeyInput = "",
+                authConnected = updatedKeys.isNotEmpty(),
+                existingCredentialDetected = false,
+                deviceCode = null,
+                // Keep Disconnect distinct from Re-authenticate. OAuthSection
+                // auto-starts whenever a disconnected OAuth provider is shown.
+                authMethod = "apikey",
+                authLoading = before.isEditMode,
+                error = null,
+            )
+        _state.value = disconnected
+        scope.launch {
+            persistDebridDisconnect(
+                before = before,
+                disconnected = disconnected,
+                provider = provider,
+                debridType = debridType,
+            )
+        }
+    }
+
+    private suspend fun persistDebridDisconnect(
+        before: PandaSetupUiState,
+        disconnected: PandaSetupUiState,
+        provider: PandaProvider,
+        debridType: DebridServiceType?,
+    ) {
+        if (before.isEditMode) {
+            val remoteResult = runCatching {
+                val configId = requireNotNull(before.configId?.takeIf { it.isNotBlank() })
+                val bearer = accountSessionCoordinator.getTorveAccessToken()
+                    ?: integrationSecretStore.get(
+                        IntegrationSecretKey.PANDA_MANAGEMENT_TOKEN,
+                        subKey = configId,
+                    )
+                    ?: error("Missing Panda management credential")
+                val primary = primaryPandaDebridConnection(disconnected)
+                pandaClient.updateConfig(
+                    configId = configId,
+                    bearerToken = bearer,
+                    patch = PandaConfigPatch(
+                        debridService = primary.provider,
+                        debridApiKey = primary.apiKey,
+                        // Empty is intentional and removes the final provider.
+                        debridConnections = pandaDebridConnectionsForPayload(disconnected),
+                    ),
+                )
+            }
+            if (remoteResult.isFailure) {
+                _state.value = before.copy(
+                    deviceCode = null,
+                    authMethod = "apikey",
+                    authLoading = false,
+                    error = "Could not disconnect " + provider.name + ". Nothing was removed.",
+                )
+                return
+            }
+        }
+
+        val localResult = runCatching {
+            if (debridType != null) {
                 integrationSecretStore.remove(debridSecretKey(debridType))
                 if (debridType == DebridServiceType.REAL_DEBRID) {
                     integrationSecretStore.remove(IntegrationSecretKey.DEBRID_RD_REFRESH_TOKEN)
@@ -710,26 +780,40 @@ class PandaSetupViewModel(
             }
         }
         _state.update {
-            val updatedKeys = it.debridApiKeys - provider.id
+            val providerSecret = "debrid_api_key_" + provider.id
+            val retainedServerSecrets = if (disconnected.debridApiKeys.isEmpty()) {
+                it.serverHasSecrets - providerSecret - "debrid_api_key"
+            } else {
+                it.serverHasSecrets - providerSecret
+            }
             it.copy(
-                debridApiKeys = updatedKeys,
-                debridApiKey = "",
-                apiKeyInput = "",
-                authConnected = updatedKeys.isNotEmpty(),
-                existingCredentialDetected = false,
-                deviceCode = null,
                 authLoading = false,
-                error = null,
+                error = localResult.exceptionOrNull()?.let {
+                    "Provider removed, but its local credential could not be cleared."
+                },
+                serverHasSecrets = retainedServerSecrets,
             )
         }
+        settingsRefreshNotifier.notifyRefresh(kotlinx.datetime.Clock.System.now().toEpochMilliseconds())
     }
 
     fun reconnectSelectedDebrid() {
-        val supportsOAuth = _state.value.selectedProvider?.authMethods?.contains("oauth") == true
-        disconnectSelectedDebrid()
-        _state.update {
-            it.copy(authMethod = if (supportsOAuth) "oauth" else "apikey")
-        }
+        val current = _state.value
+        val provider = current.selectedProvider ?: return
+        val supportsOAuth = provider.authMethods.contains("oauth")
+        pollJob?.cancel()
+        val remaining = current.debridApiKeys - provider.id
+        _state.value = current.copy(
+            debridApiKeys = remaining,
+            debridApiKey = "",
+            apiKeyInput = "",
+            authConnected = remaining.isNotEmpty(),
+            existingCredentialDetected = false,
+            deviceCode = null,
+            authMethod = if (supportsOAuth) "oauth" else "apikey",
+            authLoading = false,
+            error = null,
+        )
         if (supportsOAuth) {
             startOAuth()
         }
@@ -1028,7 +1112,9 @@ class PandaSetupViewModel(
                         patch = PandaConfigPatch(
                             debridService = primaryDebrid.provider,
                             debridApiKey = patchedDebridApiKey,
-                            debridConnections = debridConnections.takeIf { it.isNotEmpty() },
+                            // Empty deliberately clears the final provider; null
+                            // would preserve the stale server-side connection.
+                            debridConnections = debridConnections,
                             enabledProviders = s.enabledSources.toList(),
                             maxQuality = s.maxQuality,
                             qualityProfile = s.qualityProfile,

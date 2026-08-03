@@ -24,6 +24,25 @@ class TvDetailsSourcePickerStateBuilderTest {
         url = "http://192.168.1.10:41122/local/stream/abc?token=t",
         headers = mapOf("X-Torve-Lan-Auth" to "shh"),
     )
+    private val jellyfin = PlaybackRoute.JellyfinStream(
+        url = "http://media.local/Videos/movie/stream?static=true",
+        headers = mapOf("X-Emby-Token" to "library-secret"),
+    )
+
+    @Test
+    fun `Jellyfin permanent copy is preferred over LAN and provider`() {
+        val state = TvDetailsSourcePickerStateBuilder.build(
+            localFilePath = null,
+            jellyfinRoute = jellyfin,
+            lanRoute = lan,
+            providerAvailable = true,
+            networkMode = NetworkMode.WIFI,
+            wifiOnlyForLan = true,
+        )
+        assertEquals(listOf("Jellyfin library", "On desktop (LAN)", "Provider"), state.options.map { it.label })
+        assertEquals(TvSourceTier.BEST, state.options.first().tier)
+        assertEquals("library-secret", (state.options.first().route as PlaybackRoute.JellyfinStream).headers["X-Emby-Token"])
+    }
 
     @Test
     fun `local file plus LAN plus provider yields three options in priority order`() {

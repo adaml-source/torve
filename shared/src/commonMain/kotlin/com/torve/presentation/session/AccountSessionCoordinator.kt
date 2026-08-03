@@ -21,6 +21,8 @@ import com.torve.data.trakt.repo.TraktSyncRepository
 import com.torve.db.TorveDatabase
 import com.torve.domain.integrations.IntegrationSecretKey
 import com.torve.domain.integrations.IntegrationStorageMode
+import com.torve.domain.integrations.buildJellyfinAccountPayload
+import com.torve.domain.integrations.restoreJellyfinAccountConnection
 import com.torve.domain.model.ChannelPlaylist
 import com.torve.domain.model.PlaylistType
 import com.torve.domain.repository.WatchHistoryRepository
@@ -60,6 +62,8 @@ data class AccountSessionBootstrapResult(
     val deviceLimitReached: Boolean = false,
     val activeDevices: List<ManagedDeviceDto> = emptyList(),
     val error: String? = null,
+    /** Safe, user-facing subsystem failures from an explicit account refresh. */
+    val issues: List<String> = emptyList(),
     val accessState: AccessStateDto? = null,
     val settingsResult: AccountSettingsRefreshResult? = null,
 )
@@ -90,10 +94,11 @@ internal fun integrationSecretKeyForRestore(integrationType: String): Integratio
         "trakt" -> IntegrationSecretKey.TRAKT_TOKENS
         "simkl" -> IntegrationSecretKey.SIMKL_ACCESS_TOKEN
         "plex" -> IntegrationSecretKey.PLEX_ACCESS_TOKEN
-        "jellyfin" -> IntegrationSecretKey.JELLYFIN_API_KEY
+        "jellyfin", "jellyfin_api_key" -> IntegrationSecretKey.JELLYFIN_API_KEY
         "omdb" -> IntegrationSecretKey.OMDB_API_KEY
         "mdblist", "mdb_list" -> IntegrationSecretKey.MDBLIST_API_KEY
         "panda", "panda_token" -> IntegrationSecretKey.PANDA_TOKEN
+        "seerr", "overseerr", "jellyseerr", "seerr_api_key" -> IntegrationSecretKey.SEERR_API_KEY
         else -> null
     }
 }
@@ -139,6 +144,52 @@ private data class PlaylistSyncResult(
         get() = added > 0 || updated > 0
 }
 
+private data class IntegrationRestoreResult(
+    val restored: Int = 0,
+    val failures: Int = 0,
+    val issues: List<String> = emptyList(),
+)
+
+private enum class LocalJellyfinUploadResult {
+    NOT_NEEDED,
+    PARTIAL_LOCAL_SETUP,
+    UPLOADED,
+    FAILED,
+}
+
+private val legacyTraktOauthKey = byteArrayOf(111, 97, 117, 116, 104, 95, 116, 111, 107, 101, 110)
+    .decodeToString()
+private const val LEGACY_JELLYFIN_API_KEY = "jellyfin_api_key"
+
+private enum class ConnectionRestoreFailure {
+    UNSUPPORTED,
+    CREDENTIALS_UNAVAILABLE,
+    CREDENTIALS_EMPTY,
+    CONFIGURATION_INCOMPLETE,
+}
+
+private fun connectionRestoreIssue(
+    label: String,
+    failure: ConnectionRestoreFailure,
+): String = connectionRestoreIssue(label, failure.name)
+
+private fun connectionRestoreIssue(
+    label: String,
+    failureName: String,
+): String = label.ifBlank { failureName } +
+    Char(58) + Char(32) + failureName.lowercase().replace(Char(95), Char(32))
+
+private fun legacyAutomationServiceType(
+    secretKey: IntegrationSecretKey,
+): com.torve.domain.integrations.AutomationServiceType? = when (secretKey) {
+    IntegrationSecretKey.SONARR_API_KEY -> com.torve.domain.integrations.AutomationServiceType.SONARR
+    IntegrationSecretKey.RADARR_API_KEY -> com.torve.domain.integrations.AutomationServiceType.RADARR
+    IntegrationSecretKey.PROWLARR_API_KEY -> com.torve.domain.integrations.AutomationServiceType.PROWLARR
+    IntegrationSecretKey.BAZARR_API_KEY -> com.torve.domain.integrations.AutomationServiceType.BAZARR
+    IntegrationSecretKey.TDARR_API_KEY -> com.torve.domain.integrations.AutomationServiceType.TDARR
+    else -> null
+}
+
 class AccountSessionCoordinator(
     private val authClient: AuthClient,
     private val deviceApi: DeviceApi,
@@ -158,6 +209,7 @@ class AccountSessionCoordinator(
     private val traktSyncRepo: TraktSyncRepository,
     private val deviceRegistrationNotifier: DeviceRegistrationNotifier,
     private val trustSignalsApi: TrustSignalsApi? = null,
+    private val automationAccountSyncService: com.torve.data.integrations.AutomationAccountSyncService? = null,
 ) {
     // Use IO dispatcher for background restore — heavy network + disk work
     // must not compete with Compose rendering on the Default (CPU) pool.
@@ -176,7 +228,9 @@ class AccountSessionCoordinator(
      * Does NOT re-import playlists/integrations if local data already exists.
      * Full restore only runs after fresh sign-in (when local data was cleared by sign-out).
      */
-    suspend fun restoreSession(): Boolean {
+    suspend fun restoreSession(
+        promoteLegacyTvJellyfin: Boolean = false,
+    ): Boolean {
         torveVerboseLog { "AUTH_BOOTSTRAP restore_session_start" }
         val restored = authClient.restoreSession()
         if (!restored) {
@@ -186,7 +240,10 @@ class AccountSessionCoordinator(
         }
         // On cold start with existing session: lightweight bootstrap only.
         // Playlists/channels are already in local SQLite from the last session.
-        val result = bootstrap(forceSettingsRefresh = false)
+        val result = bootstrap(
+            forceSettingsRefresh = false,
+            allowLegacyDeviceOnlyJellyfinUpload = promoteLegacyTvJellyfin,
+        )
         torveVerboseLog {
             "AUTH_BOOTSTRAP restore_session_result restored=true isReady=${result.isReady} deviceLimitReached=${result.deviceLimitReached} error=${result.error}"
         }
@@ -201,8 +258,13 @@ class AccountSessionCoordinator(
         return bootstrap(forceSettingsRefresh = true)
     }
 
-    suspend fun onAppForeground(): AccountSessionBootstrapResult {
-        return bootstrap(forceSettingsRefresh = false)
+    suspend fun onAppForeground(
+        promoteLegacyTvJellyfin: Boolean = false,
+    ): AccountSessionBootstrapResult {
+        return bootstrap(
+            forceSettingsRefresh = false,
+            allowLegacyDeviceOnlyJellyfinUpload = promoteLegacyTvJellyfin,
+        )
     }
 
     suspend fun onSettingsOpened(): AccountSessionBootstrapResult {
@@ -217,6 +279,7 @@ class AccountSessionCoordinator(
      */
     suspend fun refreshAccountDataAfterCredentialTransfer(
         initialMessage: String = "Activating imported credentials...",
+        promoteLegacyTvJellyfin: Boolean = false,
     ): AccountSessionBootstrapResult {
         val token = authClient.getValidAccessToken()
             ?: return AccountSessionBootstrapResult(
@@ -230,11 +293,21 @@ class AccountSessionCoordinator(
         _restoreProgress.value = RestoreProgress(
             phase = RestorePhase.RUNNING,
             message = initialMessage,
-            isImporting = true,
+            // Explicit Refresh All is a background reconciliation, not a
+            // destructive import. Keeping this false prevents the global TV
+            // blocker from stealing focus from ARR administration pages.
+            isImporting = false,
         )
 
         return withContext(ioDispatcher) {
             var errors = 0
+            val issues = mutableListOf<String>()
+            fun addIssue(message: String) {
+                issues += message
+                _restoreProgress.update { current ->
+                    current.copy(issues = issues.distinct().take(8))
+                }
+            }
             postTrustSignal(token, "credential_transfer")
 
             _restoreProgress.update { it.copy(message = "Syncing account settings...") }
@@ -242,23 +315,36 @@ class AccountSessionCoordinator(
                 accountSettingsRepository.syncAfterSignIn()
             }.onFailure { error ->
                 errors++
+                addIssue("Account settings could not be synced.")
                 torveVerboseLog { "[AccountRefresh] Account settings FAILED: ${error.message}" }
             }.getOrNull()
+            if (settingsResult?.error != null) {
+                errors++
+                addIssue("Account settings could not be synced.")
+            }
 
             _restoreProgress.update { it.copy(message = "Restoring integrations...") }
             val restoredIntegrations = runCatching {
-                restoreIntegrations(token, forceCredentials = true)
+                restoreIntegrations(
+                    token = token,
+                    forceCredentials = true,
+                    allowLegacyDeviceOnlyJellyfinUpload = promoteLegacyTvJellyfin,
+                )
             }.getOrElse { error ->
                 errors++
+                addIssue("Provider and library connections could not be restored.")
                 torveVerboseLog { "[AccountRefresh] Integration restore FAILED: ${error.message}" }
-                0
+                IntegrationRestoreResult()
             }
+            errors += restoredIntegrations.failures
+            restoredIntegrations.issues.forEach(::addIssue)
 
             _restoreProgress.update { it.copy(message = "Syncing source providers...") }
             runCatching {
                 addonSyncService.syncAfterSignIn()
             }.onFailure { error ->
                 errors++
+                addIssue("Source providers could not be synced.")
                 torveVerboseLog { "[AccountRefresh] Addon sync FAILED: ${DiagnosticsRedactor.redact(error.message)}" }
             }
 
@@ -267,6 +353,7 @@ class AccountSessionCoordinator(
                 syncTraktFromAccountIfConnected()
             }.getOrElse { error ->
                 errors++
+                addIssue("Trakt could not be synced.")
                 torveVerboseLog { "[AccountRefresh] Trakt sync FAILED: ${DiagnosticsRedactor.redact(error.message)}" }
                 false
             }
@@ -276,15 +363,34 @@ class AccountSessionCoordinator(
                 syncPlaylistsFromAccount(token)
             }.getOrElse { error ->
                 errors++
+                addIssue("Channel sources could not be synced.")
                 torveVerboseLog { "[AccountRefresh] Playlist sync FAILED: ${DiagnosticsRedactor.redact(error.message)}" }
                 PlaylistSyncResult()
             }
+            if (playlistSync.failed > 0) {
+                errors += playlistSync.failed
+                addIssue(
+                    "${playlistSync.failed} channel source${if (playlistSync.failed == 1) "" else "s"} could not be synced.",
+                )
+            }
 
-            mediaFavoritesRepository.refresh(force = true)
+            runCatching { mediaFavoritesRepository.refresh(force = true) }
+                .onFailure {
+                    errors++
+                    addIssue("Favorites could not be refreshed.")
+                }
 
             val now = Clock.System.now().toEpochMilliseconds()
             settingsRefreshNotifier.notifyRefresh(now)
             val phase = if (errors > 0) RestorePhase.COMPLETED_WITH_ERRORS else RestorePhase.COMPLETED
+            val issueSummary = issues.distinct().joinToString(" ")
+            val completionError = if (issues.isNotEmpty()) {
+                "Refresh completed with issues: $issueSummary"
+            } else if (errors > 0) {
+                "Refresh completed with $errors unspecified issue${if (errors == 1) "" else "s"}."
+            } else {
+                null
+            }
             _restoreProgress.value = RestoreProgress(
                 phase = phase,
                 message = if (errors > 0) {
@@ -293,19 +399,21 @@ class AccountSessionCoordinator(
                     "Account refresh complete"
                 },
                 errorCount = errors,
-                integrationsRestored = restoredIntegrations,
+                issues = issues.distinct(),
+                integrationsRestored = restoredIntegrations.restored,
                 isImporting = false,
             )
             _state.update {
                 it.copy(
                     isBootstrapping = false,
-                    lastError = if (errors > 0) "Account refresh completed with issues." else null,
+                    lastError = completionError,
                 )
             }
 
             AccountSessionBootstrapResult(
-                isReady = errors == 0 || settingsResult != null || restoredIntegrations > 0 || traktSynced || playlistSync.hasChanges,
-                error = if (errors > 0) "Account refresh completed with issues." else null,
+                isReady = errors == 0 || settingsResult != null || restoredIntegrations.restored > 0 || traktSynced || playlistSync.hasChanges,
+                error = completionError,
+                issues = issues.distinct(),
                 settingsResult = settingsResult,
             )
         }
@@ -346,6 +454,7 @@ class AccountSessionCoordinator(
         withContext(ioDispatcher) {
             try {
                 torveVerboseLog { "[SignOut] Local account cleanup started reason=$reason" }
+                automationAccountSyncService?.clearLocalAccountInstances()
                 integrationSecretStore.clearAllSecrets()
                 torveVerboseLog { "[SignOut] Encrypted secret store cleared" }
                 runCatching { secureStorage.removeByPrefix("xtream_pwd_") }
@@ -569,6 +678,7 @@ class AccountSessionCoordinator(
     private suspend fun bootstrap(
         forceSettingsRefresh: Boolean,
         forceStaleRefresh: Boolean = false,
+        allowLegacyDeviceOnlyJellyfinUpload: Boolean = false,
     ): AccountSessionBootstrapResult {
         val token = authClient.getValidAccessToken()
             ?: return AccountSessionBootstrapResult(isReady = false)
@@ -625,8 +735,12 @@ class AccountSessionCoordinator(
                         accountSettingsRepository.refreshIfStale(force = true)
                     }.getOrNull()
                     val restoredIntegrations = runCatching {
-                        restoreIntegrations(token, forceCredentials = true)
-                    }.getOrDefault(0)
+                        restoreIntegrations(
+                            token = token,
+                            forceCredentials = true,
+                            allowLegacyDeviceOnlyJellyfinUpload = allowLegacyDeviceOnlyJellyfinUpload,
+                        )
+                    }.getOrDefault(IntegrationRestoreResult())
                     val traktSynced = runCatching {
                         syncTraktFromAccountIfConnected()
                     }.getOrElse {
@@ -639,7 +753,7 @@ class AccountSessionCoordinator(
                         torveVerboseLog { "[PlaylistSync] Foreground force refresh FAILED: ${DiagnosticsRedactor.redact(it.message)}" }
                         PlaylistSyncResult()
                     }
-                    if (settingsResult?.appliedChanges == true || restoredIntegrations > 0 || traktSynced || playlistSync.hasChanges) {
+                    if (settingsResult?.appliedChanges == true || restoredIntegrations.restored > 0 || traktSynced || playlistSync.hasChanges) {
                         settingsRefreshNotifier.notifyRefresh(Clock.System.now().toEpochMilliseconds())
                     }
                 }
@@ -652,10 +766,11 @@ class AccountSessionCoordinator(
                         restoreIntegrations(
                             token = token,
                             forceCredentials = settingsResult?.appliedChanges == true,
+                            allowLegacyDeviceOnlyJellyfinUpload = allowLegacyDeviceOnlyJellyfinUpload,
                         )
-                    }.getOrDefault(0)
+                    }.getOrDefault(IntegrationRestoreResult())
                     val traktSynced = runCatching {
-                        if (restoredIntegrations > 0) syncTraktFromAccountIfConnected() else false
+                        if (restoredIntegrations.restored > 0) syncTraktFromAccountIfConnected() else false
                     }.getOrElse {
                         torveVerboseLog { "[TraktSync] Foreground refresh FAILED: ${DiagnosticsRedactor.redact(it.message)}" }
                         false
@@ -666,7 +781,7 @@ class AccountSessionCoordinator(
                         torveVerboseLog { "[PlaylistSync] Foreground refresh FAILED: ${DiagnosticsRedactor.redact(it.message)}" }
                         PlaylistSyncResult()
                     }
-                    if (settingsResult?.appliedChanges == true || restoredIntegrations > 0 || traktSynced || playlistSync.hasChanges) {
+                    if (settingsResult?.appliedChanges == true || restoredIntegrations.restored > 0 || traktSynced || playlistSync.hasChanges) {
                         settingsRefreshNotifier.notifyRefresh(Clock.System.now().toEpochMilliseconds())
                     }
                 }
@@ -758,6 +873,7 @@ class AccountSessionCoordinator(
             )
             torveVerboseLog { "[Restore] Local data exists (${localPlaylists.size} playlists) — skipping heavy restore" }
             var errors = 0
+            _restoreProgress.update { it.copy(isImporting = false) }
             val settingsResult = runCatching { accountSettingsRepository.syncAfterSignIn() }.getOrElse {
                 errors++
                 recordRestoreIssue("Account settings could not be synced.")
@@ -768,8 +884,10 @@ class AccountSessionCoordinator(
             }.getOrElse {
                 errors++
                 recordRestoreIssue("Provider credentials could not be restored.")
-                0
+                IntegrationRestoreResult()
             }
+            errors += restoredIntegrations.failures
+            restoredIntegrations.issues.forEach(::recordRestoreIssue)
             val traktSynced = runCatching {
                 syncTraktFromAccountIfConnected()
             }.getOrElse {
@@ -787,7 +905,7 @@ class AccountSessionCoordinator(
                 PlaylistSyncResult()
             }
             errors += playlistSync.failed
-            if (settingsResult?.appliedChanges == true || restoredIntegrations > 0 || traktSynced || playlistSync.hasChanges) {
+            if (settingsResult?.appliedChanges == true || restoredIntegrations.restored > 0 || traktSynced || playlistSync.hasChanges) {
                 settingsRefreshNotifier.notifyRefresh(Clock.System.now().toEpochMilliseconds())
             }
             _restoreProgress.value = RestoreProgress(
@@ -797,7 +915,7 @@ class AccountSessionCoordinator(
                 } else {
                     "Account sync complete"
                 },
-                integrationsRestored = restoredIntegrations,
+                integrationsRestored = restoredIntegrations.restored,
                 errorCount = errors,
                 issues = _restoreProgress.value.issues,
                 isImporting = false,
@@ -833,8 +951,10 @@ class AccountSessionCoordinator(
             errors++
             recordRestoreIssue("Provider credentials could not be restored.")
             torveVerboseLog { "[Restore] Integrations restore FAILED: ${it.message}" }
-            0
+            IntegrationRestoreResult()
         }
+        errors += integrationsRestored.failures
+        integrationsRestored.issues.forEach(::recordRestoreIssue)
         runCatching { syncTraktFromAccountIfConnected() }.onFailure {
             errors++
             recordRestoreIssue("Trakt data could not be synced.")
@@ -867,7 +987,7 @@ class AccountSessionCoordinator(
         _restoreProgress.value = RestoreProgress(
             phase = phase,
             message = summary,
-            integrationsRestored = integrationsRestored,
+            integrationsRestored = integrationsRestored.restored,
             totalPlaylists = playlistsRestored + playlistsFailed,
             restoredPlaylists = playlistsRestored,
             errorCount = errors,
@@ -879,19 +999,116 @@ class AccountSessionCoordinator(
 
     // ── Integration restore ─────────────────────────────────────
 
-    /** Returns number of integrations restored. */
+    /** Restores integrations independently and reports every affected connection. */
     private suspend fun restoreIntegrations(
         token: String,
         forceCredentials: Boolean = false,
-    ): Int {
-        val integrations = withAccountApiAuthRetry(token) { freshToken ->
+        allowLegacyDeviceOnlyJellyfinUpload: Boolean = false,
+    ): IntegrationRestoreResult {
+        var restored = 0
+        var failures = 0
+        val issues = mutableListOf<String>()
+        var integrations = withAccountApiAuthRetry(token) { freshToken ->
             accountSettingsApi.getIntegrations(freshToken)
         }
+        val uploadedLegacyAutomation = runCatching {
+            automationAccountSyncService?.pushLocalIfRemoteMissing(integrations) == true
+        }.onFailure { error ->
+            torveVerboseLog {
+                "[IntegrationRestore] Legacy *Arr account upload FAILED: ${DiagnosticsRedactor.redact(error.message)}"
+            }
+        }.getOrDefault(false)
+        if (uploadedLegacyAutomation) {
+            integrations = withAccountApiAuthRetry(token) { freshToken ->
+                accountSettingsApi.getIntegrations(freshToken)
+            }
+            torveVerboseLog { "[IntegrationRestore] Existing device-local *Arr stack uploaded to account" }
+        }
+        when (
+            pushLocalJellyfinIfRemoteMissing(
+                token = token,
+                integrations = integrations,
+                allowDeviceOnly = allowLegacyDeviceOnlyJellyfinUpload,
+            )
+        ) {
+            LocalJellyfinUploadResult.UPLOADED -> {
+                integrations = withAccountApiAuthRetry(token) { freshToken ->
+                    accountSettingsApi.getIntegrations(freshToken)
+                }
+                torveVerboseLog {
+                    "[IntegrationRestore] Existing device-local Jellyfin connection uploaded to account"
+                }
+            }
+            LocalJellyfinUploadResult.FAILED -> {
+                failures++
+                issues += "Jellyfin: existing device connection could not be saved to the Torve account"
+            }
+            LocalJellyfinUploadResult.PARTIAL_LOCAL_SETUP -> {
+                failures++
+                issues += "Jellyfin: this device has only part of the saved connection; open Jellyfin and save the connection again"
+            }
+            LocalJellyfinUploadResult.NOT_NEEDED -> Unit
+        }
         torveVerboseLog { "[IntegrationRestore] Found ${integrations.size} integrations on backend" }
-        var restored = 0
+        val hasAutomationBundle = integrations.any {
+            it.integrationType == com.torve.data.integrations.AutomationAccountSyncService.INTEGRATION_TYPE
+        }
         for (integration in integrations) {
+            val integrationLabel = integration.displayIdentifier.orEmpty()
+                .ifBlank { integration.integrationType.lowercase().replace(Char(95), Char(32)) }
+            if (integration.integrationType == com.torve.data.integrations.AutomationAccountSyncService.INTEGRATION_TYPE) {
+                val service = automationAccountSyncService
+                if (service == null) {
+                    failures++
+                    issues += connectionRestoreIssue(
+                        integrationLabel,
+                        ConnectionRestoreFailure.UNSUPPORTED,
+                    )
+                    continue
+                }
+                val credentials = try {
+                    withAccountApiAuthRetry(token) { freshToken ->
+                        accountSettingsApi.getIntegrationCredentials(
+                            accessToken = freshToken,
+                            integrationType = integration.integrationType,
+                        )
+                    }
+                } catch (failure: Throwable) {
+                    failures++
+                    issues += connectionRestoreIssue(
+                        integrationLabel,
+                        ConnectionRestoreFailure.CREDENTIALS_UNAVAILABLE,
+                    )
+                    continue
+                }
+                if (credentials.isNullOrEmpty()) {
+                    failures++
+                    issues += connectionRestoreIssue(
+                        integrationLabel,
+                        ConnectionRestoreFailure.CREDENTIALS_EMPTY,
+                    )
+                    continue
+                }
+                val automationResult = service.restoreSafely(integration, credentials)
+                restored += automationResult.restored
+                if (automationResult.succeeded.not()) {
+                    failures++
+                    issues += connectionRestoreIssue(
+                        integrationLabel,
+                        automationResult.failure.name,
+                    )
+                }
+                continue
+            }
             val secretKey = integrationSecretKeyForRestore(integration.integrationType)
             if (secretKey == null) {
+                if (integration.storageMode == IntegrationStorageMode.ACCOUNT.name.lowercase()) {
+                    failures++
+                    issues += connectionRestoreIssue(
+                        integrationLabel,
+                        ConnectionRestoreFailure.UNSUPPORTED,
+                    )
+                }
                 torveVerboseLog { "[IntegrationRestore] Skipping unknown type: ${integration.integrationType}" }
                 continue
             }
@@ -955,10 +1172,22 @@ class AccountSessionCoordinator(
                     continue
                 }
                 torveVerboseLog { "[IntegrationRestore] Fetching credentials for ${integration.integrationType}..." }
-                val credsMap = accountSettingsApi.getIntegrationCredentials(
-                    accessToken = token,
-                    integrationType = integration.integrationType,
-                )
+                val credsMap = try {
+                    withAccountApiAuthRetry(token) { freshToken ->
+                        accountSettingsApi.getIntegrationCredentials(
+                            accessToken = freshToken,
+                            integrationType = integration.integrationType,
+                        )
+                    }
+                } catch (failure: Throwable) {
+                    failures++
+                    issues += connectionRestoreIssue(
+                        integrationLabel,
+                        ConnectionRestoreFailure.CREDENTIALS_UNAVAILABLE,
+                    )
+                    continue
+                }
+                val restoredBeforeCredential = restored
                 if (credsMap != null && credsMap.isNotEmpty()) {
                     if (secretKey == IntegrationSecretKey.TRAKT_TOKENS) {
                         val accessTok = credsMap["access_token"]
@@ -970,14 +1199,17 @@ class AccountSessionCoordinator(
                             ?: credsMap["refreshToken"]
                             ?: credsMap["refresh"]
                             ?: ""
-                        if (accessTok.isNotBlank()) {
+                        val normalizedAccessTok = accessTok.ifBlank {
+                            credsMap[legacyTraktOauthKey].orEmpty()
+                        }
+                        if (normalizedAccessTok.isNotBlank()) {
                             val traktTokenStore = com.torve.data.trakt.auth.TraktTokenStore(
                                 integrationSecretStore,
                                 kotlinx.serialization.json.Json { ignoreUnknownKeys = true },
                             )
                             traktTokenStore.write(
                                 com.torve.data.trakt.TraktTokens(
-                                    accessToken = accessTok,
+                                    accessToken = normalizedAccessTok,
                                     refreshToken = refreshTok,
                                     expiresIn = 0,
                                     createdAt = 0L,
@@ -1007,9 +1239,48 @@ class AccountSessionCoordinator(
                                 "[IntegrationRestore] ${integration.integrationType} â†’ restored OK (api_key=${apiKey.isNotBlank()} refresh=${refreshToken.isNotBlank()} client=${clientId.isNotBlank()} secret=${clientSecret.isNotBlank()})"
                             }
                         }
+                    } else if (secretKey == IntegrationSecretKey.JELLYFIN_API_KEY) {
+                        val connection = restoreJellyfinAccountConnection(
+                            credentials = credsMap,
+                            config = integration.config,
+                        )
+                        if (connection == null) {
+                            failures++
+                            issues += connectionRestoreIssue(
+                                integrationLabel,
+                                ConnectionRestoreFailure.CONFIGURATION_INCOMPLETE,
+                            )
+                            torveVerboseLog {
+                                "[IntegrationRestore] JELLYFIN_API_KEY -> incomplete account payload"
+                            }
+                            continue
+                        }
+                        integrationSecretStore.put(
+                            IntegrationSecretKey.JELLYFIN_API_KEY,
+                            connection.apiKey,
+                        )
+                        prefsRepo.setString(
+                            SettingsViewModel.KEY_JELLYFIN_SERVER_URL,
+                            connection.serverUrl,
+                        )
+                        val selectedUserKey =
+                            com.torve.data.integrations.JellyfinLibraryOverlayService.KEY_SELECTED_USER_ID
+                        if (connection.selectedUserId == null) {
+                            prefsRepo.remove(selectedUserKey)
+                        } else {
+                            prefsRepo.setString(selectedUserKey, connection.selectedUserId)
+                        }
+                        restored++
+                        torveVerboseLog {
+                            "[IntegrationRestore] JELLYFIN_API_KEY -> restored complete connection"
+                        }
+                        continue
                     } else if (secretKey == IntegrationSecretKey.SEERR_API_KEY) {
                         val apiKey = credsMap["api_key"].orEmpty()
-                        val serverUrl = credsMap["server_url"].orEmpty().trimEnd('/')
+                        val serverUrl = (
+                            credsMap["server_url"]
+                                ?: integration.config["server_url"]
+                            ).orEmpty().trimEnd('/')
                         if (apiKey.isNotBlank()) {
                             integrationSecretStore.put(IntegrationSecretKey.SEERR_API_KEY, apiKey)
                             if (serverUrl.startsWith("http://") || serverUrl.startsWith("https://")) {
@@ -1055,9 +1326,34 @@ class AccountSessionCoordinator(
                             } else {
                                 integrationSecretStore.put(secretKey, value)
                             }
+                            val legacyServiceType = legacyAutomationServiceType(secretKey)
+                            if (legacyServiceType != null && !hasAutomationBundle) {
+                                val automationResult = automationAccountSyncService?.restoreLegacyConnection(
+                                    serviceType = legacyServiceType,
+                                    metadata = integration,
+                                    apiKey = value,
+                                    credentialValues = credsMap.values,
+                                )
+                                if (automationResult?.succeeded != true) {
+                                    failures++
+                                    issues += connectionRestoreIssue(
+                                        integrationLabel,
+                                        automationResult?.failure?.name
+                                            ?: ConnectionRestoreFailure.CREDENTIALS_UNAVAILABLE.name,
+                                    )
+                                }
+                            }
                             when (secretKey) {
                                 IntegrationSecretKey.OMDB_API_KEY -> prefsRepo.setString(SettingsViewModel.KEY_OMDB_API_KEY, value)
                                 IntegrationSecretKey.MDBLIST_API_KEY -> prefsRepo.setString(SettingsViewModel.KEY_MDBLIST_API_KEY, value)
+                                IntegrationSecretKey.JELLYFIN_API_KEY -> integration.config["server_url"]
+                                    ?.takeIf { it.startsWith("http://") || it.startsWith("https://") }
+                                    ?.trimEnd('/')
+                                    ?.let { prefsRepo.setString(SettingsViewModel.KEY_JELLYFIN_SERVER_URL, it) }
+                                IntegrationSecretKey.PLEX_ACCESS_TOKEN -> integration.config["server_url"]
+                                    ?.takeIf { it.startsWith("http://") || it.startsWith("https://") }
+                                    ?.trimEnd('/')
+                                    ?.let { prefsRepo.setString(SettingsViewModel.KEY_PLEX_SERVER_URL, it) }
                                 else -> Unit
                             }
                             restored++
@@ -1067,12 +1363,127 @@ class AccountSessionCoordinator(
                 } else {
                     torveVerboseLog { "[IntegrationRestore] ${integration.integrationType} → credentials empty" }
                 }
+                if (restored == restoredBeforeCredential) {
+                    failures++
+                    issues += connectionRestoreIssue(
+                        integrationLabel,
+                        ConnectionRestoreFailure.CREDENTIALS_EMPTY,
+                    )
+                }
             }
         }
         integrationSecretStore.syncTorBoxCredentialPair()
         restored += ensureUnifiedTraktTokensAfterRestore()
         torveVerboseLog { "[IntegrationRestore] Done: $restored/${integrations.size}" }
-        return restored
+        return IntegrationRestoreResult(
+            restored = restored,
+            failures = failures,
+            issues = issues.distinct(),
+        )
+    }
+
+    /**
+     * Repairs the historical TV bug where Jellyfin was complete locally but
+     * Refresh all had no backend row to restore on another device.
+     *
+     * Device-only credentials are promoted only when the TV caller explicitly
+     * enables the legacy migration. Mobile/desktop device-only choices remain
+     * private and are never uploaded by background restore.
+     */
+    private suspend fun pushLocalJellyfinIfRemoteMissing(
+        token: String,
+        integrations: List<com.torve.data.account.IntegrationMetadataDto>,
+        allowDeviceOnly: Boolean,
+    ): LocalJellyfinUploadResult {
+        if (
+            integrations.any {
+                integrationSecretKeyForRestore(it.integrationType) ==
+                    IntegrationSecretKey.JELLYFIN_API_KEY
+            }
+        ) {
+            return LocalJellyfinUploadResult.NOT_NEEDED
+        }
+        val storageMode =
+            integrationSecretStore.getStorageMode(IntegrationSecretKey.JELLYFIN_API_KEY)
+        if (storageMode != IntegrationStorageMode.ACCOUNT && !allowDeviceOnly) {
+            return LocalJellyfinUploadResult.NOT_NEEDED
+        }
+        // Jellyfin predates account-scoped preferences and the typed secret store.
+        // Recover every historical location before deciding that this TV has no
+        // connection to promote. This is intentionally limited to the explicit
+        // TV migration path above so device-only desktop/mobile credentials stay local.
+        val legacyDatabaseServerUrl = database.torveQueries.getPreference(
+            userId = "",
+            key = SettingsViewModel.KEY_JELLYFIN_SERVER_URL,
+        ).executeAsOneOrNull()
+        val legacyDatabaseApiKey = database.torveQueries.getPreference(
+            userId = "",
+            key = LEGACY_JELLYFIN_API_KEY,
+        ).executeAsOneOrNull()
+        val serverUrl = prefsRepo.getString(SettingsViewModel.KEY_JELLYFIN_SERVER_URL)
+            ?.takeIf { it.isNotBlank() }
+            ?: legacyDatabaseServerUrl?.takeIf { it.isNotBlank() }
+            ?: secureStorage.getString(SettingsViewModel.KEY_JELLYFIN_SERVER_URL)
+                ?.takeIf { it.isNotBlank() }
+        val apiKey = integrationSecretStore.get(IntegrationSecretKey.JELLYFIN_API_KEY)
+            ?.takeIf { it.isNotBlank() }
+            ?: prefsRepo.getString(LEGACY_JELLYFIN_API_KEY)?.takeIf { it.isNotBlank() }
+            ?: legacyDatabaseApiKey?.takeIf { it.isNotBlank() }
+            ?: secureStorage.getString(LEGACY_JELLYFIN_API_KEY)?.takeIf { it.isNotBlank() }
+
+        if (serverUrl.isNullOrBlank() && apiKey.isNullOrBlank()) {
+            return LocalJellyfinUploadResult.NOT_NEEDED
+        }
+        if (serverUrl.isNullOrBlank() || apiKey.isNullOrBlank()) {
+            torveVerboseLog {
+                "[IntegrationRestore] Existing device-local Jellyfin connection is incomplete"
+            }
+            return LocalJellyfinUploadResult.PARTIAL_LOCAL_SETUP
+        }
+
+        val payload = buildJellyfinAccountPayload(
+            serverUrl = serverUrl,
+            apiKey = apiKey,
+            selectedUserId = prefsRepo.getString(
+                com.torve.data.integrations.JellyfinLibraryOverlayService.KEY_SELECTED_USER_ID,
+            ),
+        ) ?: return LocalJellyfinUploadResult.PARTIAL_LOCAL_SETUP
+
+        val saved = accountSettingsApi.saveIntegration(
+            accessToken = token,
+            integrationType = "JELLYFIN_API_KEY",
+            request = com.torve.data.account.SaveIntegrationRequest(
+                integrationType = "JELLYFIN_API_KEY",
+                storageMode = "account",
+                credentials = payload.credentials,
+                displayIdentifier = "Jellyfin",
+                config = payload.config,
+            ),
+        )
+        if (!saved) {
+            torveVerboseLog {
+                "[IntegrationRestore] Existing device-local Jellyfin account upload FAILED"
+            }
+            return LocalJellyfinUploadResult.FAILED
+        }
+        prefsRepo.setString(SettingsViewModel.KEY_JELLYFIN_SERVER_URL, serverUrl)
+        integrationSecretStore.put(IntegrationSecretKey.JELLYFIN_API_KEY, apiKey)
+        integrationSecretStore.setStorageMode(
+            IntegrationSecretKey.JELLYFIN_API_KEY,
+            IntegrationStorageMode.ACCOUNT,
+        )
+        prefsRepo.remove(LEGACY_JELLYFIN_API_KEY)
+        secureStorage.remove(LEGACY_JELLYFIN_API_KEY)
+        secureStorage.remove(SettingsViewModel.KEY_JELLYFIN_SERVER_URL)
+        database.torveQueries.deletePreference(
+            userId = "",
+            key = LEGACY_JELLYFIN_API_KEY,
+        )
+        database.torveQueries.deletePreference(
+            userId = "",
+            key = SettingsViewModel.KEY_JELLYFIN_SERVER_URL,
+        )
+        return LocalJellyfinUploadResult.UPLOADED
     }
 
     private suspend fun ensureUnifiedTraktTokensAfterRestore(): Int {
@@ -1127,7 +1538,9 @@ class AccountSessionCoordinator(
             }
             try {
                 if (xtreamPlaylist) {
-                    val creds = accountSettingsApi.getPlaylistCredentials(token, pid)
+                    val creds = withAccountApiAuthRetry(token) { freshToken ->
+                        accountSettingsApi.getPlaylistCredentials(freshToken, pid)
+                    }
                     val resolvedUsername = creds?.username?.takeIf { it.isNotBlank() } ?: remote.username.orEmpty()
                     val password = creds?.password?.takeIf { it.isNotBlank() }.orEmpty()
                     val server = remote.server?.trim().orEmpty()
@@ -1297,7 +1710,9 @@ class AccountSessionCoordinator(
         local: ChannelPlaylist?,
         playlistId: String,
     ): Boolean {
-        val creds = accountSettingsApi.getPlaylistCredentials(token, playlistId)
+        val creds = withAccountApiAuthRetry(token) { freshToken ->
+            accountSettingsApi.getPlaylistCredentials(freshToken, playlistId)
+        }
         val server = remote.server.normalizedServerValue()
             ?: throw IllegalStateException("missing server")
         val username = creds?.username.normalizedRemoteValue()
@@ -1334,8 +1749,9 @@ class AccountSessionCoordinator(
         token: String,
         block: suspend (String) -> T,
     ): T {
+        val currentToken = authClient.getValidAccessToken() ?: token
         return try {
-            block(token)
+            block(currentToken)
         } catch (e: AccountApiException) {
             if (e.statusCode != 401) throw e
             val refreshed = authClient.refreshTokens()

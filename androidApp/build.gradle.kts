@@ -144,6 +144,13 @@ android {
     }
 
     buildTypes {
+        debug {
+            // Keep instrumentation/dev builds beside the signed app. This avoids
+            // signature-conflict installs and, more importantly, prevents a test
+            // run from requiring removal of a user's saved production setup.
+            applicationIdSuffix = ".debug"
+            versionNameSuffix = "-debug"
+        }
         release {
             isMinifyEnabled = true
             isShrinkResources = true
@@ -162,6 +169,7 @@ android {
     }
 
     compileOptions {
+        isCoreLibraryDesugaringEnabled = true
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
@@ -202,7 +210,7 @@ val expectedMpvRuntimeSha256 = mapOf(
     "armeabi-v7a/libswscale.so" to "6f1258c48a8912fd53faaf2d5fa9ac0de64a127d8c6f45e718aa6087b91b56a4",
 )
 
-fun registerGooglePlayNativeSymbolsTask(variantName: String) {
+fun registerNativeSymbolsTask(variantName: String) {
     val capitalizedVariant = variantName.replaceFirstChar { it.uppercaseChar() }
     tasks.register<Zip>("package${capitalizedVariant}NativeSymbols") {
         group = "distribution"
@@ -257,8 +265,9 @@ fun registerGooglePlayNativeSymbolsTask(variantName: String) {
     }
 }
 
-registerGooglePlayNativeSymbolsTask("googleMobileRelease")
-registerGooglePlayNativeSymbolsTask("googleTvRelease")
+registerNativeSymbolsTask("googleMobileRelease")
+registerNativeSymbolsTask("googleTvRelease")
+registerNativeSymbolsTask("amazonTvRelease")
 
 tasks.register("packageGooglePlayNativeSymbols") {
     group = "distribution"
@@ -266,6 +275,16 @@ tasks.register("packageGooglePlayNativeSymbols") {
     dependsOn(
         "packageGoogleMobileReleaseNativeSymbols",
         "packageGoogleTvReleaseNativeSymbols",
+    )
+}
+
+tasks.register("packageReleaseNativeSymbols") {
+    group = "distribution"
+    description = "Packages matching native debug symbols for Google Play and Amazon TV releases."
+    dependsOn(
+        "packageGoogleMobileReleaseNativeSymbols",
+        "packageGoogleTvReleaseNativeSymbols",
+        "packageAmazonTvReleaseNativeSymbols",
     )
 }
 
@@ -279,6 +298,7 @@ kotlin {
 
 dependencies {
     implementation(project(":shared"))
+    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.5")
 
     // Compose
     implementation(platform(libs.compose.bom))

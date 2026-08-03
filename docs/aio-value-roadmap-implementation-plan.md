@@ -24,6 +24,15 @@ Turn Torve from a feature-rich enthusiast app into a credential-only AIO media h
 
 ## Implementation Status Update - 2026-04-30
 
+### Incremental implementation update - 2026-07-28
+
+- Connection readiness now has a shared status model and TV/mobile/desktop control surfaces; account sync includes non-secret playback, quality, appearance, and intelligent next-episode preferences alongside encrypted integration descriptors.
+- Permanent-library requests now expose Requested → Downloading → Processing → Available states on TV, mobile, and desktop, with availability notices and direct Jellyfin playback routing.
+- Playback startup telemetry now evaluates p50/p95/start-success targets and feeds existing host reliability ranking and automatic source fallback.
+- Android TV has provider-backed pause/seek/go-live controls when a channel exposes a seekable live window. Conservative two-channel multiview is enabled only on non-low-RAM capable TVs.
+- EPG series passes now expand into de-duplicated, conflict-checked scheduled recordings. Stream capture remains desktop-only until an Android recording service and storage workflow are implemented.
+- A repeatable two-hour Android TV soak harness and focused Library navigation policy tests are included; real-device soak evidence is still a release gate, not a claimed result.
+
 This roadmap is no longer in the "strong beta foundation" state from 2026-04-29. Prompts 5 through 12, including cleanup passes 7B, 9B, 9C, 10B, 10C, 11B, and 11C, have moved most core roadmap items from partial/foundation into implemented beta-candidate territory.
 
 The harsh status is still not "100% done." After Prompt 12B, the current state is **public beta GO for desktop, Android mobile, and Android TV**, **not stable**, and **not iOS-ready from this Windows host**. The Prompt 6-12B work is checkpointed and pushed: `HEAD = origin/master = 79844ed` (`Checkpoint Prompt 6-12B public beta release work`). `git status --short` is clean aside from unrelated pytest cache permission warnings.
@@ -39,7 +48,7 @@ The harsh status is still not "100% done." After Prompt 12B, the current state i
 | Provider health and recovery | Implemented for beta | Desktop, Android mobile, and TV provider-health/recovery rows are wired; Panda state freshness and refresh-on-save are fixed. Remaining non-blockers: Android playback-health bridge parity and cross-device non-sensitive health summary sync. |
 | Source-aware AI search | Implemented on shared + desktop, parity gaps remain | Availability kinds now include debrid cache, addon, Usenet ready, IPTV live, watch history, plus privacy sanitizer and desktop badges. Android/iOS search UI parity and first-run performance optimization are follow-ups. |
 | Cross-device downloads and LAN library | Implemented for Android/TV beta path, stable smoke pending | Backend registry, LAN publish/discovery, stream-token endpoint, authenticated headers, ExoPlayer header injection, TV/mobile detail badge, Wi-Fi/cellular guard, and desktop settings controls exist. Remaining gaps: MPV/iOS header support, title-only matching, stale-token retry, and real two-device LAN smoke. |
-| IPTV DVR-grade features | Implemented for one-off desktop recording | Recording scheduler, conflict detection, file-backed repository, desktop recording service, My Recordings UI, EPG correction UI, and correction application to rendered guide state are landed. Series-pass DVR, mobile/iOS surfaces, immediate guide rebuild on correction edit, and live-provider smoke remain follow-ups. |
+| IPTV DVR-grade features | Series scheduling implemented; capture remains desktop-only | Recording scheduler, series-pass EPG resolver, de-duplication, conflict detection, file-backed desktop recording service, My Recordings UI, provider-backed live-window controls, safe two-channel TV multiview, and EPG correction are implemented. Android/iOS capture services and live-provider soak remain follow-ups. |
 | TV-first UX | Implemented for Android TV beta after 11C | TV Home renders outcome rails, provider banner, On Now/Live TV, Downloads on Desktop, and direct one-OK playback. TV details has a D-pad source picker and LAN header handoff. Series next-episode source picking remains a follow-up. |
 | Public release hardening | Public beta code GO, stable blocked | Backend `User.is_verified` regression fixed, pairing schema drift fixed, stale-device invariant test corrected, backend is now 110/110, account deletion/export landed, legal links centralized, telemetry redaction landed, LAN `auth_secret` wrapping added with prod gate. Stable still needs web delete-account mirror, macOS/iOS verification, Windows clean-VM smoke, and prod wrap-key setup. |
 
@@ -73,7 +82,7 @@ These block stable release and, where noted, block public beta artifact cutting:
 
 - Native WinSparkle/Sparkle updater, delta updates, auto-relaunch, and rollback automation.
 - Runtime release-channel selector in Settings; channel is currently build/feed controlled.
-- Series-pass DVR and next-episode source picker parity.
+- Android/iOS recording capture services, series-pass rule-creation UI parity, and next-episode source picker parity.
 - MPV and iOS LAN-header playback support.
 - LAN manifest matching by TMDB/imdb id instead of title-only.
 - Playlist `password_enc` Fernet wrapping to match LAN `auth_secret`.

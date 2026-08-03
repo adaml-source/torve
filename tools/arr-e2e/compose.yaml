@@ -71,6 +71,20 @@ services:
         condition: service_completed_successfully
     restart: unless-stopped
 
+  sabnzbd:
+    image: lscr.io/linuxserver/sabnzbd:latest
+    environment:
+      PUID: "1000"
+      PGID: "1000"
+      TZ: Europe/Berlin
+    volumes:
+      - ./state/sabnzbd:/config
+      - ./state/downloads:/downloads
+      - ./state/usenet-incomplete:/incomplete-downloads
+    ports:
+      - "18082:8080"
+    restart: unless-stopped
+
   sonarr:
     image: lscr.io/linuxserver/sonarr:latest
     environment: &linuxserver_environment
@@ -94,6 +108,20 @@ services:
       - ./state/downloads:/downloads
     ports:
       - "17878:7878"
+    restart: unless-stopped
+
+  seerr:
+    image: ghcr.io/seerr-team/seerr:latest
+    environment:
+      TZ: Europe/Berlin
+      LOG_LEVEL: info
+    volumes:
+      - ./state/seerr:/app/config
+    ports:
+      - "15055:5055"
+    depends_on:
+      - sonarr
+      - radarr
     restart: unless-stopped
 
   prowlarr:
@@ -177,8 +205,10 @@ services:
       - fixture
       - qbit
       - qbit-seed
+      - sabnzbd
       - sonarr
       - radarr
+      - seerr
       - prowlarr
       - bazarr
       - tdarr

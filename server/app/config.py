@@ -84,6 +84,14 @@ class Settings(BaseSettings):
     SENTRY_TRACES_SAMPLE_RATE: float = 0.0    # 0.0 = errors only, no perf
     SENTRY_RELEASE: str = ""                  # optional release tag
 
+    # Server-owned rating providers. These keys never ship to clients.
+    # MDBList is the primary TMDB-id lookup; OMDb fills IMDb/RT/Metacritic
+    # when an IMDb id is already known.
+    MDBLIST_API_KEY: str = ""
+    OMDB_API_KEY: str = ""
+    RATINGS_CACHE_TTL_DAYS: int = 30
+    RATINGS_PROVIDER_TIMEOUT_SECONDS: float = 3.5
+
     # NzbDAV upstream streaming integration
     NZBDAV_ALLOW_PRIVATE_HOSTS: bool = False
     NZBDAV_HANDOFF_SECRET: str = ""          # auto-generated if empty

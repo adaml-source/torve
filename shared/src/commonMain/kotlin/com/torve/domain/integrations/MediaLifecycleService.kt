@@ -41,6 +41,14 @@ data class MediaLifecycleStatus(
     val canRetry: Boolean
         get() = requestId != null && state == MediaLifecycleState.FAILED
 
+    /** Removes the Seerr request record without deleting an acquired media file. */
+    val canDeleteRequest: Boolean
+        get() = requestId != null && state !in setOf(
+            MediaLifecycleState.UNCONFIGURED,
+            MediaLifecycleState.NOT_REQUESTED,
+            MediaLifecycleState.DELETED,
+        )
+
     val isInProgress: Boolean
         get() = state in setOf(
             MediaLifecycleState.PENDING_APPROVAL,
@@ -55,6 +63,18 @@ data class MediaLifecycleRequest(
     val mediaType: MediaType,
     val seasons: List<Int> = emptyList(),
     val is4k: Boolean = false,
+)
+
+/** Rich request-list entry used by the consumer Library experience. */
+data class MediaLifecycleEntry(
+    val status: MediaLifecycleStatus,
+    val title: String,
+    val year: Int? = null,
+    val overview: String? = null,
+    val posterUrl: String? = null,
+    val backdropUrl: String? = null,
+    val rating: Double? = null,
+    val tvdbId: Int? = null,
 )
 
 /**
@@ -72,4 +92,13 @@ interface MediaLifecycleService {
     ): MediaLifecycleStatus
     suspend fun request(request: MediaLifecycleRequest): MediaLifecycleStatus
     suspend fun retry(requestId: Int): MediaLifecycleStatus
+
+    /**
+     * Deletes the request from the request service. Implementations must not
+     * interpret this as permission to delete already acquired media files.
+     */
+    suspend fun deleteRequest(requestId: Int): Boolean = false
+
+    /** Safe default for request services which only support per-title lookup. */
+    suspend fun listRecent(limit: Int = 50): List<MediaLifecycleEntry> = emptyList()
 }

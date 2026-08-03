@@ -4,6 +4,10 @@ import com.torve.data.mdblist.MdbListApi
 import com.torve.data.mdblist.RatingsEnricher
 import com.torve.domain.integrations.IntegrationSecretKey
 import com.torve.domain.integrations.IntegrationSecretStore
+import com.torve.domain.integrations.MediaLifecycleRequest
+import com.torve.domain.integrations.MediaLifecycleService
+import com.torve.domain.integrations.MediaLifecycleState
+import com.torve.domain.integrations.MediaLifecycleStatus
 import com.torve.domain.model.MediaItem
 import com.torve.domain.model.MediaType
 import com.torve.domain.model.Season
@@ -31,12 +35,17 @@ data class DesktopSearchDetailUiState(
     val selectedSeason: Season? = null,
     val selectedEpisodeNumber: Int? = null,
     val isLoadingSeason: Boolean = false,
+    val mediaLifecycleStatus: MediaLifecycleStatus? = null,
+    val isLoadingMediaLifecycle: Boolean = false,
+    val mediaLifecycleMessage: String? = null,
+    val mediaLifecycleError: String? = null,
 )
 
 class DesktopSearchController(
     private val metadataRepository: MetadataRepository,
     private val ratingsEnricher: RatingsEnricher? = null,
     private val integrationSecretStore: IntegrationSecretStore? = null,
+    private val mediaLifecycleService: MediaLifecycleService? = null,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val started = AtomicBoolean(false)
@@ -86,6 +95,10 @@ class DesktopSearchController(
                 selectedEpisodeNumber = null,
                 isLoadingSeason = false,
                 similarItems = emptyList(),
+                mediaLifecycleStatus = null,
+                isLoadingMediaLifecycle = false,
+                mediaLifecycleMessage = null,
+                mediaLifecycleError = null,
             )
         }
 
@@ -142,6 +155,7 @@ class DesktopSearchController(
             // only ever showed TMDB pills because DesktopSearchController
             // was constructed with just the metadata repo, no enricher.
             launchEnrich(detail, similar)
+            loadMediaLifecycle(detail, seasonNumber ?: detail.seasons.firstOrNull()?.seasonNumber)
             (seasonNumber ?: detail.seasons.firstOrNull()?.seasonNumber)?.let { resolvedSeason ->
                 selectSeason(
                     seasonNumber = resolvedSeason,
@@ -194,6 +208,7 @@ class DesktopSearchController(
                     isLoadingSeason = false,
                 )
             }
+            loadMediaLifecycle(detail, seasonNumber)
         }
     }
 
@@ -205,6 +220,87 @@ class DesktopSearchController(
 
     fun clearActionMessage() {
         _state.update { it.copy(actionMessage = null) }
+    }
+
+    /** Request a permanent copy without interrupting the normal stream-now path. */
+    fun requestPermanentCopy() {
+        val service = mediaLifecycleService ?: return
+        val item = _state.value.detailItem ?: return
+        val tmdbId = item.tmdbId ?: return
+        if (_state.value.isLoadingMediaLifecycle) return
+        val seasons = if (item.type == MediaType.SERIES) {
+            listOfNotNull(_state.value.selectedSeasonNumber)
+        } else {
+            emptyList()
+        }
+        scope.launch {
+            _state.update {
+                it.copy(
+                    isLoadingMediaLifecycle = true,
+                    mediaLifecycleMessage = null,
+                    mediaLifecycleError = null,
+                )
+            }
+            val status = runCatching {
+                val current = _state.value.mediaLifecycleStatus
+                val retryRequestId = current?.requestId
+                if (current?.canRetry == true && retryRequestId != null) {
+                    service.retry(retryRequestId)
+                } else {
+                    service.request(
+                        MediaLifecycleRequest(
+                            tmdbId = tmdbId,
+                            mediaType = item.type,
+                            seasons = seasons,
+                        ),
+                    )
+                }
+            }.getOrElse {
+                _state.update {
+                    it.copy(
+                        isLoadingMediaLifecycle = false,
+                        mediaLifecycleError = "Could not add this title. Check the Seerr connection in Settings and try again.",
+                    )
+                }
+                return@launch
+            }
+            if (_state.value.detailItem?.id == item.id) {
+                _state.update {
+                    it.copy(
+                        mediaLifecycleStatus = status,
+                        isLoadingMediaLifecycle = false,
+                        mediaLifecycleMessage = when (item.type) {
+                            MediaType.MOVIE -> "Movie requested. You can stream it now while your library copy is prepared."
+                            MediaType.SERIES -> "Season requested. You can keep watching while it is prepared."
+                        },
+                    )
+                }
+            }
+        }
+    }
+
+    private fun loadMediaLifecycle(item: MediaItem, seasonNumber: Int?) {
+        val service = mediaLifecycleService ?: return
+        val tmdbId = item.tmdbId ?: return
+        val seasons = if (item.type == MediaType.SERIES) listOfNotNull(seasonNumber) else emptyList()
+        scope.launch {
+            _state.update { current ->
+                if (current.detailItem?.id == item.id) {
+                    current.copy(isLoadingMediaLifecycle = true, mediaLifecycleError = null)
+                } else current
+            }
+            val status = runCatching { service.getStatus(tmdbId, item.type, seasons) }
+                .getOrElse {
+                    MediaLifecycleStatus(tmdbId, item.type, MediaLifecycleState.UNKNOWN)
+                }
+            _state.update { current ->
+                if (current.detailItem?.id == item.id &&
+                    (item.type != MediaType.SERIES || current.selectedSeasonNumber == seasonNumber)
+                ) {
+                    current.copy(mediaLifecycleStatus = status, isLoadingMediaLifecycle = false)
+                } else current
+            }
+        }
     }
 
     /**

@@ -190,6 +190,8 @@ data class SettingsUiState(
     // Integrations — Jellyfin
     val jellyfinServerUrl: String = "",
     val jellyfinApiKey: String = "",
+    /** True only when a complete Jellyfin connection has been restored or tested successfully. */
+    val jellyfinConnected: Boolean = false,
     val jellyfinStatusMessage: String? = null,
     val jellyfinProfiles: List<com.torve.data.integrations.JellyfinProfile> = emptyList(),
     val selectedJellyfinUserId: String? = null,

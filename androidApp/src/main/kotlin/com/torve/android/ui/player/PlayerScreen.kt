@@ -53,6 +53,7 @@ import androidx.compose.material.icons.filled.ClosedCaption
 import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.Headphones
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.Tv
@@ -219,6 +220,7 @@ fun PlayerScreen(
     startPositionMs: Long = 0L,
     onVoiceSearchCommand: ((String) -> Unit)? = null,
     onBack: () -> Unit,
+    onStop: (() -> Unit)? = null,
     watchProgressRepo: WatchProgressRepository = koinInject(),
     watchHistoryRepo: WatchHistoryRepository = koinInject(),
     metadataRepo: MetadataRepository = koinInject(),
@@ -284,6 +286,7 @@ fun PlayerScreen(
     var isPlaying by remember { mutableStateOf(false) }
     var currentPosition by remember { mutableLongStateOf(0L) }
     var duration by remember { mutableLongStateOf(0L) }
+    var activeItemIsSeekable by remember { mutableStateOf(false) }
     // isInPipMode is a Compose mutableStateOf — reads trigger recomposition automatically.
     val isInPip = ActivePlaybackState.isInPipMode
     var showControls by remember { mutableStateOf(true) }
@@ -534,6 +537,7 @@ fun PlayerScreen(
 
     val visibleTopMenuTargets = buildList {
         add(TopMenuFocusTarget.BACK)
+        if (isTv) add(TopMenuFocusTarget.STOP)
         if (castAvailable) add(TopMenuFocusTarget.CAST)
         if (!isTv) add(TopMenuFocusTarget.HANDOFF)
         if (!isTv) add(TopMenuFocusTarget.VOICE)
@@ -1265,7 +1269,7 @@ fun PlayerScreen(
         retainPlaybackOnExit = false
         ActivePlaybackState.stopAndClear()
         runCatching { engine.stop() }
-        onBack()
+        (onStop ?: onBack)()
     }
 
     fun recoverFromPlaybackFailure(reason: String, errorCode: Int) {
@@ -1641,6 +1645,7 @@ fun PlayerScreen(
                 isPlaying = state.isPlaying
                 ActivePlaybackState.isPlaying = state.isPlaying
                 duration = state.durationMs
+                activeItemIsSeekable = state.isSeekable
                 if (!isSeeking) {
                     currentPosition = state.positionMs
                     sliderPosition = if (state.durationMs > 0) {
@@ -2591,8 +2596,19 @@ fun PlayerScreen(
                             }
                         }
                         Key.DirectionLeft, Key.DirectionRight -> {
-                            val timelineActive = isTv && focusCoordinator.currentRegion == PlaybackFocusRegion.Timeline
-                            if (isTv && !settingsState.tvExplicitTimelineScrubEnabled && !timelineActive) {
+                            val activeRegion = focusCoordinator.currentRegion
+                            val controlRowOwnsDirection = isTv && activeRegion in setOf(
+                                PlaybackFocusRegion.TopActions,
+                                PlaybackFocusRegion.TransportControls,
+                            )
+                            val timelineActive = isTv && activeRegion == PlaybackFocusRegion.Timeline
+                            if (controlRowOwnsDirection) {
+                                // Controls are visible and a button row owns focus. Let Compose
+                                // move between buttons; hidden controls still retain quick-seek.
+                                resetSeekAcceleration()
+                                controlsInteractionTick++
+                                false
+                            } else if (isTv && !settingsState.tvExplicitTimelineScrubEnabled && !timelineActive) {
                                 val direction = if (keyEvent.key == Key.DirectionLeft) -1 else 1
                                 handleTvTransportSeek(direction)
                                 true
@@ -3157,56 +3173,23 @@ fun PlayerScreen(
             } else {
                 resumePromptInitialPositionMs
             }
-            if (isTv) {
-                TvResumePlaybackOverlay(
-                    title = currentTitle.ifBlank { stringResource(R.string.player_resume_title) },
-                    resumeFromMs = resumeTarget,
-                    onResume = {
-                        pendingStartPositionMs = resumeTarget
-                        initialStartPositionConsumed = true
-                        showResumePrompt = false
-                        showControls = false
-                    },
-                    onStartOver = {
-                        pendingStartPositionMs = 0L
-                        initialStartPositionConsumed = true
-                        showResumePrompt = false
-                        showControls = false
-                    },
-                )
-            } else {
-                AlertDialog(
-                    onDismissRequest = {
-                        pendingStartPositionMs = 0L
-                        initialStartPositionConsumed = true
-                        showResumePrompt = false
-                    },
-                    title = { Text(stringResource(R.string.player_resume_title)) },
-                    text = { Text(stringResource(R.string.player_resume_message, formatTime(resumeTarget))) },
-                    confirmButton = {
-                        TextButton(
-                            onClick = {
-                                pendingStartPositionMs = resumeTarget
-                                initialStartPositionConsumed = true
-                                showResumePrompt = false
-                            },
-                        ) {
-                            Text(stringResource(R.string.player_resume))
-                        }
-                    },
-                    dismissButton = {
-                        TextButton(
-                            onClick = {
-                                pendingStartPositionMs = 0L
-                                initialStartPositionConsumed = true
-                                showResumePrompt = false
-                            },
-                        ) {
-                            Text(stringResource(R.string.player_start_over))
-                        }
-                    },
-                )
-            }
+            ResumePlaybackPrompt(
+                isTv = isTv,
+                title = currentTitle,
+                resumeTargetMs = resumeTarget,
+                onResume = {
+                    pendingStartPositionMs = resumeTarget
+                    initialStartPositionConsumed = true
+                    showResumePrompt = false
+                    if (isTv) showControls = false
+                },
+                onStartOver = {
+                    pendingStartPositionMs = 0L
+                    initialStartPositionConsumed = true
+                    showResumePrompt = false
+                    if (isTv) showControls = false
+                },
+            )
         }
 
         val tvModalOverlayOpen = isTv && (
@@ -3239,6 +3222,7 @@ fun PlayerScreen(
             val playButtonFocusRequester = remember { FocusRequester() }
             val rewindButtonFocusRequester = remember { FocusRequester() }
             val forwardButtonFocusRequester = remember { FocusRequester() }
+            val stopButtonFocusRequester = remember { FocusRequester() }
             val timelineFocusRequester = remember { FocusRequester() }
 
             // Build region-local modifier for top menu items: left/right cycle
@@ -3326,6 +3310,24 @@ fun PlayerScreen(
                         Icon(
                             Icons.AutoMirrored.Filled.ArrowBack,
                             contentDescription = stringResource(R.string.common_back),
+                            tint = Color.White,
+                            modifier = Modifier.size(28.dp),
+                        )
+                    }
+                    FocusableIconButton(
+                        onClick = ::stopAndExitPlayer,
+                        modifier = topMenuItemModifier(TopMenuFocusTarget.STOP),
+                        onFocused = {
+                            lastTopMenuFocusTarget = TopMenuFocusTarget.STOP
+                            focusCoordinator.reportFocusedRegion(
+                                PlaybackFocusRegion.TopActions,
+                                TopMenuFocusTarget.STOP.name,
+                            )
+                        },
+                    ) {
+                        Icon(
+                            Icons.Default.Stop,
+                            contentDescription = stringResource(R.string.player_background_stop),
                             tint = Color.White,
                             modifier = Modifier.size(28.dp),
                         )
@@ -3668,7 +3670,11 @@ fun PlayerScreen(
                         },
                         modifier = Modifier
                             .focusRequester(forwardButtonFocusRequester)
-                            .focusProperties { down = timelineFocusRequester }
+                            .focusProperties {
+                                left = playButtonFocusRequester
+                                right = stopButtonFocusRequester
+                                down = timelineFocusRequester
+                            }
                             .onFocusChanged {
                                 if (it.isFocused) {
                                     controlsInteractionTick++
@@ -3679,6 +3685,31 @@ fun PlayerScreen(
                         Icon(
                             Icons.Default.Forward10,
                             contentDescription = stringResource(R.string.player_forward),
+                            tint = Color.White,
+                            modifier = Modifier.size(40.dp),
+                        )
+                    }
+
+                    Spacer(Modifier.width(24.dp))
+
+                    FocusableIconButton(
+                        onClick = ::stopAndExitPlayer,
+                        modifier = Modifier
+                            .focusRequester(stopButtonFocusRequester)
+                            .focusProperties {
+                                left = forwardButtonFocusRequester
+                                down = timelineFocusRequester
+                            }
+                            .onFocusChanged {
+                                if (it.isFocused) {
+                                    controlsInteractionTick++
+                                    focusCoordinator.reportFocusedRegion(PlaybackFocusRegion.TransportControls)
+                                }
+                            },
+                    ) {
+                        Icon(
+                            Icons.Default.Stop,
+                            contentDescription = stringResource(R.string.player_background_stop),
                             tint = Color.White,
                             modifier = Modifier.size(40.dp),
                         )
@@ -3829,7 +3860,9 @@ fun PlayerScreen(
             val showGuideAction = isLiveChannelPlayback && livePlaybackContext.currentChannel != null
             val showChannelListAction = false
             val showFavoriteAction = isLiveChannelPlayback && livePlaybackContext.currentChannel != null
-            val showPlaybackTransport = !isLiveChannelPlayback || activeReplayProgramme != null
+            val showPlaybackTransport = !isLiveChannelPlayback ||
+                activeReplayProgramme != null ||
+                activeItemIsSeekable
             val availableMobileSettings = supportedMobilePlaybackSettings(
                 isLivePlayback = isLiveChannelPlayback,
                 supportsLiveBufferControl = supportsLiveBufferControl,
@@ -4083,6 +4116,40 @@ fun PlayerScreen(
             },
         )
     }
+}
+
+@Composable
+private fun ResumePlaybackPrompt(
+    isTv: Boolean,
+    title: String,
+    resumeTargetMs: Long,
+    onResume: () -> Unit,
+    onStartOver: () -> Unit,
+) {
+    if (isTv) {
+        TvResumePlaybackOverlay(
+            title = title.ifBlank { stringResource(R.string.player_resume_title) },
+            resumeFromMs = resumeTargetMs,
+            onResume = onResume,
+            onStartOver = onStartOver,
+        )
+        return
+    }
+    AlertDialog(
+        onDismissRequest = onStartOver,
+        title = { Text(stringResource(R.string.player_resume_title)) },
+        text = { Text(stringResource(R.string.player_resume_message, formatTime(resumeTargetMs))) },
+        confirmButton = {
+            TextButton(onClick = onResume) {
+                Text(stringResource(R.string.player_resume))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onStartOver) {
+                Text(stringResource(R.string.player_start_over))
+            }
+        },
+    )
 }
 
 @OptIn(UnstableApi::class)
@@ -4612,6 +4679,7 @@ private suspend fun resolveAndPlayNextEpisode(
 
 private enum class TopMenuFocusTarget {
     BACK,
+    STOP,
     CAST,
     HANDOFF,
     VOICE,

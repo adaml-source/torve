@@ -27,7 +27,28 @@ sealed interface PlaybackStartupEvent {
     data class FullResultsAvailable(val mergedResultCount: Int) : PlaybackStartupEvent
 }
 
+enum class ResolvedStreamDispatch {
+    REJECT_EMPTY,
+    PLAY_IMMEDIATELY,
+    PROBE_READINESS,
+}
+
 object DetailPlaybackStartupOrchestrator {
+    /**
+     * One source of truth for every normal, progressive, manual, and codec
+     * fallback path. A resolver result is never playable merely because the
+     * resolver call completed: it must contain a URL, and addon-hosted URLs
+     * must pass the readiness probe before reaching a player.
+     */
+    fun classifyResolvedStream(
+        url: String?,
+        addonHosted: Boolean,
+    ): ResolvedStreamDispatch = when {
+        url.isNullOrBlank() -> ResolvedStreamDispatch.REJECT_EMPTY
+        addonHosted -> ResolvedStreamDispatch.PROBE_READINESS
+        else -> ResolvedStreamDispatch.PLAY_IMMEDIATELY
+    }
+
     fun reduce(
         current: PlaybackStartupStatus,
         event: PlaybackStartupEvent,

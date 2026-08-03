@@ -64,6 +64,7 @@ fun EpisodeSelector(
     seasonDetail: Season?,
     isLoadingSeasonDetail: Boolean,
     watchedEpisodes: Set<String> = emptySet(),
+    availableInJellyfinEpisodes: Set<Pair<Int, Int>> = emptySet(),
     seriesRatings: MediaRatings? = null,
     onSeasonSelected: (Int) -> Unit,
     onEpisodePlay: (season: Int, episode: Int) -> Unit,
@@ -230,6 +231,8 @@ fun EpisodeSelector(
                             episode = episode,
                             season = selectedSeason,
                             isWatched = watchedEpisodes.contains(key),
+                            isAvailableInJellyfin =
+                                (selectedSeason to episode.episodeNumber) in availableInJellyfinEpisodes,
                             seriesRatings = seriesRatings,
                             onPlay = { onEpisodePlay(selectedSeason, episode.episodeNumber) },
                             onDownload = { onEpisodeDownload(selectedSeason, episode.episodeNumber) },
@@ -248,6 +251,7 @@ private fun EpisodeCard(
     episode: Episode,
     season: Int,
     isWatched: Boolean = false,
+    isAvailableInJellyfin: Boolean = false,
     seriesRatings: MediaRatings? = null,
     onPlay: () -> Unit,
     onDownload: () -> Unit,
@@ -314,6 +318,15 @@ private fun EpisodeCard(
                     color = if (isWatched) Torve.colors.textSecondary else Torve.colors.textPrimary,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
+                )
+            }
+            if (isAvailableInJellyfin) {
+                Spacer(Modifier.height(3.dp))
+                Text(
+                    text = "Available in Jellyfin",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = Amber,
+                    fontWeight = FontWeight.SemiBold,
                 )
             }
             if (episode.overview.isNotBlank()) {

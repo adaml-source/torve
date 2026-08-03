@@ -1,7 +1,9 @@
 package com.torve.android.tv.screens
 
+import android.app.ActivityManager
 import android.content.Context
 import android.net.Uri
+import android.os.Build
 import android.util.Log
 import android.view.ViewGroup
 import android.view.WindowManager
@@ -76,6 +78,8 @@ import com.torve.android.player.buildLiveAudioPreferencesKey
 import com.torve.android.player.buildLiveAudioPathLog
 import com.torve.android.player.clearPlayerSafely
 import com.torve.android.player.setPlayerSafely
+import com.torve.android.ui.player.ActivePlaybackSession
+import com.torve.android.ui.player.ActivePlaybackState
 import com.torve.android.player.toDiagnosticSummary
 import com.torve.android.ui.theme.Amber
 import com.torve.android.ui.theme.Obsidian
@@ -220,7 +224,13 @@ fun TvLivePlayerScreen(
 
 
     // ── Player engine (same pattern as PlayerScreen L264-275) ──
-    var engineSession by remember { mutableStateOf<LivePlayerEngineSession?>(null) }
+    val retainedLiveEngine = remember(channelUrl) { ActivePlaybackState.takeRetainedLiveEngine() }
+    var engineSession by remember(channelUrl) {
+        mutableStateOf(
+            retainedLiveEngine?.let { LivePlayerEngineSession(LivePlayerEngineId.EXOPLAYER, it) },
+        )
+    }
+    var skipNextRetainedRetune by remember(channelUrl) { mutableStateOf(retainedLiveEngine != null) }
     val engine = engineSession?.engine
     val useMpv = engineSession?.id == LivePlayerEngineId.MPV
     var pendingEngineRecovery by remember { mutableStateOf<PendingEngineRecovery?>(null) }
@@ -283,6 +293,7 @@ fun TvLivePlayerScreen(
     var knownTerminalFailureHint by remember { mutableStateOf<LiveAudioTerminalFailureHint?>(null) }
     var knownTerminalFailurePresentation by remember { mutableStateOf<TvLiveTerminalFailurePresentation?>(null) }
     var currentChannel by remember { mutableStateOf<Channel?>(null) }
+    var multiviewChannel by remember { mutableStateOf<Channel?>(null) }
     var currentGroupName by remember { mutableStateOf(groupName) }
     var channelNumber by remember { mutableIntStateOf(1) }
     var playbackGroupChannels by remember { mutableStateOf<List<EnrichedChannel>>(emptyList()) }
@@ -803,6 +814,13 @@ fun TvLivePlayerScreen(
                 honorRememberedHints = true,
                 allowAggressiveTrackReselection = false,
             )
+            if (skipNextRetainedRetune) {
+                // The retained player is already live at the current edge. Reattaching
+                // its surface must not restart the stream or create a visible stall.
+                skipNextRetainedRetune = false
+                applyPlaybackVolumeToEngine(activeSession)
+                return@LaunchedEffect
+            }
             delay(ZAP_COALESCE_DELAY_MS)
             if (playbackLaunchGeneration != launchGeneration) return@LaunchedEffect
             if (currentChannel?.url != ch.url) return@LaunchedEffect
@@ -824,6 +842,9 @@ fun TvLivePlayerScreen(
         mpvSurfaceAttached = false
         mpvSurfaceBindingToken = -1
         clearKnownTerminalFailureUi()
+        // Starting live TV replaces any retained movie/episode session so two
+        // decoders and two audio streams can never run at the same time.
+        if (ActivePlaybackState.session != null) ActivePlaybackState.stopAndClear()
         val nextSession = buildEngineSession(LivePlayerEngineId.EXOPLAYER)
         configureLiveEngine(
             session = nextSession,
@@ -1290,6 +1311,34 @@ fun TvLivePlayerScreen(
         onBack()
     }
 
+    fun minimizePlayback() {
+        val session = engineSession
+        val channel = currentChannel
+        val exo = session?.engine as? ExoPlayerEngine
+        if (session == null || channel == null || exo == null) {
+            exitPlayback()
+            return
+        }
+        val continuePlaying = exo.state.isPlaying || exo.getExoPlayer()?.playWhenReady == true
+        Log.i("TvLivePlayer", "minimizePlayback: retaining channel=${channel.name}")
+        detachExoPlayerView()
+        if (continuePlaying) exo.resume()
+        ActivePlaybackState.retain(
+            engine = exo,
+            descriptor = ActivePlaybackSession(
+                url = channel.url,
+                title = channel.name,
+                mediaType = "live",
+            ),
+            live = true,
+            liveGroupName = currentGroupName.ifBlank { channel.groupTitle.orEmpty() },
+        )
+        // Transfer ownership before navigation disposal so the lifecycle effect
+        // cannot release the retained engine.
+        engineSession = null
+        onBack()
+    }
+
     fun retuneAfterBackgroundResume() {
         val channel = currentChannel ?: return
         Log.w("TvLivePlayer", "ON_START: retuning live channel after background stop channel=${channel.name}")
@@ -1373,7 +1422,7 @@ fun TvLivePlayerScreen(
         val closed = closeOverlayOrReturnToPrevious()
         Log.w("TvLivePlayer", "BackHandler: overlayClosed=$closed activeOverlay=$activeOverlay")
         if (!closed) {
-            exitPlayback()
+            minimizePlayback()
         }
     }
 
@@ -1461,6 +1510,81 @@ fun TvLivePlayerScreen(
             }
             .orEmpty()
             .filter { isPlayableLiveChannel(it.channel) }
+    }
+    val multiviewDeviceSupported = remember(context) {
+        val activityManager = context.getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager
+        TvMultiviewCapability.isSupported(
+            TvMultiviewDeviceProfile(
+                apiLevel = Build.VERSION.SDK_INT,
+                isLowRamDevice = activityManager?.isLowRamDevice ?: true,
+                memoryClassMb = activityManager?.memoryClass ?: 0,
+            ),
+        )
+    }
+    val multiviewAvailable = multiviewDeviceSupported && !useMpv && zapChannels
+        .asSequence()
+        .map { it.channel.url }
+        .distinct()
+        .count() > 1
+    val multiviewEngine = remember(multiviewChannel?.url) {
+        multiviewChannel?.let { ExoPlayerEngine(context) }
+    }
+
+    DisposableEffect(multiviewEngine, multiviewChannel?.url) {
+        val previewEngine = multiviewEngine
+        val previewChannel = multiviewChannel
+        val previewListener = object : PlayerListener {
+            override fun onError(message: String) {
+                multiviewChannel = null
+                errorBannerMessage = "Multiview preview could not start: ${message.take(120)}"
+            }
+        }
+        if (previewEngine != null && previewChannel != null) {
+            previewEngine.initialize()
+            previewEngine.addListener(previewListener)
+            previewEngine.getExoPlayer()?.volume = 0f
+            previewEngine.play(previewChannel.url)
+        }
+        onDispose {
+            previewEngine?.removeListener(previewListener)
+            previewEngine?.release()
+        }
+    }
+
+    fun toggleMultiview() {
+        if (multiviewChannel != null) {
+            multiviewChannel = null
+            errorBannerMessage = "Multiview closed."
+            return
+        }
+        if (!multiviewDeviceSupported) {
+            errorBannerMessage = "Multiview is disabled on this TV to keep playback stable."
+            return
+        }
+        val currentUrl = currentChannel?.url
+        val preview = zapChannels
+            .asSequence()
+            .map { it.channel }
+            .firstOrNull { it.url != currentUrl }
+        if (preview == null) {
+            errorBannerMessage = "Choose a group with at least two playable channels for multiview."
+        } else {
+            multiviewChannel = preview
+            errorBannerMessage = "Multiview: left or right swaps the channel with audio."
+        }
+    }
+
+    fun swapMultiviewPrimary() {
+        val preview = multiviewChannel ?: return
+        val previousPrimary = currentChannel ?: return
+        multiviewChannel = previousPrimary
+        selectLiveChannel(
+            channel = preview,
+            group = currentGroupName.ifBlank { preview.groupTitle.orEmpty() },
+            index = zapChannels.indexOfFirst { it.channel.url == preview.url }.coerceAtLeast(0),
+            dismissOverlays = true,
+        )
+        errorBannerMessage = "Primary channel: ${preview.name}"
     }
     // Throttle zap to prevent cascading channel switches from rapid D-pad repeats.
     var lastZapMs by remember { mutableLongStateOf(0L) }
@@ -1965,6 +2089,15 @@ fun TvLivePlayerScreen(
                         true
                     }
 
+                    // In multiview, left/right swaps the primary feed and therefore audio.
+                    (event.key == Key.DirectionLeft || event.key == Key.DirectionRight) &&
+                        event.type == KeyEventType.KeyDown &&
+                        activeOverlay == LivePlayerOverlay.NONE &&
+                        multiviewChannel != null -> {
+                        swapMultiviewPrimary()
+                        true
+                    }
+
                     // D-pad left/right controls volume while fullscreen playback owns focus.
                     (event.key == Key.DirectionLeft || event.key == Key.DirectionRight) &&
                         event.type == KeyEventType.KeyDown &&
@@ -1983,10 +2116,15 @@ fun TvLivePlayerScreen(
 
                     // ── Back key during CHANNEL_INFO → dismiss overlay ──
                     event.key == Key.Back && event.type == KeyEventType.KeyDown -> {
+                        if (activeOverlay == LivePlayerOverlay.NONE && multiviewChannel != null) {
+                            multiviewChannel = null
+                            errorBannerMessage = "Multiview closed."
+                            return@onPreviewKeyEvent true
+                        }
                         val closed = closeOverlayOrReturnToPrevious()
                         Log.w("TvLivePlayer", "BackKey: overlayClosed=$closed activeOverlay=$activeOverlay")
                         if (!closed) {
-                            exitPlayback()
+                            minimizePlayback()
                         }
                         true
                     }
@@ -2032,12 +2170,22 @@ fun TvLivePlayerScreen(
             },
     ) {
         // ── Video surface ──
-        val videoSurfaceModifier = selectedPictureFormat.frameAspectRatio?.let { ratio ->
+        val fullScreenVideoSurfaceModifier = selectedPictureFormat.frameAspectRatio?.let { ratio ->
             Modifier
                 .fillMaxWidth()
                 .aspectRatio(ratio)
                 .align(Alignment.Center)
         } ?: Modifier.fillMaxSize()
+        val videoSurfaceModifier = if (multiviewChannel == null) {
+            fullScreenVideoSurfaceModifier
+        } else {
+            Modifier
+                .fillMaxWidth(0.49f)
+                .aspectRatio(16f / 9f)
+                .align(Alignment.CenterStart)
+                .padding(start = 12.dp)
+                .border(2.dp, Amber, RoundedCornerShape(8.dp))
+        }
 
         if (useMpv) {
             AndroidView(
@@ -2099,6 +2247,46 @@ fun TvLivePlayerScreen(
                     modifier = videoSurfaceModifier,
                 )
             }
+        }
+
+        if (multiviewChannel != null && multiviewEngine != null) {
+            AndroidView(
+                factory = {
+                    TorvePlayerView(context).apply {
+                        useController = false
+                        resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
+                        layoutParams = FrameLayout.LayoutParams(
+                            ViewGroup.LayoutParams.MATCH_PARENT,
+                            ViewGroup.LayoutParams.MATCH_PARENT,
+                        )
+                        isFocusable = false
+                        isFocusableInTouchMode = false
+                    }
+                },
+                update = { view ->
+                    view.useController = false
+                    view.setPlayerSafely(multiviewEngine.getExoPlayer(), "tv_multiview_preview_update")
+                },
+                onRelease = { view ->
+                    view.clearPlayerSafely("tv_multiview_preview_release")
+                },
+                modifier = Modifier
+                    .fillMaxWidth(0.49f)
+                    .aspectRatio(16f / 9f)
+                    .align(Alignment.CenterEnd)
+                    .padding(end = 12.dp)
+                    .border(1.dp, Snow.copy(alpha = 0.5f), RoundedCornerShape(8.dp)),
+            )
+            Text(
+                text = multiviewChannel?.name.orEmpty(),
+                color = Snow,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(end = 24.dp, bottom = 28.dp)
+                    .background(Obsidian.copy(alpha = 0.82f), RoundedCornerShape(6.dp))
+                    .padding(horizontal = 10.dp, vertical = 6.dp),
+            )
         }
 
         // ── Buffering indicator ──
@@ -2246,7 +2434,10 @@ fun TvLivePlayerScreen(
                 sleepTimerMinutes = sleepTimerMinutes,
                 sleepTimerRemainingLabel = sleepTimerRemainingLabel,
                 pipSupported = pipSupported,
-                multiviewAvailable = false,
+                multiviewAvailable = multiviewAvailable,
+                timeshiftAvailable = playerState.isLive && playerState.isSeekable,
+                timeshiftPaused = playerState.isLive && playerState.isSeekable && !playerState.isPlaying,
+                liveOffsetMs = playerState.liveOffsetMs,
                 selectedBufferPreset = selectedBufferPreset,
                 onDismiss = { closeOverlayOrReturnToPrevious() },
                 onOpenChannelList = { openOverlay(LivePlayerOverlay.CHANNEL_LIST) },
@@ -2257,6 +2448,23 @@ fun TvLivePlayerScreen(
                 onEnterPip = {
                     if (enterPipMode()) {
                         closeAllOverlays()
+                    }
+                },
+                onToggleMultiview = { toggleMultiview() },
+                onToggleTimeshiftPause = {
+                    if (playerState.isPlaying) {
+                        engine?.pause()
+                        errorBannerMessage = "Live TV paused. Choose Resume live TV to continue."
+                    } else {
+                        engine?.resume()
+                        errorBannerMessage = "Live TV resumed from the paused position."
+                    }
+                },
+                onGoLive = {
+                    (engine as? ExoPlayerEngine)?.getExoPlayer()?.let { player ->
+                        player.seekToDefaultPosition()
+                        player.playWhenReady = true
+                        errorBannerMessage = "Returned to the live edge."
                     }
                 },
                 onSelectPictureFormat = { formatKey ->

@@ -59,8 +59,15 @@ class EpisodeNotificationWorker(
                         .setAutoCancel(true)
                         .build()
 
-                    NotificationManagerCompat.from(applicationContext)
-                        .notify(NOTIFICATION_ID, notification)
+                    try {
+                        // Permission can be revoked between the check above and
+                        // delivery. Treat that race as a skipped notification,
+                        // never as a worker/app crash.
+                        NotificationManagerCompat.from(applicationContext)
+                            .notify(NOTIFICATION_ID, notification)
+                    } catch (_: SecurityException) {
+                        return Result.success()
+                    }
                 }
             }
 

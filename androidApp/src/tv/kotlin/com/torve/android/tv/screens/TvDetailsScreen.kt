@@ -81,7 +81,6 @@ import com.torve.android.ui.detail.StreamExperienceBadges
 import com.torve.android.ui.detail.StreamReadinessLabel
 import com.torve.android.ui.detail.groupPlaybackOptionStreams
 import com.torve.android.ui.detail.streamUiKey
-import com.torve.android.ui.player.ActivePlaybackState
 import com.torve.android.ui.components.getRatingValue
 import com.torve.android.ui.components.mediaItemLazyKey
 import com.torve.android.ui.components.ratingSourceIconRes
@@ -100,6 +99,7 @@ import androidx.compose.material.icons.rounded.CloudDone
 import androidx.compose.material3.Icon
 import com.torve.android.download.DownloadWorker
 import com.torve.data.download.BulkDownloadManager
+import com.torve.data.integrations.JellyfinLibraryOverlayService
 import com.torve.domain.model.CandidateProvenanceKind
 import com.torve.domain.model.ContentWarmupTrigger
 import com.torve.domain.model.Download
@@ -176,6 +176,7 @@ fun TvDetailsScreen(
     onMediaClick: (MediaItem) -> Unit = {},
     onCastClick: (castId: Int, castName: String) -> Unit = { _, _ -> },
     onSettingsClick: () -> Unit = {},
+    onLibraryAutomationClick: () -> Unit = {},
     onRequestLifetimeUnlock: (TvEntitledFeature) -> Unit = {},
     onWatchedStatusChanged: (MediaItem, Boolean) -> Unit = { _, _ -> },
 ) {
@@ -188,6 +189,7 @@ fun TvDetailsScreen(
     val downloadRepository: DownloadRepository = koinInject()
     val mediaFavoritesRepository: MediaFavoritesRepository = koinInject()
     val lanLibraryConsumer: LanLibraryConsumer = koinInject()
+    val jellyfinLibrary: JellyfinLibraryOverlayService = koinInject()
     val networkMonitor: NetworkMonitor = koinInject()
     // Kick the LAN-library consumer once so the badge resolves on
     // first paint of the TV detail screen.
@@ -222,6 +224,7 @@ fun TvDetailsScreen(
     val rateFocusRequester = remember { FocusRequester() }
     val trailerFocusRequester = remember { FocusRequester() }
     val permanentLibraryFocusRequester = remember { FocusRequester() }
+    val removeLibraryRequestFocusRequester = remember { FocusRequester() }
     val downloadMovieFocusRequester = remember { FocusRequester() }
     val downloadAllFocusRequester = remember { FocusRequester() }
     val firstStreamFocusRequester = remember { FocusRequester() }
@@ -239,13 +242,23 @@ fun TvDetailsScreen(
     var didAutoPlay by rememberSaveable(type, id) { mutableStateOf(false) }
     var pendingDownloadAction by remember { mutableStateOf<DownloadAction>(DownloadAction.None) }
     var resolvingEpisodeTarget by remember(type, id) { mutableStateOf<Pair<Int, Int>?>(null) }
+    var jellyfinAvailableEpisodes by remember(type, id) {
+        mutableStateOf<Set<Pair<Int, Int>>>(emptySet())
+    }
     var showWatchlistPicker by remember { mutableStateOf(false) }
     // Source picker (Prompt 11C). Non-null while the sheet is open;
     // selection routes either directly to the player (LocalFile/LAN)
     // or falls back to fetchStreams() (Provider). Cleared on dismiss.
     var sourcePickerState by remember { mutableStateOf<TvSourcePickerState?>(null) }
+    // Keep the title that produced the picker. Detail metadata can refresh while
+    // the modal is open; source selection must not depend on transient UI state.
+    var sourcePickerMediaItem by remember(type, id) { mutableStateOf<MediaItem?>(null) }
     var sourcePickerSeason by remember { mutableStateOf<Int?>(null) }
     var sourcePickerEpisode by remember { mutableStateOf<Int?>(null) }
+    var sourcePickerOriginEpisode by remember(type, id) { mutableStateOf<Pair<Int, Int>?>(null) }
+    var pendingEpisodeFocusRestore by remember(type, id) { mutableStateOf<Pair<Int, Int>?>(null) }
+    var initialPlayFocusAssigned by rememberSaveable(type, id) { mutableStateOf(false) }
+    var restorePlayFocusAfterSourceDismiss by remember { mutableStateOf(false) }
     val watchlistModalRestoreController = rememberTvModalFocusRestoreController(
         key = "details_watchlist_${type}_$id",
     )
@@ -266,7 +279,10 @@ fun TvDetailsScreen(
     )
     // downloadToastMessage replaced by TvNotificationQueue
 
-    BackHandler(onBack = onBack)
+    BackHandler(
+        enabled = sourcePickerState == null && !showWatchlistPicker,
+        onBack = onBack,
+    )
     DisposableEffect(Unit) {
         onDispose {
             TvNotificationQueue.clear(TV_USENET_PREPARING_NOTIFICATION_TAG)
@@ -276,7 +292,6 @@ fun TvDetailsScreen(
         showWatchlistPicker = false
         watchlistModalRestoreController.requestRestore()
     }
-
     // Wire download callbacks to trigger WorkManager
     LaunchedEffect(downloadViewModel) {
         downloadViewModel.onDownloadEnqueued = { downloadId ->
@@ -295,35 +310,41 @@ fun TvDetailsScreen(
         mediaFavoritesRepository.refresh(force = true)
     }
 
-    // Refresh watch state and restore focus when returning from player (lifecycle ON_RESUME).
+    // Refresh data on resume, but never move focus here. ON_RESUME also fires
+    // when the detail route is first shown; delayed focus requests from this
+    // observer used to race a quickly-opened source modal and steal its focus.
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
                 detailViewModel.refreshWatchState()
                 detailViewModel.refreshMediaLifecycleStatus()
-                // Leaving the full-screen player intentionally gives focus to
-                // the persistent playback card. Do not steal it back with the
-                // normal details-screen restore while that engine is retained.
-                if (ActivePlaybackState.session != null) return@LifecycleEventObserver
-                // Scroll list to top so the Play button is in the viewport, then focus it.
-                // The button label changes (Play → Resume) after refreshWatchState; without
-                // scrolling, the button is off-screen in LazyColumn and requestFocus fails silently.
-                coroutineScope.launch {
-                    listState.scrollToItem(0)
-                    delay(300)
-                    runCatching { playFocusRequester.requestFocus() }
-                    delay(400)
-                    runCatching { playFocusRequester.requestFocus() }
-                }
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
-    LaunchedEffect(state.mediaItem?.id) {
-        if (state.mediaItem != null) {
+    // Assign entry focus once per title. Background metadata, progress,
+    // library-status, and rating updates must never re-focus Watch now.
+    // Including modal visibility in the key cancels this one-shot request if
+    // the user opens the source chooser in the same frame.
+    LaunchedEffect(state.mediaItem?.id, sourcePickerState != null) {
+        if (state.mediaItem != null && sourcePickerState == null && !initialPlayFocusAssigned) {
+            initialPlayFocusAssigned = true
+            kotlinx.coroutines.yield()
+            if (sourcePickerState != null) return@LaunchedEffect
+            runCatching { playFocusRequester.requestFocus() }
+        }
+    }
+
+    // Dismissing the modal is the only post-entry path that deliberately
+    // restores Watch now. This is explicit rather than being coupled to any
+    // asynchronous detail-state update.
+    LaunchedEffect(sourcePickerState, restorePlayFocusAfterSourceDismiss) {
+        if (sourcePickerState == null && restorePlayFocusAfterSourceDismiss) {
+            restorePlayFocusAfterSourceDismiss = false
+            kotlinx.coroutines.yield()
             runCatching { playFocusRequester.requestFocus() }
         }
     }
@@ -331,6 +352,7 @@ fun TvDetailsScreen(
     // Surface stream errors as visible notifications
     LaunchedEffect(state.streamsError, state.resolvedStream, state.isLoadingStreams, state.isResolving) {
         val error = state.streamsError ?: return@LaunchedEffect
+        if (state.streams.isNotEmpty()) return@LaunchedEffect
         if (state.resolvedStream != null || state.isLoadingStreams || state.isResolving) {
             return@LaunchedEffect
         }
@@ -380,18 +402,6 @@ fun TvDetailsScreen(
         }
     }
 
-    // Auto-load first season detail for series
-    LaunchedEffect(state.mediaItem?.id, state.mediaItem?.seasons) {
-        val media = state.mediaItem ?: return@LaunchedEffect
-        if (media.type == MediaType.SERIES && media.seasons.isNotEmpty()) {
-            val firstSeason = media.seasons.filter { it.seasonNumber > 0 }.minByOrNull { it.seasonNumber }
-            if (firstSeason != null && state.seasonDetail == null) {
-                val tvId = media.tmdbId ?: return@LaunchedEffect
-                detailViewModel.loadSeasonDetail(tvId, firstSeason.seasonNumber)
-            }
-        }
-    }
-
     LaunchedEffect(state.mediaItem?.id, autoPlay) {
         val media = state.mediaItem ?: return@LaunchedEffect
         if (autoPlay && !didAutoPlay) {
@@ -405,8 +415,8 @@ fun TvDetailsScreen(
     }
 
     // Scroll to stream picker and focus the first stream when picker appears
-    LaunchedEffect(state.showStreamPicker, state.streams.size) {
-        if (state.showStreamPicker && state.streams.isNotEmpty()) {
+    LaunchedEffect(state.showStreamPicker, state.streams.size, sourcePickerState != null) {
+        if (sourcePickerState == null && state.showStreamPicker && state.streams.isNotEmpty()) {
             kotlinx.coroutines.delay(100)
             val pickerIndex = listState.layoutInfo.totalItemsCount - state.streams.size - 1
             if (pickerIndex >= 0) {
@@ -414,6 +424,15 @@ fun TvDetailsScreen(
             }
             kotlinx.coroutines.delay(50)
             runCatching { firstStreamFocusRequester.requestFocus() }
+        }
+    }
+
+    LaunchedEffect(state.mediaItem?.tmdbId, state.mediaLifecycleStatus?.state) {
+        val media = state.mediaItem
+        jellyfinAvailableEpisodes = if (media?.type == MediaType.SERIES && media.tmdbId != null) {
+            runCatching { jellyfinLibrary.findAvailableEpisodes(media.tmdbId!!) }.getOrDefault(emptySet())
+        } else {
+            emptySet()
         }
     }
 
@@ -447,8 +466,9 @@ fun TvDetailsScreen(
         state.preparing,
         state.showStreamPicker,
         state.streams.size,
+        sourcePickerState != null,
     ) {
-        if (restoreFocusAfterPreparingCancel && state.preparing == null) {
+        if (restoreFocusAfterPreparingCancel && state.preparing == null && sourcePickerState == null) {
             kotlinx.coroutines.delay(120)
             if (state.showStreamPicker && state.streams.isNotEmpty()) {
                 val pickerIndex = listState.layoutInfo.totalItemsCount - state.streams.size - 1
@@ -685,8 +705,15 @@ fun TvDetailsScreen(
                                 streamLocked -> TvPremiumAccess.UNLOCK_WITH_LIFETIME_LABEL
                                 state.isLoadingStreams -> stringResource(R.string.tv_detail_finding_streams)
                                 state.isResolving -> stringResource(R.string.tv_detail_resolving)
-                                !settingsState.canPlayStreams -> stringResource(R.string.tv_detail_connect_cloud)
-                                else -> state.primaryPlayLabel
+                                item.type == MediaType.SERIES &&
+                                    state.streamContextSeason != null &&
+                                    state.streamContextEpisode != null ->
+                                    "Watch now · S${state.streamContextSeason.toString().padStart(2, '0')}E${state.streamContextEpisode.toString().padStart(2, '0')}"
+                                else -> if (state.primaryPlayLabel.equals("Play", ignoreCase = true)) {
+                                    "Watch now"
+                                } else {
+                                    "Watch now · ${state.primaryPlayLabel}"
+                                }
                             }
                             TvActionButton(
                                 text = playText,
@@ -702,17 +729,6 @@ fun TvDetailsScreen(
                                     )
                                 },
                                 onClick = {
-                                    if (!settingsState.canPlayStreams) {
-                                        runPremiumAction(TvEntitledFeature.CLOUD_PROVIDER_SETUP) {
-                                            context.getSharedPreferences("tv_prefs", Context.MODE_PRIVATE)
-                                                .edit()
-                                                .putBoolean("tv_settings_open_connections_once", true)
-                                                .apply()
-                                            onSettingsClick()
-                                        }
-                                        return@TvActionButton
-                                    }
-
                                     runPremiumAction(TvEntitledFeature.STREAM_PLAYBACK) {
                                         // Movies: surface the source picker if there's
                                         // a non-Provider option (LocalFile or LAN). For
@@ -734,19 +750,31 @@ fun TvDetailsScreen(
                                                     seasonNumber = ctxS,
                                                     episodeNumber = ctxE,
                                                     downloadRepository = downloadRepository,
+                                                    jellyfinLibrary = jellyfinLibrary,
                                                     lanLibraryConsumer = lanLibraryConsumer,
                                                     networkMonitor = networkMonitor,
                                                     wifiOnlyForLan = settingsState.lanPlaybackWifiOnly,
                                                 )
                                                 val hasNonProvider = picker.options.any { opt ->
                                                     opt.route is PlaybackRoute.LocalFile ||
+                                                        opt.route is PlaybackRoute.JellyfinStream ||
                                                         opt.route is PlaybackRoute.LanDesktopStream
                                                 }
                                                 if (!hasNonProvider) {
-                                                    detailViewModel.fetchStreams(season = ctxS, episode = ctxE)
+                                                    if (settingsState.canPlayStreams) {
+                                                        detailViewModel.fetchStreams(season = ctxS, episode = ctxE)
+                                                    } else {
+                                                        context.getSharedPreferences("tv_prefs", Context.MODE_PRIVATE)
+                                                            .edit()
+                                                            .putBoolean("tv_settings_open_connections_once", true)
+                                                            .apply()
+                                                        onSettingsClick()
+                                                    }
                                                 } else {
+                                                    sourcePickerOriginEpisode = null
                                                     sourcePickerSeason = ctxS
                                                     sourcePickerEpisode = ctxE
+                                                    sourcePickerMediaItem = item
                                                     sourcePickerState = picker
                                                 }
                                             }
@@ -758,6 +786,7 @@ fun TvDetailsScreen(
                                                 seasonNumber = null,
                                                 episodeNumber = null,
                                                 downloadRepository = downloadRepository,
+                                                jellyfinLibrary = jellyfinLibrary,
                                                 lanLibraryConsumer = lanLibraryConsumer,
                                                 networkMonitor = networkMonitor,
                                                 wifiOnlyForLan = settingsState.lanPlaybackWifiOnly,
@@ -767,13 +796,24 @@ fun TvDetailsScreen(
                                             // existing behavior.
                                             val hasNonProvider = picker.options.any { opt ->
                                                 opt.route is PlaybackRoute.LocalFile ||
+                                                    opt.route is PlaybackRoute.JellyfinStream ||
                                                     opt.route is PlaybackRoute.LanDesktopStream
                                             }
                                             if (!hasNonProvider) {
-                                                detailViewModel.fetchStreams()
+                                                if (settingsState.canPlayStreams) {
+                                                    detailViewModel.fetchStreams()
+                                                } else {
+                                                    context.getSharedPreferences("tv_prefs", Context.MODE_PRIVATE)
+                                                        .edit()
+                                                        .putBoolean("tv_settings_open_connections_once", true)
+                                                        .apply()
+                                                    onSettingsClick()
+                                                }
                                             } else {
+                                                sourcePickerOriginEpisode = null
                                                 sourcePickerSeason = null
                                                 sourcePickerEpisode = null
+                                                sourcePickerMediaItem = item
                                                 sourcePickerState = picker
                                             }
                                         }
@@ -825,7 +865,6 @@ fun TvDetailsScreen(
                                     }
                                 },
                             )
-
                             val favoritesLocked = isLockedFeature(TvEntitledFeature.FAVORITES_EDIT)
                             TvActionButton(
                                 text = if (isFavorite) {
@@ -907,50 +946,105 @@ fun TvDetailsScreen(
                             // Download buttons removed â€" TV is stream-only
                         }
 
-                        val lifecycleStatus = state.mediaLifecycleStatus
-                        if (lifecycleStatus?.state != MediaLifecycleState.UNCONFIGURED) {
-                            val lifecycleButtonText = when {
-                                state.isLoadingMediaLifecycle -> stringResource(R.string.common_loading)
-                                lifecycleStatus?.canRetry == true -> stringResource(R.string.detail_library_request_retry)
-                                lifecycleStatus?.canRequest == true && item.type == MediaType.SERIES -> {
-                                    val selectedSeason = state.selectedSeason ?: 1
-                                    stringResource(R.string.detail_add_season_to_library, selectedSeason)
-                                }
-                                lifecycleStatus?.canRequest == true -> stringResource(R.string.detail_add_to_library)
-                                lifecycleStatus?.state == MediaLifecycleState.PENDING_APPROVAL ->
-                                    stringResource(R.string.detail_library_request_pending)
-                                lifecycleStatus?.state == MediaLifecycleState.APPROVED ->
-                                    stringResource(R.string.detail_library_request_approved)
-                                lifecycleStatus?.state == MediaLifecycleState.PROCESSING ->
-                                    stringResource(R.string.detail_library_request_processing)
-                                lifecycleStatus?.state == MediaLifecycleState.PARTIALLY_AVAILABLE ->
-                                    stringResource(R.string.detail_library_request_partial)
-                                lifecycleStatus?.state == MediaLifecycleState.AVAILABLE ->
-                                    stringResource(R.string.detail_library_request_available)
-                                else -> stringResource(R.string.detail_library_refresh)
+                    }
+                }
+            }
+
+            // Keep the permanent-library action outside the fixed-height hero.
+            // The hero clips its children to the rounded backdrop; placing the
+            // explanatory copy there caused its lower half to be cut off when
+            // metadata/status rows above consumed the available 330dp.
+            val lifecycleStatus = state.mediaLifecycleStatus
+            if (lifecycleStatus != null || state.isLoadingMediaLifecycle) {
+                item(key = "library_lifecycle") {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(start = 24.dp, top = 12.dp, end = 24.dp, bottom = 6.dp),
+                        verticalArrangement = Arrangement.spacedBy(7.dp),
+                    ) {
+                        val lifecycleButtonText = when {
+                            state.isLoadingMediaLifecycle -> stringResource(R.string.common_loading)
+                            lifecycleStatus?.state == MediaLifecycleState.UNCONFIGURED -> "Set up library downloads"
+                            lifecycleStatus?.canRetry == true -> stringResource(R.string.detail_library_request_retry)
+                            lifecycleStatus?.canRequest == true && item.type == MediaType.SERIES -> {
+                                val selectedSeason = state.selectedSeason ?: 1
+                                stringResource(R.string.detail_add_season_to_library, selectedSeason)
                             }
-                            TvActionButton(
-                                text = lifecycleButtonText,
-                                modifier = Modifier.focusRequester(permanentLibraryFocusRequester),
-                                enabled = !state.isLoadingMediaLifecycle &&
-                                    (lifecycleStatus?.canRequest == true || lifecycleStatus?.canRetry == true),
-                                onFocused = { onContentFocused(permanentLibraryFocusRequester) },
-                                onClick = {
-                                    if (lifecycleStatus?.canRetry == true) {
+                            lifecycleStatus?.canRequest == true -> stringResource(R.string.detail_add_to_library)
+                            lifecycleStatus?.state == MediaLifecycleState.PENDING_APPROVAL ->
+                                stringResource(R.string.detail_library_request_pending)
+                            lifecycleStatus?.state == MediaLifecycleState.APPROVED ->
+                                stringResource(R.string.detail_library_request_approved)
+                            lifecycleStatus?.state == MediaLifecycleState.PROCESSING ->
+                                stringResource(R.string.detail_library_request_processing)
+                            lifecycleStatus?.state == MediaLifecycleState.PARTIALLY_AVAILABLE ->
+                                stringResource(R.string.detail_library_request_partial)
+                            lifecycleStatus?.state == MediaLifecycleState.AVAILABLE ->
+                                stringResource(R.string.detail_library_request_available)
+                            else -> stringResource(R.string.detail_library_refresh)
+                        }
+                        TvActionButton(
+                            text = lifecycleButtonText,
+                            modifier = Modifier.focusRequester(permanentLibraryFocusRequester),
+                            enabled = !state.isLoadingMediaLifecycle &&
+                                (
+                                    lifecycleStatus?.state == MediaLifecycleState.UNCONFIGURED ||
+                                        lifecycleStatus?.canRequest == true ||
+                                        lifecycleStatus?.canRetry == true
+                                    ),
+                            onFocused = { onContentFocused(permanentLibraryFocusRequester) },
+                            onClick = {
+                                when {
+                                    lifecycleStatus?.state == MediaLifecycleState.UNCONFIGURED ->
+                                        onLibraryAutomationClick()
+                                    lifecycleStatus?.canRetry == true ->
                                         detailViewModel.retryMediaLifecycleRequest()
-                                    } else {
-                                        detailViewModel.requestPermanentCopy()
-                                    }
+                                    else -> detailViewModel.requestPermanentCopy()
+                                }
+                            },
+                        )
+                        if (lifecycleStatus?.canDeleteRequest == true) {
+                            TvActionButton(
+                                text = if (lifecycleStatus.isInProgress) {
+                                    "Cancel library request"
+                                } else {
+                                    "Remove library request"
                                 },
+                                modifier = Modifier.focusRequester(removeLibraryRequestFocusRequester),
+                                enabled = !state.isLoadingMediaLifecycle,
+                                onFocused = { onContentFocused(removeLibraryRequestFocusRequester) },
+                                onClick = { detailViewModel.deleteMediaLifecycleRequest() },
                             )
-                            state.mediaLifecycleError?.takeIf { it.isNotBlank() }?.let { error ->
-                                Text(
-                                    text = error,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.error,
-                                    maxLines = 1,
-                                )
-                            }
+                            Text(
+                                text = "Removes the Seerr request. Already downloaded files stay in your library.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 2,
+                            )
+                        }
+                        if (lifecycleStatus?.state == MediaLifecycleState.UNCONFIGURED) {
+                            Text(
+                                text = "Connect Seerr once to send movies to Radarr and selected seasons to Sonarr.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 3,
+                            )
+                        } else if (lifecycleStatus?.canRequest == true || lifecycleStatus?.canRetry == true) {
+                            Text(
+                                text = "Downloads your preferred copy through Seerr and *Arr. Watch now remains available while it is prepared.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 3,
+                            )
+                        }
+                        state.mediaLifecycleError?.takeIf { it.isNotBlank() }?.let { error ->
+                            Text(
+                                text = error,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.error,
+                                maxLines = 2,
+                            )
                         }
                     }
                 }
@@ -1120,6 +1214,7 @@ fun TvDetailsScreen(
                         seasonDetailError = state.seasonDetailError,
                         watchedEpisodes = state.watchedEpisodes,
                         watchProgress = state.watchProgress,
+                        availableInJellyfinEpisodes = jellyfinAvailableEpisodes,
                         ratingPrefs = settingsState.ratingPrefs,
                         seriesBackdropUrl = item.backdropUrl,
                         seriesPosterUrl = item.posterUrl,
@@ -1129,6 +1224,8 @@ fun TvDetailsScreen(
                             detailViewModel.loadSeasonDetail(tvId, seasonNumber)
                         },
                         onEpisodeSelected = { season, episode ->
+                            sourcePickerOriginEpisode = season to episode
+                            detailViewModel.selectEpisodeForPlayback(season, episode)
                             resolvingEpisodeTarget = season to episode
                             coroutineScope.launch {
                                 val picker = buildDetailPickerState(
@@ -1136,23 +1233,40 @@ fun TvDetailsScreen(
                                     seasonNumber = season,
                                     episodeNumber = episode,
                                     downloadRepository = downloadRepository,
+                                    jellyfinLibrary = jellyfinLibrary,
                                     lanLibraryConsumer = lanLibraryConsumer,
                                     networkMonitor = networkMonitor,
                                     wifiOnlyForLan = settingsState.lanPlaybackWifiOnly,
                                 )
                                 val hasNonProvider = picker.options.any { opt ->
                                     opt.route is PlaybackRoute.LocalFile ||
+                                        opt.route is PlaybackRoute.JellyfinStream ||
                                         opt.route is PlaybackRoute.LanDesktopStream
                                 }
                                 if (!hasNonProvider) {
-                                    detailViewModel.fetchStreams(season = season, episode = episode)
+                                    sourcePickerOriginEpisode = null
+                                    if (settingsState.canPlayStreams) {
+                                        detailViewModel.fetchStreams(season = season, episode = episode)
+                                    } else {
+                                        resolvingEpisodeTarget = null
+                                        context.getSharedPreferences("tv_prefs", Context.MODE_PRIVATE)
+                                            .edit()
+                                            .putBoolean("tv_settings_open_connections_once", true)
+                                            .apply()
+                                        onSettingsClick()
+                                    }
                                 } else {
                                     resolvingEpisodeTarget = null
                                     sourcePickerSeason = season
                                     sourcePickerEpisode = episode
+                                    sourcePickerMediaItem = item
                                     sourcePickerState = picker
                                 }
                             }
+                        },
+                        restoreFocusEpisode = pendingEpisodeFocusRestore,
+                        onEpisodeFocusRestored = {
+                            pendingEpisodeFocusRestore = null
                         },
                         onRetrySeason = {
                             val tvId = item.tmdbId ?: return@TvEpisodePicker
@@ -1180,6 +1294,9 @@ fun TvDetailsScreen(
                             } else {
                                 null
                             },
+                        preferredEpisode = state.nextEpisode?.let { next ->
+                            next.season to next.episode
+                        },
                     )
                 }
             }
@@ -1686,7 +1803,7 @@ fun TvDetailsScreen(
             }
 
             // â"€â"€ Error â"€â"€
-            if (state.streamsError != null) {
+            if ((state.streamsError != null).and(state.streams.isEmpty())) {
                 item(key = "error") {
                     Text(
                         text = resolveTvDetailMessage(context, state.streamsError),
@@ -1737,27 +1854,47 @@ fun TvDetailsScreen(
     // flow (Provider). Route failures are handled by PlayerScreen's
     // auto-source fallback path when launched with autoSourceSelection.
     sourcePickerState?.let { picker ->
-        val mediaItem = state.mediaItem
+        val mediaItem = sourcePickerMediaItem ?: state.mediaItem
         TvSourcePickerSheet(
             state = picker,
             modifier = Modifier.zIndex(90f),
             onSelect = { option ->
+                // Capture the launch context before removing the modal. This is
+                // atomic with DPAD_CENTER even if detail metadata refreshes now.
+                val selectedMediaItem = mediaItem ?: return@TvSourcePickerSheet
+                val selectedSeason = sourcePickerSeason
+                val selectedEpisode = sourcePickerEpisode
+                restorePlayFocusAfterSourceDismiss = false
+                sourcePickerOriginEpisode = null
+                pendingEpisodeFocusRestore = null
                 sourcePickerState = null
-                if (mediaItem == null) return@TvSourcePickerSheet
+                sourcePickerMediaItem = null
                 if (TvDetailsSourcePickerStateBuilder.isProviderFetchSentinel(option)) {
-                    detailViewModel.fetchStreams(season = sourcePickerSeason, episode = sourcePickerEpisode)
+                    detailViewModel.fetchStreams(season = selectedSeason, episode = selectedEpisode)
                     return@TvSourcePickerSheet
                 }
                 val pickerEpName = state.seasonDetail?.episodes
-                    ?.find { it.episodeNumber == sourcePickerEpisode }?.name.orEmpty()
+                    ?.find { it.episodeNumber == selectedEpisode }?.name.orEmpty()
                 when (val route = option.route) {
                     is PlaybackRoute.LocalFile -> {
                         onPlayResolved(
                             "file://${route.absolutePath}",
                             "",
-                            mediaItem,
-                            sourcePickerSeason,
-                            sourcePickerEpisode,
+                            selectedMediaItem,
+                            selectedSeason,
+                            selectedEpisode,
+                            true,
+                            pickerEpName,
+                        )
+                    }
+                    is PlaybackRoute.JellyfinStream -> {
+                        PendingLanPlaybackHandoff.stage(route)
+                        onPlayResolved(
+                            route.url,
+                            "",
+                            selectedMediaItem,
+                            selectedSeason,
+                            selectedEpisode,
                             true,
                             pickerEpName,
                         )
@@ -1769,9 +1906,9 @@ fun TvDetailsScreen(
                         onPlayResolved(
                             route.url,
                             "",
-                            mediaItem,
-                            sourcePickerSeason,
-                            sourcePickerEpisode,
+                            selectedMediaItem,
+                            selectedSeason,
+                            selectedEpisode,
                             true,
                             pickerEpName,
                         )
@@ -1781,7 +1918,7 @@ fun TvDetailsScreen(
                         // A real ProviderStream URL here would be
                         // unusual â€" fall back to fetchStreams to keep
                         // the source disambiguation flow.
-                        detailViewModel.fetchStreams(season = sourcePickerSeason, episode = sourcePickerEpisode)
+                        detailViewModel.fetchStreams(season = selectedSeason, episode = selectedEpisode)
                     }
                     PlaybackRoute.ReDownload -> {
                         // No-op â€" the picker only emits ReDownload when
@@ -1791,7 +1928,12 @@ fun TvDetailsScreen(
                 }
             },
             onDismiss = {
+                val episodeOrigin = sourcePickerOriginEpisode
+                pendingEpisodeFocusRestore = episodeOrigin
+                restorePlayFocusAfterSourceDismiss = episodeOrigin == null
+                sourcePickerOriginEpisode = null
                 sourcePickerState = null
+                sourcePickerMediaItem = null
                 sourcePickerSeason = null
                 sourcePickerEpisode = null
             },
@@ -1812,6 +1954,7 @@ private suspend fun buildDetailPickerState(
     seasonNumber: Int?,
     episodeNumber: Int?,
     downloadRepository: DownloadRepository,
+    jellyfinLibrary: JellyfinLibraryOverlayService,
     lanLibraryConsumer: LanLibraryConsumer,
     networkMonitor: NetworkMonitor,
     wifiOnlyForLan: Boolean,
@@ -1827,6 +1970,16 @@ private suspend fun buildDetailPickerState(
         seasonNumber = seasonNumber,
         episodeNumber = episodeNumber,
     )
+    val jellyfinRoute = item.tmdbId?.let { tmdbId ->
+        runCatching {
+            jellyfinLibrary.findPlaybackRoute(
+                tmdbId = tmdbId,
+                mediaType = item.type,
+                seasonNumber = seasonNumber,
+                episodeNumber = episodeNumber,
+            )
+        }.getOrNull()
+    }
     val lanRoute = runCatching {
         lanLibraryConsumer.findLanRoute(
             title = item.title,
@@ -1842,6 +1995,7 @@ private suspend fun buildDetailPickerState(
     }
     return TvDetailsSourcePickerStateBuilder.build(
         localFilePath = localFilePath,
+        jellyfinRoute = jellyfinRoute,
         lanRoute = lanRoute,
         // The detail screen always assumes provider streams might
         // resolve â€" the existing fetchStreams() will tell the user if

@@ -100,7 +100,11 @@ class TorveApp : Application() {
                 DownloadWorker.ensureChannel(this@TorveApp)
             }
             launch {
-                runCatching { getKoin().get<AccountSessionCoordinator>().restoreSession() }
+                runCatching {
+                    getKoin().get<AccountSessionCoordinator>().restoreSession(
+                        promoteLegacyTvJellyfin = isTvBuild,
+                    )
+                }
                 runCatching { getKoin().get<com.torve.presentation.device.DeviceGovernanceViewModel>().fetchAccessState() }
                 runCatching { EpisodeNotificationWorker.scheduleIfEnabled(this@TorveApp) }
                 runCatching { getKoin().get<AccelerationInventorySyncService>().syncConnectedProviders() }

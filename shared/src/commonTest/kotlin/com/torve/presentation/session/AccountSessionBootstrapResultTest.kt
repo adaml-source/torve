@@ -87,5 +87,17 @@ class AccountSessionBootstrapResultTest {
             IntegrationSecretKey.PANDA_TOKEN,
             integrationSecretKeyForRestore("panda"),
         )
+        assertEquals(
+            IntegrationSecretKey.JELLYFIN_API_KEY,
+            integrationSecretKeyForRestore("jellyfin"),
+        )
+        assertEquals(
+            IntegrationSecretKey.SEERR_API_KEY,
+            integrationSecretKeyForRestore("seerr"),
+        )
+        assertEquals(
+            IntegrationSecretKey.SEERR_API_KEY,
+            integrationSecretKeyForRestore("jellyseerr"),
+        )
     }
 }

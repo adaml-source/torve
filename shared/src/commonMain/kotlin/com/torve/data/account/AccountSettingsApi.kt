@@ -75,14 +75,11 @@ class AccountSettingsApi(
     }
 
     /**
-     * Fetch the credential for a single account-mode integration.
-     * Returns null if the integration is device-only, not found, or the call fails.
-     * Never call this for device-only integrations — the backend will return empty.
-     */
-    /**
-     * Fetch credentials dict for a single integration.
-     * Returns the full map so multi-value credentials (e.g. Trakt access+refresh tokens)
-     * can be restored correctly.
+     * Fetch the complete credential map for one account-mode integration.
+     *
+     * A missing integration returns null. Authentication, network and server failures
+     * throw so restore callers can refresh the session or report the affected
+     * connection instead of silently treating a failed request as empty credentials.
      */
     suspend fun getIntegrationCredentials(
         accessToken: String,
@@ -111,6 +108,13 @@ class AccountSettingsApi(
                 }
                 if (!response.status.isSuccess()) {
                     if (response.status.value == 404) return null
+                    if (response.status.value == 401) {
+                        throw AccountApiException(401, integrationType)
+                    }
+                    val retryableClientFailure = response.status.value in setOf(408, 429)
+                    if ((response.status.value in 400..499).and(retryableClientFailure.not())) {
+                        throw AccountApiException(response.status.value, integrationType)
+                    }
                     lastError = RuntimeException("HTTP ${response.status.value}")
                     continue
                 }
@@ -123,6 +127,9 @@ class AccountSettingsApi(
                 val dto: IntegrationCredentialsDto = lenientJson.decodeFromString(raw)
                 return dto.credentials
             } catch (e: Exception) {
+                if (e is AccountApiException) {
+                    if (e.statusCode == 401) throw e
+                }
                 lastError = e
                 torveVerboseLog {
                     "[IntegrationAPI] GET credentials FAILED for $integrationType " +
@@ -134,7 +141,7 @@ class AccountSettingsApi(
             "[IntegrationAPI] GET credentials gave up for $integrationType after ${backoffsMs.size} attempts: " +
                 DiagnosticsRedactor.redact(lastError?.message)
         }
-        return null
+        throw requireNotNull(lastError)
     }
 
     /**
@@ -166,6 +173,22 @@ class AccountSettingsApi(
             ok
         } catch (e: Exception) {
             torveVerboseLog { "[IntegrationAPI] PUT exception: ${e::class.simpleName} ${DiagnosticsRedactor.redact(e.message)}" }
+            false
+        }
+    }
+
+    /** Remove an account integration. A missing row is already the desired state. */
+    suspend fun deleteIntegration(accessToken: String, integrationType: String): Boolean {
+        return try {
+            val response = httpClient.delete("${baseUrl()}/me/integrations/$integrationType") {
+                bearerAuth(accessToken)
+                appendBackendHeaders()
+            }
+            response.status.isSuccess() || response.status.value == 404
+        } catch (e: Exception) {
+            torveVerboseLog {
+                "[IntegrationAPI] DELETE exception: ${e::class.simpleName} ${DiagnosticsRedactor.redact(e.message)}"
+            }
             false
         }
     }
@@ -314,6 +337,10 @@ class AccountSettingsApi(
                 if (response.status.isSuccess()) {
                     return response.body()
                 }
+                if (response.status.value == 404) return null
+                if (response.status.value == 401) {
+                    throw AccountApiException(401, playlistId)
+                }
                 if (response.status.value == 429 && attempt < 2) {
                     val delayMs = playlistCredentialRetryDelayMs(
                         retryAfterHeader = response.headers["Retry-After"],
@@ -326,8 +353,11 @@ class AccountSettingsApi(
                     return@repeat
                 }
                 torveVerboseLog { "[PlaylistAPI] GET credentials FAILED for $playlistId: ${response.status.value}" }
-                return null
+                throw AccountApiException(response.status.value, playlistId)
             } catch (e: Exception) {
+                if (e is AccountApiException) {
+                    if (e.statusCode == 401) throw e
+                }
                 if (attempt < 2) {
                     val delayMs = playlistCredentialRetryDelayMs(retryAfterHeader = null, attempt = attempt)
                     torveVerboseLog {
@@ -337,10 +367,10 @@ class AccountSettingsApi(
                     return@repeat
                 }
                 torveVerboseLog { "[PlaylistAPI] GET credentials FAILED for $playlistId: ${e::class.simpleName} ${DiagnosticsRedactor.redact(e.message)}" }
-                return null
+                throw e
             }
         }
-        return null
+        error(playlistId)
     }
 
     suspend fun patchAccountSettings(

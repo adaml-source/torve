@@ -7,6 +7,36 @@ import kotlin.test.assertEquals
 class DetailPlaybackStartupOrchestratorTest {
 
     @Test
+    fun resolved_stream_dispatch_rejects_blank_urls_for_every_source_type() {
+        assertEquals(
+            ResolvedStreamDispatch.REJECT_EMPTY,
+            DetailPlaybackStartupOrchestrator.classifyResolvedStream("", addonHosted = false),
+        )
+        assertEquals(
+            ResolvedStreamDispatch.REJECT_EMPTY,
+            DetailPlaybackStartupOrchestrator.classifyResolvedStream("   ", addonHosted = true),
+        )
+    }
+
+    @Test
+    fun resolved_stream_dispatch_never_skips_addon_readiness_probe() {
+        assertEquals(
+            ResolvedStreamDispatch.PROBE_READINESS,
+            DetailPlaybackStartupOrchestrator.classifyResolvedStream(
+                "https://provider.example/stream",
+                addonHosted = true,
+            ),
+        )
+        assertEquals(
+            ResolvedStreamDispatch.PLAY_IMMEDIATELY,
+            DetailPlaybackStartupOrchestrator.classifyResolvedStream(
+                "https://cdn.example/video.mkv",
+                addonHosted = false,
+            ),
+        )
+    }
+
+    @Test
     fun reducer_tracks_progressive_startup_phases_in_order() {
         var status = PlaybackStartupStatus()
 
