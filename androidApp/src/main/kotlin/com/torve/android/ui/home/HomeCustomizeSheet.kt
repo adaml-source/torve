@@ -395,6 +395,7 @@ fun StreamingServicesRow(
 fun StreamingProviderBrandArtwork(
     service: StreamingService,
     modifier: Modifier = Modifier,
+    transparentBackground: Boolean = false,
 ) {
     val shape = RoundedCornerShape(14.dp)
     val brand = remember(service.tmdbProviderId) {
@@ -408,8 +409,12 @@ fun StreamingProviderBrandArtwork(
     Box(
         modifier = modifier
             .clip(shape)
-            .background(brand.background)
-            .border(1.dp, brand.border, shape),
+            .background(if (transparentBackground) Color.Transparent else brand.background)
+            .border(
+                width = if (transparentBackground) 0.dp else 1.dp,
+                color = if (transparentBackground) Color.Transparent else brand.border,
+                shape = shape,
+            ),
         contentAlignment = Alignment.Center,
     ) {
         if (!artworkFailed && !brand.artworkUrl.isNullOrBlank()) {
