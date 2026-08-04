@@ -422,7 +422,7 @@ fun StreamingProviderBrandArtwork(
             // Keep every provider on the same translucent black canvas. The
             // sourced PNG contains the branding; competing gradients reduce
             // wordmark contrast and make the rail look inconsistent.
-            .background(Color.Black.copy(alpha = 0.90f))
+            .background(Color.Black.copy(alpha = 0.10f))
             .border(1.dp, Color.White.copy(alpha = 0.10f), shape),
     ) {
         if (!artworkUrl.isNullOrBlank()) {
