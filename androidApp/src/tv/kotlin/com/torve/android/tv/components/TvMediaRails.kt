@@ -96,6 +96,7 @@ import com.torve.android.tv.focus.rememberRegisteredTvFocusRequester
 import com.torve.android.tv.focus.rememberTvModalFocusRestoreController
 import com.torve.android.tv.focus.TvScreenFocusHandle
 import com.torve.android.ui.home.ALL_STREAMING_SERVICES
+import com.torve.android.ui.home.StreamingProviderBrandArtwork
 import com.torve.android.ui.theme.Amber
 import com.torve.android.ui.theme.AmberLight
 import com.torve.android.ui.theme.Charcoal
@@ -1011,8 +1012,8 @@ internal fun TvMediaRails(
                                             TvStreamingServiceCard(
                                                 item = item,
                                                 modifier = cardModifier
-                                                    .width(220.dp)
-                                                    .height(120.dp),
+                                                    .width(256.dp)
+                                                    .height(144.dp),
                                                 onClick = { onMediaClick(item) },
                                                 onFocused = onItemFocused,
                                             )
@@ -1218,27 +1219,22 @@ private fun TvStreamingServiceCard(
         label = "serviceCardBorder",
     )
     val providerId = item.id.removePrefix("provider:").toIntOrNull()
-    val brandColor = ALL_STREAMING_SERVICES
+    val service = ALL_STREAMING_SERVICES
         .firstOrNull { it.tmdbProviderId == providerId }
-        ?.brandColor
-        ?: Charcoal
+        ?: com.torve.android.ui.home.StreamingService(
+            name = item.title,
+            brandColor = Charcoal,
+            tmdbProviderId = providerId ?: -1,
+        )
     val interactionSource = remember { MutableInteractionSource() }
+    val shape = RoundedCornerShape(14.dp)
 
     Box(
         modifier = modifier
             .zIndex(if (focused) 1f else 0f)
             .scale(scale)
-            .clip(RoundedCornerShape(18.dp))
-            .background(
-                Brush.radialGradient(
-                    colors = listOf(
-                        brandColor.copy(alpha = if (focused) 0.42f else 0.30f),
-                        Charcoal.copy(alpha = 0.92f),
-                        Obsidian.copy(alpha = 0.96f),
-                    ),
-                ),
-            )
-            .border(3.dp, borderColor, RoundedCornerShape(18.dp))
+            .clip(shape)
+            .border(2.dp, borderColor, shape)
             .onFocusChanged {
                 focused = it.isFocused
                 if (it.isFocused) onFocused()
@@ -1247,30 +1243,14 @@ private fun TvStreamingServiceCard(
                 interactionSource = interactionSource,
                 indication = null,
                 onClick = onClick,
-            )
-            .padding(horizontal = 28.dp, vertical = 22.dp),
-        contentAlignment = Alignment.Center,
+            ),
     ) {
         val logoUrl = item.posterUrl ?: item.backdropUrl
-        if (!logoUrl.isNullOrBlank()) {
-            AsyncImage(
-                model = logoUrl,
-                contentDescription = item.title,
-                contentScale = ContentScale.Fit,
-                modifier = Modifier
-                    .fillMaxSize()
-                    .clip(RoundedCornerShape(10.dp)),
-            )
-        } else {
-            Text(
-                text = item.title,
-                style = MaterialTheme.typography.titleMedium,
-                color = Snow,
-                fontWeight = FontWeight.Bold,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
+        StreamingProviderBrandArtwork(
+            service = service,
+            logoUrl = logoUrl,
+            modifier = Modifier.fillMaxSize(),
+        )
     }
 }
 

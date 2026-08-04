@@ -444,7 +444,12 @@ private fun buildBuiltInRails(
 
         HomeSection.STREAMING_SERVICES -> {
             val items = ALL_STREAMING_SERVICES
-                .filter { it.tmdbProviderId in enabledStreamingServiceIds }
+                .sortedBy { service ->
+                    // Saved services stay at the front for quick access, but
+                    // the discovery rail must not silently hide the rest of
+                    // Torve's supported providers.
+                    if (service.tmdbProviderId in enabledStreamingServiceIds) 0 else 1
+                }
                 .map { service ->
                     MediaItem(
                         id = "$TV_HOME_PROVIDER_ID_PREFIX${service.tmdbProviderId}",

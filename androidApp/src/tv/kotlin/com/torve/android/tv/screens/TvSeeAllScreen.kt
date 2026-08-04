@@ -216,6 +216,7 @@ internal fun TvSeeAllScreen(
     val prefsRepo: PreferencesRepository = koinInject()
     val secretStore: IntegrationSecretStore = koinInject()
     val isPersonCreditsRail = railKey.startsWith("person_credits_")
+    val isProviderDiscoveryRail = railKey.startsWith("provider_")
     val items = remember { mutableStateListOf<MediaItem>() }
     val filterOptionItems = remember(railKey, mediaType) { mutableStateListOf<MediaItem>() }
     var currentPage by remember { mutableIntStateOf(1) }
@@ -791,7 +792,16 @@ internal fun TvSeeAllScreen(
             }.getOrDefault(MdbListApi.DEFAULT_API_KEY)
             val remainingMs = ratingsEnricher.rateLimitRemainingMs()
             if (remainingMs > 0L) delay(remainingMs + 2_000L)
-            val enriched = ratingsEnricher.enrichList(snapshot, apiKey)
+            // Provider discovery promises the same IMDb-enriched browsing
+            // experience as Search. Use the focused IMDb path here: it
+            // hydrates cache first and then fetches only the fields the card
+            // and preview need, while the already-rendered poster grid stays
+            // available and stable.
+            val enriched = if (isProviderDiscoveryRail) {
+                ratingsEnricher.enrichImdbList(snapshot, apiKey)
+            } else {
+                ratingsEnricher.enrichList(snapshot, apiKey)
+            }
             val enrichedByOriginalKey = snapshot.zip(enriched).associate { (before, after) ->
                 before.seeAllStableKey() to before.mergeSeeAllEnrichedItem(after)
             }

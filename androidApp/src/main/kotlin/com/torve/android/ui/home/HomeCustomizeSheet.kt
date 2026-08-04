@@ -9,7 +9,9 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.background
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.border
 import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
@@ -356,40 +358,21 @@ fun StreamingServicesRow(
                 val logoUrl = providerLogos[service.tmdbProviderId]
                 Column(
                     horizontalAlignment = Alignment.CenterHorizontally,
-                    modifier = Modifier.width(220.dp),
+                    modifier = Modifier.width(240.dp),
                 ) {
                     Surface(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(120.dp),
+                            .height(135.dp),
                         shape = RoundedCornerShape(14.dp),
-                        color = service.brandColor,
+                        color = Color.Transparent,
                         onClick = { onProviderClick(service.tmdbProviderId, service.name) },
                     ) {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(120.dp),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            if (logoUrl != null) {
-                                coil3.compose.AsyncImage(
-                                    model = logoUrl,
-                                    contentDescription = service.name,
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(horizontal = 24.dp, vertical = 20.dp),
-                                    contentScale = androidx.compose.ui.layout.ContentScale.Fit,
-                                )
-                            } else {
-                                Text(
-                                    service.name,
-                                    color = Color.White,
-                                    fontWeight = FontWeight.Bold,
-                                    style = MaterialTheme.typography.titleMedium,
-                                )
-                            }
-                        }
+                        StreamingProviderBrandArtwork(
+                            service = service,
+                            logoUrl = logoUrl,
+                            modifier = Modifier.fillMaxSize(),
+                        )
                     }
                 }
             }
@@ -403,6 +386,103 @@ fun StreamingServicesRow(
         )
     }
 }
+
+/**
+ * A 16:9 Torve treatment for official provider artwork.
+ *
+ * TMDB provider marks are requested at original resolution and cropped
+ * edge-to-edge into the 16:9 frame. No separate square icon or text treatment
+ * is layered over the artwork.
+ */
+@Composable
+fun StreamingProviderBrandArtwork(
+    service: StreamingService,
+    logoUrl: String?,
+    modifier: Modifier = Modifier,
+) {
+    val shape = RoundedCornerShape(14.dp)
+    val tmdbFallbackUrl = remember(logoUrl) {
+        logoUrl
+            ?.replace(Regex("/w\\d+/"), "/original/")
+            ?.replace(Regex("/h\\d+/"), "/original/")
+    }
+    val wideWordmarkUrl = remember(service.tmdbProviderId) {
+        STREAMING_PROVIDER_WIDE_PNGS[service.tmdbProviderId]
+    }
+    var wideWordmarkFailed by remember(wideWordmarkUrl, tmdbFallbackUrl) { mutableStateOf(false) }
+    val artworkUrl = if (!wideWordmarkFailed) {
+        wideWordmarkUrl ?: tmdbFallbackUrl
+    } else {
+        tmdbFallbackUrl
+    }
+    val usesWideWordmark = artworkUrl != null && artworkUrl == wideWordmarkUrl
+    Box(
+        modifier = modifier
+            .clip(shape)
+            // Keep every provider on the same quiet neutral canvas. The
+            // sourced PNG contains the branding; competing gradients reduce
+            // wordmark contrast and make the rail look inconsistent.
+            .background(Color(0xFFE6E6E8))
+            .border(1.dp, Color.Black.copy(alpha = 0.16f), shape),
+    ) {
+        if (!artworkUrl.isNullOrBlank()) {
+            coil3.compose.AsyncImage(
+                model = artworkUrl,
+                contentDescription = service.name,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(
+                        horizontal = if (usesWideWordmark) 0.dp else 34.dp,
+                        vertical = if (usesWideWordmark) 0.dp else 22.dp,
+                    ),
+                contentScale = if (usesWideWordmark) {
+                    // The sourced transparent PNG canvases are already wide;
+                    // crop only their empty top/bottom margin into the 16:9
+                    // frame. The wordmark itself is never stretched.
+                    androidx.compose.ui.layout.ContentScale.Crop
+                } else {
+                    // A square TMDB mark is a last-resort fallback. Keep it
+                    // entirely visible and never zoom it.
+                    androidx.compose.ui.layout.ContentScale.Fit
+                },
+                onError = {
+                    if (usesWideWordmark && !tmdbFallbackUrl.isNullOrBlank()) {
+                        wideWordmarkFailed = true
+                    }
+                },
+            )
+        }
+    }
+}
+
+/**
+ * High-resolution transparent PNG wordmarks used as TV title art.
+ *
+ * These are deliberately separate from TMDB's square watch-provider icons.
+ * Each image is rendered over Torve's 16:9 brand canvas at its native aspect
+ * ratio. Unsupported regional services retain the un-cropped TMDB fallback.
+ */
+private val STREAMING_PROVIDER_WIDE_PNGS = mapOf(
+    8 to "https://download.logo.wine/logo/Netflix/Netflix-Logo.wine.png",
+    9 to "https://download.logo.wine/logo/Prime_Video/Prime_Video-Logo.wine.png",
+    337 to "https://download.logo.wine/logo/Disney%2B/Disney%2B-Logo.wine.png",
+    350 to "https://download.logo.wine/logo/Apple_TV/Apple_TV-Logo.wine.png",
+    1899 to "https://download.logo.wine/logo/HBO_Max/HBO_Max-Logo.wine.png",
+    15 to "https://download.logo.wine/logo/Hulu/Hulu-Logo.wine.png",
+    531 to "https://download.logo.wine/logo/Paramount%2B/Paramount%2B-Logo.wine.png",
+    386 to "https://download.logo.wine/logo/Peacock_(streaming_service)/Peacock_(streaming_service)-Logo.wine.png",
+    283 to "https://download.logo.wine/logo/Crunchyroll/Crunchyroll-Logo.wine.png",
+    11 to "https://download.logo.wine/logo/Mubi_(streaming_service)/Mubi_(streaming_service)-Logo.wine.png",
+    43 to "https://download.logo.wine/logo/Starz/Starz-Logo.wine.png",
+    37 to "https://download.logo.wine/logo/Showtime_(TV_network)/Showtime_(TV_network)-Logo.wine.png",
+    380 to "https://download.logo.wine/logo/BritBox/BritBox-Logo.wine.png",
+    258 to "https://download.logo.wine/logo/The_Criterion_Collection/The_Criterion_Collection-Logo.wine.png",
+    73 to "https://download.logo.wine/logo/Tubi/Tubi-Logo.wine.png",
+    300 to "https://download.logo.wine/logo/Pluto_TV/Pluto_TV-Logo.wine.png",
+    613 to "https://download.logo.wine/logo/Amazon_Freevee/Amazon_Freevee-Logo.wine.png",
+    190 to "https://download.logo.wine/logo/CuriosityStream/CuriosityStream-Logo.wine.png",
+    439 to "https://download.logo.wine/logo/Shudder_(streaming_service)/Shudder_(streaming_service)-Logo.wine.png",
+)
 
 data class StreamingService(
     val name: String,

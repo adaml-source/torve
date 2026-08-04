@@ -80,7 +80,7 @@ class TvHomeRailsConfigurationTest {
     }
 
     @Test
-    fun streamingServicesRenderSavedProvidersWithServiceCards() {
+    fun streamingServicesRenderSavedProvidersFirstAndKeepFullCatalog() {
         val rails = buildTvHomeRails(
             state = HomeUiState(),
             sectionConfigs = listOf(
@@ -95,8 +95,12 @@ class TvHomeRailsConfigurationTest {
         val services = rails.single()
         assertEquals("streaming_services", services.key)
         assertEquals(TvCardStyle.SERVICE, services.cardStyle)
-        assertEquals(listOf("provider:8", "provider:337"), services.items.map { it.id })
-        assertEquals(listOf("netflix.png", "disney.png"), services.items.map { it.posterUrl })
+        assertEquals(listOf("provider:8", "provider:337"), services.items.take(2).map { it.id })
+        assertEquals(listOf("netflix.png", "disney.png"), services.items.take(2).map { it.posterUrl })
+        assertTrue(services.items.size > 6)
+        assertTrue(services.items.any { it.id == "provider:531" })
+        assertTrue(services.items.any { it.id == "provider:386" })
+        assertTrue(services.items.any { it.id == "provider:283" })
     }
 
     private fun media(id: String, type: MediaType = MediaType.MOVIE) = MediaItem(
