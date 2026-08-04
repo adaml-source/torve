@@ -1429,6 +1429,7 @@ fun TorveNavGraph(
                         ratingsEnricher = ratingsEnricher,
                         integrationSecretStore = integrationSecretStore,
                         initialProviderId = providerId,
+                        initialProviderName = providerName,
                     )
                 }
                 CatalogScreen(

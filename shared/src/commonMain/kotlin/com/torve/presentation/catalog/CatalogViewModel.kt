@@ -14,8 +14,10 @@ import com.torve.domain.model.ContentSourceType
 import com.torve.domain.model.MediaItem
 import com.torve.domain.model.MediaType
 import com.torve.domain.model.PagedResult
+import com.torve.domain.model.StreamingProviderCandidate
 import com.torve.domain.model.dedupeByStableKey
 import com.torve.domain.model.extractTmdbIdOrNull
+import com.torve.domain.model.resolveStreamingProviderIds
 import com.torve.domain.discovery.tmdbDiscoverRating
 import com.torve.domain.integrations.IntegrationSecretKey
 import com.torve.domain.integrations.IntegrationSecretStore
@@ -56,7 +58,8 @@ class CatalogViewModel(
     private val contentPolicyRepository: ContentPolicyRepository? = null,
     private val contentPolicyFilter: ContentPolicyFilter = ContentPolicyFilter(),
     invalidationCoordinator: ContentPolicyCacheInvalidationCoordinator? = null,
-    initialProviderId: Int? = null,
+    private val initialProviderId: Int? = null,
+    private val initialProviderName: String? = null,
     /**
      * Optional pre-paginated top-1000 cache. When present and populated for
      * the active genre + media type, the catalog grid is rendered straight
@@ -205,6 +208,7 @@ class CatalogViewModel(
                 val filter = _state.value.filter
                 val genreId = _state.value.selectedGenreId
                 val providerId = _state.value.providerId
+                val providerFilter = resolveProviderFilter(providerId)
                 val category = _state.value.selectedCategory
 
                 // Pre-cache fast path DISABLED 2026-05-08. SQLite's
@@ -267,8 +271,8 @@ class CatalogViewModel(
                             yearTo = filter.yearTo,
                             runtimeGte = filter.runtimeFilter?.minMinutes,
                             runtimeLte = filter.runtimeFilter?.maxMinutes,
-                            withWatchProviders = providerId?.toString(),
-                            watchRegion = if (providerId != null) "US" else null,
+                            withWatchProviders = providerFilter.first,
+                            watchRegion = providerFilter.second,
                         )
                     }
                 }
@@ -388,6 +392,7 @@ class CatalogViewModel(
                 val filter = s.filter
                 val genreId = s.selectedGenreId
                 val providerId = s.providerId
+                val providerFilter = resolveProviderFilter(providerId)
                 val category = s.selectedCategory
 
                 if (category == CatalogCategory.IN_PROGRESS) return@launch
@@ -417,8 +422,8 @@ class CatalogViewModel(
                         yearTo = filter.yearTo,
                         runtimeGte = filter.runtimeFilter?.minMinutes,
                         runtimeLte = filter.runtimeFilter?.maxMinutes,
-                        withWatchProviders = providerId?.toString(),
-                        watchRegion = if (providerId != null) "US" else null,
+                        withWatchProviders = providerFilter.first,
+                        watchRegion = providerFilter.second,
                     )
                 }
 
@@ -748,6 +753,31 @@ class CatalogViewModel(
      */
     private fun catalogDiagLog(message: String) {
         torveVerboseLog { "CATALOG mediaType=$mediaType $message" }
+    }
+
+    private suspend fun resolveProviderFilter(providerId: Int?): Pair<String?, String?> {
+        if (providerId == null) return null to null
+        val region = prefsRepo?.getString(SettingsViewModel.KEY_REGION_CODE)
+            ?.trim()
+            ?.uppercase()
+            ?.takeIf { it.length == 2 }
+            ?: "US"
+        val providerName = initialProviderName
+            ?.takeIf { providerId == initialProviderId }
+            ?.takeIf { it.isNotBlank() }
+            ?: return providerId.toString() to region
+        val providerNames = runCatching {
+            metadataRepo.getWatchProviderNames(mediaType, region)
+        }.getOrDefault(emptyMap())
+        val resolved = resolveStreamingProviderIds(
+            requestedName = providerName,
+            configuredProviderId = providerId,
+            region = region,
+            availableProviders = providerNames.map { (id, name) ->
+                StreamingProviderCandidate(id = id, name = name)
+            },
+        )
+        return resolved.joinToString("|").ifBlank { providerId.toString() } to region
     }
 
     private fun hydrateCachedRatings(items: List<MediaItem>): List<MediaItem> {

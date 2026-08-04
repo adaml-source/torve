@@ -83,6 +83,9 @@ import com.torve.android.tv.components.cacheTvBrowsePreviewEnrichedItem
 import com.torve.android.tv.settings.TV_SEE_ALL_POSTER_COLUMN_OPTIONS
 import com.torve.android.tv.settings.rememberTvSeeAllPosterColumnsPreference
 import com.torve.android.tv.settings.setTvSeeAllPosterColumns
+import com.torve.android.ui.home.ALL_STREAMING_SERVICES
+import com.torve.android.ui.home.StreamingProviderBrandArtwork
+import com.torve.android.ui.home.StreamingService
 import com.torve.data.mdblist.MdbListApi
 import com.torve.data.mdblist.RatingsEnricher
 import com.torve.data.metadata.TmdbMappers
@@ -91,6 +94,8 @@ import com.torve.domain.integrations.IntegrationSecretStore
 import com.torve.domain.model.MediaItem
 import com.torve.domain.model.MediaRatings
 import com.torve.domain.model.PagedResult
+import com.torve.domain.model.StreamingProviderCandidate
+import com.torve.domain.model.resolveStreamingProviderIds
 import com.torve.domain.repository.PreferencesRepository
 import com.torve.presentation.settings.SettingsViewModel
 import com.torve.domain.model.hasRichExternalRating
@@ -217,6 +222,15 @@ internal fun TvSeeAllScreen(
     val secretStore: IntegrationSecretStore = koinInject()
     val isPersonCreditsRail = railKey.startsWith("person_credits_")
     val isProviderDiscoveryRail = railKey.startsWith("provider_")
+    val configuredProviderId = remember(railKey) {
+        railKey.split("_").getOrNull(2)?.toIntOrNull()
+    }
+    val initialProviderType = remember(railKey) {
+        railKey.split("_").getOrNull(1)?.takeIf { it == "movie" || it == "tv" } ?: "movie"
+    }
+    var providerContentType by rememberSaveable(railKey) { mutableStateOf(initialProviderType) }
+    var providerRegion by rememberSaveable(railKey) { mutableStateOf<String?>(null) }
+    var providerControlsInteracted by remember(railKey) { mutableStateOf(false) }
     val items = remember { mutableStateListOf<MediaItem>() }
     val filterOptionItems = remember(railKey, mediaType) { mutableStateListOf<MediaItem>() }
     var currentPage by remember { mutableIntStateOf(1) }
@@ -228,7 +242,9 @@ internal fun TvSeeAllScreen(
     val firstItemFocusRequester = remember { FocusRequester() }
     val previewFocusRequester = remember { FocusRequester() }
     val focusRestoreController = rememberTvModalFocusRestoreController(key = "see_all_${railKey}_$mediaType")
-    val cacheKey = remember(railKey, mediaType) { "$railKey|$mediaType" }
+    val cacheKey = remember(railKey, mediaType, providerContentType, providerRegion) {
+        "$railKey|$mediaType|$providerContentType|${providerRegion ?: "default"}"
+    }
     val sortOptions = remember(railKey) { sortOptionsForRail(railKey) }
     var selectedSortKey by remember(railKey) { mutableStateOf(defaultSortKeyForRail(railKey, sortOptions)) }
     val sortRequesters = remember(sortOptions) { List(sortOptions.size) { FocusRequester() } }
@@ -250,8 +266,8 @@ internal fun TvSeeAllScreen(
     // must transform the loaded rail source only; it must not switch to a
     // broader discovery query to "refill" results.
     val filterSourceItems = filterOptionItems.toList().ifEmpty { loadedItems }
-    val filterMediaType = remember(railKey, mediaType) {
-        mediaType.takeIf { it == "movie" || it == "tv" }
+    val filterMediaType = remember(railKey, mediaType, providerContentType) {
+        if (isProviderDiscoveryRail) providerContentType else mediaType.takeIf { it == "movie" || it == "tv" }
             ?: when {
                 railKey.contains("_tv") || railKey.endsWith("-tv") -> "tv"
                 else -> "movie"
@@ -332,6 +348,7 @@ internal fun TvSeeAllScreen(
                     pendingGridRestoreNonce += 1
                     focusRestoreController.requestRestore(origin = origin, reason = reason)
                 },
+                isOriginFocused = focusRestoreController::isOriginFocused,
             ),
         )
         onDispose {
@@ -351,6 +368,15 @@ internal fun TvSeeAllScreen(
         focusedMediaItem = null
         onBack()
     })
+
+    LaunchedEffect(isProviderDiscoveryRail, railKey) {
+        if (!isProviderDiscoveryRail || providerRegion != null) return@LaunchedEffect
+        providerRegion = prefsRepo.getString(SettingsViewModel.KEY_REGION_CODE)
+            ?.trim()
+            ?.uppercase()
+            ?.takeIf { it.length == 2 }
+            ?: "US"
+    }
 
     fun rememberBaseFilterOptions() {
         if (!isPersonCreditsRail) {
@@ -595,19 +621,33 @@ internal fun TvSeeAllScreen(
                 return
             }
             if (railKey.startsWith("provider_")) {
-                val parts = railKey.split("_")
-                val providerType = parts.getOrNull(1)?.takeIf { it == "movie" || it == "tv" } ?: "movie"
-                val providerId = parts.getOrNull(2)
-                if (providerId.isNullOrBlank()) {
+                val providerId = configuredProviderId
+                if (providerId == null) {
                     loading = false
                     return
                 }
+                val watchRegion = providerRegion ?: "US"
+                val providerNames = runCatching {
+                    metadataRepo.getWatchProviderNames(providerContentType, watchRegion)
+                }.getOrDefault(emptyMap())
+                val providerQuery = resolveStreamingProviderIds(
+                    requestedName = title,
+                    configuredProviderId = providerId,
+                    region = watchRegion,
+                    availableProviders = providerNames.map { (id, name) ->
+                        StreamingProviderCandidate(id = id, name = name)
+                    },
+                ).filter { it > 0 }.joinToString("|").ifBlank { providerId.toString() }
+                Log.d(
+                    "TvProviderDiscovery",
+                    "provider=$title type=$providerContentType region=$watchRegion ids=$providerQuery",
+                )
                 val result = metadataRepo.discover(
-                    type = providerType,
+                    type = providerContentType,
                     page = page,
                     sortBy = "popularity.desc",
-                    withWatchProviders = providerId,
-                    watchRegion = "US",
+                    withWatchProviders = providerQuery,
+                    watchRegion = watchRegion,
                 )
                 val existingKeys = items.mapTo(mutableSetOf()) { it.seeAllStableKey() }
                 items.addAll(result.items.filter { existingKeys.add(it.seeAllStableKey()) })
@@ -665,7 +705,8 @@ internal fun TvSeeAllScreen(
         }
     }
 
-    LaunchedEffect(railKey, mediaType) {
+    LaunchedEffect(railKey, mediaType, providerContentType, providerRegion) {
+        if (isProviderDiscoveryRail && providerRegion == null) return@LaunchedEffect
         val cached = TvSeeAllCache.get(cacheKey)
         if (cached != null && shouldRestoreTvSeeAllCache(railKey, cached)) {
             items.clear()
@@ -677,7 +718,7 @@ internal fun TvSeeAllScreen(
             loading = false
             initialLoad = false
             personPanelInfo = cached.personPanelInfo
-            initialFocusHandled = false
+            initialFocusHandled = providerControlsInteracted
             return@LaunchedEffect
         }
         items.clear()
@@ -687,7 +728,7 @@ internal fun TvSeeAllScreen(
         loading = false
         initialLoad = true
         personPanelInfo = null
-        initialFocusHandled = false
+        initialFocusHandled = providerControlsInteracted
         while (items.size < TV_SEE_ALL_INITIAL_TARGET_COUNT && currentPage < totalPages) {
             loadPage(currentPage + 1)
             if (totalPages == 1) break
@@ -998,7 +1039,19 @@ internal fun TvSeeAllScreen(
                 .padding(start = 14.dp, top = TV_PAGE_TOP_GUTTER, end = TV_PAGE_END_GUTTER, bottom = TV_PAGE_BOTTOM_GUTTER),
         ) {
         // Info panel — left side
-        if (!isPersonCreditsRail) {
+        if (isProviderDiscoveryRail) {
+            val providerService = remember(configuredProviderId, title) {
+                ALL_STREAMING_SERVICES.firstOrNull { it.tmdbProviderId == configuredProviderId }
+                    ?: StreamingService(title, Graphite, configuredProviderId ?: 0)
+            }
+            StreamingProviderBrandArtwork(
+                service = providerService,
+                modifier = Modifier
+                    .width(190.dp)
+                    .height(58.dp)
+                    .padding(bottom = 8.dp),
+            )
+        } else if (!isPersonCreditsRail) {
             Text(
                 text = title,
                 style = MaterialTheme.typography.headlineMedium,
@@ -1012,6 +1065,15 @@ internal fun TvSeeAllScreen(
         val firstFilterRequester = remember(screenId, "first_filter") { FocusRequester() }
         val clearRequester = remember(screenId, "clear_filters") { FocusRequester() }
         val posterColumnsRequester = remember(screenId, "poster_columns") { FocusRequester() }
+        val providerMovieRequester = remember(screenId, "provider_movie") { FocusRequester() }
+        val providerSeriesRequester = remember(screenId, "provider_series") { FocusRequester() }
+        val providerRegions = remember(providerRegion) {
+            listOfNotNull(providerRegion, "US", "DE", "GB", "CA", "AU", "AT", "CH", "FR")
+                .distinct()
+        }
+        val providerRegionRequesters = remember(providerRegions) {
+            List(providerRegions.size) { FocusRequester() }
+        }
         val afterFiltersRequester = when {
             renderedItems.isNotEmpty() -> firstItemFocusRequester
             sortOptions.isNotEmpty() -> sortRequesters[selectedSortIndex]
@@ -1054,6 +1116,64 @@ internal fun TvSeeAllScreen(
                 onContentFocused(filterToggleRequester)
             }
         }
+        if (isProviderDiscoveryRail) {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                modifier = Modifier.padding(bottom = 8.dp),
+            ) {
+                TvSeeAllFilterChip(
+                    label = "Movies",
+                    selected = providerContentType == "movie",
+                    modifier = Modifier
+                        .focusRequester(providerMovieRequester)
+                        .focusProperties {
+                            left = railFocusRequester
+                            right = providerSeriesRequester
+                            down = filterToggleRequester
+                        },
+                    onFocused = { onContentFocused(providerMovieRequester) },
+                    onClick = {
+                        providerControlsInteracted = true
+                        providerContentType = "movie"
+                    },
+                )
+                TvSeeAllFilterChip(
+                    label = "Series",
+                    selected = providerContentType == "tv",
+                    modifier = Modifier
+                        .focusRequester(providerSeriesRequester)
+                        .focusProperties {
+                            left = providerMovieRequester
+                            right = providerRegionRequesters.firstOrNull() ?: filterToggleRequester
+                            down = filterToggleRequester
+                        },
+                    onFocused = { onContentFocused(providerSeriesRequester) },
+                    onClick = {
+                        providerControlsInteracted = true
+                        providerContentType = "tv"
+                    },
+                )
+                providerRegions.forEachIndexed { index, region ->
+                    val requester = providerRegionRequesters[index]
+                    TvSeeAllFilterChip(
+                        label = region,
+                        selected = providerRegion == region,
+                        modifier = Modifier
+                            .focusRequester(requester)
+                            .focusProperties {
+                                left = if (index == 0) providerSeriesRequester else providerRegionRequesters[index - 1]
+                                right = providerRegionRequesters.getOrNull(index + 1) ?: filterToggleRequester
+                                down = filterToggleRequester
+                            },
+                        onFocused = { onContentFocused(requester) },
+                        onClick = {
+                            providerControlsInteracted = true
+                            providerRegion = region
+                        },
+                    )
+                }
+            }
+        }
         Row(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             modifier = Modifier.padding(bottom = if (showFilters) 10.dp else 16.dp),
@@ -1068,7 +1188,14 @@ internal fun TvSeeAllScreen(
                 modifier = Modifier
                     .focusRequester(filterToggleRequester)
                     .focusProperties {
-                        left = railFocusRequester
+                        left = if (isProviderDiscoveryRail) {
+                            providerRegionRequesters.lastOrNull() ?: providerSeriesRequester
+                        } else {
+                            railFocusRequester
+                        }
+                        if (isProviderDiscoveryRail) {
+                            up = providerMovieRequester
+                        }
                         right = if (hasFilterSelections) clearRequester else posterColumnsRequester
                         if (showFilters) {
                             down = firstFilterRequester
@@ -1239,7 +1366,11 @@ internal fun TvSeeAllScreen(
                     contentAlignment = Alignment.Center,
                 ) {
                     Text(
-                        text = stringResource(R.string.tv_no_data),
+                        text = if (isProviderDiscoveryRail) {
+                            "No ${if (providerContentType == "tv") "series" else "movies"} are listed for $title in ${providerRegion ?: "this region"}."
+                        } else {
+                            stringResource(R.string.tv_no_data)
+                        },
                         style = MaterialTheme.typography.titleLarge,
                         color = Silver,
                     )

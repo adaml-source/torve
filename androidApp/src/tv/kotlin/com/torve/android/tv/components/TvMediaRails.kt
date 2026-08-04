@@ -466,6 +466,7 @@ internal fun TvMediaRails(
                 requestRestore = { origin, reason ->
                     modalFocusRestoreController.requestRestore(origin = origin, reason = reason)
                 },
+                isOriginFocused = modalFocusRestoreController::isOriginFocused,
             ),
         )
         onDispose {

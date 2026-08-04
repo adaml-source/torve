@@ -321,6 +321,7 @@ internal fun TvSearchScreen(
                 requestRestore = { origin, reason ->
                     focusRestoreController.requestRestore(origin = origin, reason = reason)
                 },
+                isOriginFocused = focusRestoreController::isOriginFocused,
             ),
         )
         onDispose {

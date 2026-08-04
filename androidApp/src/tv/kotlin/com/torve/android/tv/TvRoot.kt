@@ -188,7 +188,6 @@ internal object TvScreenCache {
 private data class TvFocusBackStackEntry(
     val route: String,
     val origin: TvFocusOrigin? = null,
-    val exactRequester: FocusRequester? = null,
 )
 
 internal fun orderedSettingsEntryCandidates(
@@ -568,13 +567,15 @@ fun TvRoot(
         focusedContentRoute = route
         contentFocusEpoch += 1
         val pendingBack = pendingFocusBackRestore
+        val restoredStableOrigin = pendingBack?.origin?.let { origin ->
+            focusHandlesByRoute[route]?.isOriginFocused(origin) == true
+        } ?: true
         if (
             pendingBack?.route == route &&
-            (pendingBack.exactRequester == null || pendingBack.exactRequester === requester)
+            restoredStableOrigin
         ) {
-            // Keep the back-stack restore pending until the exact originating
-            // card reports focus. Clearing it earlier lets the navigation rail
-            // win the transient focus race during the sub-route pop animation.
+            // Requester instances can change when a lazy row recomposes. Only
+            // stable screen/row/item identity is authoritative here.
             pendingFocusBackRestore = null
             pendingContentEntryRoute = null
         }
@@ -1268,7 +1269,6 @@ fun TvRoot(
         val entry = TvFocusBackStackEntry(
             route = route,
             origin = origin,
-            exactRequester = lastFocusedContentByRoute[route],
         )
         focusReturnStack.add(entry)
         Log.d(
@@ -1313,16 +1313,14 @@ fun TvRoot(
 
         pendingContentEntryRoute = route
         if (entry.origin != null) {
-            focusHandlesByRoute[route]?.requestRestore(entry.origin, "back_stack")
-            // The top-level page is kept composed, so its exact requester is
-            // still valid after the overlay closes. Retry it across several
-            // frames while the navigation transition releases focus. The
-            // matching onFocus callback clears pendingFocusBackRestore.
-            repeat(20) {
+            val handle = focusHandlesByRoute[route] ?: return@LaunchedEffect
+            handle.requestRestore(entry.origin, "back_stack")
+            repeat(30) {
                 delay(40L)
                 if (pendingFocusBackRestore != entry) return@LaunchedEffect
-                entry.exactRequester?.let { requester ->
-                    runCatching { requester.requestFocus() }
+                if (handle.isOriginFocused(entry.origin)) {
+                    pendingFocusBackRestore = null
+                    return@LaunchedEffect
                 }
                 withFrameNanos { }
             }

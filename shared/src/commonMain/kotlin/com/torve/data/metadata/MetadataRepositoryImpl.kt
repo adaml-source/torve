@@ -633,6 +633,15 @@ class MetadataRepositoryImpl(
         }
     }
 
+    override suspend fun getWatchProviderNames(type: String, region: String): Map<Int, String> {
+        val cacheKey = metadataCacheKey("getWatchProviderNames", type, region)
+        return cachedMetadata(cacheKey, METADATA_DETAIL_TTL_MS) {
+            api.getWatchProviders(type, region).results.associate { provider ->
+                provider.providerId to provider.providerName
+            }
+        }
+    }
+
     override suspend fun getWatchProviderLogos(type: String, region: String): Map<Int, String> {
         val cacheKey = metadataCacheKey("getWatchProviderLogos", type, region)
         return cachedMetadata(cacheKey, METADATA_DETAIL_TTL_MS) {

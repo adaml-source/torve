@@ -45,6 +45,7 @@ internal data class TvFocusOrigin(
 internal data class TvScreenFocusHandle(
     val captureFocusedOrigin: () -> TvFocusOrigin?,
     val requestRestore: (TvFocusOrigin, String) -> Unit,
+    val isOriginFocused: (TvFocusOrigin) -> Boolean = { false },
 )
 
 internal class TvModalFocusRestoreController {
@@ -109,6 +110,14 @@ internal class TvModalFocusRestoreController {
                 "item=${target.itemKey} itemIndex=${target.itemIndex} type=${target.targetType} " +
                 "pendingToken=${pendingRestore?.restoreToken ?: -1L}",
         )
+    }
+
+    fun isOriginFocused(origin: TvFocusOrigin): Boolean {
+        val target = focusedTarget ?: return false
+        return target.screenId == origin.screenId &&
+            target.rowKey == origin.rowKey &&
+            target.itemKey == origin.itemKey &&
+            target.targetType == origin.focusTargetType
     }
 
     fun captureOrigin(

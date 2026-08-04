@@ -56,6 +56,7 @@ interface MetadataRepository {
     suspend fun searchMultiPaged(query: String, page: Int = 1, type: String? = null): PagedResult
     suspend fun getPopularPeople(page: Int = 1): List<PersonSummary>
     suspend fun searchPerson(query: String, page: Int = 1): List<PersonSummary>
+    suspend fun getWatchProviderNames(type: String = "movie", region: String = "US"): Map<Int, String> = emptyMap()
     suspend fun getWatchProviderLogos(type: String = "movie", region: String = "US"): Map<Int, String>
     suspend fun getLogoUrl(type: String, tmdbId: Int): String?
 }
