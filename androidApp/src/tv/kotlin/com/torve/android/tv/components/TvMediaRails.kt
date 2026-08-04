@@ -1245,10 +1245,8 @@ private fun TvStreamingServiceCard(
                 onClick = onClick,
             ),
     ) {
-        val logoUrl = item.posterUrl ?: item.backdropUrl
         StreamingProviderBrandArtwork(
             service = service,
-            logoUrl = logoUrl,
             modifier = Modifier.fillMaxSize(),
         )
     }

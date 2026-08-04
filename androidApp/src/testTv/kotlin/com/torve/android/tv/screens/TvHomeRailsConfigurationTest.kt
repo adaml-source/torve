@@ -1,6 +1,7 @@
 package com.torve.android.tv.screens
 
 import com.torve.android.tv.components.TvCardStyle
+import com.torve.android.ui.home.ALL_STREAMING_SERVICES
 import com.torve.domain.model.CatalogShelf
 import com.torve.domain.model.HomeSection
 import com.torve.domain.model.HomeSectionConfig
@@ -101,6 +102,13 @@ class TvHomeRailsConfigurationTest {
         assertTrue(services.items.any { it.id == "provider:531" })
         assertTrue(services.items.any { it.id == "provider:386" })
         assertTrue(services.items.any { it.id == "provider:283" })
+        assertEquals(
+            ALL_STREAMING_SERVICES.size,
+            ALL_STREAMING_SERVICES.map { it.tmdbProviderId }.distinct().size,
+        )
+        assertFalse(services.items.any { it.id == "provider:613" })
+        assertFalse(services.items.any { it.id == "provider:37" })
+        assertTrue(services.items.any { it.title == "HBO Max" })
     }
 
     private fun media(id: String, type: MediaType = MediaType.MOVIE) = MediaItem(

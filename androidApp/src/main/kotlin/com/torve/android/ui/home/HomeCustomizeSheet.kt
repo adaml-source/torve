@@ -61,6 +61,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -317,19 +318,17 @@ val ALL_STREAMING_SERVICES = listOf(
     StreamingService("Prime Video", Color(0xFF00A8E1), 9),
     StreamingService("Disney+", Color(0xFF113CCF), 337),
     StreamingService("Apple TV+", Color(0xFF000000), 350),
-    StreamingService("Max", Color(0xFF002BE7), 1899),
+    StreamingService("HBO Max", Color(0xFF002BE7), 1899),
     StreamingService("Hulu", Color(0xFF1CE783), 15),
     StreamingService("Paramount+", Color(0xFF0064FF), 531),
     StreamingService("Peacock", Color(0xFF000000), 386),
     StreamingService("Crunchyroll", Color(0xFFF47521), 283),
     StreamingService("Mubi", Color(0xFF001C3C), 11),
     StreamingService("Starz", Color(0xFF000000), 43),
-    StreamingService("Showtime", Color(0xFFFF0000), 37),
     StreamingService("BritBox", Color(0xFF053560), 380),
     StreamingService("Criterion", Color(0xFF000000), 258),
     StreamingService("Tubi", Color(0xFFF88500), 73),
     StreamingService("Pluto TV", Color(0xFF000033), 300),
-    StreamingService("Freevee", Color(0xFF39B54A), 613),
     StreamingService("Curiosity Stream", Color(0xFF17A2B8), 190),
     StreamingService("Shudder", Color(0xFF000AFF), 439),
     StreamingService("WOW", Color(0xFF1F1F1F), 30),
@@ -341,7 +340,6 @@ val ALL_STREAMING_SERVICES = listOf(
 @Composable
 fun StreamingServicesRow(
     services: List<StreamingService> = ALL_STREAMING_SERVICES,
-    providerLogos: Map<Int, String> = emptyMap(),
     onProviderClick: (providerId: Int, providerName: String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -355,7 +353,6 @@ fun StreamingServicesRow(
             horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             items(services) { service ->
-                val logoUrl = providerLogos[service.tmdbProviderId]
                 Column(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     modifier = Modifier.width(240.dp),
@@ -370,7 +367,6 @@ fun StreamingServicesRow(
                     ) {
                         StreamingProviderBrandArtwork(
                             service = service,
-                            logoUrl = logoUrl,
                             modifier = Modifier.fillMaxSize(),
                         )
                     }
@@ -388,100 +384,210 @@ fun StreamingServicesRow(
 }
 
 /**
- * A 16:9 Torve treatment for official provider artwork.
+ * A 16:9 provider treatment using a provider-specific canvas and wordmark.
  *
- * TMDB provider marks are requested at original resolution and cropped
- * edge-to-edge into the 16:9 frame. No separate square icon or text treatment
- * is layered over the artwork.
+ * Square TMDB provider tiles are deliberately not used as fallbacks: their
+ * baked-in boxes look inconsistent in a wide rail and stale metadata can show
+ * the wrong brand. A failed remote wordmark becomes a deterministic wordmark
+ * for that provider instead, so a card can never render empty.
  */
 @Composable
 fun StreamingProviderBrandArtwork(
     service: StreamingService,
-    logoUrl: String?,
     modifier: Modifier = Modifier,
 ) {
     val shape = RoundedCornerShape(14.dp)
-    val tmdbFallbackUrl = remember(logoUrl) {
-        logoUrl
-            ?.replace(Regex("/w\\d+/"), "/original/")
-            ?.replace(Regex("/h\\d+/"), "/original/")
+    val brand = remember(service.tmdbProviderId) {
+        STREAMING_PROVIDER_BRANDS[service.tmdbProviderId]
+            ?: StreamingProviderBrand(
+                background = service.brandColor,
+                fallbackForeground = Color.White,
+            )
     }
-    val wideWordmarkUrl = remember(service.tmdbProviderId) {
-        STREAMING_PROVIDER_WIDE_PNGS[service.tmdbProviderId]
-    }
-    var wideWordmarkFailed by remember(wideWordmarkUrl, tmdbFallbackUrl) { mutableStateOf(false) }
-    val artworkUrl = if (!wideWordmarkFailed) {
-        wideWordmarkUrl ?: tmdbFallbackUrl
-    } else {
-        tmdbFallbackUrl
-    }
-    val usesWideWordmark = artworkUrl != null && artworkUrl == wideWordmarkUrl
+    var artworkFailed by remember(service.tmdbProviderId, brand.artworkUrl) { mutableStateOf(false) }
     Box(
         modifier = modifier
             .clip(shape)
-            // Keep every provider on the same translucent black canvas. The
-            // sourced PNG contains the branding; competing gradients reduce
-            // wordmark contrast and make the rail look inconsistent.
-            .background(Color.Black.copy(alpha = 0.10f))
-            .border(1.dp, Color.White.copy(alpha = 0.10f), shape),
+            .background(brand.background)
+            .border(1.dp, brand.border, shape),
+        contentAlignment = Alignment.Center,
     ) {
-        if (!artworkUrl.isNullOrBlank()) {
+        if (!artworkFailed && !brand.artworkUrl.isNullOrBlank()) {
             coil3.compose.AsyncImage(
-                model = artworkUrl,
+                model = brand.artworkUrl,
                 contentDescription = service.name,
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(
-                        horizontal = if (usesWideWordmark) 0.dp else 34.dp,
-                        vertical = if (usesWideWordmark) 0.dp else 22.dp,
-                    ),
-                contentScale = if (usesWideWordmark) {
-                    // The sourced transparent PNG canvases are already wide;
-                    // crop only their empty top/bottom margin into the 16:9
-                    // frame. The wordmark itself is never stretched.
-                    androidx.compose.ui.layout.ContentScale.Crop
-                } else {
-                    // A square TMDB mark is a last-resort fallback. Keep it
-                    // entirely visible and never zoom it.
+                    .padding(brand.artworkInset),
+                contentScale = if (brand.fitArtwork) {
                     androidx.compose.ui.layout.ContentScale.Fit
+                } else {
+                    androidx.compose.ui.layout.ContentScale.Crop
                 },
-                onError = {
-                    if (usesWideWordmark && !tmdbFallbackUrl.isNullOrBlank()) {
-                        wideWordmarkFailed = true
-                    }
-                },
+                colorFilter = brand.artworkTint?.let { ColorFilter.tint(it) },
+                onError = { artworkFailed = true },
+            )
+        } else {
+            Text(
+                text = service.name,
+                style = MaterialTheme.typography.headlineSmall,
+                color = brand.fallbackForeground,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1,
+                modifier = Modifier.padding(horizontal = 24.dp),
             )
         }
     }
 }
 
-/**
- * High-resolution transparent PNG wordmarks used as TV title art.
- *
- * These are deliberately separate from TMDB's square watch-provider icons.
- * Each image is rendered over Torve's 16:9 brand canvas at its native aspect
- * ratio. Unsupported regional services retain the un-cropped TMDB fallback.
- */
-private val STREAMING_PROVIDER_WIDE_PNGS = mapOf(
-    8 to "https://download.logo.wine/logo/Netflix/Netflix-Logo.wine.png",
-    9 to "https://download.logo.wine/logo/Prime_Video/Prime_Video-Logo.wine.png",
-    337 to "https://download.logo.wine/logo/Disney%2B/Disney%2B-Logo.wine.png",
-    350 to "https://download.logo.wine/logo/Apple_TV/Apple_TV-Logo.wine.png",
-    1899 to "https://download.logo.wine/logo/HBO_Max/HBO_Max-Logo.wine.png",
-    15 to "https://download.logo.wine/logo/Hulu/Hulu-Logo.wine.png",
-    531 to "https://download.logo.wine/logo/Paramount%2B/Paramount%2B-Logo.wine.png",
-    386 to "https://download.logo.wine/logo/Peacock_(streaming_service)/Peacock_(streaming_service)-Logo.wine.png",
-    283 to "https://download.logo.wine/logo/Crunchyroll/Crunchyroll-Logo.wine.png",
-    11 to "https://download.logo.wine/logo/Mubi_(streaming_service)/Mubi_(streaming_service)-Logo.wine.png",
-    43 to "https://download.logo.wine/logo/Starz/Starz-Logo.wine.png",
-    37 to "https://download.logo.wine/logo/Showtime_(TV_network)/Showtime_(TV_network)-Logo.wine.png",
-    380 to "https://download.logo.wine/logo/BritBox/BritBox-Logo.wine.png",
-    258 to "https://download.logo.wine/logo/The_Criterion_Collection/The_Criterion_Collection-Logo.wine.png",
-    73 to "https://download.logo.wine/logo/Tubi/Tubi-Logo.wine.png",
-    300 to "https://download.logo.wine/logo/Pluto_TV/Pluto_TV-Logo.wine.png",
-    613 to "https://download.logo.wine/logo/Amazon_Freevee/Amazon_Freevee-Logo.wine.png",
-    190 to "https://download.logo.wine/logo/CuriosityStream/CuriosityStream-Logo.wine.png",
-    439 to "https://download.logo.wine/logo/Shudder_(streaming_service)/Shudder_(streaming_service)-Logo.wine.png",
+/** Provider-specific, high-contrast title-card styles. */
+private data class StreamingProviderBrand(
+    val background: Color,
+    val fallbackForeground: Color,
+    val artworkUrl: String? = null,
+    val artworkTint: Color? = null,
+    val fitArtwork: Boolean = false,
+    val artworkInset: androidx.compose.ui.unit.Dp = 0.dp,
+    val border: Color = Color.White.copy(alpha = 0.16f),
+)
+
+private val STREAMING_PROVIDER_BRANDS = mapOf(
+    8 to StreamingProviderBrand(
+        background = Color(0xFFF5F5F1),
+        fallbackForeground = Color(0xFFE50914),
+        artworkUrl = "https://download.logo.wine/logo/Netflix/Netflix-Logo.wine.png",
+    ),
+    9 to StreamingProviderBrand(
+        background = Color(0xFF0F79AF),
+        fallbackForeground = Color.White,
+        artworkUrl = "https://download.logo.wine/logo/Prime_Video/Prime_Video-Logo.wine.png",
+        artworkTint = Color.White,
+    ),
+    337 to StreamingProviderBrand(
+        background = Color(0xFF062B5C),
+        fallbackForeground = Color.White,
+        artworkUrl = "https://download.logo.wine/logo/Disney%2B/Disney%2B-Logo.wine.png",
+        artworkTint = Color.White,
+    ),
+    350 to StreamingProviderBrand(
+        background = Color.Black,
+        fallbackForeground = Color.White,
+        artworkUrl = "https://download.logo.wine/logo/Apple_TV/Apple_TV-Logo.wine.png",
+        artworkTint = Color.White,
+    ),
+    1899 to StreamingProviderBrand(
+        background = Color(0xFF081A31),
+        fallbackForeground = Color.White,
+        artworkUrl = "https://download.logo.wine/logo/HBO_Max/HBO_Max-Logo.wine.png",
+        artworkTint = Color.White,
+    ),
+    15 to StreamingProviderBrand(
+        background = Color(0xFF0B0C0C),
+        fallbackForeground = Color(0xFF1CE783),
+        artworkUrl = "https://download.logo.wine/logo/Hulu/Hulu-Logo.wine.png",
+    ),
+    531 to StreamingProviderBrand(
+        background = Color(0xFF0064FF),
+        fallbackForeground = Color.White,
+        artworkUrl = "https://upload.wikimedia.org/wikipedia/commons/thumb/4/4e/Paramount%2B_logo.svg/1280px-Paramount%2B_logo.svg.png",
+        artworkTint = Color.White,
+        fitArtwork = true,
+        artworkInset = 16.dp,
+    ),
+    386 to StreamingProviderBrand(
+        background = Color(0xFFF4F4F4),
+        fallbackForeground = Color.Black,
+        artworkUrl = "https://upload.wikimedia.org/wikipedia/commons/thumb/2/20/NBCUniversal_Peacock_Logo_%282026%29.svg/1280px-NBCUniversal_Peacock_Logo_%282026%29.svg.png",
+        fitArtwork = true,
+        artworkInset = 16.dp,
+    ),
+    283 to StreamingProviderBrand(
+        background = Color(0xFFF5F5F5),
+        fallbackForeground = Color(0xFFF47521),
+        artworkUrl = "https://download.logo.wine/logo/Crunchyroll/Crunchyroll-Logo.wine.png",
+    ),
+    11 to StreamingProviderBrand(
+        background = Color(0xFFF5F5F5),
+        fallbackForeground = Color.Black,
+        artworkUrl = "https://upload.wikimedia.org/wikipedia/commons/thumb/d/dc/MUBI_Logo_Standard_Black.png/1280px-MUBI_Logo_Standard_Black.png",
+        fitArtwork = true,
+        artworkInset = 16.dp,
+    ),
+    43 to StreamingProviderBrand(
+        background = Color.Black,
+        fallbackForeground = Color.White,
+        artworkUrl = "https://upload.wikimedia.org/wikipedia/commons/thumb/0/03/Starz_2022.svg/1280px-Starz_2022.svg.png",
+        artworkTint = Color.White,
+        fitArtwork = true,
+        artworkInset = 16.dp,
+    ),
+    380 to StreamingProviderBrand(
+        background = Color(0xFF271C5B),
+        fallbackForeground = Color.White,
+        artworkUrl = "https://download.logo.wine/logo/BritBox/BritBox-Logo.wine.png",
+        artworkTint = Color.White,
+    ),
+    258 to StreamingProviderBrand(
+        background = Color(0xFFF4F1EA),
+        fallbackForeground = Color.Black,
+        artworkUrl = "https://upload.wikimedia.org/wikipedia/commons/thumb/1/1a/The_Criterion_Collection_logo_and_wordmark.svg/1280px-The_Criterion_Collection_logo_and_wordmark.svg.png",
+        fitArtwork = true,
+        artworkInset = 16.dp,
+    ),
+    73 to StreamingProviderBrand(
+        background = Color(0xFFF5F5F5),
+        fallbackForeground = Color(0xFF6F2CFF),
+        artworkUrl = "https://download.logo.wine/logo/Tubi/Tubi-Logo.wine.png",
+    ),
+    300 to StreamingProviderBrand(
+        background = Color(0xFF000033),
+        fallbackForeground = Color.White,
+        artworkUrl = "https://upload.wikimedia.org/wikipedia/commons/thumb/5/5d/Pluto_TV_logo.svg/1280px-Pluto_TV_logo.svg.png",
+        artworkTint = Color.White,
+        fitArtwork = true,
+        artworkInset = 16.dp,
+    ),
+    190 to StreamingProviderBrand(
+        background = Color(0xFF082B3B),
+        fallbackForeground = Color.White,
+        artworkUrl = "https://download.logo.wine/logo/CuriosityStream/CuriosityStream-Logo.wine.png",
+        artworkTint = Color.White,
+    ),
+    439 to StreamingProviderBrand(
+        background = Color.Black,
+        fallbackForeground = Color(0xFFE41D2F),
+        artworkUrl = "https://upload.wikimedia.org/wikipedia/commons/thumb/5/51/Shudder_2017.svg/1280px-Shudder_2017.svg.png",
+        fitArtwork = true,
+        artworkInset = 16.dp,
+    ),
+    30 to StreamingProviderBrand(
+        background = Color(0xFFF5F5F5),
+        fallbackForeground = Color(0xFF061420),
+        artworkUrl = "https://upload.wikimedia.org/wikipedia/commons/thumb/2/2d/WOW_Logo_2022.svg/1280px-WOW_Logo_2022.svg.png",
+        fitArtwork = true,
+        artworkInset = 16.dp,
+    ),
+    298 to StreamingProviderBrand(
+        background = Color.Black,
+        fallbackForeground = Color.White,
+        artworkUrl = "https://upload.wikimedia.org/wikipedia/commons/thumb/f/f4/RTL%2B_Logo_2021.svg/1280px-RTL%2B_Logo_2021.svg.png",
+        fitArtwork = true,
+        artworkInset = 16.dp,
+    ),
+    421 to StreamingProviderBrand(
+        background = Color(0xFFF5F5F5),
+        fallbackForeground = Color(0xFF16132F),
+        artworkUrl = "https://upload.wikimedia.org/wikipedia/commons/7/7f/Joyn.jpg",
+        fitArtwork = true,
+        artworkInset = 16.dp,
+    ),
+    551 to StreamingProviderBrand(
+        background = Color(0xFFF5F5F5),
+        fallbackForeground = Color(0xFFE20074),
+        artworkUrl = "https://upload.wikimedia.org/wikipedia/commons/thumb/e/e4/Magenta_TV_Logo_2024.svg/1280px-Magenta_TV_Logo_2024.svg.png",
+        fitArtwork = true,
+        artworkInset = 16.dp,
+    ),
 )
 
 data class StreamingService(

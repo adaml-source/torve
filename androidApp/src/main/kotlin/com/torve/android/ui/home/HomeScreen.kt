@@ -669,7 +669,6 @@ fun HomeScreen(
                                     item(key = "streaming_services") {
                                         StreamingServicesRow(
                                             services = activeStreamingServices,
-                                            providerLogos = providerLogos,
                                             onProviderClick = onProviderClick,
                                         )
                                     }
