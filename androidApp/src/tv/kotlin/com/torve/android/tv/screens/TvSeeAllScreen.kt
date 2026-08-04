@@ -1997,14 +1997,17 @@ private fun TvSeeAllFilterRows(
     onContentFocused: (FocusRequester) -> Unit,
 ) {
     val columns = 5
+    val filterScrollState = rememberScrollState()
     Column(
-        verticalArrangement = Arrangement.spacedBy(7.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
         modifier = Modifier
             .padding(bottom = 10.dp)
+            .heightIn(max = 250.dp)
             .clip(RoundedCornerShape(24.dp))
             .background(Charcoal.copy(alpha = 0.54f))
             .border(1.dp, Snow.copy(alpha = 0.12f), RoundedCornerShape(24.dp))
-            .padding(horizontal = 14.dp, vertical = 12.dp),
+            .verticalScroll(filterScrollState)
+            .padding(horizontal = 12.dp, vertical = 8.dp),
     ) {
         val groups = remember(genres, studios, years, ratingThresholds) {
             buildList {
@@ -2051,7 +2054,7 @@ private fun TvSeeAllFilterRows(
                     style = MaterialTheme.typography.labelMedium,
                     color = Silver,
                     fontWeight = FontWeight.Medium,
-                    modifier = Modifier.padding(top = if (rowIndex == 0) 0.dp else 4.dp),
+                    modifier = Modifier.padding(top = if (rowIndex == 0) 0.dp else 2.dp),
                 )
             }
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
