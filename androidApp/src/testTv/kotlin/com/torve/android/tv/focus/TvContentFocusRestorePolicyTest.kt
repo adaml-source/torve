@@ -18,6 +18,17 @@ class TvContentFocusRestorePolicyTest {
     }
 
     @Test
+    fun matchingRouteWithoutPhysicalContentFocus_keepsBackRestoreEligible() {
+        assertFalse(
+            shouldStopContentFocusRestore(
+                activeRoute = TvRoutes.HOME,
+                focusedContentRoute = TvRoutes.HOME,
+                contentOwnsFocus = false,
+            ),
+        )
+    }
+
+    @Test
     fun differentOrMissingFocus_keepsRestoreEligible() {
         assertFalse(
             shouldStopContentFocusRestore(

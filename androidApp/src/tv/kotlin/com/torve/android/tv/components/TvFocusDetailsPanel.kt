@@ -99,6 +99,18 @@ internal fun cacheTvBrowsePreviewEnrichedItem(item: MediaItem) {
     enrichedItemCache[key] = existing?.mergeWithRicherPreviewItem(item) ?: item
 }
 
+/**
+ * Returns the richest already-cached preview representation for [item].
+ *
+ * The cache is observable Compose state, so callers such as the TV hero
+ * recompose as soon as the focused-poster enrichment completes. This keeps
+ * IMDb and other external ratings consistent without issuing a second request.
+ */
+internal fun withCachedTvBrowsePreviewEnrichment(item: MediaItem): MediaItem {
+    val cached = enrichedItemCache[tvBrowsePreviewEnrichedItemKey(item)] ?: return item
+    return item.mergeWithRicherPreviewItem(cached)
+}
+
 private fun MediaItem.mergeWithRicherPreviewItem(other: MediaItem): MediaItem =
     copy(
         tmdbId = tmdbId ?: other.tmdbId,
@@ -333,23 +345,7 @@ fun TvBrowsePreviewPanel(
 
     val sourceItem = debouncedSourceItem
     val sourceKey = sourceItem?.let { tvBrowsePreviewEnrichedItemKey(it) }
-    val cachedItem = sourceKey?.let { enrichedItemCache[it] }
-    val item = if (sourceItem != null && cachedItem != null) {
-        sourceItem.copy(
-            tmdbId = sourceItem.tmdbId ?: cachedItem.tmdbId,
-            imdbId = sourceItem.imdbId ?: cachedItem.imdbId,
-            overview = sourceItem.overview ?: cachedItem.overview,
-            genres = sourceItem.genres.ifEmpty { cachedItem.genres },
-            year = sourceItem.year ?: cachedItem.year,
-            runtime = sourceItem.runtime ?: cachedItem.runtime,
-            ratings = sourceItem.ratings.preferRichRatings(cachedItem.ratings),
-            logoUrl = sourceItem.logoUrl ?: cachedItem.logoUrl,
-            posterUrl = sourceItem.posterUrl ?: cachedItem.posterUrl,
-            backdropUrl = sourceItem.backdropUrl ?: cachedItem.backdropUrl,
-        )
-    } else {
-        sourceItem
-    }
+    val item = sourceItem?.let(::withCachedTvBrowsePreviewEnrichment)
 
     LaunchedEffect(sourceKey) {
         val base = sourceItem ?: return@LaunchedEffect

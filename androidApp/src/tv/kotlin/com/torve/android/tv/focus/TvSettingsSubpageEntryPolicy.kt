@@ -33,7 +33,8 @@ internal fun resolveContentEntryRoute(
 internal fun shouldStopContentFocusRestore(
     activeRoute: String,
     focusedContentRoute: String?,
-): Boolean = focusedContentRoute != null && focusedContentRoute == activeRoute
+    contentOwnsFocus: Boolean = true,
+): Boolean = contentOwnsFocus && focusedContentRoute != null && focusedContentRoute == activeRoute
 
 /**
  * Generic root retries are for top-level content and the two Settings

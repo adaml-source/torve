@@ -79,11 +79,13 @@ import com.torve.android.session.PostSignInRefresh
 import com.torve.android.sync.SyncCoordinator
 import com.torve.android.sync.model.SyncInboundEvent
 import com.torve.android.tv.components.TvBrowseLayout
+import com.torve.android.tv.components.cacheTvBrowsePreviewEnrichedItem
 import com.torve.android.tv.components.TvHeroBackground
 import com.torve.android.tv.components.TvHeroOverlay
 import com.torve.android.tv.components.TvLifetimeUnlockDialog
 import com.torve.android.tv.components.TvMediaContextMenuAction
 import com.torve.android.tv.components.TvNavRail
+import com.torve.android.tv.components.withCachedTvBrowsePreviewEnrichment
 import com.torve.android.tv.focus.TvFocusOrigin
 import com.torve.android.tv.focus.TvScreenFocusHandle
 import com.torve.android.tv.focus.TvSettingsItemIds
@@ -124,6 +126,7 @@ import com.torve.domain.model.MediaItem
 import com.torve.domain.model.MediaType
 import com.torve.domain.model.ratingEnrichmentLookupKeys
 import com.torve.domain.model.withEnrichedRatingsFrom
+import com.torve.domain.model.hasRichExternalRating
 import com.torve.domain.model.extractTmdbIdOrNull
 import com.torve.domain.model.favoriteMediaKey
 import com.torve.domain.model.toMediaItem
@@ -185,6 +188,7 @@ internal object TvScreenCache {
 private data class TvFocusBackStackEntry(
     val route: String,
     val origin: TvFocusOrigin? = null,
+    val exactRequester: FocusRequester? = null,
 )
 
 internal fun orderedSettingsEntryCandidates(
@@ -262,6 +266,9 @@ fun TvRoot(
     // but this guarantees the main thread never blocks on DB/VM creation.
     data class RootDeps(
         val metadataRepo: MetadataRepository,
+        val ratingsEnricher: com.torve.data.mdblist.RatingsEnricher,
+        val preferencesRepository: com.torve.domain.repository.PreferencesRepository,
+        val integrationSecretStore: com.torve.domain.integrations.IntegrationSecretStore,
         val watchlistViewModel: WatchlistViewModel,
         val watchProgressRepo: WatchProgressRepository,
         val watchHistoryRepo: WatchHistoryRepository,
@@ -281,6 +288,9 @@ fun TvRoot(
             val koin = org.koin.java.KoinJavaComponent.getKoin()
             RootDeps(
                 metadataRepo = koin.get(),
+                ratingsEnricher = koin.get(),
+                preferencesRepository = koin.get(),
+                integrationSecretStore = koin.get(),
                 watchlistViewModel = koin.get(),
                 watchProgressRepo = koin.get(),
                 watchHistoryRepo = koin.get(),
@@ -308,6 +318,9 @@ fun TvRoot(
     }
 
     val metadataRepo = deps!!.metadataRepo
+    val ratingsEnricher = deps!!.ratingsEnricher
+    val preferencesRepository = deps!!.preferencesRepository
+    val integrationSecretStore = deps!!.integrationSecretStore
     val watchlistViewModel = deps!!.watchlistViewModel
     val watchProgressRepo = deps!!.watchProgressRepo
     val watchHistoryRepo = deps!!.watchHistoryRepo
@@ -494,6 +507,7 @@ fun TvRoot(
     var focusedContentRoute by remember { mutableStateOf<String?>(null) }
     val focusReturnStack = remember { mutableStateListOf<TvFocusBackStackEntry>() }
     var pendingFocusBackRestore by remember { mutableStateOf<TvFocusBackStackEntry?>(null) }
+    var pendingContentEntryRoute by remember { mutableStateOf<String?>(null) }
     val topLevelRoutes = remember(visibleTopDestinations) {
         visibleTopDestinations.map { it.route }.toSet()
     }
@@ -553,6 +567,17 @@ fun TvRoot(
         lastFocusedContentByRoute[route] = requester
         focusedContentRoute = route
         contentFocusEpoch += 1
+        val pendingBack = pendingFocusBackRestore
+        if (
+            pendingBack?.route == route &&
+            (pendingBack.exactRequester == null || pendingBack.exactRequester === requester)
+        ) {
+            // Keep the back-stack restore pending until the exact originating
+            // card reports focus. Clearing it earlier lets the navigation rail
+            // win the transient focus race during the sub-route pop animation.
+            pendingFocusBackRestore = null
+            pendingContentEntryRoute = null
+        }
     }
     val mediaFavoritesPrefKey = remember(signedInUserId) {
         signedInUserId?.let { "$TV_PREF_KEY_MEDIA_FAVORITES:$it" }
@@ -603,7 +628,13 @@ fun TvRoot(
     val onBrowseMediaFocused: (MediaItem) -> Unit = remember(logoCache, logoLoadingByKey) {
         onFocus@{ item ->
             val tmdbId = item.tmdbId ?: item.id.extractTmdbIdOrNull()
-            val focusItem = if (tmdbId != null && item.tmdbId == null) item.copy(tmdbId = tmdbId) else item
+            val focusItem = withCachedTvBrowsePreviewEnrichment(
+                if (tmdbId != null && item.tmdbId == null) item.copy(tmdbId = tmdbId) else item,
+            )
+            // Rails can already contain asynchronously enriched IMDb ratings.
+            // Publish that richer representation so the featured hero keeps it
+            // when focus moves from the poster back to the navigation rail.
+            cacheTvBrowsePreviewEnrichedItem(focusItem)
             val focusKey = tmdbId?.let { "${focusItem.type}:$it" } ?: "${focusItem.type}:${focusItem.id}"
             if (focusKey == lastBrowseFocusKey) {
                 val current = focusedMediaItem ?: return@onFocus
@@ -616,6 +647,7 @@ fun TvRoot(
                     rating = current.rating ?: focusItem.rating,
                 )
                 if (refreshed != current) focusedMediaItem = refreshed
+                cacheTvBrowsePreviewEnrichedItem(refreshed)
                 return@onFocus
             }
             lastBrowseFocusKey = focusKey
@@ -688,13 +720,15 @@ fun TvRoot(
             if (focusedMediaItem?.let { it.tmdbId ?: it.id.extractTmdbIdOrNull() } == tmdbId) {
                 val current = focusedMediaItem
                 focusedMediaItem = if (detail != null && current != null) {
-                    current.copy(
+                    val ratingsByKey = detail.ratings?.let { ratings ->
+                        current.ratingEnrichmentLookupKeys().associateWith { ratings }
+                    }.orEmpty()
+                    current.withEnrichedRatingsFrom(ratingsByKey).copy(
                         posterUrl = current.posterUrl?.takeIf { it.isNotBlank() } ?: detail.posterUrl,
                         backdropUrl = current.backdropUrl?.takeIf { it.isNotBlank() } ?: detail.backdropUrl,
                         logoUrl = current.logoUrl?.takeIf { it.isNotBlank() } ?: url ?: detail.logoUrl,
                         overview = current.overview?.takeIf { it.isNotBlank() } ?: detail.overview,
                         rating = current.rating ?: detail.rating,
-                        ratings = current.ratings ?: detail.ratings,
                         genres = current.genres.ifEmpty { detail.genres },
                         runtime = current.runtime ?: detail.runtime,
                     )
@@ -703,6 +737,7 @@ fun TvRoot(
                 } else {
                     current
                 }
+                focusedMediaItem?.let(::cacheTvBrowsePreviewEnrichedItem)
             }
         } finally {
             logoLoadingByKey.remove(cacheKey)
@@ -759,7 +794,6 @@ fun TvRoot(
     var rootHasFocus by remember { mutableStateOf(false) }
     var focusRestoreTrigger by remember { mutableStateOf(0) }
     var railInteractionEpoch by remember { mutableStateOf(0) }
-    var pendingContentEntryRoute by remember { mutableStateOf<String?>(null) }
     var contentEntryRequestNonce by remember { mutableIntStateOf(0) }
     var pendingRailEntryRoute by remember { mutableStateOf<String?>(null) }
     var pendingRailEntryRequestNonce by remember { mutableIntStateOf(0) }
@@ -958,7 +992,13 @@ fun TvRoot(
             // pending route. Otherwise a successful details-screen entry can
             // leave delayed root retries alive; one of those retries can steal
             // focus from a source modal opened immediately afterward.
-            if (shouldStopContentFocusRestore(activeRoute, focusedContentRoute)) {
+            if (
+                shouldStopContentFocusRestore(
+                    activeRoute = activeRoute,
+                    focusedContentRoute = focusedContentRoute,
+                    contentOwnsFocus = rootHasFocus && !isRailFocused,
+                )
+            ) {
                 pendingContentEntryRoute = null
                 return@LaunchedEffect
             }
@@ -1034,6 +1074,11 @@ fun TvRoot(
     /* ── Sub-route transitions trigger focus restore ───────────────────────────────── */
     LaunchedEffect(isSubRouteActive) {
         if (isSubRouteActive) {
+            // A keep-alive top-level tab retains its last route marker while
+            // hidden. It no longer physically owns focus, so clear the marker
+            // before the sub-route takes over. Otherwise Back can mistake this
+            // stale value for a successful restore and leave focus on the rail.
+            focusedContentRoute = null
             // Entering a sub-route (e.g. Details) — cancel any pending debounced rail
             // navigation to prevent selectedTopRoute from switching while in the sub-route.
             pendingNavJob?.cancel()
@@ -1223,6 +1268,7 @@ fun TvRoot(
         val entry = TvFocusBackStackEntry(
             route = route,
             origin = origin,
+            exactRequester = lastFocusedContentByRoute[route],
         )
         focusReturnStack.add(entry)
         Log.d(
@@ -1268,7 +1314,22 @@ fun TvRoot(
         pendingContentEntryRoute = route
         if (entry.origin != null) {
             focusHandlesByRoute[route]?.requestRestore(entry.origin, "back_stack")
+            // The top-level page is kept composed, so its exact requester is
+            // still valid after the overlay closes. Retry it across several
+            // frames while the navigation transition releases focus. The
+            // matching onFocus callback clears pendingFocusBackRestore.
+            repeat(20) {
+                delay(40L)
+                if (pendingFocusBackRestore != entry) return@LaunchedEffect
+                entry.exactRequester?.let { requester ->
+                    runCatching { requester.requestFocus() }
+                }
+                withFrameNanos { }
+            }
         }
+        if (pendingFocusBackRestore != entry) return@LaunchedEffect
+        // Missing/disposed exact target: release the guard and let the existing
+        // route-level restore policy choose the nearest safe content fallback.
         pendingFocusBackRestore = null
         if (route in topLevelRoutes) {
             focusRestoreTrigger++
@@ -1608,11 +1669,11 @@ fun TvRoot(
         val item = displayedFeaturedItem ?: return@LaunchedEffect
         val tmdbId = item.tmdbId ?: item.id.extractTmdbIdOrNull() ?: return@LaunchedEffect
         val cacheKey = "${item.type}:$tmdbId"
-        if (heroDetailCache[cacheKey] != null) return@LaunchedEffect
+        if (heroDetailCache[cacheKey]?.ratings.hasRichExternalRating()) return@LaunchedEffect
 
         val needsDetail = item.overview.isNullOrBlank() ||
             item.logoUrl.isNullOrBlank() ||
-            item.ratings == null ||
+            !item.ratings.hasRichExternalRating() ||
             item.runtime == null ||
             item.genres.isEmpty()
         if (!needsDetail) {
@@ -1623,9 +1684,20 @@ fun TvRoot(
         delay(120)
         val type = if (item.type == MediaType.MOVIE) "movie" else "tv"
         val detail = withContext(Dispatchers.IO) {
-            runCatching { metadataRepo.getDetail(type, tmdbId) }.getOrNull()
+            val metadataDetail = runCatching { metadataRepo.getDetail(type, tmdbId) }
+                .getOrNull()
+                ?: item
+            val apiKey = runCatching {
+                integrationSecretStore.get(
+                    com.torve.domain.integrations.IntegrationSecretKey.MDBLIST_API_KEY,
+                ) ?: preferencesRepository.getString(SettingsViewModel.KEY_MDBLIST_API_KEY)
+                    ?: com.torve.data.mdblist.MdbListApi.DEFAULT_API_KEY
+            }.getOrDefault(com.torve.data.mdblist.MdbListApi.DEFAULT_API_KEY)
+            runCatching { ratingsEnricher.enrichSingle(metadataDetail, apiKey) }
+                .getOrDefault(metadataDetail)
         }
         heroDetailCache[cacheKey] = detail
+        cacheTvBrowsePreviewEnrichedItem(detail)
         detail?.logoUrl?.takeIf { it.isNotBlank() }?.let { logoUrl ->
             logoCache[cacheKey] = logoUrl
             logoLoadingByKey.remove(cacheKey)
@@ -1681,12 +1753,18 @@ fun TvRoot(
 
     val displayedHeroItem = displayedFeaturedItem?.let { item ->
         val tmdbId = item.tmdbId ?: item.id.extractTmdbIdOrNull()
-        val heroBaseItem = if (tmdbId != null && item.tmdbId == null) item.copy(tmdbId = tmdbId) else item
+        val heroBaseItem = withCachedTvBrowsePreviewEnrichment(
+            if (tmdbId != null && item.tmdbId == null) item.copy(tmdbId = tmdbId) else item,
+        )
         val detail = tmdbId?.let { heroDetailCache["${heroBaseItem.type}:$it"] }
         val enriched = if (detail == null) {
             heroBaseItem
         } else {
-            heroBaseItem.copy(
+            val ratingsByKey = detail.ratings?.let { ratings ->
+                heroBaseItem.ratingEnrichmentLookupKeys().associateWith { ratings }
+            }.orEmpty()
+            val heroBaseWithRatings = heroBaseItem.withEnrichedRatingsFrom(ratingsByKey)
+            heroBaseWithRatings.copy(
                 imdbId = heroBaseItem.imdbId ?: detail.imdbId,
                 year = heroBaseItem.year ?: detail.year,
                 overview = heroBaseItem.overview?.takeIf { it.isNotBlank() } ?: detail.overview,
@@ -1702,7 +1780,6 @@ fun TvRoot(
                 status = heroBaseItem.status?.takeIf { it.isNotBlank() } ?: detail.status,
                 trailerKey = heroBaseItem.trailerKey?.takeIf { it.isNotBlank() } ?: detail.trailerKey,
                 tagline = heroBaseItem.tagline?.takeIf { it.isNotBlank() } ?: detail.tagline,
-                ratings = heroBaseItem.ratings ?: detail.ratings,
             )
         }
         if (!enriched.logoUrl.isNullOrBlank() || tmdbId == null) {
