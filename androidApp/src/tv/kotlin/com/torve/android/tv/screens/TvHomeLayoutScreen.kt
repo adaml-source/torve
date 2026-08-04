@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -32,6 +33,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.focus.FocusRequester
@@ -170,8 +173,8 @@ fun TvHomeLayoutScreen(
                         mutableList[index] = prev.copy(order = config.order)
                         homeViewModel.updateSectionOrder(mutableList)
                         scope.launch {
-                            yield()
-                            listState.scrollToItem(index - 1 + HOME_LAYOUT_STATIC_ITEM_COUNT)
+                            val targetIndex = index - 1 + HOME_LAYOUT_STATIC_ITEM_COUNT
+                            centerHomeLayoutRow(listState, targetIndex)
                             runCatching { requester.requestFocus() }
                         }
                     }
@@ -184,8 +187,8 @@ fun TvHomeLayoutScreen(
                         mutableList[index] = next.copy(order = config.order)
                         homeViewModel.updateSectionOrder(mutableList)
                         scope.launch {
-                            yield()
-                            listState.scrollToItem(index + 1 + HOME_LAYOUT_STATIC_ITEM_COUNT)
+                            val targetIndex = index + 1 + HOME_LAYOUT_STATIC_ITEM_COUNT
+                            centerHomeLayoutRow(listState, targetIndex)
                             runCatching { requester.requestFocus() }
                         }
                     }
@@ -429,6 +432,29 @@ fun TvHomeLayoutScreen(
 
 private const val HOME_LAYOUT_STATIC_ITEM_COUNT = 2
 
+private suspend fun centerHomeLayoutRow(
+    listState: LazyListState,
+    itemIndex: Int,
+) {
+    // Wait until the reordered keyed row has reached the new list position.
+    yield()
+    repeat(2) { withFrameNanos { } }
+
+    val layoutInfo = listState.layoutInfo
+    val visibleTarget = layoutInfo.visibleItemsInfo.firstOrNull { it.index == itemIndex }
+    val typicalRowSize = visibleTarget?.size
+        ?: layoutInfo.visibleItemsInfo
+            .filter { it.index >= HOME_LAYOUT_STATIC_ITEM_COUNT }
+            .map { it.size }
+            .average()
+            .takeIf { !it.isNaN() }
+            ?.toInt()
+        ?: 72
+    val viewportSize = layoutInfo.viewportEndOffset - layoutInfo.viewportStartOffset
+    val centeredOffset = -((viewportSize - typicalRowSize).coerceAtLeast(0) / 2)
+    listState.animateScrollToItem(itemIndex, centeredOffset)
+}
+
 @Composable
 private fun HomeSectionRow(
     config: HomeSectionConfig,
@@ -453,7 +479,7 @@ private fun HomeSectionRow(
         label = "sectionBorder",
     )
 
-    Column(
+    Row(
         modifier = Modifier
             .fillMaxWidth()
             .focusRequester(focusRequester)
@@ -527,45 +553,36 @@ private fun HomeSectionRow(
                 color = if (focused) Graphite.copy(alpha = 0.5f) else Charcoal.copy(alpha = 0.5f),
                 shape = RoundedCornerShape(16.dp),
             )
-            .padding(horizontal = 20.dp, vertical = 14.dp),
+            .padding(horizontal = 18.dp, vertical = 9.dp),
+        horizontalArrangement = Arrangement.spacedBy(16.dp),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(
-            text = config.customTitle ?: config.section.defaultTitle,
-            style = MaterialTheme.typography.titleMedium,
-            color = Snow,
-            fontWeight = FontWeight.SemiBold,
-        )
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(2.dp),
+        ) {
+            Text(
+                text = config.customTitle ?: config.section.defaultTitle,
+                style = MaterialTheme.typography.titleMedium,
+                color = Snow,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Text(
+                text = if (isMoveMode) {
+                    "UP/DOWN: reorder  •  LEFT or OK: finish"
+                } else {
+                    "OK: toggle  •  RIGHT: reorder"
+                },
+                style = MaterialTheme.typography.labelSmall,
+                color = if (isMoveMode) Amber else Silver,
+            )
+        }
         Text(
             text = if (config.enabled) stringResource(R.string.tv_home_layout_enabled)
                    else stringResource(R.string.tv_home_layout_disabled),
             style = MaterialTheme.typography.bodySmall,
             color = if (config.enabled) Amber else Ash,
-            modifier = Modifier.padding(top = 4.dp),
+            fontWeight = FontWeight.SemiBold,
         )
-        Text(
-            text = if (isMoveMode) {
-                "Move mode active: UP or DOWN reorders this section. Press LEFT to finish."
-            } else {
-                "Press RIGHT to move this section."
-            },
-            style = MaterialTheme.typography.labelSmall,
-            color = if (isMoveMode) Amber else Silver,
-            modifier = Modifier.padding(top = 6.dp),
-        )
-        Row(
-            horizontalArrangement = Arrangement.spacedBy(16.dp),
-            modifier = Modifier.padding(top = 8.dp),
-        ) {
-            Text(
-                text = stringResource(R.string.tv_home_layout_move_up),
-                style = MaterialTheme.typography.labelMedium,
-                color = if (isMoveMode) Amber else Silver,
-            )
-            Text(
-                text = stringResource(R.string.tv_home_layout_move_down),
-                style = MaterialTheme.typography.labelMedium,
-                color = if (isMoveMode) Amber else Silver,
-            )
-        }
     }
 }

@@ -1,5 +1,6 @@
 package com.torve.android.tv.screens
 
+import com.torve.android.tv.components.TvCardStyle
 import com.torve.domain.model.CatalogShelf
 import com.torve.domain.model.HomeSection
 import com.torve.domain.model.HomeSectionConfig
@@ -76,6 +77,26 @@ class TvHomeRailsConfigurationTest {
 
         assertFalse(disabled.any { it.key == "addon:addon-one" })
         assertTrue(enabled.any { it.key == "addon:addon-one" })
+    }
+
+    @Test
+    fun streamingServicesRenderSavedProvidersWithServiceCards() {
+        val rails = buildTvHomeRails(
+            state = HomeUiState(),
+            sectionConfigs = listOf(
+                HomeSectionConfig(HomeSection.STREAMING_SERVICES, enabled = true, order = 0),
+            ),
+            customSections = emptyList(),
+            homeLayoutOrder = listOf("section:STREAMING_SERVICES"),
+            enabledStreamingServiceIds = setOf(8, 337),
+            providerLogos = mapOf(8 to "netflix.png", 337 to "disney.png"),
+        )
+
+        val services = rails.single()
+        assertEquals("streaming_services", services.key)
+        assertEquals(TvCardStyle.SERVICE, services.cardStyle)
+        assertEquals(listOf("provider:8", "provider:337"), services.items.map { it.id })
+        assertEquals(listOf("netflix.png", "disney.png"), services.items.map { it.posterUrl })
     }
 
     private fun media(id: String, type: MediaType = MediaType.MOVIE) = MediaItem(

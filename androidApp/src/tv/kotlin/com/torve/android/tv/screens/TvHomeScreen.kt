@@ -21,6 +21,7 @@ import com.torve.android.tv.components.rememberTvFocusMemory
 import com.torve.android.tv.focus.TvScreenFocusHandle
 import com.torve.android.tv.isTvCatalogProgress
 import com.torve.android.tv.toMediaItemOrNull
+import com.torve.android.ui.home.ALL_STREAMING_SERVICES
 import com.torve.domain.lanlibrary.NetworkMode
 import com.torve.domain.model.CatalogShelf
 import com.torve.domain.model.CustomSection
@@ -116,6 +117,8 @@ internal fun TvHomeScreen(
     val sectionConfigs by homeViewModel.sectionConfigs.collectAsState()
     val customSections by homeViewModel.customSections.collectAsState()
     val homeLayoutOrder by homeViewModel.homeLayoutOrder.collectAsState()
+    val enabledStreamingServiceIds by homeViewModel.enabledServiceIds.collectAsState()
+    val providerLogos by homeViewModel.providerLogos.collectAsState()
     val outcomeState by outcomeViewModel.state.collectAsState()
     val settingsState by settingsViewModel.state.collectAsState()
     val coroutineScope = rememberCoroutineScope()
@@ -133,6 +136,8 @@ internal fun TvHomeScreen(
         sectionConfigs,
         customSections,
         homeLayoutOrder,
+        enabledStreamingServiceIds,
+        providerLogos,
         outcomeState,
         state.continueWatchingRatings,
         availableNowTitle,
@@ -151,6 +156,8 @@ internal fun TvHomeScreen(
                 sectionConfigs = sectionConfigs,
                 customSections = customSections,
                 homeLayoutOrder = homeLayoutOrder,
+                enabledStreamingServiceIds = enabledStreamingServiceIds,
+                providerLogos = providerLogos,
             )
     }
 
@@ -161,10 +168,15 @@ internal fun TvHomeScreen(
     // gone away between the snapshot and the tap, we fall back to
     // opening detail rather than crashing or staring at a black screen.
     val handleMediaClick: (MediaItem) -> Unit = { item ->
+        val providerId = item.id.removePrefix(TV_HOME_PROVIDER_ID_PREFIX)
+            .takeIf { item.id.startsWith(TV_HOME_PROVIDER_ID_PREFIX) }
+            ?.toIntOrNull()
         val personId = item.id.removePrefix(TV_HOME_PERSON_ID_PREFIX)
             .takeIf { item.id.startsWith(TV_HOME_PERSON_ID_PREFIX) }
             ?.toIntOrNull()
-        if (personId != null) {
+        if (providerId != null) {
+            onSeeAll?.invoke("provider_movie_$providerId", item.title)
+        } else if (personId != null) {
             onSeeAll?.invoke("person_credits_$personId", item.title)
         } else {
             coroutineScope.launch {
@@ -265,7 +277,11 @@ internal fun TvHomeScreen(
         loading = state.isLoading,
         emptyMessage = emptyMessage,
         focusMemory = focusMemory,
-        onMediaFocused = onMediaFocused,
+        onMediaFocused = { item ->
+            if (!item.id.startsWith(TV_HOME_PROVIDER_ID_PREFIX)) {
+                onMediaFocused?.invoke(item)
+            }
+        },
         onSeeAll = onSeeAll,
         heroOverlay = composedHeroOverlay,
         presentationMode = TvRailsPresentationMode.CatalogHero,
@@ -336,6 +352,8 @@ internal fun buildTvHomeRails(
     sectionConfigs: List<HomeSectionConfig>,
     customSections: List<CustomSection>,
     homeLayoutOrder: List<String>,
+    enabledStreamingServiceIds: Set<Int> = emptySet(),
+    providerLogos: Map<Int, String> = emptyMap(),
 ): List<TvContentRail> {
     val orderIndex = homeLayoutOrder.withIndex().associate { it.value to it.index }
     val addonShelfVisibility = state.addonShelfVisibility
@@ -373,7 +391,12 @@ internal fun buildTvHomeRails(
     renderItems.forEach { item ->
         when (item) {
             is BuiltInHomeItem -> {
-                rails += buildBuiltInRails(item.config, state)
+                rails += buildBuiltInRails(
+                    config = item.config,
+                    state = state,
+                    enabledStreamingServiceIds = enabledStreamingServiceIds,
+                    providerLogos = providerLogos,
+                )
             }
             is CustomHomeItem -> {
                 val items = state.customShelves[item.section.id].orEmpty().tvHomeCardItems()
@@ -407,15 +430,42 @@ internal fun buildTvHomeRails(
 private fun buildBuiltInRails(
     config: HomeSectionConfig,
     state: HomeUiState,
+    enabledStreamingServiceIds: Set<Int>,
+    providerLogos: Map<Int, String>,
 ): List<TvContentRail> {
     val title = config.customTitle ?: config.section.defaultTitle
     return when (config.section) {
         HomeSection.SEARCH_BAR,
         HomeSection.HERO,
         HomeSection.ON_NOW,
-        HomeSection.STREAMING_SERVICES,
         HomeSection.ADDON_SHELVES -> {
             emptyList()
+        }
+
+        HomeSection.STREAMING_SERVICES -> {
+            val items = ALL_STREAMING_SERVICES
+                .filter { it.tmdbProviderId in enabledStreamingServiceIds }
+                .map { service ->
+                    MediaItem(
+                        id = "$TV_HOME_PROVIDER_ID_PREFIX${service.tmdbProviderId}",
+                        type = MediaType.MOVIE,
+                        title = service.name,
+                        posterUrl = providerLogos[service.tmdbProviderId],
+                        backdropUrl = providerLogos[service.tmdbProviderId],
+                    )
+                }
+            if (items.isEmpty()) {
+                emptyList()
+            } else {
+                listOf(
+                    TvContentRail(
+                        key = "streaming_services",
+                        title = title,
+                        items = items,
+                        cardStyle = TvCardStyle.SERVICE,
+                    ),
+                )
+            }
         }
 
         HomeSection.UPCOMING_SCHEDULE -> {
@@ -560,6 +610,7 @@ private fun MediaItem.isTvHomeDisplayable(): Boolean =
         title.isNotBlank()
 
 private const val TV_HOME_PERSON_ID_PREFIX = "person:"
+private const val TV_HOME_PROVIDER_ID_PREFIX = "provider:"
 
 private fun PersonSummary.toTvHomePersonItem(): MediaItem = MediaItem(
     id = "$TV_HOME_PERSON_ID_PREFIX$id",
