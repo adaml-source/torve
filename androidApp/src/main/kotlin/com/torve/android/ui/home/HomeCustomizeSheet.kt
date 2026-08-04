@@ -419,11 +419,11 @@ fun StreamingProviderBrandArtwork(
     Box(
         modifier = modifier
             .clip(shape)
-            // Keep every provider on the same quiet neutral canvas. The
+            // Keep every provider on the same translucent black canvas. The
             // sourced PNG contains the branding; competing gradients reduce
             // wordmark contrast and make the rail look inconsistent.
-            .background(Color(0xFFE6E6E8))
-            .border(1.dp, Color.Black.copy(alpha = 0.16f), shape),
+            .background(Color.Black.copy(alpha = 0.90f))
+            .border(1.dp, Color.White.copy(alpha = 0.10f), shape),
     ) {
         if (!artworkUrl.isNullOrBlank()) {
             coil3.compose.AsyncImage(
