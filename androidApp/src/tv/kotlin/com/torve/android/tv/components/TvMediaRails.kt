@@ -31,6 +31,7 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
@@ -136,6 +137,7 @@ data class TvContentRail(
     val items: List<MediaItem>,
     val cardStyle: TvCardStyle = TvCardStyle.POSTER,
     val progressByMediaId: Map<String, Float> = emptyMap(),
+    val seeAllItems: List<MediaItem>? = null,
 )
 
 private fun TvContentRail.progressFor(item: MediaItem): Float? {
@@ -1033,6 +1035,7 @@ internal fun TvMediaRails(
                                                 onClick = { onMediaClick(item) },
                                                 onFocused = onItemFocused,
                                                 progress = progress,
+                                                showTitles = forcePosterTitles || showTitlesOnCards,
                                                 showTmdbRating = showTmdbRating,
                                                 ratingPrefs = tvCardRatingPrefs,
                                             )
@@ -1047,13 +1050,13 @@ internal fun TvMediaRails(
                                             TvPosterCard(
                                                 item = item,
                                                 modifier = cardModifier
-                                                    .width(posterCardWidth)
-                                                    .aspectRatio(2f / 3f),
+                                                    .width(posterCardWidth),
                                                 onClick = { onMediaClick(item) },
                                                 onFocused = onItemFocused,
                                                 progress = progress,
                                                 showTitles = forcePosterTitles || showTitlesOnCards,
                                                 compactTitles = compactPosterTitles,
+                                                showMetadata = !catalogHeroMode,
                                                 showTmdbRating = showTmdbRating,
                                                 sourceAwareRatings = sourceAwareRatings,
                                                 onContextMenuRequested = { anchorBounds ->
@@ -1141,7 +1144,7 @@ internal fun TvMediaRails(
                                         },
                                         onClick = {
                                             if (shouldSeedPendingSeeAllItems(row.key)) {
-                                                SeeAllViewModel.pendingItems[row.key] = row.title to row.items
+                                                SeeAllViewModel.pendingItems[row.key] = row.title to (row.seeAllItems ?: row.items)
                                             } else {
                                                 SeeAllViewModel.pendingItems.remove(row.key)
                                             }
@@ -1263,6 +1266,7 @@ private fun TvPosterCard(
     progress: Float? = null,
     showTitles: Boolean = true,
     compactTitles: Boolean = false,
+    showMetadata: Boolean = true,
     showTmdbRating: Boolean = true,
     sourceAwareRatings: Boolean = false,
     onContextMenuRequested: ((Rect?) -> Unit)? = null,
@@ -1284,27 +1288,15 @@ private fun TvPosterCard(
 
     val isWatched = (progress ?: 0f) >= TV_CARD_WATCHED_THRESHOLD
 
-    Box(
+    val shouldShowCaption = showTitles || item.id.startsWith("trakt-calendar:")
+
+    Column(
         modifier = modifier
             .zIndex(if (focused) 1f else 0f)
             .graphicsLayer {
-                shape = focusShape
-                clip = true
                 scaleX = scale
                 scaleY = scale
             }
-            .background(
-                Brush.radialGradient(
-                    colors = listOf(
-                        Amber.copy(alpha = if (focused) 0.34f else 0f),
-                        Amber.copy(alpha = if (focused) 0.16f else 0f),
-                        Color.Transparent,
-                    ),
-                ),
-                focusShape,
-            )
-            .border(if (focused) 3.dp else 1.dp, borderColor, cardShape)
-            .clip(cardShape)
             .onGloballyPositioned { coordinates ->
                 anchorBounds = coordinates.boundsInWindow()
             }
@@ -1334,154 +1326,159 @@ private fun TvPosterCard(
                     onContextMenuRequested?.invoke(anchorBounds)
                 },
             ),
+        verticalArrangement = Arrangement.spacedBy(if (shouldShowCaption) 7.dp else 0.dp),
     ) {
-        val posterImageUrl = item.posterUrl ?: item.backdropUrl
-        if (posterImageUrl.isNullOrBlank()) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(Color(0xFF1A1A2E)),
-                contentAlignment = Alignment.Center,
-            ) {
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(6.dp),
-                    modifier = Modifier.padding(8.dp),
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .aspectRatio(2f / 3f)
+                .background(
+                    Brush.radialGradient(
+                        colors = listOf(
+                            Amber.copy(alpha = if (focused) 0.34f else 0f),
+                            Amber.copy(alpha = if (focused) 0.16f else 0f),
+                            Color.Transparent,
+                        ),
+                    ),
+                    focusShape,
+                )
+                .border(if (focused) 3.dp else 1.dp, borderColor, cardShape)
+                .clip(cardShape),
+        ) {
+            val posterImageUrl = item.posterUrl ?: item.backdropUrl
+            if (posterImageUrl.isNullOrBlank()) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(Color(0xFF1A1A2E)),
+                    contentAlignment = Alignment.Center,
                 ) {
-                    Text(
-                        text = item.title,
-                        style = MaterialTheme.typography.labelMedium,
-                        color = Snow,
-                        fontWeight = FontWeight.SemiBold,
-                        maxLines = 3,
-                        overflow = TextOverflow.Ellipsis,
-                        textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                    )
-                    item.upcomingScheduleMetadata()?.let { metadata ->
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                        modifier = Modifier.padding(8.dp),
+                    ) {
                         Text(
-                            text = metadata,
-                            style = MaterialTheme.typography.labelSmall,
-                            color = Silver,
-                            maxLines = 1,
+                            text = item.title,
+                            style = MaterialTheme.typography.labelMedium,
+                            color = Snow,
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 3,
                             overflow = TextOverflow.Ellipsis,
                             textAlign = androidx.compose.ui.text.style.TextAlign.Center,
                         )
-                    }
-                }
-            }
-        } else {
-            AsyncImage(
-                model = posterImageUrl,
-                contentDescription = item.title,
-                contentScale = ContentScale.Crop,
-                modifier = Modifier.fillMaxSize(),
-            )
-        }
-
-        val shouldShowTitle = showTitles || item.id.startsWith("trakt-calendar:")
-        if (shouldShowTitle) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .align(Alignment.BottomCenter)
-                    .background(
-                        Brush.verticalGradient(
-                            colors = listOf(
-                                Color.Transparent,
-                                Obsidian.copy(alpha = 0.9f),
-                            ),
-                        ),
-                    )
-                    .padding(horizontal = 10.dp, vertical = 10.dp),
-            ) {
-                Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                    Text(
-                        text = item.title,
-                        style = if (compactTitles) {
-                            MaterialTheme.typography.labelLarge
-                        } else {
-                            MaterialTheme.typography.titleMedium
-                        },
-                        color = Snow,
-                        fontWeight = if (compactTitles) FontWeight.SemiBold else FontWeight.Normal,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp),
-                    ) {
-                        val scheduleMetadata = item.upcomingScheduleMetadata()
-                        if (scheduleMetadata != null) {
+                        item.upcomingScheduleMetadata()?.let { metadata ->
                             Text(
-                                text = scheduleMetadata,
-                                style = if (compactTitles) {
-                                    MaterialTheme.typography.labelSmall
-                                } else {
-                                    MaterialTheme.typography.labelMedium
-                                },
+                                text = metadata,
+                                style = MaterialTheme.typography.labelSmall,
                                 color = Silver,
-                            )
-                        } else {
-                            item.year?.let { year ->
-                                Text(
-                                    text = year.toString(),
-                                    style = if (compactTitles) {
-                                        MaterialTheme.typography.labelSmall
-                                    } else {
-                                        MaterialTheme.typography.labelMedium
-                                    },
-                                    color = Silver,
-                                )
-                            }
-                        }
-                        if (!sourceAwareRatings && showTmdbRating && item.rating != null) {
-                            if (scheduleMetadata != null || item.year != null) {
-                                Spacer(modifier = Modifier.width(2.dp))
-                            }
-                            Image(
-                                painter = painterResource(id = R.drawable.tmbd_logo),
-                                contentDescription = "TMDB",
-                                modifier = Modifier.size(16.dp),
-                            )
-                            Text(
-                                text = String.format("%.1f", item.rating),
-                                style = MaterialTheme.typography.labelMedium,
-                                color = Silver,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
                             )
                         }
                     }
                 }
+            } else {
+                AsyncImage(
+                    model = posterImageUrl,
+                    contentDescription = item.title,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize(),
+                )
             }
-        }
 
-        if (isWatched) {
-            TvPosterWatchedBadge(
-                modifier = Modifier
-                    .align(Alignment.TopEnd)
-                    .padding(8.dp),
-            )
-        }
+            if (isWatched) {
+                TvPosterWatchedBadge(
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(8.dp),
+                )
+            }
 
-        if (progress != null && progress > 0f && !isWatched) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(3.dp)
-                    .align(Alignment.BottomCenter),
-            ) {
+            if (progress != null && progress > 0f && !isWatched) {
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(3.dp)
-                        .background(Snow.copy(alpha = 0.27f)),
+                        .align(Alignment.BottomCenter),
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(3.dp)
+                            .background(Snow.copy(alpha = 0.27f)),
+                    )
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth(fraction = progress.coerceIn(0f, 1f))
+                            .height(3.dp)
+                            .background(Amber),
+                    )
+                }
+            }
+        }
+
+        if (shouldShowCaption) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 2.dp),
+                verticalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
+                Text(
+                    text = item.title,
+                    style = if (compactTitles) {
+                        MaterialTheme.typography.labelMedium
+                    } else {
+                        MaterialTheme.typography.labelLarge
+                    },
+                    color = Snow,
+                    fontWeight = FontWeight.SemiBold,
+                    minLines = 2,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
                 )
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth(fraction = progress.coerceIn(0f, 1f))
-                        .height(3.dp)
-                        .background(Amber),
-                )
+                if (showMetadata) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                    val scheduleMetadata = item.upcomingScheduleMetadata()
+                    if (scheduleMetadata != null) {
+                        Text(
+                            text = scheduleMetadata,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = Silver,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    } else {
+                        item.year?.let { year ->
+                            Text(
+                                text = year.toString(),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = Silver,
+                            )
+                        }
+                    }
+                    if (!sourceAwareRatings && showTmdbRating && item.rating != null) {
+                        if (scheduleMetadata != null || item.year != null) {
+                            Spacer(modifier = Modifier.width(2.dp))
+                        }
+                        Image(
+                            painter = painterResource(id = R.drawable.tmbd_logo),
+                            contentDescription = "TMDB",
+                            modifier = Modifier.size(14.dp),
+                        )
+                        Text(
+                            text = String.format("%.1f", item.rating),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = Silver,
+                        )
+                    }
+                }
+                }
             }
         }
     }
@@ -1494,13 +1491,13 @@ private fun TvPosterWatchedBadge(modifier: Modifier = Modifier) {
             .clip(RoundedCornerShape(999.dp))
             .background(Charcoal.copy(alpha = 0.86f))
             .border(1.dp, Amber.copy(alpha = 0.58f), RoundedCornerShape(999.dp))
-            .padding(horizontal = 8.dp, vertical = 4.dp),
+            .padding(5.dp),
     ) {
-        Text(
-            text = stringResource(R.string.tv_watched),
-            style = MaterialTheme.typography.labelSmall,
-            color = AmberLight,
-            fontWeight = FontWeight.SemiBold,
+        Icon(
+            imageVector = Icons.Default.CheckCircle,
+            contentDescription = stringResource(R.string.tv_watched),
+            tint = AmberLight,
+            modifier = Modifier.size(17.dp),
         )
     }
 }

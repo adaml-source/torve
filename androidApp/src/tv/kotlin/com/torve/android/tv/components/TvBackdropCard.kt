@@ -16,6 +16,9 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -73,6 +76,7 @@ fun TvBackdropCard(
     onClick: () -> Unit,
     onFocused: () -> Unit,
     progress: Float? = null,
+    showTitles: Boolean = true,
     showTmdbRating: Boolean = true,
     ratingPrefs: RatingDisplayPrefs,
 ) {
@@ -85,24 +89,11 @@ fun TvBackdropCard(
 
     val isWatched = (progress ?: 0f) >= TV_BACKDROP_WATCHED_THRESHOLD
 
-    Box(
+    Column(
         modifier = modifier
             .width(width)
-            .aspectRatio(16f / 9f)
             .zIndex(if (focused) 1f else 0f)
             .scale(scale)
-            .background(
-                Brush.radialGradient(
-                    colors = listOf(
-                        Amber.copy(alpha = if (focused) 0.30f else 0f),
-                        Amber.copy(alpha = if (focused) 0.13f else 0f),
-                        Color.Transparent,
-                    ),
-                ),
-                RoundedCornerShape(16.dp),
-            )
-            .border(width = 2.dp, color = borderColor, shape = RoundedCornerShape(14.dp))
-            .clip(RoundedCornerShape(14.dp))
             .onFocusChanged {
                 focused = it.isFocused
                 if (it.isFocused) onFocused()
@@ -112,58 +103,111 @@ fun TvBackdropCard(
                 indication = null,
                 onClick = onClick,
             ),
+        verticalArrangement = Arrangement.spacedBy(if (showTitles) 7.dp else 0.dp),
     ) {
-        val imageUrl = item.backdropUrl ?: item.posterUrl
-        if (imageUrl.isNullOrBlank()) {
-            // Fallback: dark card with title centered when no image is available
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(Color(0xFF1A1A2E)),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text(
-                    text = item.title,
-                    style = MaterialTheme.typography.titleMedium,
-                    color = Snow,
-                    fontWeight = FontWeight.SemiBold,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.padding(16.dp),
-                )
-            }
-        } else {
-            AsyncImage(
-                model = imageUrl,
-                contentDescription = item.title,
-                contentScale = ContentScale.Crop,
-                modifier = Modifier.fillMaxSize(),
-            )
-        }
-
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .align(Alignment.BottomCenter)
+                .aspectRatio(16f / 9f)
                 .background(
-                    Brush.verticalGradient(
+                    Brush.radialGradient(
                         colors = listOf(
+                            Amber.copy(alpha = if (focused) 0.30f else 0f),
+                            Amber.copy(alpha = if (focused) 0.13f else 0f),
                             Color.Transparent,
-                            Obsidian.copy(alpha = 0.9f),
                         ),
+                        radius = 520f,
                     ),
+                    RoundedCornerShape(16.dp),
                 )
-                .padding(horizontal = 10.dp, vertical = 10.dp),
+                .border(width = 2.dp, color = borderColor, shape = RoundedCornerShape(14.dp))
+                .clip(RoundedCornerShape(14.dp)),
         ) {
-            Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+            val imageUrl = item.backdropUrl ?: item.posterUrl
+            if (imageUrl.isNullOrBlank()) {
+                // Fallback: dark card with title centered when no image is available.
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(Color(0xFF1A1A2E)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        text = item.title,
+                        style = MaterialTheme.typography.titleMedium,
+                        color = Snow,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.padding(16.dp),
+                    )
+                }
+            } else {
+                AsyncImage(
+                    model = imageUrl,
+                    contentDescription = item.title,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
+
+            if (isWatched) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(10.dp)
+                        .clip(RoundedCornerShape(999.dp))
+                        .background(Obsidian.copy(alpha = 0.82f))
+                        .border(1.dp, Amber.copy(alpha = 0.58f), RoundedCornerShape(999.dp))
+                        .padding(5.dp),
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.CheckCircle,
+                        contentDescription = stringResource(R.string.tv_watched),
+                        tint = AmberLight,
+                        modifier = Modifier.width(18.dp).height(18.dp),
+                    )
+                }
+            }
+
+            if (progress != null && progress > 0f && !isWatched) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(3.dp)
+                        .align(Alignment.BottomCenter),
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(3.dp)
+                            .background(Snow.copy(alpha = 0.27f)),
+                    )
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth(fraction = progress.coerceIn(0f, 1f))
+                            .height(3.dp)
+                            .background(Amber),
+                    )
+                }
+            }
+        }
+
+        if (showTitles) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 2.dp),
+                verticalArrangement = Arrangement.spacedBy(3.dp),
+            ) {
                 Text(
                     text = item.title,
-                    style = MaterialTheme.typography.titleMedium,
+                    style = MaterialTheme.typography.labelLarge,
                     color = Snow,
-                    maxLines = 1,
+                    minLines = 2,
+                    maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                     fontWeight = FontWeight.SemiBold,
-                    modifier = Modifier.padding(end = 82.dp),
                 )
                 val subtitle = buildString {
                     val scheduleMetadata = item.upcomingScheduleMetadata()
@@ -180,61 +224,16 @@ fun TvBackdropCard(
                 if (subtitle.isNotBlank()) {
                     Text(
                         text = subtitle,
-                        style = MaterialTheme.typography.labelMedium,
+                        style = MaterialTheme.typography.labelSmall,
                         color = Silver,
                     )
                 }
-            }
-        }
-
-        item.ratings.withFallbackTmdbScore(item.rating)?.let { ratings ->
-            PreferredRatingPills(
-                ratings = ratings,
-                prefs = ratingPrefs.tvExternalCardRatingPrefs(),
-                modifier = Modifier
-                    .align(Alignment.BottomEnd)
-                    .padding(10.dp),
-            )
-        }
-
-        if (isWatched) {
-            Box(
-                modifier = Modifier
-                    .align(Alignment.TopEnd)
-                    .padding(10.dp)
-                    .clip(RoundedCornerShape(999.dp))
-                    .background(Obsidian.copy(alpha = 0.82f))
-                    .border(1.dp, Amber.copy(alpha = 0.58f), RoundedCornerShape(999.dp))
-                    .padding(horizontal = 8.dp, vertical = 4.dp),
-            ) {
-                Text(
-                    text = stringResource(R.string.tv_watched),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = AmberLight,
-                    fontWeight = FontWeight.SemiBold,
-                )
-            }
-        }
-
-        if (progress != null && progress > 0f && !isWatched) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(3.dp)
-                    .align(Alignment.BottomCenter),
-            ) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(3.dp)
-                        .background(Snow.copy(alpha = 0.27f)),
-                )
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth(fraction = progress.coerceIn(0f, 1f))
-                        .height(3.dp)
-                        .background(Amber),
-                )
+                item.ratings.withFallbackTmdbScore(item.rating)?.let { ratings ->
+                    PreferredRatingPills(
+                        ratings = ratings,
+                        prefs = ratingPrefs.tvExternalCardRatingPrefs(),
+                    )
+                }
             }
         }
     }

@@ -25,11 +25,14 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -69,7 +72,11 @@ import androidx.compose.ui.zIndex
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.torve.android.R
+import com.torve.android.BuildConfig
 import com.torve.android.background.BackgroundWork
 import com.torve.android.diagnostics.AndroidDiagnosticsRecorder
 import com.torve.android.deeplink.TorveAppLink
@@ -78,6 +85,11 @@ import com.torve.android.premium.rememberEffectivePremiumAccessTier
 import com.torve.android.session.PostSignInRefresh
 import com.torve.android.sync.SyncCoordinator
 import com.torve.android.sync.model.SyncInboundEvent
+import com.torve.android.update.AppUpdateChecker
+import com.torve.android.update.AppUpdateActivity
+import com.torve.android.update.AppUpdateNotifier
+import com.torve.android.update.AvailableAppUpdate
+import com.torve.android.update.usesVpsReleaseUpdates
 import com.torve.android.tv.components.TvBrowseLayout
 import com.torve.android.tv.components.cacheTvBrowsePreviewEnrichedItem
 import com.torve.android.tv.components.TvHeroBackground
@@ -188,6 +200,7 @@ internal object TvScreenCache {
 private data class TvFocusBackStackEntry(
     val route: String,
     val origin: TvFocusOrigin? = null,
+    val exactRequester: FocusRequester? = null,
 )
 
 internal fun orderedSettingsEntryCandidates(
@@ -207,6 +220,7 @@ private fun NavHostController.navigateToTvDetails(
     autoPlay: Boolean = false,
     focusEpisodes: Boolean = false,
 ) {
+    com.torve.android.ui.components.ContentLaunchArtworkStore.show(item)
     val id = item.tmdbId ?: item.id.toIntOrNull() ?: item.id.extractTmdbIdOrNull() ?: return
     val type = if (item.type == MediaType.SERIES) "tv" else "movie"
     navigate(TvRoutes.details(type = type, id = id, autoPlay = autoPlay, focusEpisodes = focusEpisodes))
@@ -254,7 +268,9 @@ fun TvRoot(
     appLink: TorveAppLink? = null,
     onAppLinkConsumed: () -> Unit = {},
 ) {
-    com.torve.android.debug.AnrDebugLogger.log("STARTUP TvRoot composable entered")
+    LaunchedEffect(Unit) {
+        com.torve.android.debug.AnrDebugLogger.log("STARTUP TvRoot composable entered")
+    }
     val navController = rememberNavController()
     val context = LocalContext.current
     val rootScope = rememberCoroutineScope()
@@ -662,8 +678,10 @@ fun TvRoot(
                         logoCache[cacheKey] = focusItem.logoUrl
                         logoLoadingByKey.remove(cacheKey)
                     }
-                    logoCache[cacheKey] != null -> {
-                        focusedMediaItem = focusItem.copy(logoUrl = logoCache[cacheKey])
+                    logoCache.containsKey(cacheKey) -> {
+                        focusedMediaItem = logoCache[cacheKey]?.let { logoUrl ->
+                            focusItem.copy(logoUrl = logoUrl)
+                        } ?: focusItem
                         logoLoadingByKey.remove(cacheKey)
                     }
                     else -> {
@@ -685,9 +703,11 @@ fun TvRoot(
             return@LaunchedEffect
         }
         val cacheKey = "${item.type}:$tmdbId"
-        logoCache[cacheKey]?.let { cached ->
-            if (focusedMediaItem?.tmdbId == tmdbId) {
-                focusedMediaItem = item.copy(logoUrl = cached)
+        if (logoCache.containsKey(cacheKey)) {
+            logoCache[cacheKey]?.let { cached ->
+                if (focusedMediaItem?.tmdbId == tmdbId) {
+                    focusedMediaItem = item.copy(logoUrl = cached)
+                }
             }
             logoLoadingByKey.remove(cacheKey)
             return@LaunchedEffect
@@ -712,11 +732,10 @@ fun TvRoot(
                 }
             }
             detail?.let { heroDetailCache[cacheKey] = it }
-            if (url != null) {
-                logoCache[cacheKey] = url
-            } else {
-                logoCache.remove(cacheKey)
-            }
+            // A null value is a resolved "no artwork" result. Retaining that
+            // state prevents both repeated lookups and a one-frame text flash
+            // before every new request starts.
+            logoCache[cacheKey] = url
             // Only update if still the focused item
             if (focusedMediaItem?.let { it.tmdbId ?: it.id.extractTmdbIdOrNull() } == tmdbId) {
                 val current = focusedMediaItem
@@ -794,6 +813,9 @@ fun TvRoot(
     /* ── For focus restoration when returning from sub-routes ───────────────────────────── */
     var rootHasFocus by remember { mutableStateOf(false) }
     var focusRestoreTrigger by remember { mutableStateOf(0) }
+    var foregroundFocusRestoreTrigger by remember { mutableIntStateOf(0) }
+    var appWasPaused by remember { mutableStateOf(false) }
+    var subRouteFocusEpoch by remember { mutableIntStateOf(0) }
     var railInteractionEpoch by remember { mutableStateOf(0) }
     var contentEntryRequestNonce by remember { mutableIntStateOf(0) }
     var pendingRailEntryRoute by remember { mutableStateOf<String?>(null) }
@@ -816,6 +838,72 @@ fun TvRoot(
     var backgroundWorkWasBlocking by remember { mutableStateOf(false) }
     var backgroundWorkWasVisible by remember { mutableStateOf(false) }
     var suppressNextSeeAllReturnFocusRestore by remember { mutableStateOf(false) }
+
+    // External TV apps (for example YouTube trailer playback) take window focus
+    // without changing our navigation route. Compose can keep its internal focus
+    // marker in that case even though the activity returns with no usable D-pad
+    // target. Track a real pause/resume round-trip and explicitly restore the
+    // active surface instead of relying on the lost-focus watchdog, which is
+    // intentionally disabled while a sub-route such as Details owns the screen.
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_PAUSE -> appWasPaused = true
+                Lifecycle.Event.ON_RESUME -> {
+                    if (appWasPaused) {
+                        appWasPaused = false
+                        foregroundFocusRestoreTrigger += 1
+                    }
+                }
+                else -> Unit
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
+    LaunchedEffect(foregroundFocusRestoreTrigger) {
+        if (foregroundFocusRestoreTrigger == 0 || showCredentialTransferNudge) {
+            return@LaunchedEffect
+        }
+        val delays = listOf(80L, 180L, 360L, 700L)
+        for (waitMs in delays) {
+            delay(waitMs)
+            if (showCredentialTransferNudge || isPlayerRoute) return@LaunchedEffect
+
+            val destinationRoute = navController.currentDestination?.route
+            val focusRoute = if (destinationRoute?.startsWith("tv_details/") == true) {
+                TvRoutes.DETAILS
+            } else {
+                selectedTopRoute
+            }
+            val candidates = listOfNotNull(
+                lastFocusedContentByRoute[focusRoute],
+                firstContentFocusByRoute[focusRoute],
+            ).distinct()
+            for (requester in candidates) {
+                val beforeEpoch = contentFocusEpoch
+                val beforeSubRouteEpoch = subRouteFocusEpoch
+                runCatching { requester.requestFocus() }
+                kotlinx.coroutines.yield()
+                withFrameNanos { }
+                val restored = if (focusRoute == TvRoutes.DETAILS) {
+                    subRouteFocusEpoch != beforeSubRouteEpoch
+                } else {
+                    contentFocusEpoch != beforeEpoch && focusedContentRoute == focusRoute
+                }
+                if (restored) {
+                    return@LaunchedEffect
+                }
+            }
+        }
+
+        // A stale requester can outlive a lazy item. The permanent rail is the
+        // safe final target, so foreground return can never leave the UI inert.
+        pendingRailEntryRoute = selectedTopRoute
+        runCatching { railFocusRequester.requestFocus() }
+    }
 
     LaunchedEffect(backgroundWorkStatus.blockNavigation) {
         if (backgroundWorkWasBlocking && !backgroundWorkStatus.blockNavigation) {
@@ -1269,6 +1357,7 @@ fun TvRoot(
         val entry = TvFocusBackStackEntry(
             route = route,
             origin = origin,
+            exactRequester = lastFocusedContentByRoute[route],
         )
         focusReturnStack.add(entry)
         Log.d(
@@ -1316,11 +1405,13 @@ fun TvRoot(
             val handle = focusHandlesByRoute[route] ?: return@LaunchedEffect
             handle.requestRestore(entry.origin, "back_stack")
             repeat(30) {
-                delay(40L)
                 if (pendingFocusBackRestore != entry) return@LaunchedEffect
                 if (handle.isOriginFocused(entry.origin)) {
                     pendingFocusBackRestore = null
                     return@LaunchedEffect
+                }
+                entry.exactRequester?.let { requester ->
+                    runCatching { requester.requestFocus() }
                 }
                 withFrameNanos { }
             }
@@ -1568,6 +1659,33 @@ fun TvRoot(
         }
     }
 
+    // Fire TV does not consistently surface Android notifications while the app
+    // is foregrounded, so mirror a newly published VPS release into Torve's TV
+    // notification surface as soon as the interactive root is available and
+    // re-check while a long-running TV session remains open.
+    var availableAppUpdate by remember { mutableStateOf<AvailableAppUpdate?>(null) }
+    LaunchedEffect(Unit) {
+        if (!usesVpsReleaseUpdates(BuildConfig.FLAVOR)) return@LaunchedEffect
+        var lastBannerVersion: String? = null
+        while (true) {
+            val update = runCatching {
+                withContext(Dispatchers.IO) { AppUpdateChecker.checkForUpdate() }
+            }.getOrNull()
+            if (update != null && update.version != lastBannerVersion) {
+                availableAppUpdate = update
+                AppUpdateNotifier.showSystemNotificationIfNew(context, update)
+                TvNotificationQueue.post(
+                    message = context.getString(R.string.tv_update_available, update.version),
+                    type = NotificationType.INFO,
+                    tag = "app_update_${update.version}",
+                    durationMs = 8_000L,
+                )
+                lastBannerVersion = update.version
+            }
+            delay(15 * 60 * 1_000L)
+        }
+    }
+
     /* ── Featured hero item ────────────────────────────────────────────────────────────── */
     val heroRoute = heroPreviewRoute
     val heroContentReady = firstContentFocusByRoute.containsKey(heroRoute)
@@ -1719,7 +1837,7 @@ fun TvRoot(
             logoLoadingByKey.remove(cacheKey)
             return@LaunchedEffect
         }
-        if (logoCache[cacheKey] != null) return@LaunchedEffect
+        if (logoCache.containsKey(cacheKey)) return@LaunchedEffect
 
         logoLoadingByKey[cacheKey] = true
         try {
@@ -1739,11 +1857,7 @@ fun TvRoot(
             detail?.let {
                 heroDetailCache[cacheKey] = it
             }
-            if (url != null) {
-                logoCache[cacheKey] = url
-            } else {
-                logoCache.remove(cacheKey)
-            }
+            logoCache[cacheKey] = url
         } finally {
             logoLoadingByKey.remove(cacheKey)
         }
@@ -2369,8 +2483,8 @@ fun TvRoot(
                 val heroOverlayContent: (@Composable () -> Unit) = {
                     val heroItem = displayedHeroItem
                     val heroLogoLookupInFlight = heroItem?.tmdbId?.let { tmdbId ->
-                        heroItem.logoUrl.isNullOrBlank() &&
-                            logoLoadingByKey["${heroItem.type}:$tmdbId"] == true
+                        val key = "${heroItem.type}:$tmdbId"
+                        heroItem.logoUrl.isNullOrBlank() && !logoCache.containsKey(key)
                     } == true
                     val heroInWatchlist = heroItem?.let {
                         watchlistViewModel.isInWatchlist(it.id)
@@ -3188,6 +3302,7 @@ fun TvRoot(
                         },
                         onContentFocused = { req ->
                             lastFocusedContentByRoute[TvRoutes.DETAILS] = req
+                            subRouteFocusEpoch += 1
                         },
                         registerSeeAllFocusHandle = { handle ->
                             if (handle == null) {
@@ -3336,6 +3451,38 @@ fun TvRoot(
             onDismiss = {
                 showCredentialTransferNudge = false
                 credentialNudgeDismissed = true
+            },
+        )
+    }
+
+    availableAppUpdate?.let { update ->
+        AlertDialog(
+            onDismissRequest = { availableAppUpdate = null },
+            title = {
+                Text(context.getString(R.string.app_update_notification_title, update.version))
+            },
+            text = { Text(stringResource(R.string.app_update_notification_body)) },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        availableAppUpdate = null
+                        runCatching {
+                            context.startActivity(AppUpdateActivity.createIntent(context, update))
+                        }.onFailure {
+                            TvNotificationQueue.post(
+                                context.getString(R.string.app_update_download_failed),
+                                NotificationType.ERROR,
+                            )
+                        }
+                    },
+                ) {
+                    Text(stringResource(R.string.app_update_download_install))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { availableAppUpdate = null }) {
+                    Text(stringResource(R.string.app_update_later))
+                }
             },
         )
     }

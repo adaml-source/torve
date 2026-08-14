@@ -54,7 +54,9 @@ data class SettingsUiState(
     // Debrid device auth
     val debridDeviceCode: DeviceCodeInfo? = null,
     val isPollingDebrid: Boolean = false,
-    // All connected debrid providers (provider → apiKey)
+    // Configured/authenticated providers, including explicitly disabled ones.
+    val configuredDebridProviders: Map<DebridServiceType, String> = emptyMap(),
+    // Providers explicitly enabled for use (provider → apiKey).
     val connectedDebridProviders: Map<DebridServiceType, String> = emptyMap(),
     // Trakt
     val traktClientId: String = "",
@@ -228,8 +230,8 @@ data class SettingsUiState(
      * key (torrent/hoster unrestrict path) or at least one installed addon
      * that produces streams (Panda serving direct / cloud-debrid URLs).
      *
-     * Use this to gate play buttons. Use [debridConnected] when specifically
-     * checking whether the local unrestrict / bulk-download path is available.
+     * Use this to gate play buttons. Use [connectedDebridProviders] when
+     * specifically checking whether local unrestrict / bulk download is available.
      */
-    val canPlayStreams: Boolean get() = debridConnected || hasStreamAddon
+    val canPlayStreams: Boolean get() = connectedDebridProviders.isNotEmpty() || hasStreamAddon
 }

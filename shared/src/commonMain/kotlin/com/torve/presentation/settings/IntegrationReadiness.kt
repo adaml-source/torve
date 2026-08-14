@@ -81,14 +81,15 @@ fun buildIntegrationReadinessSummary(
     settings: SettingsUiState,
     automationInstances: List<AutomationInstance>,
 ): IntegrationReadinessSummary {
+    val hasEnabledDebrid = settings.connectedDebridProviders.isNotEmpty()
     val watchNow = when {
-        settings.debridConnected && settings.hasStreamAddon -> readiness(
+        hasEnabledDebrid && settings.hasStreamAddon -> readiness(
             IntegrationWorkflow.WATCH_NOW,
             "Watch now",
             "Streaming add-on and debrid are connected.",
             IntegrationReadinessStatus.READY,
         )
-        settings.debridConnected -> readiness(
+        hasEnabledDebrid -> readiness(
             IntegrationWorkflow.WATCH_NOW,
             "Watch now",
             "Debrid is connected for immediate playback.",
@@ -100,7 +101,7 @@ fun buildIntegrationReadinessSummary(
             "A streaming add-on is connected.",
             IntegrationReadinessStatus.READY,
         )
-        settings.debridApiKey.isNotBlank() || settings.connectedDebridProviders.isNotEmpty() -> readiness(
+        settings.debridApiKey.isNotBlank() || settings.configuredDebridProviders.isNotEmpty() -> readiness(
             IntegrationWorkflow.WATCH_NOW,
             "Watch now",
             "Playback credentials exist but the connection needs attention.",

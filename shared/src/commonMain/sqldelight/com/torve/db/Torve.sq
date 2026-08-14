@@ -439,6 +439,13 @@ INSERT OR REPLACE INTO iptv_channel (
 clearChannelsForPlaylistGeneration:
 DELETE FROM iptv_channel WHERE user_id = :userId AND playlist_id = :playlistId AND generation_id = :generationId;
 
+deleteStaleChannelsForPlaylistGeneration:
+DELETE FROM iptv_channel
+WHERE user_id = :userId
+  AND playlist_id = :playlistId
+  AND generation_id = :generationId
+  AND updated_at != :updatedAt;
+
 deleteChannelsOlderGenerations:
 DELETE FROM iptv_channel WHERE user_id = :userId AND playlist_id = :playlistId AND generation_id != :generationId;
 

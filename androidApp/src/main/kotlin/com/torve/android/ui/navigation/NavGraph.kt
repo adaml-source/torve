@@ -186,6 +186,7 @@ import kotlinx.coroutines.withContext
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 private fun NavHostController.navigateToDetail(item: com.torve.domain.model.MediaItem) {
+    com.torve.android.ui.components.ContentLaunchArtworkStore.show(item)
     val type = if (item.type == MediaType.SERIES) "tv" else "movie"
     // Addon items arrive with namespaced ids like "tmdb:1523145" or "tt0111161"
     // but leave `tmdbId`/`imdbId` unset. Parse them out of `id` so those

@@ -252,6 +252,7 @@ data class TmdbWatchProvider(
     @SerialName("provider_id") val providerId: Int,
     @SerialName("provider_name") val providerName: String = "",
     @SerialName("logo_path") val logoPath: String? = null,
+    @SerialName("display_priorities") val displayPriorities: Map<String, Int> = emptyMap(),
 )
 
 @Serializable

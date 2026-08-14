@@ -313,6 +313,15 @@ internal fun TvNavHost(
                 onBack = onSeeAllBack,
                 onFirstContentRequester = onFirstContentRequester,
                 onContentFocused = onContentFocused,
+                onSeeAll = { childRailKey, childTitle, childMediaType ->
+                    navController.navigate(
+                        TvRoutes.seeAll(
+                            railKey = childRailKey,
+                            mediaType = childMediaType,
+                            title = childTitle,
+                        ),
+                    )
+                },
                 registerFocusHandle = registerSeeAllFocusHandle,
             )
         }

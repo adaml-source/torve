@@ -3,6 +3,7 @@ package com.torve.domain.model
 data class StreamingProviderCandidate(
     val id: Int,
     val name: String,
+    val regions: Set<String> = emptySet(),
 )
 
 /**

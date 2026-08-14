@@ -549,12 +549,12 @@ class TmdbApiClient(
         )
     }
 
-    suspend fun getWatchProviders(type: String = "movie", region: String = "US"): TmdbWatchProvidersResponse {
+    suspend fun getWatchProviders(type: String = "movie", region: String? = "US"): TmdbWatchProvidersResponse {
         return get(
             endpoint = "/watch/providers/$type",
             requestCategory = "tmdb.watch_providers.$type",
-            parameters = baseParams() + listOf(
-                "watch_region" to region,
+            parameters = baseParams() + listOfNotNull(
+                region?.takeIf { it.isNotBlank() }?.let { "watch_region" to it },
             ),
         )
     }

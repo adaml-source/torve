@@ -10,6 +10,7 @@ import org.xmlpull.v1.XmlPullParserFactory
 import java.io.InputStream
 import java.io.InputStreamReader
 import kotlin.coroutines.coroutineContext
+import kotlin.time.TimeSource
 
 private const val DEFAULT_DB_BATCH_SIZE = 75
 private const val TITLE_MAX_LEN = 120
@@ -182,7 +183,7 @@ internal suspend fun EpgParser.parseXmlTvStreamingToDb(
     maxProgrammesTotal: Int = MAX_PROGRAMMES_TOTAL_DEFAULT,
     onProgress: ((EpgBatchProgress) -> Unit)? = null,
 ): EpgDbParseStats = withContext(Dispatchers.IO) {
-    val startedAtMs = Clock.System.now().toEpochMilliseconds()
+    val startedAt = TimeSource.Monotonic.markNow()
     val safeBatchSize = batchSize.coerceIn(50, 200)
     val maxPerChannel = maxProgrammesPerChannel.coerceAtLeast(1)
     val maxTotal = maxProgrammesTotal.coerceAtLeast(1)
@@ -203,6 +204,7 @@ internal suspend fun EpgParser.parseXmlTvStreamingToDb(
     var programmesSkippedByCap = 0
     var batchesCommitted = 0
     var abortedByGlobalCap = false
+    var persistenceDurationMs = 0L
 
     fun progressSnapshot(): EpgBatchProgress {
         val (heapUsedMb, heapFreeMb) = heapStatsMb()
@@ -222,6 +224,7 @@ internal suspend fun EpgParser.parseXmlTvStreamingToDb(
 
     fun flushBatches() {
         if (channelBatch.isEmpty() && programmeBatch.isEmpty()) return
+        val persistenceStartedAt = TimeSource.Monotonic.markNow()
         db.torveQueries.transaction {
             channelBatch.forEach { row ->
                 db.torveQueries.insertEpgChannel(
@@ -250,6 +253,7 @@ internal suspend fun EpgParser.parseXmlTvStreamingToDb(
                 )
             }
         }
+        persistenceDurationMs += persistenceStartedAt.elapsedNow().inWholeMilliseconds
         channelBatch.clear()
         programmeBatch.clear()
         batchesCommitted++
@@ -428,9 +432,9 @@ internal suspend fun EpgParser.parseXmlTvStreamingToDb(
         throw t
     }
 
-    val durationMs = Clock.System.now().toEpochMilliseconds() - startedAtMs
+    val durationMs = startedAt.elapsedNow().inWholeMilliseconds
     println(
-        "ChannelsEPG: db parser complete playlistId=$playlistId generation=$generationId channelsSeen=$channelsSeen totalSeen=$totalProgrammesSeen kept=$programmesKept skippedByWindow=$programmesSkippedByWindow skippedByChannelFilter=$programmesSkippedByChannelFilter skippedByInvalidTime=$programmesSkippedByInvalidTime skippedByNoMapping=$programmesSkippedByNoMapping skippedByCap=$programmesSkippedByCap abortedByGlobalCap=$abortedByGlobalCap durationMs=$durationMs",
+        "ChannelsEPG: db parser complete playlistId=$playlistId generation=$generationId channelsSeen=$channelsSeen totalSeen=$totalProgrammesSeen kept=$programmesKept skippedByWindow=$programmesSkippedByWindow skippedByChannelFilter=$programmesSkippedByChannelFilter skippedByInvalidTime=$programmesSkippedByInvalidTime skippedByNoMapping=$programmesSkippedByNoMapping skippedByCap=$programmesSkippedByCap abortedByGlobalCap=$abortedByGlobalCap durationMs=$durationMs persistenceMs=$persistenceDurationMs",
     )
 
     EpgDbParseStats(
@@ -444,5 +448,6 @@ internal suspend fun EpgParser.parseXmlTvStreamingToDb(
         programmesSkippedByCap = programmesSkippedByCap,
         abortedByGlobalCap = abortedByGlobalCap,
         parseDurationMs = durationMs,
+        persistenceDurationMs = persistenceDurationMs,
     )
 }

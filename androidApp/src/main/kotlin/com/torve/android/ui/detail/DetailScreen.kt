@@ -150,6 +150,7 @@ import com.torve.presentation.tvhome.TvSourcePickerState
 import com.torve.presentation.watchlist.containsMedia
 import com.torve.presentation.watchlist.isMutatingMedia
 import com.torve.presentation.watchlist.WatchlistViewModel
+import com.torve.domain.repository.MetadataRepository
 import com.torve.util.FormatUtil
 import org.koin.compose.koinInject
 
@@ -178,6 +179,7 @@ fun DetailScreen(
     networkMonitor: NetworkMonitor = koinInject(),
 ) {
     val bulkDownloadManager: BulkDownloadManager = koinInject()
+    val metadataRepository: MetadataRepository = koinInject()
     val bulkProgress by bulkDownloadManager.progress.collectAsState()
     // Kick the LAN-library consumer once so the "Available on desktop"
     // pill resolves on first paint (instead of waiting for the next
@@ -185,6 +187,15 @@ fun DetailScreen(
     com.torve.android.ui.components.LanAvailabilityBootstrap()
     val coroutineScope = rememberCoroutineScope()
     val state by viewModel.state.collectAsState()
+    var cinematicLogoUrl by remember(type, id) { mutableStateOf<String?>(null) }
+    LaunchedEffect(state.mediaItem?.id, state.mediaItem?.logoUrl) {
+        val item = state.mediaItem ?: return@LaunchedEffect
+        val logo = item.logoUrl ?: item.tmdbId?.let { tmdbId ->
+            runCatching { metadataRepository.getLogoUrl(type, tmdbId) }.getOrNull()
+        }
+        cinematicLogoUrl = logo
+        com.torve.android.ui.components.ContentLaunchArtworkStore.clear()
+    }
     val settingsState by settingsViewModel.state.collectAsState()
     val runtimeFilterFeedbackEnabled = true
     val watchlistState by watchlistViewModel.state.collectAsState()
@@ -195,7 +206,7 @@ fun DetailScreen(
     }
     // The addon VM is loaded on this screen and is the freshest local source
     // of truth. Settings can initialize before startup addon sync completes.
-    val canPlayStreams = settingsState.debridConnected || hasEnabledStreamAddon
+    val canPlayStreams = settingsState.connectedDebridProviders.isNotEmpty() || hasEnabledStreamAddon
     val isLocked: (PremiumFeature) -> Boolean = remember(accessTier) {
         { feature -> PremiumAccess.isPremiumLocked(feature, accessTier) }
     }
@@ -422,9 +433,15 @@ fun DetailScreen(
         Box(modifier = Modifier.fillMaxSize()) {
         when {
             state.isLoading -> {
-                CircularProgressIndicator(
-                    modifier = Modifier.align(Alignment.Center).size(48.dp),
-                    color = Amber,
+                val launchArtwork = com.torve.android.ui.components.ContentLaunchArtworkStore.current
+                com.torve.android.ui.components.CinematicContentLoading(
+                    title = launchArtwork?.title.orEmpty(),
+                    backdropUrl = launchArtwork?.backdropUrl,
+                    posterUrl = launchArtwork?.posterUrl,
+                    logoUrl = launchArtwork?.logoUrl,
+                    tmdbId = launchArtwork?.tmdbId,
+                    mediaType = launchArtwork?.type,
+                    modifier = Modifier.fillMaxSize(),
                 )
             }
 
@@ -1016,13 +1033,13 @@ fun DetailScreen(
                                     openSourcePickerOrProvider(season, episode)
                                 },
                                 onEpisodeDownload = { season, episode ->
-                                    if (settingsState.debridConnected) {
+                                    if (settingsState.connectedDebridProviders.isNotEmpty()) {
                                         pendingEpisodeDownload = season to episode
                                         viewModel.fetchStreams(season = season, episode = episode)
                                     }
                                 },
                                 onDownloadSeason = { season ->
-                                    if (settingsState.debridConnected) {
+                                    if (settingsState.connectedDebridProviders.isNotEmpty()) {
                                         val media = state.mediaItem ?: return@EpisodeSelector
                                         val seasonObj = media.seasons.find { it.seasonNumber == season }
                                         val epCount = seasonObj?.episodeCount ?: return@EpisodeSelector
@@ -1043,7 +1060,7 @@ fun DetailScreen(
                                     }
                                 },
                                 onDownloadAll = {
-                                    if (settingsState.debridConnected) {
+                                    if (settingsState.connectedDebridProviders.isNotEmpty()) {
                                         val media = state.mediaItem ?: return@EpisodeSelector
                                         coroutineScope.launch {
                                             val episodes = bulkDownloadManager.buildAllSeasonsTargets(media)
@@ -1413,8 +1430,21 @@ fun DetailScreen(
             state.preparing?.let { preparing ->
                 StreamPreparingOverlay(
                     state = preparing,
+                    mediaItem = state.mediaItem?.copy(logoUrl = cinematicLogoUrl ?: state.mediaItem?.logoUrl),
                     onCancel = { viewModel.cancelPreparing() },
                     modifier = Modifier.zIndex(80f),
+                )
+            }
+            if ((state.isLoadingStreams || state.isResolving) && state.preparing == null && sourcePickerState == null) {
+                val resolvingItem = state.mediaItem
+                com.torve.android.ui.components.CinematicContentLoading(
+                    title = resolvingItem?.title.orEmpty(),
+                    backdropUrl = resolvingItem?.backdropUrl,
+                    posterUrl = resolvingItem?.posterUrl,
+                    logoUrl = cinematicLogoUrl ?: resolvingItem?.logoUrl,
+                    tmdbId = resolvingItem?.tmdbId,
+                    mediaType = resolvingItem?.type,
+                    modifier = Modifier.fillMaxSize().zIndex(70f),
                 )
             }
         }

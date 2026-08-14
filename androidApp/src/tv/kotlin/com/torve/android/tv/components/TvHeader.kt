@@ -2,7 +2,9 @@ package com.torve.android.tv.components
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
@@ -22,6 +24,7 @@ import com.torve.domain.model.MediaItem
 fun TvHeroBackground(
     featuredItem: MediaItem?,
     modifier: Modifier = Modifier,
+    extendedReadability: Boolean = false,
 ) {
     Box(modifier = modifier.fillMaxSize()) {
         val imageUrl = featuredItem?.backdropUrl ?: featuredItem?.posterUrl
@@ -75,5 +78,22 @@ fun TvHeroBackground(
                     ),
                 ),
         )
+
+        if (extendedReadability) {
+            Box(
+                modifier = Modifier
+                    .fillMaxHeight()
+                    .fillMaxWidth(0.78f)
+                    .background(
+                        Brush.horizontalGradient(
+                            colors = listOf(
+                                Obsidian.copy(alpha = 0.18f),
+                                Obsidian.copy(alpha = 0.08f),
+                                Obsidian.copy(alpha = 0f),
+                            ),
+                        ),
+                    ),
+            )
+        }
     }
 }

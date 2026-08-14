@@ -4,6 +4,7 @@ import android.content.Context
 import android.util.Log
 import androidx.activity.compose.BackHandler
 import androidx.appcompat.app.AppCompatDelegate
+import androidx.core.content.pm.PackageInfoCompat
 import androidx.core.os.LocaleListCompat
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.layout.Row
@@ -3096,12 +3097,11 @@ internal fun TvSettingsScreen(
                                         TvNotificationQueue.post(
                                             context.getString(R.string.login_reset_sent),
                                             NotificationType.INFO,
-                                    )
-                                } else {
-                                    authIsLoading = false
-                                    authError = result.error
-                                    TvNotificationQueue.post(
-                                        result.error ?: context.getString(R.string.tv_auth_failed),
+                                        )
+                                    } else {
+                                        authError = result.error
+                                        TvNotificationQueue.post(
+                                            result.error ?: context.getString(R.string.tv_auth_failed),
                                             NotificationType.ERROR,
                                         )
                                     }
@@ -6546,7 +6546,9 @@ internal fun TvSettingsScreen(
                 externalRequester = remember("about_build") { FocusRequester() },
             )
             val buildNumber = runCatching {
-                context.packageManager.getPackageInfo(context.packageName, 0).longVersionCode
+                PackageInfoCompat.getLongVersionCode(
+                    context.packageManager.getPackageInfo(context.packageName, 0),
+                )
             }.getOrDefault(0L)
             TvSettingCard(
                 title = stringResource(R.string.tv_settings_build_number),

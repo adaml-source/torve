@@ -25,6 +25,7 @@ import com.torve.domain.repository.VodCategoryTypeCount
 import com.torve.data.network.HttpClientFactory
 import com.torve.platform.torveVerboseLog
 import com.torve.util.ioDispatcher
+import app.cash.sqldelight.db.SqlDriver
 import io.ktor.client.HttpClient
 import io.ktor.client.plugins.timeout
 import io.ktor.client.request.prepareGet
@@ -37,9 +38,11 @@ import io.ktor.utils.io.ByteReadChannel
 import io.ktor.utils.io.readAvailable
 import kotlinx.datetime.Clock
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import kotlin.time.TimeSource
 
 class ChannelRepositoryImpl(
     private val database: TorveDatabase,
@@ -49,6 +52,7 @@ class ChannelRepositoryImpl(
     private val xtreamClient: XtreamClient,
     private val secureStorage: com.torve.domain.security.SecureStorage,
     private val userIdProvider: UserIdProvider,
+    private val sqlDriver: SqlDriver,
 ) : ChannelRepository {
 
     private fun uid(): String = userIdProvider.currentUserId()
@@ -73,6 +77,7 @@ class ChannelRepositoryImpl(
         private const val PREF_CHANNEL_ACTIVE_GENERATION_PREFIX = "channel_active_generation_"
         private const val PREF_CHANNEL_LAST_SYNC_PREFIX = "channel_last_sync_"
         private const val PREF_CHANNEL_STAGED_GENERATION_PREFIX = "channel_staged_generation_"
+        private const val PREF_CHANNEL_SNAPSHOT_SIGNATURE_PREFIX = "channel_snapshot_signature_"
         private const val DEFAULT_EPG_WINDOW_HOURS_AHEAD = 6
         private const val DEFAULT_EPG_WINDOW_HOURS_BEHIND = 1
         private const val MAX_EPG_WINDOW_HOURS = 18
@@ -83,7 +88,9 @@ class ChannelRepositoryImpl(
         private const val EPG_DEBUG_LOG_ENABLED = false
         private const val CHANNEL_DEBUG_LOG_ENABLED = false
         private const val PLAYLIST_CACHE_MAX_CHANNELS = 10_000
-        private const val STALE_CHANNEL_DELETE_BATCH_SIZE = 2_000L
+        private const val CHANNEL_INSERT_BIND_COUNT = 24
+        private const val CHANNEL_INSERT_BATCH_SIZE = 40
+        private const val BULK_CHANNEL_INSERT_QUERY_ID = 1_947_204_611
         private const val M3U_MAX_BODY_BYTES = 32 * 1024 * 1024
         private const val M3U_INITIAL_BODY_BUFFER_BYTES = 256 * 1024
         private const val M3U_READ_CHUNK_BYTES = 64 * 1024
@@ -293,6 +300,7 @@ class ChannelRepositoryImpl(
     private val refreshPlaylistMutexes = mutableMapOf<String, Mutex>()
     private fun refreshPlaylistMutexFor(playlistId: String): Mutex =
         refreshPlaylistMutexes.getOrPut(playlistId) { Mutex() }
+    private val catalogRefreshCoalescer = InFlightRefreshCoalescer()
     private val epgHttpClient: HttpClient by lazy {
         HttpClientFactory.createEpgStreamingClient(
             forceIdentityEncoding = EPG_FORCE_IDENTITY_ACCEPT_ENCODING,
@@ -886,12 +894,15 @@ class ChannelRepositoryImpl(
     }
 
     override suspend fun refreshPlaylistCatalog(playlistId: String) {
-        refreshPlaylistMutexFor(playlistId).withLock {
-            refreshPlaylistInternal(playlistId, includeEpg = false)
+        catalogRefreshCoalescer.run(playlistId) {
+            refreshPlaylistMutexFor(playlistId).withLock {
+                refreshPlaylistInternal(playlistId, includeEpg = false)
+            }
         }
     }
 
     private suspend fun refreshPlaylistInternal(playlistId: String, includeEpg: Boolean) {
+        val refreshStartedAt = TimeSource.Monotonic.markNow()
         repairChannelCatalogIfNeeded(playlistId)
         val playlist = database.torveQueries.getPlaylist(userId = uid(), playlistId = playlistId).executeAsOneOrNull()
             ?: return
@@ -902,7 +913,10 @@ class ChannelRepositoryImpl(
         val xtreamPassword = if (playlist.type == "xtream") loadXtreamPassword(playlistId) else null
         if (playlist.type == "xtream" && playlist.server != null && playlist.username != null && xtreamPassword != null) {
             // Xtream playlist refresh
+            val liveCategoryStartedAt = TimeSource.Monotonic.markNow()
             val categories = xtreamClient.getLiveCategories(playlist.server, playlist.username, xtreamPassword)
+            val liveCategoryMs = liveCategoryStartedAt.elapsedNow().inWholeMilliseconds
+            val liveRequestStartedAt = TimeSource.Monotonic.markNow()
             val liveStreams = fetchXtreamLiveCatalog(
                 server = playlist.server,
                 username = playlist.username,
@@ -910,6 +924,8 @@ class ChannelRepositoryImpl(
                 playlistId = playlistId,
                 liveCategories = categories,
             )
+            val liveRequestMs = liveRequestStartedAt.elapsedNow().inWholeMilliseconds
+            val liveNormalizeStartedAt = TimeSource.Monotonic.markNow()
             val channels = xtreamClient.mapLiveToChannels(
                 streams = liveStreams,
                 categories = categories,
@@ -918,13 +934,17 @@ class ChannelRepositoryImpl(
                 password = xtreamPassword,
                 playlistId = playlistId,
             )
+            val liveNormalizeMs = liveNormalizeStartedAt.elapsedNow().inWholeMilliseconds
 
+            val vodCategoryStartedAt = TimeSource.Monotonic.markNow()
             val vodCategories = try {
                 xtreamClient.getVodCategories(playlist.server, playlist.username, xtreamPassword)
             } catch (t: Exception) {
                 channelDebugLog("Xtream VOD category refresh failed for playlist $playlistId: ${t.message}")
                 emptyList()
             }
+            val vodCategoryMs = vodCategoryStartedAt.elapsedNow().inWholeMilliseconds
+            val vodRequestStartedAt = TimeSource.Monotonic.markNow()
             val vodStreams = fetchXtreamVodCatalog(
                 server = playlist.server,
                 username = playlist.username,
@@ -932,6 +952,8 @@ class ChannelRepositoryImpl(
                 playlistId = playlistId,
                 vodCategories = vodCategories,
             )
+            val vodRequestMs = vodRequestStartedAt.elapsedNow().inWholeMilliseconds
+            val vodNormalizeStartedAt = TimeSource.Monotonic.markNow()
             val vodChannels = xtreamClient.mapVodToChannels(
                 streams = vodStreams,
                 categories = vodCategories,
@@ -940,12 +962,16 @@ class ChannelRepositoryImpl(
                 password = xtreamPassword,
                 playlistId = playlistId,
             )
+            val vodNormalizeMs = vodNormalizeStartedAt.elapsedNow().inWholeMilliseconds
+            val seriesCategoryStartedAt = TimeSource.Monotonic.markNow()
             val seriesCategories = try {
                 xtreamClient.getSeriesCategories(playlist.server, playlist.username, xtreamPassword)
             } catch (t: Exception) {
                 channelDebugLog("Xtream series category refresh failed for playlist $playlistId: ${t.message}")
                 emptyList()
             }
+            val seriesCategoryMs = seriesCategoryStartedAt.elapsedNow().inWholeMilliseconds
+            val seriesRequestStartedAt = TimeSource.Monotonic.markNow()
             val series = fetchXtreamSeriesCatalog(
                 server = playlist.server,
                 username = playlist.username,
@@ -953,6 +979,8 @@ class ChannelRepositoryImpl(
                 playlistId = playlistId,
                 seriesCategories = seriesCategories,
             )
+            val seriesRequestMs = seriesRequestStartedAt.elapsedNow().inWholeMilliseconds
+            val seriesNormalizeStartedAt = TimeSource.Monotonic.markNow()
             val seriesChannels = xtreamClient.mapSeriesToChannels(
                 series = series,
                 categories = seriesCategories,
@@ -961,6 +989,7 @@ class ChannelRepositoryImpl(
                 password = xtreamPassword,
                 playlistId = playlistId,
             )
+            val seriesNormalizeMs = seriesNormalizeStartedAt.elapsedNow().inWholeMilliseconds
             val xtreamEpgUrl = playlist.epg_url ?: buildXtreamEpgUrl(
                 server = playlist.server,
                 username = playlist.username,
@@ -968,6 +997,7 @@ class ChannelRepositoryImpl(
             )
 
             val allChannels = channels + vodChannels + seriesChannels
+            val persistenceStartedAt = TimeSource.Monotonic.markNow()
             persistPlaylistSnapshot(
                 playlistId = playlist.id,
                 playlistName = playlist.name,
@@ -980,17 +1010,31 @@ class ChannelRepositoryImpl(
                 channels = allChannels,
                 updatedAt = now,
             )
+            val persistenceMs = persistenceStartedAt.elapsedNow().inWholeMilliseconds
+            println(
+                "TorvePerf: iptv stages playlistId=$playlistId type=xtream " +
+                    "liveCategoryMs=$liveCategoryMs liveRequestMs=$liveRequestMs liveNormalizeMs=$liveNormalizeMs " +
+                    "vodCategoryMs=$vodCategoryMs vodRequestMs=$vodRequestMs vodNormalizeMs=$vodNormalizeMs " +
+                    "seriesCategoryMs=$seriesCategoryMs seriesRequestMs=$seriesRequestMs seriesNormalizeMs=$seriesNormalizeMs " +
+                    "persistenceMs=$persistenceMs itemCount=${allChannels.size} " +
+                    "catalogCompleteMs=${refreshStartedAt.elapsedNow().inWholeMilliseconds}",
+            )
             if (includeEpg) {
                 refreshEpgForPlaylist(playlistId, xtreamEpgUrl)
             }
         } else {
             // M3U playlist refresh
+            val requestStartedAt = TimeSource.Monotonic.markNow()
             val m3uContent = playlistHttpClient.prepareGet(playlist.url).execute { response ->
                 readM3uResponseAsText(response)
             }
+            val requestMs = requestStartedAt.elapsedNow().inWholeMilliseconds
+            val parseStartedAt = TimeSource.Monotonic.markNow()
             val parsed = m3uParser.parse(m3uContent, playlistId)
+            val parseMs = parseStartedAt.elapsedNow().inWholeMilliseconds
             val resolvedEpgUrl = playlist.epg_url ?: parsed.epgUrl
 
+            val persistenceStartedAt = TimeSource.Monotonic.markNow()
             persistPlaylistSnapshot(
                 playlistId = playlist.id,
                 playlistName = playlist.name,
@@ -1002,6 +1046,12 @@ class ChannelRepositoryImpl(
                 password = null,
                 channels = parsed.channels,
                 updatedAt = now,
+            )
+            val persistenceMs = persistenceStartedAt.elapsedNow().inWholeMilliseconds
+            println(
+                "TorvePerf: iptv stages playlistId=$playlistId type=m3u requestMs=$requestMs parseMs=$parseMs " +
+                    "persistenceMs=$persistenceMs itemCount=${parsed.channels.size} " +
+                    "catalogCompleteMs=${refreshStartedAt.elapsedNow().inWholeMilliseconds}",
             )
 
             // Refresh EPG
@@ -1680,6 +1730,37 @@ class ChannelRepositoryImpl(
         } else {
             0L
         }
+        val incomingSignature = channelSnapshotSignature(channels)
+        val persistedSignature = database.torveQueries
+            .getPreference(userId = uid(), key = channelSnapshotSignaturePrefKey(playlistId))
+            .executeAsOneOrNull()
+        if (existingGeneration != null && persistedSignature == incomingSignature) {
+            database.transaction {
+                database.torveQueries.insertPlaylist(
+                    user_id = uid(),
+                    id = playlistId,
+                    name = playlistName,
+                    url = playlistUrl,
+                    epg_url = epgUrl,
+                    channel_count = channels.size.toLong(),
+                    last_updated = updatedAt,
+                    type = playlistType,
+                    server = server,
+                    username = username,
+                    password = password,
+                )
+                database.torveQueries.setPreference(
+                    user_id = uid(),
+                    key = channelLastSyncPrefKey(playlistId),
+                    value_ = updatedAt.toString(),
+                )
+            }
+            println(
+                "TorvePerf: iptv persistence playlistId=$playlistId itemCount=${channels.size} " +
+                    "snapshotUnchanged=true snapshotWriteMs=0 pruneMs=0",
+            )
+            return
+        }
         if (!shouldAcceptIncomingChannelSnapshot(existingChannelCount.toInt(), channels.size)) {
             channelDebugLog(
                 "ChannelCatalog: rejected empty replacement playlistId=$playlistId existing=$existingChannelCount incoming=${channels.size}",
@@ -1687,35 +1768,25 @@ class ChannelRepositoryImpl(
             return
         }
 
-        val nextGeneration = nextChannelSnapshotGeneration(updatedAt, existingGeneration)
-        setStagedChannelGeneration(playlistId, nextGeneration)
+        val reusingActiveGeneration = existingGeneration != null
+        val nextGeneration = existingGeneration ?: nextChannelSnapshotGeneration(updatedAt, null)
+        if (!reusingActiveGeneration) {
+            setStagedChannelGeneration(playlistId, nextGeneration)
+        }
+        val snapshotWriteStartedAt = TimeSource.Monotonic.markNow()
         database.transaction {
-            channels.forEachIndexed { index, channel ->
-                database.torveQueries.insertChannel(
-                    user_id = uid(),
-                    playlist_id = playlistId,
-                    generation_id = nextGeneration,
-                    stable_id = stableChannelId(playlistId, channel),
-                    sort_index = index.toLong(),
-                    name = channel.name,
-                    stream_url = channel.url,
-                    tvg_id = channel.tvgId,
-                    tvg_name = channel.tvgName,
-                    logo_url = channel.tvgLogo,
-                    group_title = channel.groupTitle,
-                    tvg_language = channel.tvgLanguage,
-                    tvg_country = channel.tvgCountry,
-                    tvg_shift = channel.tvgShift?.toLong(),
-                    channel_number = channel.channelNumber?.toLong(),
-                    duration = channel.duration.toLong(),
-                    catchup_type = channel.catchupType,
-                    catchup_days = channel.catchupDays?.toLong(),
-                    catchup_source = channel.catchupSource,
-                    user_agent = channel.userAgent,
-                    vlc_options = channel.vlcOptions.joinToString("\n"),
-                    kodi_props = encodeKodiProps(channel.kodiProps),
-                    content_type = channel.contentType.name,
-                    updated_at = updatedAt,
+            insertChannelSnapshotBatched(
+                playlistId = playlistId,
+                generationId = nextGeneration,
+                channels = channels,
+                updatedAt = updatedAt,
+            )
+            if (reusingActiveGeneration) {
+                database.torveQueries.deleteStaleChannelsForPlaylistGeneration(
+                    userId = uid(),
+                    playlistId = playlistId,
+                    generationId = nextGeneration,
+                    updatedAt = updatedAt,
                 )
             }
             database.torveQueries.insertPlaylist(
@@ -1733,15 +1804,30 @@ class ChannelRepositoryImpl(
             )
             setActiveChannelGeneration(playlistId, nextGeneration)
             database.torveQueries.setPreference(user_id = uid(), key = channelLastSyncPrefKey(playlistId), value_ = updatedAt.toString())
-        }
-        clearStagedChannelGeneration(playlistId)
-        runCatching {
-            pruneOlderChannelGenerations(playlistId, nextGeneration)
-        }.onFailure { error ->
-            channelDebugLog(
-                "ChannelCatalog: stale generation cleanup failed playlistId=$playlistId generation=$nextGeneration error=${error.message}",
+            database.torveQueries.setPreference(
+                user_id = uid(),
+                key = channelSnapshotSignaturePrefKey(playlistId),
+                value_ = incomingSignature,
             )
         }
+        val snapshotWriteMs = snapshotWriteStartedAt.elapsedNow().inWholeMilliseconds
+        if (!reusingActiveGeneration) {
+            clearStagedChannelGeneration(playlistId)
+        }
+        val pruneStartedAt = TimeSource.Monotonic.markNow()
+        if (!reusingActiveGeneration) {
+            runCatching {
+                pruneOlderChannelGenerations(playlistId, nextGeneration)
+            }.onFailure { error ->
+                channelDebugLog(
+                    "ChannelCatalog: stale generation cleanup failed playlistId=$playlistId generation=$nextGeneration error=${error.message}",
+                )
+            }
+        }
+        println(
+            "TorvePerf: iptv persistence playlistId=$playlistId itemCount=${channels.size} " +
+                "snapshotWriteMs=$snapshotWriteMs pruneMs=${pruneStartedAt.elapsedNow().inWholeMilliseconds}",
+        )
 
         if (channels.size <= PLAYLIST_CACHE_MAX_CHANNELS) {
             playlistCache[playlistId] = channels
@@ -1754,30 +1840,105 @@ class ChannelRepositoryImpl(
     }
 
     private fun pruneOlderChannelGenerations(playlistId: String, activeGeneration: Long) {
-        var remaining = database.torveQueries
-            .countChannelsOlderGenerations(
-                userId = uid(),
-                playlistId = playlistId,
-                generationId = activeGeneration,
-            )
-            .executeAsOne()
-        while (remaining > 0L) {
-            database.torveQueries.deleteChannelsOlderGenerationsBatch(
-                userId = uid(),
-                playlistId = playlistId,
-                generationId = activeGeneration,
-                batchSize = minOf(remaining, STALE_CHANNEL_DELETE_BATCH_SIZE),
-            )
-            val nextRemaining = database.torveQueries
-                .countChannelsOlderGenerations(
-                    userId = uid(),
-                    playlistId = playlistId,
-                    generationId = activeGeneration,
-                )
-                .executeAsOne()
-            if (nextRemaining >= remaining) break
-            remaining = nextRemaining
+        database.torveQueries.deleteChannelsOlderGenerations(
+            userId = uid(),
+            playlistId = playlistId,
+            generationId = activeGeneration,
+        )
+    }
+
+    private fun insertChannelSnapshotBatched(
+        playlistId: String,
+        generationId: Long,
+        channels: List<Channel>,
+        updatedAt: Long,
+    ) {
+        if (channels.isEmpty()) return
+        val ownerId = uid()
+        val directRows = channels.dropLast(1).withIndex().toList()
+        directRows.chunked(CHANNEL_INSERT_BATCH_SIZE).forEach { batch ->
+            val sql = buildChannelBatchInsertSql(batch.size)
+            val identifier = BULK_CHANNEL_INSERT_QUERY_ID.takeIf { batch.size == CHANNEL_INSERT_BATCH_SIZE }
+            sqlDriver.execute(
+                identifier = identifier,
+                sql = sql,
+                parameters = batch.size * CHANNEL_INSERT_BIND_COUNT,
+            ) {
+                batch.forEachIndexed { batchIndex, indexedChannel ->
+                    val channel = indexedChannel.value
+                    val offset = batchIndex * CHANNEL_INSERT_BIND_COUNT
+                    bindString(offset, ownerId)
+                    bindString(offset + 1, playlistId)
+                    bindLong(offset + 2, generationId)
+                    bindString(offset + 3, stableChannelId(playlistId, channel))
+                    bindLong(offset + 4, indexedChannel.index.toLong())
+                    bindString(offset + 5, channel.name)
+                    bindString(offset + 6, channel.url)
+                    bindString(offset + 7, channel.tvgId)
+                    bindString(offset + 8, channel.tvgName)
+                    bindString(offset + 9, channel.tvgLogo)
+                    bindString(offset + 10, channel.groupTitle)
+                    bindString(offset + 11, channel.tvgLanguage)
+                    bindString(offset + 12, channel.tvgCountry)
+                    bindLong(offset + 13, channel.tvgShift?.toLong())
+                    bindLong(offset + 14, channel.channelNumber?.toLong())
+                    bindLong(offset + 15, channel.duration.toLong())
+                    bindString(offset + 16, channel.catchupType)
+                    bindLong(offset + 17, channel.catchupDays?.toLong())
+                    bindString(offset + 18, channel.catchupSource)
+                    bindString(offset + 19, channel.userAgent)
+                    bindString(offset + 20, channel.vlcOptions.joinToString("\n"))
+                    bindString(offset + 21, encodeKodiProps(channel.kodiProps))
+                    bindString(offset + 22, channel.contentType.name)
+                    bindLong(offset + 23, updatedAt)
+                }
+            }
         }
+
+        // Use the generated query for the final row so SQLDelight emits one
+        // table notification after the direct batched inserts.
+        val lastIndex = channels.lastIndex
+        val last = channels[lastIndex]
+        database.torveQueries.insertChannel(
+            user_id = ownerId,
+            playlist_id = playlistId,
+            generation_id = generationId,
+            stable_id = stableChannelId(playlistId, last),
+            sort_index = lastIndex.toLong(),
+            name = last.name,
+            stream_url = last.url,
+            tvg_id = last.tvgId,
+            tvg_name = last.tvgName,
+            logo_url = last.tvgLogo,
+            group_title = last.groupTitle,
+            tvg_language = last.tvgLanguage,
+            tvg_country = last.tvgCountry,
+            tvg_shift = last.tvgShift?.toLong(),
+            channel_number = last.channelNumber?.toLong(),
+            duration = last.duration.toLong(),
+            catchup_type = last.catchupType,
+            catchup_days = last.catchupDays?.toLong(),
+            catchup_source = last.catchupSource,
+            user_agent = last.userAgent,
+            vlc_options = last.vlcOptions.joinToString("\n"),
+            kodi_props = encodeKodiProps(last.kodiProps),
+            content_type = last.contentType.name,
+            updated_at = updatedAt,
+        )
+    }
+
+    private fun buildChannelBatchInsertSql(rowCount: Int): String {
+        val placeholders = List(rowCount) {
+            List(CHANNEL_INSERT_BIND_COUNT) { "?" }.joinToString(prefix = "(", postfix = ")")
+        }.joinToString()
+        return """
+            INSERT OR REPLACE INTO iptv_channel (
+                user_id, playlist_id, generation_id, stable_id, sort_index, name, stream_url,
+                tvg_id, tvg_name, logo_url, group_title, tvg_language, tvg_country, tvg_shift,
+                channel_number, duration, catchup_type, catchup_days, catchup_source, user_agent,
+                vlc_options, kodi_props, content_type, updated_at
+            ) VALUES $placeholders
+        """.trimIndent()
     }
 
     private fun persistPlaylistConfigOnly(
@@ -1933,6 +2094,7 @@ class ChannelRepositoryImpl(
     }
 
     private suspend fun fetchAndParseEpg(playlistId: String, sourceUrl: String, hiddenChannelIds: Set<String> = emptySet()): EpgData? = withContext(ioDispatcher) {
+        val refreshStartedAt = TimeSource.Monotonic.markNow()
         var lastError: String? = null
         var inFlightGeneration: Long? = null
 
@@ -1973,15 +2135,18 @@ class ChannelRepositoryImpl(
 
                     val (windowStart, windowEnd) = resolveEpgWindowBounds()
                     val nextGeneration = Clock.System.now().toEpochMilliseconds()
+                    val channelMappingStartedAt = TimeSource.Monotonic.markNow()
                     val channelMapping = buildEpgChannelMapping(playlistId, hiddenChannelIds)
+                    val channelMappingMs = channelMappingStartedAt.elapsedNow().inWholeMilliseconds
                     inFlightGeneration = nextGeneration
-                    val ingestStartedAt = Clock.System.now().toEpochMilliseconds()
+                    val ingestStartedAt = TimeSource.Monotonic.markNow()
                     var tempFilePath: String? = null
 
                     println(
                         "ChannelsEPG: fetch response playlistId=$playlistId sourceConfigured=true attempt=$attempt status=$statusCode contentType=$contentType contentEncoding=$contentEncoding contentLength=${contentLength ?: -1}",
                     )
                     try {
+                        val downloadStartedAt = TimeSource.Monotonic.markNow()
                         val downloadResult = GzipSupport.downloadToTempFile(
                             response = response,
                             maxCompressedBytes = EPG_MAX_DOWNLOAD_BYTES,
@@ -1991,8 +2156,10 @@ class ChannelRepositoryImpl(
                             epgErrorCache[playlistId] = "EPG download failed."
                             return@execute null
                         }
+                        val downloadMs = downloadStartedAt.elapsedNow().inWholeMilliseconds
                         tempFilePath = downloadResult.tempFilePath
 
+                        val parseStartedAt = TimeSource.Monotonic.markNow()
                         val ingestResult = GzipSupport.parseXmlTvAutoFromFileToDbOrNull(
                             tempFilePath = downloadResult.tempFilePath,
                             parser = epgParser,
@@ -2011,7 +2178,7 @@ class ChannelRepositoryImpl(
                                 ?: channelMapping.byNormalizedName[normalizeEpgMatchKey(xmltvId)]
                                 ?: channelMapping.byNormalizedName[normalizeEpgMatchKey(xmltvDisplayName)]
                         },
-                        batchSize = 75,
+                        batchSize = 200,
                         maxProgrammesPerChannel = EPG_MAX_PROGRAMMES_PER_CHANNEL_INGEST,
                         maxProgrammesTotal = EPG_MAX_PROGRAMMES_TOTAL_INGEST,
                         onProgress = { progress ->
@@ -2027,8 +2194,9 @@ class ChannelRepositoryImpl(
                             epgErrorCache[playlistId] = "EPG XML data could not be parsed."
                             return@execute null
                         }
+                        val parseAndPersistenceMs = parseStartedAt.elapsedNow().inWholeMilliseconds
                         val stats = ingestResult.stats
-                        val ingestDurationMs = Clock.System.now().toEpochMilliseconds() - ingestStartedAt
+                        val ingestDurationMs = ingestStartedAt.elapsedNow().inWholeMilliseconds
                         println(
                             "ChannelsEPG: ingest transport playlistId=$playlistId generation=$nextGeneration contentLength=${downloadResult.contentLength ?: contentLength ?: -1} usedTempFile=true bytesDownloaded=${downloadResult.bytesDownloaded} gzipDetected=${ingestResult.isGzipDetected} bytesParsed=${ingestResult.bytesParsed} durationMs=$ingestDurationMs",
                         )
@@ -2047,7 +2215,17 @@ class ChannelRepositoryImpl(
                         database.torveQueries.deleteEpgProgrammesOlderGenerations(userId = uid(), playlistId = playlistId, generationId = nextGeneration)
                         database.torveQueries.deleteEpgChannelsOlderGenerations(userId = uid(), playlistId = playlistId, generationId = nextGeneration)
                         inFlightGeneration = null
-                        loadEpgFromDatabase(playlistId, nextGeneration, windowStart, windowEnd)
+                        val databaseLoadStartedAt = TimeSource.Monotonic.markNow()
+                        val loaded = loadEpgFromDatabase(playlistId, nextGeneration, windowStart, windowEnd)
+                        println(
+                            "TorvePerf: epg stages playlistId=$playlistId channelMappingMs=$channelMappingMs " +
+                                "downloadMs=$downloadMs parseAndPersistenceMs=$parseAndPersistenceMs " +
+                                "persistenceMs=${stats.persistenceDurationMs} " +
+                                "databaseLoadMs=${databaseLoadStartedAt.elapsedNow().inWholeMilliseconds} " +
+                                "bytesDownloaded=${downloadResult.bytesDownloaded} bytesParsed=${ingestResult.bytesParsed} " +
+                                "programmeCount=${stats.programmesKept} completeMs=${refreshStartedAt.elapsedNow().inWholeMilliseconds}",
+                        )
+                        loaded
                     } finally {
                         tempFilePath?.let { GzipSupport.deleteTempFile(it) }
                     }
@@ -2175,6 +2353,8 @@ class ChannelRepositoryImpl(
     private fun channelLastSyncPrefKey(playlistId: String): String = "$PREF_CHANNEL_LAST_SYNC_PREFIX$playlistId"
 
     private fun channelStagedGenerationPrefKey(playlistId: String): String = "$PREF_CHANNEL_STAGED_GENERATION_PREFIX$playlistId"
+
+    private fun channelSnapshotSignaturePrefKey(playlistId: String): String = "$PREF_CHANNEL_SNAPSHOT_SIGNATURE_PREFIX$playlistId"
 
     private fun setEpgLoadState(playlistId: String, state: String) {
         database.torveQueries.setPreference(user_id = uid(), key = epgLoadStatePrefKey(playlistId), value_ = state)
@@ -2436,5 +2616,69 @@ class ChannelRepositoryImpl(
         if (CHANNEL_DEBUG_LOG_ENABLED) {
             println(message)
         }
+    }
+}
+
+internal fun channelSnapshotSignature(channels: List<Channel>): String {
+    var hash = -0x340d631b8c467531L
+    fun mix(value: String?) {
+        value.orEmpty().forEach { char ->
+            hash = hash xor char.code.toLong()
+            hash *= 0x100000001b3L
+        }
+        hash = hash xor 0xffL
+        hash *= 0x100000001b3L
+    }
+    channels.forEachIndexed { index, channel ->
+        mix(index.toString())
+        mix(channel.name)
+        mix(channel.url)
+        mix(channel.tvgId)
+        mix(channel.tvgName)
+        mix(channel.tvgLogo)
+        mix(channel.groupTitle)
+        mix(channel.tvgLanguage)
+        mix(channel.tvgCountry)
+        mix(channel.tvgShift?.toString())
+        mix(channel.channelNumber?.toString())
+        mix(channel.duration.toString())
+        mix(channel.catchupType)
+        mix(channel.catchupDays?.toString())
+        mix(channel.catchupSource)
+        mix(channel.userAgent)
+        channel.vlcOptions.forEach(::mix)
+        channel.kodiProps.toSortedMap().forEach { (key, value) ->
+            mix(key)
+            mix(value)
+        }
+        mix(channel.contentType.name)
+    }
+    return hash.toULong().toString(16)
+}
+
+internal class InFlightRefreshCoalescer {
+    private val mutex = Mutex()
+    private val inFlight = mutableMapOf<String, CompletableDeferred<Result<Unit>>>()
+
+    suspend fun run(key: String, operation: suspend () -> Unit) {
+        val (deferred, owner) = mutex.withLock {
+            val existing = inFlight[key]
+            if (existing != null) {
+                existing to false
+            } else {
+                CompletableDeferred<Result<Unit>>().also { inFlight[key] = it } to true
+            }
+        }
+        if (!owner) {
+            deferred.await().getOrThrow()
+            return
+        }
+
+        val result = runCatching { operation() }
+        deferred.complete(result)
+        mutex.withLock {
+            if (inFlight[key] === deferred) inFlight.remove(key)
+        }
+        result.getOrThrow()
     }
 }

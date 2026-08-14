@@ -7,6 +7,7 @@ import com.torve.domain.model.MediaItem
 import com.torve.domain.model.PagedResult
 import com.torve.domain.model.PersonSummary
 import com.torve.domain.model.Season
+import com.torve.domain.model.StreamingProviderCandidate
 
 interface MetadataRepository {
     suspend fun getTrending(type: String, page: Int = 1): List<MediaItem>
@@ -57,6 +58,11 @@ interface MetadataRepository {
     suspend fun getPopularPeople(page: Int = 1): List<PersonSummary>
     suspend fun searchPerson(query: String, page: Int = 1): List<PersonSummary>
     suspend fun getWatchProviderNames(type: String = "movie", region: String = "US"): Map<Int, String> = emptyMap()
+    suspend fun getWatchProviderCandidates(type: String = "movie"): List<StreamingProviderCandidate> = emptyList()
+    suspend fun getTitleWatchProviderCandidates(
+        type: String,
+        tmdbId: Int,
+    ): List<StreamingProviderCandidate> = emptyList()
     suspend fun getWatchProviderLogos(type: String = "movie", region: String = "US"): Map<Int, String>
     suspend fun getLogoUrl(type: String, tmdbId: Int): String?
 }

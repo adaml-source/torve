@@ -14,6 +14,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -333,6 +334,7 @@ fun TvBrowsePreviewPanel(
     val requestedSourceItem = focusedItem
     val requestedSourceKey = requestedSourceItem?.let { tvBrowsePreviewEnrichedItemKey(it) }
     var debouncedSourceItem by remember { mutableStateOf(focusedItem) }
+    val resolvedLogoLookupKeys = remember { mutableStateMapOf<String, Boolean>() }
 
     LaunchedEffect(requestedSourceKey) {
         if (requestedSourceItem == null) {
@@ -346,19 +348,35 @@ fun TvBrowsePreviewPanel(
     val sourceItem = debouncedSourceItem
     val sourceKey = sourceItem?.let { tvBrowsePreviewEnrichedItemKey(it) }
     val item = sourceItem?.let(::withCachedTvBrowsePreviewEnrichment)
+    val artworkLookupPending = item != null &&
+        item.logoUrl.isNullOrBlank() &&
+        (item.tmdbId != null || item.id.extractTmdbIdOrNull() != null) &&
+        resolvedLogoLookupKeys[sourceKey] != true
 
     LaunchedEffect(sourceKey) {
-        val base = sourceItem ?: return@LaunchedEffect
-        val key = sourceKey ?: return@LaunchedEffect
-        if (!base.logoUrl.isNullOrBlank()) return@LaunchedEffect
-        val tmdbId = base.tmdbId ?: base.id.extractTmdbIdOrNull() ?: return@LaunchedEffect
+        val base = sourceItem
+        val key = sourceKey
+        if (base == null || key == null) {
+            return@LaunchedEffect
+        }
+        if (!base.logoUrl.isNullOrBlank()) {
+            resolvedLogoLookupKeys[key] = true
+            return@LaunchedEffect
+        }
+        val tmdbId = base.tmdbId ?: base.id.extractTmdbIdOrNull()
+        if (tmdbId == null) {
+            resolvedLogoLookupKeys[key] = true
+            return@LaunchedEffect
+        }
         val mediaType = if (base.type == MediaType.MOVIE) "movie" else "tv"
-        delay(360L)
         val logoUrl = withContext(Dispatchers.IO) {
             runCatching { metadataRepo.getLogoUrl(mediaType, tmdbId) }.getOrNull()
-        } ?: return@LaunchedEffect
-        val current = enrichedItemCache[key] ?: base
-        enrichedItemCache[key] = current.copy(logoUrl = current.logoUrl ?: logoUrl)
+        }
+        if (logoUrl != null) {
+            val current = enrichedItemCache[key] ?: base
+            enrichedItemCache[key] = current.copy(logoUrl = current.logoUrl ?: logoUrl)
+        }
+        resolvedLogoLookupKeys[key] = true
     }
 
     LaunchedEffect(sourceKey) {
@@ -385,7 +403,9 @@ fun TvBrowsePreviewPanel(
             year = base.year ?: detail.year,
             runtime = base.runtime ?: detail.runtime,
             ratings = base.ratings.preferRichRatings(detail.ratings),
-            logoUrl = base.logoUrl ?: detail.logoUrl,
+            // Logo artwork has a dedicated lookup above. Do not introduce it
+            // during delayed detail enrichment after text fallback is visible.
+            logoUrl = cached?.logoUrl ?: base.logoUrl,
             posterUrl = base.posterUrl ?: detail.posterUrl,
             backdropUrl = base.backdropUrl ?: detail.backdropUrl,
         )
@@ -399,7 +419,6 @@ fun TvBrowsePreviewPanel(
 
     val imageUrl = item?.backdropUrl?.takeIf { it.isNotBlank() }
         ?: item?.posterUrl?.takeIf { it.isNotBlank() }
-    val logoUrl = item?.logoUrl?.takeIf { it.isNotBlank() }
     val overviewScrollState = rememberScrollState()
     val overview = item?.overview?.takeIf { it.isNotBlank() }
     LaunchedEffect(sourceKey, overview) {
@@ -488,32 +507,40 @@ fun TvBrowsePreviewPanel(
                     ),
                 ),
         )
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(20.dp),
-            verticalArrangement = Arrangement.Bottom,
-        ) {
-            if (!logoUrl.isNullOrBlank()) {
-                AsyncImage(
-                    model = logoUrl,
-                    contentDescription = item?.title,
-                    contentScale = ContentScale.Fit,
-                    alignment = Alignment.CenterStart,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(68.dp),
+        BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+            val previewHeight = maxHeight
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(horizontal = 20.dp, vertical = 20.dp),
+                verticalArrangement = Arrangement.Top,
+            ) {
+                Spacer(
+                    modifier = Modifier.height(
+                        (previewHeight * 0.12f).coerceIn(32.dp, 72.dp),
+                    ),
                 )
-            } else {
-                Text(
-                    text = item?.title ?: "Focus a title",
-                    style = MaterialTheme.typography.headlineSmall,
-                    color = Snow,
-                    fontWeight = FontWeight.Bold,
-                    maxLines = 3,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
+                if (item != null) {
+                    TvTitleArtworkOrText(
+                        item = item,
+                        textStyle = MaterialTheme.typography.headlineSmall,
+                        maxTextLines = 3,
+                        artworkLookupPending = artworkLookupPending,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(72.dp),
+                    )
+                } else {
+                    Text(
+                        text = "Focus a title",
+                        style = MaterialTheme.typography.headlineSmall,
+                        color = Snow,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 3,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.height(72.dp),
+                    )
+                }
             if (metadata.isNotBlank()) {
                 Spacer(Modifier.height(10.dp))
                 Text(
@@ -530,20 +557,21 @@ fun TvBrowsePreviewPanel(
                     ratingPrefs = settingsState.ratingPrefs.tvExternalCardRatingPrefs(),
                 )
             }
-            overview?.let {
-                Spacer(Modifier.height(12.dp))
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .heightIn(max = 156.dp)
-                        .verticalScroll(overviewScrollState),
-                ) {
-                    Text(
-                        text = it,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = Snow.copy(alpha = 0.84f),
-                        lineHeight = 20.sp,
-                    )
+                overview?.let {
+                    Spacer(Modifier.height(12.dp))
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 156.dp)
+                            .verticalScroll(overviewScrollState),
+                    ) {
+                        Text(
+                            text = it,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = Snow.copy(alpha = 0.84f),
+                            lineHeight = 20.sp,
+                        )
+                    }
                 }
             }
         }

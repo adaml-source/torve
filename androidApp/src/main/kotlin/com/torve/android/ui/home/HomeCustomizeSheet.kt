@@ -1,5 +1,6 @@
 package com.torve.android.ui.home
 
+import android.graphics.Bitmap
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -11,6 +12,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.border
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
@@ -64,6 +66,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.torve.android.R
@@ -79,6 +82,12 @@ import com.torve.android.ui.theme.Snow
 import com.torve.android.ui.theme.Steel
 import com.torve.domain.model.HomeSection
 import com.torve.domain.model.HomeSectionConfig
+import coil3.request.ImageRequest
+import coil3.request.CachePolicy
+import coil3.request.transformations
+import coil3.size.Size
+import coil3.size.Precision
+import coil3.transform.Transformation
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -396,6 +405,12 @@ fun StreamingProviderBrandArtwork(
     service: StreamingService,
     modifier: Modifier = Modifier,
     transparentBackground: Boolean = false,
+    forceFitArtwork: Boolean = false,
+    safeAreaInset: androidx.compose.ui.unit.Dp = 0.dp,
+    artworkAlignment: Alignment = Alignment.Center,
+    fallbackHorizontalPadding: androidx.compose.ui.unit.Dp = 24.dp,
+    trimTransparentPadding: Boolean = false,
+    highResolutionBranding: Boolean = false,
 ) {
     val shape = RoundedCornerShape(14.dp)
     val brand = remember(service.tmdbProviderId) {
@@ -406,6 +421,26 @@ fun StreamingProviderBrandArtwork(
             )
     }
     var artworkFailed by remember(service.tmdbProviderId, brand.artworkUrl) { mutableStateOf(false) }
+    val context = LocalContext.current
+    val artworkModel = remember(service.tmdbProviderId, brand.artworkUrl, trimTransparentPadding, highResolutionBranding) {
+        if ((trimTransparentPadding || highResolutionBranding) && !brand.artworkUrl.isNullOrBlank()) {
+            ImageRequest.Builder(context)
+                .data(brand.artworkUrl)
+                .apply {
+                    if (trimTransparentPadding) transformations(TrimTransparentPaddingTransformation)
+                    if (highResolutionBranding) {
+                        size(1_440, 540)
+                        precision(Precision.EXACT)
+                        memoryCacheKey("provider-brand-hires-v1:${service.tmdbProviderId}")
+                        diskCacheKey("provider-brand-hires-v1:${service.tmdbProviderId}:${brand.artworkUrl}")
+                        networkCachePolicy(CachePolicy.ENABLED)
+                    }
+                }
+                .build()
+        } else {
+            brand.artworkUrl
+        }
+    }
     Box(
         modifier = modifier
             .clip(shape)
@@ -415,20 +450,22 @@ fun StreamingProviderBrandArtwork(
                 color = if (transparentBackground) Color.Transparent else brand.border,
                 shape = shape,
             ),
-        contentAlignment = Alignment.Center,
+        contentAlignment = artworkAlignment,
     ) {
         if (!artworkFailed && !brand.artworkUrl.isNullOrBlank()) {
             coil3.compose.AsyncImage(
-                model = brand.artworkUrl,
+                model = artworkModel,
                 contentDescription = service.name,
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(brand.artworkInset),
-                contentScale = if (brand.fitArtwork) {
+                    .padding(brand.artworkInset + safeAreaInset)
+                    .scale(brand.artworkScale),
+                contentScale = if (forceFitArtwork || brand.fitArtwork) {
                     androidx.compose.ui.layout.ContentScale.Fit
                 } else {
                     androidx.compose.ui.layout.ContentScale.Crop
                 },
+                alignment = artworkAlignment,
                 colorFilter = brand.artworkTint?.let { ColorFilter.tint(it) },
                 onError = { artworkFailed = true },
             )
@@ -439,9 +476,40 @@ fun StreamingProviderBrandArtwork(
                 color = brand.fallbackForeground,
                 fontWeight = FontWeight.Bold,
                 maxLines = 1,
-                modifier = Modifier.padding(horizontal = 24.dp),
+                modifier = Modifier.padding(horizontal = fallbackHorizontalPadding),
             )
         }
+    }
+}
+
+/** Removes transparent source-canvas margins so start alignment is optical. */
+internal object TrimTransparentPaddingTransformation : Transformation() {
+    override val cacheKey: String = "provider-visible-alpha-bounds-v1"
+
+    override suspend fun transform(input: Bitmap, size: Size): Bitmap {
+        val width = input.width
+        val height = input.height
+        if (width <= 1 || height <= 1 || !input.hasAlpha()) return input
+
+        val pixels = IntArray(width * height)
+        input.getPixels(pixels, 0, width, 0, 0, width, height)
+        var minX = width
+        var minY = height
+        var maxX = -1
+        var maxY = -1
+        pixels.forEachIndexed { index, pixel ->
+            if ((pixel ushr 24) > 8) {
+                val x = index % width
+                val y = index / width
+                if (x < minX) minX = x
+                if (x > maxX) maxX = x
+                if (y < minY) minY = y
+                if (y > maxY) maxY = y
+            }
+        }
+        if (maxX < minX || maxY < minY) return input
+        if (minX == 0 && minY == 0 && maxX == width - 1 && maxY == height - 1) return input
+        return Bitmap.createBitmap(input, minX, minY, maxX - minX + 1, maxY - minY + 1)
     }
 }
 
@@ -453,6 +521,7 @@ private data class StreamingProviderBrand(
     val artworkTint: Color? = null,
     val fitArtwork: Boolean = false,
     val artworkInset: androidx.compose.ui.unit.Dp = 0.dp,
+    val artworkScale: Float = 1f,
     val border: Color = Color.White.copy(alpha = 0.16f),
 )
 
@@ -473,12 +542,14 @@ private val STREAMING_PROVIDER_BRANDS = mapOf(
         fallbackForeground = Color.White,
         artworkUrl = "https://download.logo.wine/logo/Disney%2B/Disney%2B-Logo.wine.png",
         artworkTint = Color.White,
+        artworkScale = 0.78f,
     ),
     350 to StreamingProviderBrand(
         background = Color.Black,
         fallbackForeground = Color.White,
         artworkUrl = "https://download.logo.wine/logo/Apple_TV/Apple_TV-Logo.wine.png",
         artworkTint = Color.White,
+        artworkScale = 0.78f,
     ),
     1899 to StreamingProviderBrand(
         background = Color(0xFF081A31),

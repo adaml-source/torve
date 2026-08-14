@@ -526,4 +526,15 @@
     <string name="tv_vod_rating_value">Avalia\u00e7\u00e3o %1$s</string>
     <!-- Added translations for recently introduced strings. -->
     <string name="tv_library_tab_vod">VOD</string>
+    <string name="tv_season_mark_watched">Marcar T%1$d como vista</string>
+    <string name="tv_season_watched">T%1$d vista</string>
+    <string name="tv_settings_custom_epg_url">URL de EPG personalizada (opcional)</string>
+    <string name="tv_settings_channels_count_pending">Os canais ainda não foram contados. Se faltarem dados do guia, use Atualizar EPG abaixo.</string>
+    <string name="tv_settings_import_refresh_subtitle">Atualize a configuração da conta, listas, credenciais dos fornecedores, favoritos e o estado do Panda. Se ainda faltarem canais ou dados do guia, abra Canais e execute Atualizar EPG.</string>
+    <string name="tv_settings_open_panda_setup">Abrir configuração do Panda</string>
+    <string name="tv_notification_setup_sync_refresh_failed">A sincronização da configuração não conseguiu atualizar o estado da conta. A continuar com a configuração recebida.</string>
+    <string name="tv_unlock_purchase_options_title">Torve é software livre</string>
+    <string name="tv_unlock_purchase_options_body">Torve é software livre. Sem subscrições. Sem níveis pagos.</string>
+    <string name="tv_unlock_go_to_premium">Continuar</string>
+    <string name="tv_settings_account_refreshed_epg_hint">Configuração da conta atualizada. Se ainda faltarem canais ou dados do guia, abra Definições &gt; Canais e escolha Atualizar EPG.</string>
 </resources>

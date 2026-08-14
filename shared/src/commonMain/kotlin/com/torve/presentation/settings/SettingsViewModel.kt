@@ -5,6 +5,9 @@ import com.torve.data.auth.UserIdProvider
 import com.torve.data.ai.AiProvider
 import com.torve.data.ai.AiSuggestClient
 import com.torve.data.debrid.DebridClient
+import com.torve.data.panda.readPandaDebridActivationSnapshot
+import com.torve.data.panda.enabledCredentials
+import com.torve.data.panda.pandaProviderId
 import com.torve.data.kodi.KodiClient
 import com.torve.data.kodi.KodiHost
 import com.torve.data.simkl.SimklClient
@@ -352,10 +355,21 @@ class SettingsViewModel(
                 integrationSecretStore.remove(IntegrationSecretKey.DEBRID_API_KEY)
                 prefsRepo.remove(KEY_DEBRID_API_KEY)
             }
+            val activation = prefsRepo.readPandaDebridActivationSnapshot()
+            activation.disconnectedProviderIds.forEach { providerId ->
+                val disconnectedProvider = DebridServiceType.entries.firstOrNull {
+                    it.pandaProviderId() == providerId
+                }
+                if (disconnectedProvider != null) allDebridKeys.remove(disconnectedProvider)
+            }
             // One-shot startup refresh: if we have RD OAuth credentials and haven't
             // refreshed yet this session, get a fresh access token now so the first
             // play attempt never hits a bad_token 401.
-            if (!rdStartupRefreshDone && provider == DebridServiceType.REAL_DEBRID) {
+            if (
+                !rdStartupRefreshDone &&
+                provider == DebridServiceType.REAL_DEBRID &&
+                provider.pandaProviderId() !in activation.disconnectedProviderIds
+            ) {
                 rdStartupRefreshDone = true
                 val refreshToken = integrationSecretStore.get(IntegrationSecretKey.DEBRID_RD_REFRESH_TOKEN)
                 val clientId = integrationSecretStore.get(IntegrationSecretKey.DEBRID_RD_CLIENT_ID)
@@ -364,6 +378,12 @@ class SettingsViewModel(
                 if (refreshToken != null && clientId != null && clientSecret != null) {
                     try {
                         val tokens = debridClient.rdRefreshAccessToken(refreshToken, clientId, clientSecret)
+                        if (
+                            DebridServiceType.REAL_DEBRID.pandaProviderId() in
+                            prefsRepo.readPandaDebridActivationSnapshot().disconnectedProviderIds
+                        ) {
+                            return@launch
+                        }
                         integrationSecretStore.put(IntegrationSecretKey.DEBRID_API_KEY_REAL_DEBRID, tokens.accessToken)
                         integrationSecretStore.put(IntegrationSecretKey.DEBRID_RD_REFRESH_TOKEN, tokens.refreshToken)
                         prefsRepo.setString(KEY_DEBRID_RD_EXPIRES_AT, tokens.expiresAt.toString())
@@ -376,7 +396,11 @@ class SettingsViewModel(
             }
 
             val apiKey = allDebridKeys[provider] ?: ""
-            torveVerboseLog { "[SettingsLoad] Debrid provider=$provider hasCredential=${apiKey.isNotBlank()} providers=${allDebridKeys.keys}" }
+            val enabledDebridKeys = activation.enabledCredentials(allDebridKeys)
+            torveVerboseLog {
+                "[SettingsLoad] Debrid provider=$provider hasCredential=${apiKey.isNotBlank()} " +
+                    "configured=${allDebridKeys.keys} enabled=${enabledDebridKeys.keys}"
+            }
             // Trakt: apply a complete configured OAuth app identity when one was
             // transferred or saved during setup. Incomplete pairs fall back to
             // the bundled identity so the code and token requests never use
@@ -531,7 +555,8 @@ class SettingsViewModel(
                     debridApiKey = apiKey,
                     debridConnected = apiKey.isNotBlank(),
                     hasStreamAddon = hasStreamAddon,
-                    connectedDebridProviders = allDebridKeys,
+                    configuredDebridProviders = allDebridKeys,
+                    connectedDebridProviders = enabledDebridKeys,
                     // Clear runtime-only account-linked state that isn't re-read from stores.
                     // After logout, secrets are empty → connected=false → profiles/users gone.
                     debridUser = if (apiKey.isNotBlank()) it.debridUser else null,
@@ -771,13 +796,21 @@ class SettingsViewModel(
                 if (provider == DebridServiceType.TORBOX) {
                     integrationSecretStore.syncTorBoxCredentialPair(apiKey)
                 }
+                val activation = prefsRepo.readPandaDebridActivationSnapshot()
                 val updated = _state.value.connectedDebridProviders.toMutableMap()
-                updated[provider] = apiKey
+                if (activation.isEnabled(provider.pandaProviderId())) {
+                    updated[provider] = apiKey
+                } else {
+                    updated.remove(provider)
+                }
+                val configured = _state.value.configuredDebridProviders.toMutableMap()
+                configured[provider] = apiKey
                 _state.update {
                     it.copy(
                         debridConnected = true,
                         debridUser = result.user,
                         debridLoading = false,
+                        configuredDebridProviders = configured,
                         connectedDebridProviders = updated,
                     )
                 }
@@ -840,14 +873,22 @@ class SettingsViewModel(
                         integrationSecretStore.put(IntegrationSecretKey.DEBRID_RD_CLIENT_SECRET, tokens.clientSecret)
                         prefsRepo.setString(KEY_DEBRID_RD_EXPIRES_AT, tokens.expiresAt.toString())
                     }
+                    val activation = prefsRepo.readPandaDebridActivationSnapshot()
                     val updated = _state.value.connectedDebridProviders.toMutableMap()
-                    updated[provider] = result.apiKey
+                    if (activation.isEnabled(provider.pandaProviderId())) {
+                        updated[provider] = result.apiKey
+                    } else {
+                        updated.remove(provider)
+                    }
+                    val configured = _state.value.configuredDebridProviders.toMutableMap()
+                    configured[provider] = result.apiKey
                     _state.update {
                         it.copy(
                             debridApiKey = result.apiKey,
                             debridConnected = true,
                             debridDeviceCode = null,
                             isPollingDebrid = false,
+                            configuredDebridProviders = configured,
                             connectedDebridProviders = updated,
                         )
                     }
@@ -917,6 +958,8 @@ class SettingsViewModel(
         }
         val updated = _state.value.connectedDebridProviders.toMutableMap()
         updated.remove(provider)
+        val configured = _state.value.configuredDebridProviders.toMutableMap()
+        configured.remove(provider)
         _state.update {
             it.copy(
                 debridApiKey = "",
@@ -924,6 +967,7 @@ class SettingsViewModel(
                 debridUser = null,
                 debridDeviceCode = null,
                 isPollingDebrid = false,
+                configuredDebridProviders = configured,
                 connectedDebridProviders = updated,
             )
         }
@@ -2472,22 +2516,14 @@ class SettingsViewModel(
     // -------------------------------------------------------------------------
 
     fun getDebridProvider(): DebridServiceType = _state.value.debridProvider
-    fun getDebridApiKey(): String = _state.value.debridApiKey
+    fun getDebridApiKey(): String =
+        _state.value.connectedDebridProviders[_state.value.debridProvider].orEmpty()
     fun isDebridConnected(): Boolean = _state.value.debridConnected
     fun getTraktAccessToken(): String = _state.value.traktAccessToken
     fun isTraktConnected(): Boolean = _state.value.traktConnected
 
     fun getDebridAccounts(): Map<DebridServiceType, String> {
-        val providers = _state.value.connectedDebridProviders
-            .filterValues { it.isNotBlank() }
-        if (providers.isNotEmpty()) return providers
-
-        val legacyKey = _state.value.debridApiKey.trim()
-        return if (legacyKey.isNotBlank()) {
-            mapOf(_state.value.debridProvider to legacyKey)
-        } else {
-            emptyMap()
-        }
+        return _state.value.connectedDebridProviders.filterValues { it.isNotBlank() }
     }
 
     fun setMinSourceSizePerHourMb(sizeMb: Int) {

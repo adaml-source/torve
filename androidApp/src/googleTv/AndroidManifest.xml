@@ -1,7 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    tools:ignore="ImpliedTouchscreenHardware,MissingLeanbackLauncher,MissingLeanbackSupport">
     <application>
-        <activity android:name=".TvMainActivity">
+        <!-- Launcher/exported declarations are supplied by the shared TV
+             source set; this overlay only adds Google App Links. -->
+        <activity
+            android:name=".TvMainActivity"
+            tools:ignore="IntentFilterExportedReceiver">
             <intent-filter android:autoVerify="true">
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />

@@ -38,9 +38,16 @@ import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusDirection
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.torve.android.R
@@ -69,6 +76,7 @@ fun TvPandaSetupScreen(
     viewModel: PandaSetupViewModel = koinInject(),
 ) {
     val state by viewModel.state.collectAsState()
+    val focusManager = LocalFocusManager.current
 
     BackHandler(enabled = true) {
         when {
@@ -123,6 +131,28 @@ fun TvPandaSetupScreen(
     Box(
         modifier = Modifier
             .fillMaxSize()
+            .onKeyEvent { event ->
+                if (event.type != KeyEventType.KeyDown) return@onKeyEvent false
+                when (event.key) {
+                    Key.DirectionRight -> when {
+                        focusManager.moveFocus(FocusDirection.Right) -> true
+                        canAdvance -> {
+                            viewModel.nextStep()
+                            true
+                        }
+                        else -> false
+                    }
+                    Key.DirectionLeft -> when {
+                        focusManager.moveFocus(FocusDirection.Left) -> true
+                        state.currentStep != PandaSetupStep.SETUP_TYPE -> {
+                            viewModel.previousStep()
+                            true
+                        }
+                        else -> false
+                    }
+                    else -> false
+                }
+            }
             .background(Obsidian),
     ) {
         Column(
@@ -289,8 +319,8 @@ private fun TvPandaPrimaryNavButton(
             .focusRequester(focusRequester)
             .clip(shape)
             .border(
-                width = if (focused) 2.dp else 1.dp,
-                color = if (focused) Snow else Amber.copy(alpha = 0.35f),
+                width = 1.dp,
+                color = Amber,
                 shape = shape,
             ),
     ) {
@@ -325,8 +355,8 @@ private fun TvPandaOutlinedNavButton(
                 shape = shape,
             )
             .border(
-                width = if (focused) 2.dp else 1.dp,
-                color = if (focused) Snow else Amber.copy(alpha = 0.45f),
+                width = 1.dp,
+                color = if (focused) Amber else Amber.copy(alpha = 0.45f),
                 shape = shape,
             ),
     ) {

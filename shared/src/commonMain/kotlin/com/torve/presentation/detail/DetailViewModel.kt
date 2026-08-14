@@ -1041,9 +1041,14 @@ class DetailViewModel(
         if (imdbId == null) {
             _state.update {
                 it.copy(
+                    isLoadingStreams = false,
+                    isLoadingMoreSources = false,
+                    isResolving = false,
                     streamsError = "No IMDB ID — cannot fetch streams for this title",
                     streamsErrorHint = null,
                     streamFilterHiddenCount = 0,
+                    autoPlayMessage = null,
+                    preparing = null,
                 )
             }
             return
@@ -2509,6 +2514,7 @@ class DetailViewModel(
                     serviceName = serviceName,
                     canCancel = true,
                 ),
+                isResolving = false,
                 resolveError = null,
                 autoPlayMessage = null,
                 // Close the source picker so the user doesn't accidentally
@@ -2536,6 +2542,7 @@ class DetailViewModel(
                         _state.update {
                             it.copy(
                                 preparing = null,
+                                isResolving = false,
                                 resolvedStream = resolved.copy(url = result.finalUrl),
                                 showStreamPicker = false,
                                 autoPlayMessage = readyMessage,
@@ -2551,12 +2558,7 @@ class DetailViewModel(
                         }
                     }
                     is com.torve.domain.repository.StreamReadiness.Failed -> {
-                        _state.update {
-                            it.copy(
-                                preparing = null,
-                                resolveError = result.reason,
-                            )
-                        }
+                        _state.update { it.withPreparingFailure(result.reason) }
                         return@launch
                     }
                 }
@@ -2564,12 +2566,7 @@ class DetailViewModel(
             // Budget exhausted — the cloud client hasn't produced a URL in
             // 5 min. Clear preparing, surface a specific timeout message so
             // the user can pick an alternate source.
-            _state.update {
-                it.copy(
-                    preparing = null,
-                    resolveError = "error_stream_preparing_timeout",
-                )
-            }
+            _state.update { it.withPreparingFailure("error_stream_preparing_timeout") }
         }
     }
 
@@ -2582,6 +2579,27 @@ class DetailViewModel(
                 isResolving = false,
                 autoPlayMessage = null,
                 showStreamPicker = state.showStreamPicker || state.streams.isNotEmpty(),
+            )
+        }
+    }
+
+    /** Cancel an active lookup without navigating away from the detail page. */
+    fun cancelSourceLookup() {
+        streamFetchJob?.cancel()
+        streamFetchJob = null
+        cancelPreparingLoop()
+        cancelUsenetResolveAndPoll()
+        _state.update { state ->
+            state.copy(
+                preparing = null,
+                isLoadingStreams = false,
+                isLoadingMoreSources = false,
+                isResolving = false,
+                autoPlayMessage = null,
+                streamsError = null,
+                streamsErrorHint = null,
+                resolveError = null,
+                showStreamPicker = state.streams.isNotEmpty(),
             )
         }
     }

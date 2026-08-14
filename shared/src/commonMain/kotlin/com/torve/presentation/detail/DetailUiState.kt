@@ -172,8 +172,17 @@ data class DetailUiState(
                 if (stamp != null) "Resume from $stamp" else "Resume"
             }
             else -> "Play"
-        }
+    }
 }
+
+/** Terminal preparation failures must release every blocking playback flag. */
+internal fun DetailUiState.withPreparingFailure(reason: String): DetailUiState = copy(
+    preparing = null,
+    isResolving = false,
+    autoPlayMessage = null,
+    showStreamPicker = streams.isNotEmpty(),
+    resolveError = reason,
+)
 
 /**
  * Format a position in milliseconds as `h:mm:ss` (or `m:ss` when under an

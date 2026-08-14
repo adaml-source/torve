@@ -2,9 +2,5 @@
 <resources>
     <style name="Theme.Torve.TvSplash" parent="Theme.Torve">
         <item name="android:windowBackground">@drawable/tv_startup_background</item>
-        <item name="android:windowSplashScreenBackground">#050507</item>
-        <item name="android:windowSplashScreenAnimatedIcon">@drawable/ic_launcher_foreground</item>
-        <item name="android:windowSplashScreenIconBackgroundColor">#050507</item>
-        <item name="android:windowSplashScreenAnimationDuration">0</item>
     </style>
 </resources>

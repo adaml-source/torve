@@ -526,4 +526,15 @@
     <string name="tv_vod_rating_value">Puan %1$s</string>
     <!-- Added translations for recently introduced strings. -->
     <string name="tv_library_tab_vod">VOD</string>
+    <string name="tv_season_mark_watched">S%1$d izlendi olarak işaretle</string>
+    <string name="tv_season_watched">S%1$d izlendi</string>
+    <string name="tv_settings_custom_epg_url">Özel EPG URL\'si (isteğe bağlı)</string>
+    <string name="tv_settings_channels_count_pending">Kanallar henüz sayılmadı. Rehber verileri eksikse aşağıdaki EPG\'yi Yenile seçeneğini kullanın.</string>
+    <string name="tv_settings_import_refresh_subtitle">Hesap kurulumunu, oynatma listelerini, sağlayıcı kimlik bilgilerini, favorileri ve Panda durumunu yenileyin. Kanallar veya rehber verileri hâlâ eksikse Kanallar\'ı açıp EPG\'yi Yenile\'yi çalıştırın.</string>
+    <string name="tv_settings_open_panda_setup">Panda kurulumunu aç</string>
+    <string name="tv_notification_setup_sync_refresh_failed">Kurulum eşitlemesi hesap durumunu yenileyemedi. Alınan kurulumla devam ediliyor.</string>
+    <string name="tv_unlock_purchase_options_title">Torve özgür bir yazılımdır</string>
+    <string name="tv_unlock_purchase_options_body">Torve özgür bir yazılımdır. Abonelik yok. Ücretli katman yok.</string>
+    <string name="tv_unlock_go_to_premium">Devam et</string>
+    <string name="tv_settings_account_refreshed_epg_hint">Hesap kurulumu yenilendi. Kanallar veya rehber verileri hâlâ eksikse Ayarlar &gt; Kanallar\'ı açın ve EPG\'yi Yenile\'yi seçin.</string>
 </resources>

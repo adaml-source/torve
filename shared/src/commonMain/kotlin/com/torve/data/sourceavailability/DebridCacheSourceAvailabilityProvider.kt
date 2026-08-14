@@ -2,6 +2,7 @@ package com.torve.data.sourceavailability
 
 import com.torve.domain.integrations.IntegrationSecretKey
 import com.torve.domain.integrations.IntegrationSecretStore
+import com.torve.domain.model.DebridServiceType
 import com.torve.domain.model.CandidateProvenanceKind
 import com.torve.domain.model.MediaType
 import com.torve.domain.model.ReadinessState
@@ -27,6 +28,7 @@ class DebridCacheSourceAvailabilityProvider(
     private val streamRepository: StreamRepository,
     private val secretStore: IntegrationSecretStore,
     private val tmdbToImdbResolver: suspend (Int, MediaType) -> String?,
+    private val isProviderEnabled: suspend (DebridServiceType) -> Boolean = { true },
 ) : SourceAvailabilityProvider {
 
     override val kind: SourceAvailabilityKind = SourceAvailabilityKind.DEBRID_CACHE
@@ -54,17 +56,19 @@ class DebridCacheSourceAvailabilityProvider(
     }
 
     private suspend fun hasAnyDebridKey(): Boolean {
-        return DEBRID_KEYS.any { key ->
-            !runCatching { secretStore.get(key) }.getOrNull().isNullOrBlank()
+        for ((provider, key) in DEBRID_KEYS) {
+            if (!isProviderEnabled(provider)) continue
+            if (!runCatching { secretStore.get(key) }.getOrNull().isNullOrBlank()) return true
         }
+        return false
     }
 
     companion object {
         private val DEBRID_KEYS = listOf(
-            IntegrationSecretKey.DEBRID_API_KEY_REAL_DEBRID,
-            IntegrationSecretKey.DEBRID_API_KEY_ALL_DEBRID,
-            IntegrationSecretKey.DEBRID_API_KEY_PREMIUMIZE,
-            IntegrationSecretKey.DEBRID_API_KEY_TORBOX,
+            DebridServiceType.REAL_DEBRID to IntegrationSecretKey.DEBRID_API_KEY_REAL_DEBRID,
+            DebridServiceType.ALL_DEBRID to IntegrationSecretKey.DEBRID_API_KEY_ALL_DEBRID,
+            DebridServiceType.PREMIUMIZE to IntegrationSecretKey.DEBRID_API_KEY_PREMIUMIZE,
+            DebridServiceType.TORBOX to IntegrationSecretKey.DEBRID_API_KEY_TORBOX,
         )
     }
 }

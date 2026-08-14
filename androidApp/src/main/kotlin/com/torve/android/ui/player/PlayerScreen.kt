@@ -381,14 +381,17 @@ fun PlayerScreen(
     val mobileActiveSheet = mobileSheetStack.lastOrNull()
     var autoFallbackInProgress by remember { mutableStateOf(false) }
     var currentStreamHostKey by remember { mutableStateOf(StreamRuntimeTelemetry.keyForUrl(url)) }
-    var healthWindowStartedAtMs by remember(currentUrl) { mutableLongStateOf(0L) }
-    var firstFrameAtMs by remember(currentUrl) { mutableLongStateOf(0L) }
-    var earlyRebufferCount by remember(currentUrl) { mutableIntStateOf(0) }
-    var earlyRebufferDurationMs by remember(currentUrl) { mutableLongStateOf(0L) }
-    var inBufferingWindow by remember(currentUrl) { mutableStateOf(false) }
-    var bufferStartedAtMs by remember(currentUrl) { mutableLongStateOf(0L) }
-    var bufferingAttributedToUserSeek by remember(currentUrl) { mutableStateOf(false) }
-    var earlyFallbackTriggered by remember(currentUrl) { mutableStateOf(false) }
+    // These holders must remain stable for the lifetime of the engine listener.
+    // Re-keying them by URL leaves DisposableEffect(engine)'s listener writing
+    // into the previous holder after an in-player episode rollover.
+    var healthWindowStartedAtMs by remember { mutableLongStateOf(0L) }
+    var firstFrameAtMs by remember { mutableLongStateOf(0L) }
+    var earlyRebufferCount by remember { mutableIntStateOf(0) }
+    var earlyRebufferDurationMs by remember { mutableLongStateOf(0L) }
+    var inBufferingWindow by remember { mutableStateOf(false) }
+    var bufferStartedAtMs by remember { mutableLongStateOf(0L) }
+    var bufferingAttributedToUserSeek by remember { mutableStateOf(false) }
+    var earlyFallbackTriggered by remember { mutableStateOf(false) }
     var seekSuppressionUntilMs by remember { mutableLongStateOf(0L) }
     var pendingAutoFallbackResumePositionMs by remember { mutableLongStateOf(-1L) }
     var pendingAutoFallbackResumeDeadlineMs by remember { mutableLongStateOf(0L) }
@@ -643,6 +646,10 @@ fun PlayerScreen(
             )
         }
         currentUrl = url
+        // Reset synchronously before play(). A LaunchedEffect(currentUrl)
+        // reset can run after the engine already reported its first frame and
+        // would make the cinematic loading layer visible forever.
+        resetPlaybackHealthWindow()
         // Consume any LAN handoff staged before navigation. The route
         // schema can't carry HTTP headers, so the LAN-from-Home /
         // LAN-from-Details flows stage them in
@@ -1381,7 +1388,6 @@ fun PlayerScreen(
         trackPrefsAppliedForUrl = false
         currentStreamHostKey = StreamRuntimeTelemetry.keyForUrl(currentUrl)
         currentStreamHostKey?.let { StreamRuntimeTelemetry.recordPlayAttempt(it) }
-        resetPlaybackHealthWindow()
         resetSeekAcceleration()
         tvSeekFeedbackVisible = false
     }
@@ -2740,6 +2746,16 @@ fun PlayerScreen(
                 if (exoPlayerView === view) exoPlayerView = null
             },
         )
+        if (shouldShowPlayerCinematicLoading(currentUrl, firstFrameAtMs, errorMessage)) {
+            PlayerCinematicLoading(
+                title = currentTitle.ifBlank { title },
+                backdropUrl = backdropUrl,
+                posterUrl = posterUrl,
+                tmdbId = tmdbId,
+                mediaType = mediaType,
+                modifier = Modifier.fillMaxSize(),
+            )
+        }
         PlaybackErrorOverlay(
             message = errorMessage,
             isTv = isTv,
@@ -4357,6 +4373,25 @@ private suspend fun loadStartupPlaybackSelection(
         snapshot = snapshot,
         startupCandidates = rankedStartup,
         autoplayCandidates = autoplayCandidates,
+    )
+}
+
+@Composable
+private fun PlayerCinematicLoading(
+    title: String,
+    backdropUrl: String?,
+    posterUrl: String?,
+    tmdbId: Int,
+    mediaType: String,
+    modifier: Modifier = Modifier,
+) {
+    com.torve.android.ui.components.CinematicContentLoading(
+        title = title,
+        backdropUrl = backdropUrl,
+        posterUrl = posterUrl,
+        tmdbId = tmdbId.takeIf { it > 0 },
+        mediaType = MediaType.fromString(mediaType),
+        modifier = modifier,
     )
 }
 

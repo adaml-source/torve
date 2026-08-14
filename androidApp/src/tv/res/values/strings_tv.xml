@@ -465,6 +465,7 @@
     <string name="tv_notification_sync_summary_progress">%1$d progress entries</string>
     <string name="tv_notification_sync_error">Sync error: %1$s</string>
     <string name="tv_notification_downloads_completed">%1$d downloads completed</string>
+    <string name="tv_update_available">Torve %1$s is available and ready to download.</string>
     <string name="tv_unlock_purchase_phone_title">Torve is free software</string>
     <string name="tv_unlock_purchase_phone_body">Torve is free software. No subscriptions. No paid tiers.</string>
     <string name="tv_unlock_purchase_options_title">Torve is free software</string>

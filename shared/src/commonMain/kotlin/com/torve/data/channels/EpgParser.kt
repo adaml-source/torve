@@ -31,6 +31,7 @@ data class EpgDbParseStats(
     val programmesSkippedByCap: Int,
     val abortedByGlobalCap: Boolean,
     val parseDurationMs: Long,
+    val persistenceDurationMs: Long,
 )
 
 /**

@@ -92,6 +92,7 @@ fun TvHeroOverlay(
             ) {
                 val logoUrl = item?.logoUrl?.takeIf { it.isNotBlank() }
                 var logoFailed by remember(logoUrl) { mutableStateOf(false) }
+                val artworkPending = !logoFailed && (!allowLogoArtwork || logoLookupInFlight)
                 if (allowLogoArtwork && !logoUrl.isNullOrBlank() && !logoFailed) {
                     AsyncImage(
                         model = logoUrl,
@@ -109,7 +110,7 @@ fun TvHeroOverlay(
                     )
                 } else {
                     val titleText = item?.title ?: subtitle
-                    if (titleText.isNotBlank() && (!logoLookupInFlight || logoFailed)) {
+                    if (titleText.isNotBlank() && (!artworkPending || logoFailed)) {
                         Text(
                             text = titleText,
                             style = MaterialTheme.typography.headlineMedium.copy(

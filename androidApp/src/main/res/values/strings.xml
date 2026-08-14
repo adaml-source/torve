@@ -1789,6 +1789,19 @@
     <string name="notif_download_failed">Couldn\'t download \"%1$s\". Try again.</string>
     <string name="notif_channel_episodes">Episode Notifications</string>
     <string name="notif_channel_episodes_desc">Notifications for new TV show episodes</string>
+    <string name="app_update_channel_name">Torve updates</string>
+    <string name="app_update_channel_description">Notifications when a new Torve release is available</string>
+    <string name="app_update_notification_title">Torve %1$s is available</string>
+    <string name="app_update_notification_body">A new update is ready. Select Download &amp; install to update Torve.</string>
+    <string name="app_update_download_install">Download &amp; install</string>
+    <string name="app_update_later">Later</string>
+    <string name="app_update_downloading">Downloading the signed Torve %1$s update…</string>
+    <string name="app_update_verifying">Verifying the downloaded update…</string>
+    <string name="app_update_permission_required">Allow Torve to install this signed update, then return to continue.</string>
+    <string name="app_update_allow_installation">Allow installation</string>
+    <string name="app_update_opening_installer">Opening the system installer…</string>
+    <string name="app_update_download_failed">The update could not be downloaded or verified. Please try again.</string>
+    <string name="app_update_retry">Retry</string>
     <string name="notif_new_episodes">New Episodes Available</string>
     <string name="notif_episodes_and_more">%1$s and %2$d more</string>
 

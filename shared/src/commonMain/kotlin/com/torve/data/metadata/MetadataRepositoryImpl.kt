@@ -642,6 +642,48 @@ class MetadataRepositoryImpl(
         }
     }
 
+    override suspend fun getWatchProviderCandidates(type: String): List<com.torve.domain.model.StreamingProviderCandidate> {
+        val cacheKey = metadataCacheKey("getWatchProviderCandidates", type)
+        return cachedMetadata(cacheKey, METADATA_DETAIL_TTL_MS) {
+            api.getWatchProviders(type, region = null).results.map { provider ->
+                com.torve.domain.model.StreamingProviderCandidate(
+                    id = provider.providerId,
+                    name = provider.providerName,
+                    regions = provider.displayPriorities.keys
+                        .asSequence()
+                        .map { it.trim().uppercase() }
+                        .filter { it.length == 2 }
+                        .toSet(),
+                )
+            }
+        }
+    }
+
+    override suspend fun getTitleWatchProviderCandidates(
+        type: String,
+        tmdbId: Int,
+    ): List<com.torve.domain.model.StreamingProviderCandidate> {
+        val cacheKey = metadataCacheKey("getTitleWatchProviderCandidates", type, tmdbId)
+        return cachedMetadata(cacheKey, METADATA_DETAIL_TTL_MS) {
+            api.getTitleWatchProviders(type, tmdbId).results
+                .flatMap { (region, providers) ->
+                    (providers.flatrate + providers.free + providers.ads)
+                        .distinctBy { it.providerId }
+                        .map { provider ->
+                            Triple(provider.providerId, provider.providerName, region.trim().uppercase())
+                        }
+                }
+                .groupBy { it.first to it.second }
+                .map { (provider, entries) ->
+                    com.torve.domain.model.StreamingProviderCandidate(
+                        id = provider.first,
+                        name = provider.second,
+                        regions = entries.map { it.third }.filter { it.length == 2 }.toSet(),
+                    )
+                }
+        }
+    }
+
     override suspend fun getWatchProviderLogos(type: String, region: String): Map<Int, String> {
         val cacheKey = metadataCacheKey("getWatchProviderLogos", type, region)
         return cachedMetadata(cacheKey, METADATA_DETAIL_TTL_MS) {

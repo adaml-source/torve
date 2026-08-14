@@ -10,6 +10,8 @@ import com.torve.android.download.DownloadWorker
 import com.torve.android.epg.EpgWarmupWorker
 import com.torve.android.notification.EpisodeNotificationWorker
 import com.torve.android.sync.TraktSyncWorker
+import com.torve.android.update.AppUpdateWorker
+import com.torve.android.update.usesVpsReleaseUpdates
 import com.torve.data.acceleration.AccelerationInventorySyncService
 import com.torve.data.contentpolicy.MutableContentChannelProvider
 import com.torve.data.trakt.TraktClient
@@ -98,6 +100,14 @@ class TorveApp : Application() {
                     CatalogWarmupWorker.schedule(this@TorveApp)
                 }
                 DownloadWorker.ensureChannel(this@TorveApp)
+                if (usesVpsReleaseUpdates(BuildConfig.FLAVOR)) {
+                    AppUpdateWorker.schedule(this@TorveApp)
+                    AppUpdateWorker.checkNow(this@TorveApp)
+                } else {
+                    // Google Play owns delivery for Play-distributed builds. In
+                    // particular, Play's in-app update API is not supported on TV.
+                    AppUpdateWorker.cancel(this@TorveApp)
+                }
             }
             launch {
                 runCatching {
@@ -105,9 +115,19 @@ class TorveApp : Application() {
                         promoteLegacyTvJellyfin = isTvBuild,
                     )
                 }
-                runCatching { getKoin().get<com.torve.presentation.device.DeviceGovernanceViewModel>().fetchAccessState() }
-                runCatching { EpisodeNotificationWorker.scheduleIfEnabled(this@TorveApp) }
-                runCatching { getKoin().get<AccelerationInventorySyncService>().syncConnectedProviders() }
+                // Independent account follow-up work must not form one long
+                // serial chain behind Panda's remote configuration hydration.
+                launch {
+                    runCatching {
+                        getKoin().get<com.torve.presentation.panda.PandaSetupViewModel>()
+                            .awaitInitialConfigHydration()
+                    }
+                    runCatching { getKoin().get<AccelerationInventorySyncService>().syncConnectedProviders() }
+                }
+                launch {
+                    runCatching { getKoin().get<com.torve.presentation.device.DeviceGovernanceViewModel>().fetchAccessState() }
+                }
+                launch { runCatching { EpisodeNotificationWorker.scheduleIfEnabled(this@TorveApp) } }
             }
             launch { runCatching { androidx.media3.decoder.ffmpeg.FfmpegLibrary.isAvailable() } }
 

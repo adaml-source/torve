@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Sign in to Torve Sync</title>
+  <meta name="description" content="Sign in to Torve for sync, device linking, and account-backed data." />
+  <link rel="canonical" href="https://torve.app/signin.html" />
+  <meta property="og:title" content="Sign in to Torve Sync" />
+  <meta property="og:description" content="Authentication protects sync and account-scoped services." />
+  <meta property="og:type" content="website" />
+  <meta property="og:url" content="https://torve.app/signin.html" />
+  <meta property="og:image" content="https://torve.app/assets/new_screenshots/mobile/1%20-%20Home%20Screen.jpg" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <link rel="icon" type="image/png" href="assets/favicon.png" />
+  <link rel="stylesheet" href="assets/site-base.css?v=20260701-storecopy" />
+  <link rel="stylesheet" href="assets/style.css?v=20260701-storecopy" />
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+  <header class="site-header">
+    <div class="site-header-inner">
+      <a href="/"><img src="assets/torve-logo-transparent.png" alt="Torve" class="site-header-logo" /></a>
+      <button class="site-header-toggle nav-toggle" aria-label="Menu" aria-expanded="false"><span></span></button>
+      <nav class="site-header-nav nav-links">
+        <a href="/">Home</a>
+        <a href="/download.html">Download</a>
+        <a href="/source.html">Source</a>
+        <a href="/support.html">Support</a>
+      </nav>
+      <div class="site-header-spacer"></div>
+      <div class="site-header-actions">
+        <a href="/signup.html" class="t-btn t-btn-primary t-btn-sm">Create account</a>
+      </div>
+    </div>
+  </header>
+
+  <main id="main">
+    <section class="auth-shell">
+      <div class="auth-container">
+        <section class="auth-form-side">
+          <div class="eyebrow">Account sync</div>
+          <h1 class="auth-form-title">Sign in for sync</h1>
+          <p class="auth-form-subtitle">Sync across devices, link devices, and manage account-backed data.</p>
+          <form data-auth-form="/web/auth/login">
+            <div class="t-field">
+              <label for="signin-email">Email</label>
+              <input id="signin-email" name="email" type="email" autocomplete="email" required />
+            </div>
+            <div class="t-field">
+              <label for="signin-password">Password</label>
+              <input id="signin-password" name="password" type="password" autocomplete="current-password" required minlength="8" />
+            </div>
+            <button class="t-btn t-btn-primary t-btn-full" type="submit">Sign in</button>
+            <p class="status-message" data-message aria-live="polite"></p>
+          </form>
+          <a class="auth-link" href="/reset-password">Forgot password?</a>
+          <p class="auth-footer-text">New to Torve? <a href="/signup.html">Create an account</a></p>
+        </section>
+        <aside class="auth-brand-side">
+          <h2>Why sign in?</h2>
+          <p>Authentication protects account-scoped services. Local app workflows are not payment-gated.</p>
+          <ul class="auth-brand-features">
+            <li>Cross-device sync</li>
+            <li>Device linking</li>
+            <li>Account-backed watch state and preferences</li>
+            <li>Data export and account deletion</li>
+          </ul>
+        </aside>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <div class="container footer-row">
+      <div>&copy; <span data-current-year></span> Torve. Free software under AGPL-3.0-or-later.</div>
+      <div class="footer-links">
+        <a href="/">Home</a>
+        <a href="/privacy.html">Privacy</a>
+        <a href="/terms.html">Terms</a>
+        <a href="/account-deletion.html">Account Deletion</a>
+      </div>
+    </div>
+  </footer>
+
+  <script src="assets/script.js"></script>
+  <script src="site.js"></script>
+</body>
+</html>

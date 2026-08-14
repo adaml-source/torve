@@ -218,7 +218,9 @@ fun ManagePandaScreen(
                 Spacer(Modifier.height(16.dp))
             }
 
-            if (isInstalled && (!settingsState.debridConnected || settingsState.connectedDebridProviders.isEmpty())) {
+            if (isInstalled && settingsState.connectedDebridProviders.isEmpty()) {
+                val hasConfiguredDebrid = settingsState.configuredDebridProviders.isNotEmpty() ||
+                    settingsState.debridConnected
                 Card(
                     modifier = Modifier.fillMaxWidth(),
                     colors = CardDefaults.cardColors(containerColor = Ruby.copy(alpha = 0.12f)),
@@ -226,14 +228,18 @@ fun ManagePandaScreen(
                 ) {
                     Column(Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
                         Text(
-                            "Real-Debrid not connected",
+                            if (hasConfiguredDebrid) "Debrid providers disabled" else "Debrid not connected",
                             style = MaterialTheme.typography.bodyLarge,
                             fontWeight = FontWeight.SemiBold,
                             color = Ruby,
                         )
                         Spacer(Modifier.height(4.dp))
                         Text(
-                            "Your debrid token may have expired. Go to Settings → Integrations → Debrid to reconnect, then tap Reconfigure below to sync.",
+                            if (hasConfiguredDebrid) {
+                                "Your credentials are retained, but no debrid provider is enabled for use. Reconfigure Panda to enable one."
+                            } else {
+                                "Your debrid token may have expired. Go to Settings → Integrations → Debrid to reconnect, then tap Reconfigure below to sync."
+                            },
                             style = MaterialTheme.typography.bodySmall,
                             color = Silver,
                         )

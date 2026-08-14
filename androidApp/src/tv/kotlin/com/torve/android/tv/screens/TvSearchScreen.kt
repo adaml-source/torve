@@ -268,6 +268,7 @@ internal fun TvSearchScreen(
     var focusCompactFiltersAfterHide by remember { mutableStateOf(false) }
     var focusFirstFilterAfterShow by remember { mutableStateOf(false) }
     var restoreAiFocusAfterToggle by remember { mutableStateOf(false) }
+    var focusInputAfterClear by remember { mutableStateOf(false) }
     var selectedResultKey by remember { mutableStateOf(restoredContentCache?.selectedMediaKey) }
     var selectedResult by remember {
         mutableStateOf(
@@ -288,6 +289,7 @@ internal fun TvSearchScreen(
     var resultFocusRequestNonce by remember { mutableStateOf(0) }
     var focusedResultKey by remember { mutableStateOf<String?>(null) }
     val inputFocusRequester = remember { FocusRequester() }
+    val clearSearchRequester = remember { FocusRequester() }
     val filterToggleRequester = remember { FocusRequester() }
     val advancedFiltersRequester = remember { FocusRequester() }
     val aiModeRequester = remember { FocusRequester() }
@@ -409,10 +411,8 @@ internal fun TvSearchScreen(
     }
 
     val hasAiKey = settingsState.activeAiApiKey.isNotBlank()
-    val availableGenres = remember(baseResults, filterType) {
-        baseResults.availableTvSearchGenres()
-            .ifEmpty { tvSearchDefaultGenres(filterType) }
-            .take(18)
+    val availableGenres = remember(filterType) {
+        tvSearchDefaultGenres(filterType)
     }
     // Keep these choices fixed while results hydrate/page. Exact years made the
     // drawer both incomplete and unstable because they were derived from only
@@ -479,6 +479,14 @@ internal fun TvSearchScreen(
         runCatching { aiModeRequester.requestFocus() }
         onContentFocused(aiModeRequester)
         restoreAiFocusAfterToggle = false
+    }
+
+    LaunchedEffect(focusInputAfterClear) {
+        if (!focusInputAfterClear) return@LaunchedEffect
+        focusInputAfterClear = false
+        kotlinx.coroutines.yield()
+        runCatching { inputFocusRequester.requestFocus() }
+        onContentFocused(inputFocusRequester)
     }
 
     LaunchedEffect(showFilters) {
@@ -649,7 +657,13 @@ internal fun TvSearchScreen(
         focusResultsAfterClosingFilters = true
     }
     BackHandler(enabled = onClose != null && !showFilters) {
-        onClose?.invoke()
+        if (focusedResultKey != null) {
+            focusedResultKey = null
+            runCatching { filterToggleRequester.requestFocus() }
+            onContentFocused(filterToggleRequester)
+        } else {
+            onClose?.invoke()
+        }
     }
 
     LaunchedEffect(Unit) {
@@ -1424,6 +1438,7 @@ internal fun TvSearchScreen(
                     }
                 },
                 inputFocusRequester = inputFocusRequester,
+                clearFocusRequester = clearSearchRequester,
                 aiFocusRequester = aiModeRequester,
                 railFocusRequester = railFocusRequester,
                 downFocusRequester = when {
@@ -1432,6 +1447,15 @@ internal fun TvSearchScreen(
                     else -> filterToggleRequester
                 },
                 onMoveDown = ::requestSearchHeaderDownFocus,
+                onClearSearch = {
+                    if (query.trim().equals("top rated", ignoreCase = true) &&
+                        selectedMinRating == TV_SEARCH_TOP_RATED_FILTER
+                    ) {
+                        selectedMinRating = null
+                    }
+                    query = ""
+                    focusInputAfterClear = true
+                },
                 onContentFocused = onContentFocused,
             )
 
@@ -1529,7 +1553,10 @@ internal fun TvSearchScreen(
                 } else {
                     null
                 },
-                onFilterFocused = { lastVisibleFilterRequester = it },
+                onFilterFocused = {
+                    lastVisibleFilterRequester = it
+                    focusedResultKey = null
+                },
                 onContentFocused = onContentFocused,
             )
 
@@ -2245,10 +2272,12 @@ private fun TvSearchHeader(
     hasAiKey: Boolean,
     onToggleAi: () -> Unit,
     inputFocusRequester: FocusRequester,
+    clearFocusRequester: FocusRequester,
     aiFocusRequester: FocusRequester,
     railFocusRequester: FocusRequester,
     downFocusRequester: FocusRequester,
     onMoveDown: () -> Boolean,
+    onClearSearch: () -> Unit,
     onContentFocused: (FocusRequester) -> Unit,
 ) {
     Row(
@@ -2283,15 +2312,30 @@ private fun TvSearchHeader(
                 onValueChange = onQueryChange,
                 placeholder = "Search movies, shows, channels",
                 onMoveDown = onMoveDown,
+                restingFocusRequester = inputFocusRequester,
                 modifier = Modifier
                     .weight(1f)
                     .focusRequester(inputFocusRequester)
                     .focusProperties {
                         left = railFocusRequester
-                        right = aiFocusRequester
+                        right = clearFocusRequester
                         down = downFocusRequester
                     }
                     .onFocusChanged { if (it.isFocused) onContentFocused(inputFocusRequester) },
+            )
+            TvSearchHeaderAction(
+                text = "Clear search",
+                active = query.isNotBlank(),
+                modifier = Modifier
+                    .focusRequester(clearFocusRequester)
+                    .focusProperties {
+                        left = inputFocusRequester
+                        right = aiFocusRequester
+                        down = downFocusRequester
+                    },
+                onFocused = { onContentFocused(clearFocusRequester) },
+                onMoveDown = onMoveDown,
+                onClick = onClearSearch,
             )
             TvSearchAiToggle(
                 active = searchMode == SearchMode.AI,
@@ -2299,7 +2343,7 @@ private fun TvSearchHeader(
                 modifier = Modifier
                     .focusRequester(aiFocusRequester)
                     .focusProperties {
-                        left = inputFocusRequester
+                        left = clearFocusRequester
                         right = aiFocusRequester
                         down = downFocusRequester
                     },
@@ -2370,11 +2414,13 @@ private fun TvSearchCompactInput(
     onValueChange: (String) -> Unit,
     placeholder: String,
     onMoveDown: () -> Boolean,
+    restingFocusRequester: FocusRequester,
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
     val view = LocalView.current
     val textFieldRequester = remember { FocusRequester() }
+    val focusScope = rememberCoroutineScope()
     var focused by remember { mutableStateOf(false) }
     var editMode by remember { mutableStateOf(false) }
     val iconTint by animateColorAsState(
@@ -2416,10 +2462,16 @@ private fun TvSearchCompactInput(
         }
     }
 
-    fun leaveEditMode() {
+    fun leaveEditMode(restoreRestingFocus: Boolean = false) {
         if (editMode) {
             editMode = false
             hideKeyboard()
+            if (restoreRestingFocus) {
+                focusScope.launch {
+                    kotlinx.coroutines.yield()
+                    runCatching { restingFocusRequester.requestFocus() }
+                }
+            }
         }
     }
 
@@ -2442,7 +2494,7 @@ private fun TvSearchCompactInput(
 
             Key.Back -> {
                 if (editMode) {
-                    leaveEditMode()
+                    leaveEditMode(restoreRestingFocus = true)
                     true
                 } else {
                     false
@@ -2486,6 +2538,7 @@ private fun TvSearchCompactInput(
             modifier = Modifier
                 .fillMaxSize()
                 .focusRequester(textFieldRequester)
+                .focusProperties { canFocus = editMode }
                 .onPreviewKeyEvent { event ->
                     if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
                     handleKey(event.key)
@@ -2519,6 +2572,67 @@ private fun TvSearchCompactInput(
                     }
                 }
             },
+        )
+    }
+}
+
+@Composable
+private fun TvSearchHeaderAction(
+    text: String,
+    active: Boolean,
+    modifier: Modifier,
+    onFocused: () -> Unit,
+    onMoveDown: () -> Boolean,
+    onClick: () -> Unit,
+) {
+    var focused by remember { mutableStateOf(false) }
+    Box(
+        modifier = modifier
+            .height(40.dp)
+            .clip(RoundedCornerShape(14.dp))
+            .background(
+                when {
+                    focused -> Amber.copy(alpha = 0.22f)
+                    active -> Snow.copy(alpha = 0.09f)
+                    else -> Snow.copy(alpha = 0.04f)
+                },
+            )
+            .border(
+                width = if (focused) 2.dp else 1.dp,
+                color = if (focused) AmberLight else Snow.copy(alpha = if (active) 0.16f else 0.08f),
+                shape = RoundedCornerShape(14.dp),
+            )
+            .onFocusChanged {
+                focused = it.isFocused
+                if (it.isFocused) onFocused()
+            }
+            .onPreviewKeyEvent { event ->
+                when {
+                    event.key == Key.DirectionDown && event.type == KeyEventType.KeyDown -> {
+                        onMoveDown()
+                        true
+                    }
+                    event.key == Key.DirectionDown && event.type == KeyEventType.KeyUp -> true
+                    else -> false
+                }
+            }
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                onClick = onClick,
+            )
+            .padding(horizontal = 12.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text = text,
+            style = MaterialTheme.typography.labelLarge,
+            color = when {
+                focused -> AmberLight
+                active -> Snow
+                else -> Silver.copy(alpha = 0.48f)
+            },
+            maxLines = 1,
         )
     }
 }
@@ -2644,17 +2758,15 @@ private fun TvSearchRefinementArea(
     onFilterFocused: (FocusRequester) -> Unit,
     onContentFocused: (FocusRequester) -> Unit,
 ) {
-    val focusScope = rememberCoroutineScope()
     var sortOptionsVisible by remember { mutableStateOf(false) }
+    var restoreSortFocus by remember { mutableStateOf(false) }
 
-    fun activateAndRetainFocus(requester: FocusRequester, action: () -> Unit) {
-        action()
-        focusScope.launch {
-            repeat(4) { attempt ->
-                if (attempt == 0) kotlinx.coroutines.yield() else delay(40)
-                runCatching { requester.requestFocus() }
-            }
-        }
+    LaunchedEffect(sortOptionsVisible, restoreSortFocus) {
+        if (sortOptionsVisible || !restoreSortFocus) return@LaunchedEffect
+        restoreSortFocus = false
+        kotlinx.coroutines.yield()
+        runCatching { sortRequester.requestFocus() }
+        onContentFocused(sortRequester)
     }
 
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -2721,7 +2833,7 @@ private fun TvSearchRefinementArea(
                     onContentFocused(allTypeRequester)
                 },
                 onClick = {
-                    activateAndRetainFocus(allTypeRequester) { onFilterTypeChange(null) }
+                    onFilterTypeChange(null)
                 },
             )
             }
@@ -2742,9 +2854,7 @@ private fun TvSearchRefinementArea(
                     onContentFocused(movieTypeRequester)
                 },
                 onClick = {
-                    activateAndRetainFocus(movieTypeRequester) {
-                        onFilterTypeChange(if (filterType == "movie") null else "movie")
-                    }
+                    onFilterTypeChange(if (filterType == "movie") null else "movie")
                 },
             )
             }
@@ -2764,9 +2874,7 @@ private fun TvSearchRefinementArea(
                     onContentFocused(tvTypeRequester)
                 },
                 onClick = {
-                    activateAndRetainFocus(tvTypeRequester) {
-                        onFilterTypeChange(if (filterType == "tv") null else "tv")
-                    }
+                    onFilterTypeChange(if (filterType == "tv") null else "tv")
                 },
             )
             }
@@ -2821,9 +2929,7 @@ private fun TvSearchRefinementArea(
                         onContentFocused(sortRequester)
                     },
                     onClick = {
-                        activateAndRetainFocus(sortRequester) {
-                            sortOptionsVisible = !sortOptionsVisible
-                        }
+                        sortOptionsVisible = !sortOptionsVisible
                     },
                 )
             }
@@ -2846,7 +2952,7 @@ private fun TvSearchRefinementArea(
                         onClick = {
                             onSelectSort(option)
                             sortOptionsVisible = false
-                            activateAndRetainFocus(sortRequester) {}
+                            restoreSortFocus = true
                         },
                     )
                 }

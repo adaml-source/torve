@@ -2,6 +2,7 @@ package com.torve.presentation.settings
 
 import com.torve.domain.integrations.AutomationInstance
 import com.torve.domain.integrations.AutomationServiceType
+import com.torve.domain.model.DebridServiceType
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -90,6 +91,24 @@ class IntegrationReadinessTest {
         assertEquals(IntegrationReadinessStatus.NEEDS_ATTENTION, summary.item(IntegrationWorkflow.SAVE_TO_LIBRARY).status)
         assertEquals(IntegrationReadinessStatus.NEEDS_ATTENTION, summary.item(IntegrationWorkflow.TRACKING).status)
         assertFalse(rendered.contains("secret", ignoreCase = true))
+    }
+
+    @Test
+    fun authenticatedButDisabledDebridDoesNotEnablePlayback() {
+        val settings = SettingsUiState(
+            debridConnected = true,
+            debridApiKey = "still-configured",
+            configuredDebridProviders = mapOf(DebridServiceType.REAL_DEBRID to "still-configured"),
+            connectedDebridProviders = emptyMap(),
+        )
+
+        assertFalse(settings.canPlayStreams)
+        assertEquals(
+            IntegrationReadinessStatus.NEEDS_ATTENTION,
+            buildIntegrationReadinessSummary(settings, emptyList())
+                .item(IntegrationWorkflow.WATCH_NOW)
+                .status,
+        )
     }
 
     private fun instance(id: String, type: AutomationServiceType) = AutomationInstance(

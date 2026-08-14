@@ -10,9 +10,11 @@ class AccelerationInventorySyncService(
     private val secretStore: IntegrationSecretStore,
     private val debridClient: DebridClient,
     private val accelerationApi: AccelerationApi,
+    private val isProviderEnabled: suspend (DebridServiceType) -> Boolean = { true },
 ) {
     suspend fun syncConnectedProviders() {
         DebridServiceType.entries.forEach { provider ->
+            if (!isProviderEnabled(provider)) return@forEach
             val apiKey = secretStore.get(provider.secretKey())?.takeIf { it.isNotBlank() } ?: return@forEach
             val items = debridClient.getInventoryItems(provider, apiKey)
             if (items.isEmpty()) return@forEach

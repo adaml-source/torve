@@ -1,5 +1,6 @@
 package com.torve.android
 
+import android.annotation.SuppressLint
 import android.content.Intent
 import android.os.Bundle
 import android.os.Handler
@@ -82,7 +83,11 @@ class TvMainActivity : AppCompatActivity() {
         return true
     }
 
+    @SuppressLint("GestureBackNavigation")
     private fun handleBackgroundPlaybackBack(event: KeyEvent): Boolean {
+        // This TV-only shortcut needs the physical key's DOWN/repeat/UP
+        // sequence to distinguish long Back. Short Back is still delegated
+        // to onBackPressedDispatcher below.
         if (event.keyCode != KeyEvent.KEYCODE_BACK) return false
         // Once this Activity accepts the initial DOWN, keep ownership through
         // every repeat and the matching UP. The long-press navigation can make
@@ -178,7 +183,18 @@ class TvMainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         pendingAppLink = TorveAppLinkParser.parse(intent?.data)
         configureTorveEdgeToEdge()
+        requestNotificationPermission()
         pollForKoinReady()
+    }
+
+    private fun requestNotificationPermission() {
+        if (
+            android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU &&
+            checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) !=
+            android.content.pm.PackageManager.PERMISSION_GRANTED
+        ) {
+            requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 1001)
+        }
     }
 
     private fun pollForKoinReady() {

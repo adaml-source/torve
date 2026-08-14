@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -39,6 +40,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -96,25 +100,48 @@ fun PandaAuthStep(
             state.providers.filter { it.id != "none" }.forEach { item ->
                 val selected = item.id == provider?.id
                 val connected = state.debridApiKeys[item.id]?.isNotBlank() == true
+                val enabledForUse = state.debridProviderEnabled[item.id] ?: true
+                val providerCardRequester = remember(item.id) { FocusRequester() }
+                val providerInteractionSource = remember(item.id) { MutableInteractionSource() }
+                val providerFocused by providerInteractionSource.collectIsFocusedAsState()
+                val providerShape = RoundedCornerShape(12.dp)
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clip(RoundedCornerShape(12.dp))
+                        .focusRequester(providerCardRequester)
+                        .clip(providerShape)
                         .background(if (selected) Amber.copy(alpha = 0.15f) else Gunmetal)
-                        .clickable { viewModel.selectProvider(item) }
+                        .border(
+                            width = 1.dp,
+                            color = if (providerFocused) Amber else Steel.copy(alpha = 0.22f),
+                            shape = providerShape,
+                        )
+                        .clickable(
+                            interactionSource = providerInteractionSource,
+                            indication = null,
+                        ) { viewModel.selectProvider(item) }
                         .padding(14.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Column(Modifier.weight(1f)) {
                         Text(item.name, color = Snow, fontWeight = FontWeight.SemiBold)
                         Text(
-                            if (connected) "API key saved" else "Not connected",
+                            when {
+                                !connected -> "Not connected"
+                                enabledForUse -> "Connected · Enabled for use"
+                                else -> "Connected · Disabled"
+                            },
                             color = Silver,
                             style = MaterialTheme.typography.bodySmall,
                         )
                     }
                     if (connected) {
-                        Icon(Icons.Default.Check, null, tint = Amber, modifier = Modifier.size(18.dp))
+                        Icon(
+                            Icons.Default.Check,
+                            null,
+                            tint = if (enabledForUse) Amber else Steel,
+                            modifier = Modifier.size(18.dp),
+                        )
                     }
                 }
 
@@ -124,6 +151,7 @@ fun PandaAuthStep(
                         viewModel = viewModel,
                         provider = item,
                         entryFocusRequester = entryFocusRequester,
+                        providerCardRequester = providerCardRequester,
                     )
                 }
             }
@@ -137,10 +165,29 @@ private fun SelectedProviderAuthControls(
     viewModel: PandaSetupViewModel,
     provider: PandaProvider,
     entryFocusRequester: FocusRequester? = null,
+    providerCardRequester: FocusRequester,
 ) {
     val supportsOAuth = "oauth" in provider.authMethods
     val providerConnected = state.debridApiKeys[provider.id]?.isNotBlank() == true ||
         (state.selectedProvider?.id == provider.id && state.debridApiKey.isNotBlank())
+    val providerEnabled = state.debridProviderEnabled[provider.id] ?: true
+    val reauthenticateRequester = remember(provider.id, ProviderActionId.REAUTHENTICATE) { FocusRequester() }
+    val disconnectRequester = remember(provider.id, ProviderActionId.DISCONNECT) { FocusRequester() }
+    val enabledToggleRequester = remember(provider.id, ProviderActionId.ENABLED_TOGGLE) { FocusRequester() }
+    val effectiveReauthenticateRequester = entryFocusRequester ?: reauthenticateRequester
+    var pendingAction by remember(provider.id) { mutableStateOf<ProviderActionId?>(null) }
+
+    LaunchedEffect(providerConnected, providerEnabled, pendingAction) {
+        val action = pendingAction ?: return@LaunchedEffect
+        withFrameNanos { }
+        val target = when {
+            action == ProviderActionId.ENABLED_TOGGLE && providerConnected -> enabledToggleRequester
+            action == ProviderActionId.REAUTHENTICATE && providerConnected -> effectiveReauthenticateRequester
+            else -> providerCardRequester
+        }
+        runCatching { target.requestFocus() }
+        pendingAction = null
+    }
 
     Column(
         modifier = Modifier
@@ -148,53 +195,67 @@ private fun SelectedProviderAuthControls(
             .clip(RoundedCornerShape(12.dp))
             .background(Gunmetal.copy(alpha = 0.72f))
             .border(1.dp, Amber.copy(alpha = 0.35f), RoundedCornerShape(12.dp))
-            .padding(14.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp),
+            .padding(horizontal = 10.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         if (providerConnected) {
-            Column(
+            Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(12.dp))
                     .background(Amber.copy(alpha = 0.15f))
-                    .padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(14.dp),
+                    .padding(horizontal = 10.dp, vertical = 7.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Default.Check, null, tint = Amber, modifier = Modifier.size(24.dp))
-                    Spacer(Modifier.width(12.dp))
-                    Column {
-                        Text(
-                            stringResource(R.string.panda_setup_auth_connected),
-                            style = MaterialTheme.typography.bodyLarge,
-                            fontWeight = FontWeight.SemiBold,
-                            color = Amber,
-                        )
-                        if (state.existingCredentialDetected) {
-                            Text(
-                                "Using existing ${provider.name} credentials",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = Silver,
-                            )
-                        }
-                    }
-                }
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                ) {
-                    FocusRingOutlinedButton(
-                        text = stringResource(R.string.storage_reauth_action),
-                        onClick = { viewModel.reconnectSelectedDebrid() },
-                        modifier = Modifier.weight(1f),
-                        entryFocusRequester = entryFocusRequester,
-                    )
-                    FocusRingOutlinedButton(
-                        text = stringResource(R.string.common_disconnect),
-                        onClick = { viewModel.disconnectSelectedDebrid() },
-                        modifier = Modifier.weight(1f),
+                Icon(Icons.Default.Check, null, tint = Amber, modifier = Modifier.size(18.dp))
+                Text(
+                    stringResource(R.string.panda_setup_auth_connected),
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = Amber,
+                    modifier = Modifier.weight(1f),
+                )
+                if (state.existingCredentialDetected) {
+                    Text(
+                        "Existing credentials",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Silver,
                     )
                 }
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                FocusRingOutlinedButton(
+                    text = stringResource(R.string.storage_reauth_action),
+                    onClick = {
+                        pendingAction = ProviderActionId.REAUTHENTICATE
+                        viewModel.reconnectSelectedDebrid()
+                    },
+                    modifier = Modifier.weight(1f),
+                    entryFocusRequester = effectiveReauthenticateRequester,
+                )
+                FocusRingOutlinedButton(
+                    text = stringResource(R.string.common_disconnect),
+                    onClick = {
+                        pendingAction = ProviderActionId.DISCONNECT
+                        viewModel.disconnectSelectedDebrid()
+                    },
+                    modifier = Modifier.weight(1f),
+                    entryFocusRequester = disconnectRequester,
+                    destructive = true,
+                )
+                FocusRingOutlinedButton(
+                    text = if (providerEnabled) "Disable for use" else "Enable for use",
+                    onClick = {
+                        pendingAction = ProviderActionId.ENABLED_TOGGLE
+                        viewModel.setDebridProviderEnabled(provider.id, !providerEnabled)
+                    },
+                    modifier = Modifier.weight(1.2f),
+                    entryFocusRequester = enabledToggleRequester,
+                )
             }
         }
 
@@ -242,6 +303,7 @@ private fun FocusRingOutlinedButton(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     entryFocusRequester: FocusRequester? = null,
+    destructive: Boolean = false,
 ) {
     val interactionSource = remember { MutableInteractionSource() }
     val isFocused by interactionSource.collectIsFocusedAsState()
@@ -250,10 +312,15 @@ private fun FocusRingOutlinedButton(
         onClick = onClick,
         modifier = modifier
             .then(entryFocusRequester?.let { Modifier.focusRequester(it) } ?: Modifier)
+            .heightIn(min = 48.dp)
             .clip(shape)
             .border(
-                width = if (isFocused) 2.dp else 1.dp,
-                color = if (isFocused) Amber else Steel.copy(alpha = 0.45f),
+                width = 1.dp,
+                color = when {
+                    isFocused -> Amber
+                    destructive -> Ruby.copy(alpha = 0.72f)
+                    else -> Steel.copy(alpha = 0.45f)
+                },
                 shape = shape,
             ),
         shape = shape,
@@ -263,7 +330,11 @@ private fun FocusRingOutlinedButton(
     ) {
         Text(
             text = text,
-            color = if (isFocused) Amber else Snow,
+            color = when {
+                isFocused -> Amber
+                destructive -> Ruby
+                else -> Snow
+            },
             fontWeight = FontWeight.SemiBold,
             fontSize = 12.sp,
             maxLines = 1,
@@ -271,6 +342,12 @@ private fun FocusRingOutlinedButton(
             overflow = TextOverflow.Clip,
         )
     }
+}
+
+private enum class ProviderActionId {
+    REAUTHENTICATE,
+    DISCONNECT,
+    ENABLED_TOGGLE,
 }
 
 @Composable

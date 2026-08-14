@@ -53,6 +53,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -120,6 +121,7 @@ import com.torve.domain.lanlibrary.PlaybackRoute
 import com.torve.domain.integrations.MediaLifecycleState
 import com.torve.domain.repository.DownloadRepository
 import com.torve.domain.repository.MediaFavoritesRepository
+import com.torve.domain.repository.MetadataRepository
 import com.torve.platform.NetworkMonitor
 import com.torve.platform.NetworkType
 import com.torve.presentation.detail.DetailViewModel
@@ -181,6 +183,7 @@ fun TvDetailsScreen(
     onWatchedStatusChanged: (MediaItem, Boolean) -> Unit = { _, _ -> },
 ) {
     val detailViewModel: DetailViewModel = koinInject()
+    val metadataRepository: MetadataRepository = koinInject()
     val settingsViewModel: SettingsViewModel = koinInject()
     val watchlistViewModel: WatchlistViewModel = koinInject()
     val downloadViewModel: DownloadViewModel = koinInject()
@@ -200,6 +203,15 @@ fun TvDetailsScreen(
     val subscriptionState by subscriptionViewModel.state.collectAsState()
     val mediaFavoritesState by mediaFavoritesRepository.state.collectAsState()
     val state by detailViewModel.state.collectAsState()
+    var cinematicLogoUrl by remember(type, id) { mutableStateOf<String?>(null) }
+    LaunchedEffect(state.mediaItem?.id, state.mediaItem?.logoUrl) {
+        val item = state.mediaItem ?: return@LaunchedEffect
+        val logo = item.logoUrl ?: item.tmdbId?.let { tmdbId ->
+            runCatching { metadataRepository.getLogoUrl(type, tmdbId) }.getOrNull()
+        }
+        cinematicLogoUrl = logo
+        com.torve.android.ui.components.ContentLaunchArtworkStore.clear()
+    }
     val accessTier = rememberEffectivePremiumAccessTier(
         subscriptionTier = subscriptionState.subscription?.tier,
         subscriptionIsPro = subscriptionState.isPro,
@@ -228,6 +240,7 @@ fun TvDetailsScreen(
     val downloadMovieFocusRequester = remember { FocusRequester() }
     val downloadAllFocusRequester = remember { FocusRequester() }
     val firstStreamFocusRequester = remember { FocusRequester() }
+    var streamPickerFocusInitialized by remember(type, id) { mutableStateOf(false) }
     var restoreFocusAfterPreparingCancel by remember { mutableStateOf(false) }
     val listState = rememberLazyListState()
     var episodesFocusHandled by rememberSaveable(type, id, focusEpisodes) { mutableStateOf(false) }
@@ -259,6 +272,23 @@ fun TvDetailsScreen(
     var pendingEpisodeFocusRestore by remember(type, id) { mutableStateOf<Pair<Int, Int>?>(null) }
     var initialPlayFocusAssigned by rememberSaveable(type, id) { mutableStateOf(false) }
     var restorePlayFocusAfterSourceDismiss by remember { mutableStateOf(false) }
+    val showCinematicSourceLoading = state.shouldShowCinematicSourceLoading(
+        sourcePickerVisible = sourcePickerState != null,
+    )
+    val sourceOperationBlocksDetail = state.preparing != null || showCinematicSourceLoading
+
+    fun queueSourceOriginFocusRestore(
+        episodeTarget: Pair<Int, Int>? = sourcePickerOriginEpisode ?: resolvingEpisodeTarget,
+    ) {
+        if (episodeTarget != null) {
+            pendingEpisodeFocusRestore = episodeTarget
+            restorePlayFocusAfterSourceDismiss = false
+        } else {
+            restorePlayFocusAfterSourceDismiss = true
+        }
+        sourcePickerOriginEpisode = null
+        resolvingEpisodeTarget = null
+    }
     val watchlistModalRestoreController = rememberTvModalFocusRestoreController(
         key = "details_watchlist_${type}_$id",
     )
@@ -280,9 +310,13 @@ fun TvDetailsScreen(
     // downloadToastMessage replaced by TvNotificationQueue
 
     BackHandler(
-        enabled = sourcePickerState == null && !showWatchlistPicker,
+        enabled = sourcePickerState == null && !showWatchlistPicker && !sourceOperationBlocksDetail,
         onBack = onBack,
     )
+    BackHandler(enabled = sourceOperationBlocksDetail && !showWatchlistPicker) {
+        queueSourceOriginFocusRestore()
+        detailViewModel.cancelSourceLookup()
+    }
     DisposableEffect(Unit) {
         onDispose {
             TvNotificationQueue.clear(TV_USENET_PREPARING_NOTIFICATION_TAG)
@@ -358,6 +392,9 @@ fun TvDetailsScreen(
         }
         TvNotificationQueue.clear(TV_USENET_PREPARING_NOTIFICATION_TAG)
         TvNotificationQueue.clear(TV_STREAM_RESOLVING_NOTIFICATION_TAG)
+        queueSourceOriginFocusRestore(
+            terminalEpisodeFocusTarget(state, sourcePickerOriginEpisode, resolvingEpisodeTarget),
+        )
         TvNotificationQueue.post(resolveTvDetailMessage(context, error), NotificationType.ERROR)
     }
 
@@ -368,12 +405,18 @@ fun TvDetailsScreen(
         }
         TvNotificationQueue.clear(TV_USENET_PREPARING_NOTIFICATION_TAG)
         TvNotificationQueue.clear(TV_STREAM_RESOLVING_NOTIFICATION_TAG)
-        resolvingEpisodeTarget = null
+        if (state.hasTerminalSourceFailure()) {
+            queueSourceOriginFocusRestore(
+                terminalEpisodeFocusTarget(state, sourcePickerOriginEpisode, resolvingEpisodeTarget),
+            )
+        } else {
+            resolvingEpisodeTarget = null
+        }
         TvNotificationQueue.post(resolveTvDetailMessage(context, error), NotificationType.ERROR)
     }
 
-    LaunchedEffect(state.isLoadingStreams, state.isResolving, state.showStreamPicker, state.resolvedStream) {
-        if (!state.isLoadingStreams && !state.isResolving || state.showStreamPicker || state.resolvedStream != null) {
+    LaunchedEffect(state.showStreamPicker, state.resolvedStream) {
+        if (state.showStreamPicker || state.resolvedStream != null) {
             resolvingEpisodeTarget = null
         }
     }
@@ -414,17 +457,27 @@ fun TvDetailsScreen(
         }
     }
 
-    // Scroll to stream picker and focus the first stream when picker appears
-    LaunchedEffect(state.showStreamPicker, state.streams.size, sourcePickerState != null) {
-        if (sourcePickerState == null && state.showStreamPicker && state.streams.isNotEmpty()) {
-            kotlinx.coroutines.delay(100)
-            val pickerIndex = listState.layoutInfo.totalItemsCount - state.streams.size - 1
-            if (pickerIndex >= 0) {
-                listState.animateScrollToItem(pickerIndex.coerceAtLeast(0))
-            }
-            kotlinx.coroutines.delay(50)
-            runCatching { firstStreamFocusRequester.requestFocus() }
+    // Give the picker an initial focus owner once. Streams arrive incrementally;
+    // keying this effect to their count repeatedly pulled the list back to the
+    // first result while the user was already browsing it.
+    LaunchedEffect(
+        state.showStreamPicker,
+        state.streams.isNotEmpty(),
+        sourcePickerState != null,
+    ) {
+        if (!state.showStreamPicker || state.streams.isEmpty()) {
+            streamPickerFocusInitialized = false
+            return@LaunchedEffect
         }
+        if (sourcePickerState != null || streamPickerFocusInitialized) return@LaunchedEffect
+
+        streamPickerFocusInitialized = true
+        val pickerIndex = listState.layoutInfo.totalItemsCount - state.streams.size - 1
+        if (pickerIndex >= 0) {
+            listState.scrollToItem(pickerIndex)
+        }
+        withFrameNanos { }
+        runCatching { firstStreamFocusRequester.requestFocus() }
     }
 
     LaunchedEffect(state.mediaItem?.tmdbId, state.mediaLifecycleStatus?.state) {
@@ -469,16 +522,15 @@ fun TvDetailsScreen(
         sourcePickerState != null,
     ) {
         if (restoreFocusAfterPreparingCancel && state.preparing == null && sourcePickerState == null) {
-            kotlinx.coroutines.delay(120)
             if (state.showStreamPicker && state.streams.isNotEmpty()) {
                 val pickerIndex = listState.layoutInfo.totalItemsCount - state.streams.size - 1
                 if (pickerIndex >= 0) {
-                    listState.animateScrollToItem(pickerIndex.coerceAtLeast(0))
+                    listState.scrollToItem(pickerIndex.coerceAtLeast(0))
                 }
-                kotlinx.coroutines.delay(50)
+                withFrameNanos { }
                 runCatching { firstStreamFocusRequester.requestFocus() }
             } else {
-                runCatching { playFocusRequester.requestFocus() }
+                queueSourceOriginFocusRestore()
             }
             restoreFocusAfterPreparingCancel = false
         }
@@ -502,6 +554,9 @@ fun TvDetailsScreen(
     LaunchedEffect(state.usenetPlaybackIntent) {
         val intent = state.usenetPlaybackIntent ?: return@LaunchedEffect
         val media = state.mediaItem ?: return@LaunchedEffect
+        sourcePickerOriginEpisode = null
+        pendingEpisodeFocusRestore = null
+        resolvingEpisodeTarget = null
         TvNotificationQueue.clear(TV_USENET_PREPARING_NOTIFICATION_TAG)
         val epName = state.seasonDetail?.episodes
             ?.find { it.episodeNumber == state.streamContextEpisode }?.name.orEmpty()
@@ -532,6 +587,10 @@ fun TvDetailsScreen(
         TvNotificationQueue.clear(TV_STREAM_RESOLVING_NOTIFICATION_TAG)
         // Don't navigate to player if this resolve was for a download action
         if (pendingDownloadAction !is DownloadAction.None) return@LaunchedEffect
+
+        sourcePickerOriginEpisode = null
+        pendingEpisodeFocusRestore = null
+        resolvingEpisodeTarget = null
 
         val urlCandidates = if (resolved.service != null) {
             listOf(resolved.url, resolved.transcodeUrls?.hls, resolved.transcodeUrls?.mp4)
@@ -600,9 +659,15 @@ fun TvDetailsScreen(
     val isBusy = state.isLoadingStreams || state.isResolving
 
     if (state.isLoading && mediaItem == null) {
-        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            CircularProgressIndicator(color = Amber)
-        }
+        val launchArtwork = com.torve.android.ui.components.ContentLaunchArtworkStore.current
+        com.torve.android.ui.components.CinematicContentLoading(
+            title = launchArtwork?.title.orEmpty(),
+            backdropUrl = launchArtwork?.backdropUrl,
+            posterUrl = launchArtwork?.posterUrl,
+            logoUrl = launchArtwork?.logoUrl,
+            tmdbId = launchArtwork?.tmdbId,
+            mediaType = launchArtwork?.type,
+        )
         return
     }
 
@@ -1244,10 +1309,10 @@ fun TvDetailsScreen(
                                         opt.route is PlaybackRoute.LanDesktopStream
                                 }
                                 if (!hasNonProvider) {
-                                    sourcePickerOriginEpisode = null
                                     if (settingsState.canPlayStreams) {
                                         detailViewModel.fetchStreams(season = season, episode = episode)
                                     } else {
+                                        sourcePickerOriginEpisode = null
                                         resolvingEpisodeTarget = null
                                         context.getSharedPreferences("tv_prefs", Context.MODE_PRIVATE)
                                             .edit()
@@ -1642,7 +1707,7 @@ fun TvDetailsScreen(
                     }
                     itemsIndexed(
                         group.items,
-                        key = { index, stream -> "stream_${group.titleRes}_${index}_${stream.streamUiKey()}" },
+                        key = { _, stream -> "stream_${group.titleRes}_${stream.streamUiKey()}" },
                     ) { _, stream ->
                     val startupCandidate = startupCandidateMap[stream.streamUiKey()]
                     val req = if (stream.streamUiKey() == firstStreamKey) {
@@ -1839,11 +1904,23 @@ fun TvDetailsScreen(
     if (preparing != null) {
         TvStreamPreparingOverlay(
             state = preparing,
+            mediaItem = mediaItem?.copy(logoUrl = cinematicLogoUrl ?: mediaItem.logoUrl),
             onCancel = {
                 restoreFocusAfterPreparingCancel = true
                 detailViewModel.cancelPreparing()
             },
             modifier = Modifier.zIndex(80f),
+        )
+    }
+    if (showCinematicSourceLoading) {
+        com.torve.android.ui.components.CinematicContentLoading(
+            title = mediaItem?.title.orEmpty(),
+            backdropUrl = mediaItem?.backdropUrl,
+            posterUrl = mediaItem?.posterUrl,
+            logoUrl = cinematicLogoUrl ?: mediaItem?.logoUrl,
+            tmdbId = mediaItem?.tmdbId,
+            mediaType = mediaItem?.type,
+            modifier = Modifier.fillMaxSize().zIndex(70f),
         )
     }
 
@@ -1864,15 +1941,21 @@ fun TvDetailsScreen(
                 val selectedMediaItem = mediaItem ?: return@TvSourcePickerSheet
                 val selectedSeason = sourcePickerSeason
                 val selectedEpisode = sourcePickerEpisode
+                val selectedOriginEpisode = sourcePickerOriginEpisode
                 restorePlayFocusAfterSourceDismiss = false
-                sourcePickerOriginEpisode = null
                 pendingEpisodeFocusRestore = null
                 sourcePickerState = null
                 sourcePickerMediaItem = null
+                sourcePickerSeason = null
+                sourcePickerEpisode = null
                 if (TvDetailsSourcePickerStateBuilder.isProviderFetchSentinel(option)) {
+                    sourcePickerOriginEpisode = selectedOriginEpisode
+                    resolvingEpisodeTarget = selectedOriginEpisode
                     detailViewModel.fetchStreams(season = selectedSeason, episode = selectedEpisode)
                     return@TvSourcePickerSheet
                 }
+                sourcePickerOriginEpisode = null
+                resolvingEpisodeTarget = null
                 val pickerEpName = state.seasonDetail?.episodes
                     ?.find { it.episodeNumber == selectedEpisode }?.name.orEmpty()
                 when (val route = option.route) {
@@ -1918,6 +2001,8 @@ fun TvDetailsScreen(
                         // A real ProviderStream URL here would be
                         // unusual â€" fall back to fetchStreams to keep
                         // the source disambiguation flow.
+                        sourcePickerOriginEpisode = selectedOriginEpisode
+                        resolvingEpisodeTarget = selectedOriginEpisode
                         detailViewModel.fetchStreams(season = selectedSeason, episode = selectedEpisode)
                     }
                     PlaybackRoute.ReDownload -> {
@@ -2655,6 +2740,7 @@ private fun TvWatchedStatusPill() {
 @Composable
 internal fun TvStreamPreparingOverlay(
     state: com.torve.presentation.detail.PreparingStreamState,
+    mediaItem: MediaItem?,
     onCancel: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -2680,22 +2766,25 @@ internal fun TvStreamPreparingOverlay(
             },
         contentAlignment = Alignment.Center,
     ) {
+        com.torve.android.ui.components.CinematicContentLoading(
+            title = mediaItem?.title.orEmpty(),
+            backdropUrl = mediaItem?.backdropUrl,
+            posterUrl = mediaItem?.posterUrl,
+            logoUrl = mediaItem?.logoUrl,
+            tmdbId = mediaItem?.tmdbId,
+            mediaType = mediaItem?.type,
+        )
         Column(
             modifier = Modifier
+                .align(Alignment.BottomCenter)
                 .widthIn(max = 560.dp)
                 .fillMaxWidth()
-                .padding(horizontal = 48.dp)
+                .padding(horizontal = 48.dp, vertical = 26.dp)
                 .clip(RoundedCornerShape(22.dp))
-                .background(Gunmetal)
-                .padding(horizontal = 40.dp, vertical = 36.dp),
+                .background(Gunmetal.copy(alpha = 0.92f))
+                .padding(horizontal = 40.dp, vertical = 24.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            CircularProgressIndicator(
-                modifier = Modifier.size(64.dp),
-                strokeWidth = 4.dp,
-                color = Amber,
-            )
-            Spacer(Modifier.height(20.dp))
             Text(
                 stringResource(R.string.stream_preparing_title),
                 style = MaterialTheme.typography.headlineMedium,

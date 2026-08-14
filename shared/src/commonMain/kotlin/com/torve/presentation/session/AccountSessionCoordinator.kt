@@ -6,6 +6,7 @@ import com.torve.data.account.AccountSettingsRefreshResult
 import com.torve.data.account.AccountSettingsRepository
 import com.torve.data.account.RemotePlaylistDto
 import com.torve.data.account.isXtreamPlaylist
+import com.torve.data.panda.readPandaDebridActivationSnapshot
 import com.torve.data.addon.AddonSyncService
 import com.torve.data.auth.AuthClient
 import com.torve.data.device.AccessStateDto
@@ -552,6 +553,15 @@ class AccountSessionCoordinator(
     }
 
     /**
+     * Removes an account-backed integration so a later account refresh cannot
+     * restore credentials that the user explicitly disconnected locally.
+     */
+    suspend fun deleteIntegrationFromBackend(integrationType: String): Boolean {
+        val token = authClient.getValidAccessToken() ?: return false
+        return accountSettingsApi.deleteIntegration(token, integrationType)
+    }
+
+    /**
      * Merge new credential keys into an existing integration row server-
      * side. Used to backfill the Panda `management_token` for users who
      * onboarded before that field was persisted at create time —
@@ -1011,6 +1021,21 @@ class AccountSessionCoordinator(
         var integrations = withAccountApiAuthRetry(token) { freshToken ->
             accountSettingsApi.getIntegrations(freshToken)
         }
+        val disconnectedDebridIds = prefsRepo.readPandaDebridActivationSnapshot().disconnectedProviderIds
+        disconnectedDebridIds.forEach { providerId ->
+            debridAccountIntegrationType(providerId)?.let { integrationType ->
+                runCatching {
+                    withAccountApiAuthRetry(token) { freshToken ->
+                        accountSettingsApi.deleteIntegration(freshToken, integrationType)
+                    }
+                }
+            }
+        }
+        integrations = integrations.filterNot { integration ->
+            integrationSecretKeyForRestore(integration.integrationType)
+                ?.pandaDebridProviderId() in disconnectedDebridIds
+        }
+        pruneRemovedAccountDebridCredentials(integrations)
         val uploadedLegacyAutomation = runCatching {
             automationAccountSyncService?.pushLocalIfRemoteMissing(integrations) == true
         }.onFailure { error ->
@@ -1110,6 +1135,14 @@ class AccountSessionCoordinator(
                     )
                 }
                 torveVerboseLog { "[IntegrationRestore] Skipping unknown type: ${integration.integrationType}" }
+                continue
+            }
+            val debridProviderId = secretKey.pandaDebridProviderId()
+            if (
+                debridProviderId != null &&
+                debridProviderId in prefsRepo.readPandaDebridActivationSnapshot().disconnectedProviderIds
+            ) {
+                integrationSecretStore.remove(secretKey)
                 continue
             }
 
@@ -1219,6 +1252,13 @@ class AccountSessionCoordinator(
                             torveVerboseLog { "[IntegrationRestore] TRAKT_TOKENS → restored OK (access+refresh)" }
                         }
                     } else if (secretKey == IntegrationSecretKey.DEBRID_API_KEY_REAL_DEBRID) {
+                        if (
+                            "realdebrid" in
+                            prefsRepo.readPandaDebridActivationSnapshot().disconnectedProviderIds
+                        ) {
+                            integrationSecretStore.remove(secretKey)
+                            continue
+                        }
                         val apiKey = credsMap["api_key"].orEmpty()
                         val refreshToken = credsMap["refresh_token"].orEmpty()
                         val clientId = credsMap["client_id"].orEmpty()
@@ -1317,6 +1357,15 @@ class AccountSessionCoordinator(
                             }
                         }
                     } else {
+                        val refreshedDebridProviderId = secretKey.pandaDebridProviderId()
+                        if (
+                            refreshedDebridProviderId != null &&
+                            refreshedDebridProviderId in
+                            prefsRepo.readPandaDebridActivationSnapshot().disconnectedProviderIds
+                        ) {
+                            integrationSecretStore.remove(secretKey)
+                            continue
+                        }
                         val value = restoredSingleCredentialValue(credsMap)
                         if (!value.isNullOrBlank()) {
                             if (secretKey == IntegrationSecretKey.DEBRID_API_KEY_TORBOX ||
@@ -1380,6 +1429,56 @@ class AccountSessionCoordinator(
             failures = failures,
             issues = issues.distinct(),
         )
+    }
+
+    /**
+     * Account integration metadata is authoritative for account-mode debrid
+     * credentials. Removing a provider on Device A therefore clears a stale
+     * local copy on Device B instead of leaving it usable forever. Device-only
+     * credentials are deliberately untouched.
+     */
+    private suspend fun pruneRemovedAccountDebridCredentials(
+        integrations: List<com.torve.data.account.IntegrationMetadataDto>,
+    ) {
+        val remoteKeys = integrations.mapNotNullTo(hashSetOf()) { integration ->
+            integrationSecretKeyForRestore(integration.integrationType)
+        }
+        val debridKeys = listOf(
+            IntegrationSecretKey.DEBRID_API_KEY_REAL_DEBRID,
+            IntegrationSecretKey.DEBRID_API_KEY_ALL_DEBRID,
+            IntegrationSecretKey.DEBRID_API_KEY_PREMIUMIZE,
+            IntegrationSecretKey.DEBRID_API_KEY_TORBOX,
+        )
+        debridKeys.forEach { key ->
+            if (
+                key !in remoteKeys &&
+                integrationSecretStore.getStorageMode(key) == IntegrationStorageMode.ACCOUNT
+            ) {
+                integrationSecretStore.remove(key)
+                if (key == IntegrationSecretKey.DEBRID_API_KEY_REAL_DEBRID) {
+                    integrationSecretStore.remove(IntegrationSecretKey.DEBRID_RD_REFRESH_TOKEN)
+                    integrationSecretStore.remove(IntegrationSecretKey.DEBRID_RD_CLIENT_ID)
+                    integrationSecretStore.remove(IntegrationSecretKey.DEBRID_RD_CLIENT_SECRET)
+                    prefsRepo.remove(SettingsViewModel.KEY_DEBRID_RD_EXPIRES_AT)
+                }
+            }
+        }
+    }
+
+    private fun IntegrationSecretKey.pandaDebridProviderId(): String? = when (this) {
+        IntegrationSecretKey.DEBRID_API_KEY_REAL_DEBRID -> "realdebrid"
+        IntegrationSecretKey.DEBRID_API_KEY_ALL_DEBRID -> "alldebrid"
+        IntegrationSecretKey.DEBRID_API_KEY_PREMIUMIZE -> "premiumize"
+        IntegrationSecretKey.DEBRID_API_KEY_TORBOX -> "torbox"
+        else -> null
+    }
+
+    private fun debridAccountIntegrationType(providerId: String): String? = when (providerId) {
+        "realdebrid" -> "DEBRID_API_KEY_REAL_DEBRID"
+        "alldebrid" -> "DEBRID_API_KEY_ALL_DEBRID"
+        "premiumize" -> "DEBRID_API_KEY_PREMIUMIZE"
+        "torbox" -> "DEBRID_API_KEY_TORBOX"
+        else -> null
     }
 
     /**

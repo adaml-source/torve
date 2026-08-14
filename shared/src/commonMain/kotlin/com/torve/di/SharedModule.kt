@@ -46,6 +46,8 @@ import com.torve.data.profile.ProfileRepositoryImpl
 import com.torve.data.shelf.ShelfConfigRepositoryImpl
 import com.torve.data.kodi.KodiClient
 import com.torve.data.pairing.PairingApi
+import com.torve.data.panda.pandaProviderId
+import com.torve.data.panda.readPandaDebridActivationSnapshot
 import com.torve.data.channels.CatchupResolver
 import com.torve.data.channels.EpgParser
 import com.torve.data.channels.ChannelRepositoryImpl
@@ -184,8 +186,12 @@ val sharedModule = module {
     single {
         val client = DebridClient(get(), get(), get())
         val secretStore: com.torve.domain.integrations.IntegrationSecretStore = get()
+        val preferences: com.torve.domain.repository.PreferencesRepository = get()
         val settingsRefreshNotifier: com.torve.presentation.settings.SettingsRefreshNotifier = get()
         client.rdTokenRefresher = com.torve.data.debrid.RdTokenRefresher {
+            if (
+                "realdebrid" in preferences.readPandaDebridActivationSnapshot().disconnectedProviderIds
+            ) return@RdTokenRefresher null
             val refreshToken = secretStore.get(com.torve.domain.integrations.IntegrationSecretKey.DEBRID_RD_REFRESH_TOKEN)
             val clientId = secretStore.get(com.torve.domain.integrations.IntegrationSecretKey.DEBRID_RD_CLIENT_ID)
             val clientSecret = secretStore.get(com.torve.domain.integrations.IntegrationSecretKey.DEBRID_RD_CLIENT_SECRET)
@@ -196,6 +202,9 @@ val sharedModule = module {
             }
             try {
                 val tokens = client.rdRefreshAccessToken(refreshToken, clientId, clientSecret)
+                if (
+                    "realdebrid" in preferences.readPandaDebridActivationSnapshot().disconnectedProviderIds
+                ) return@RdTokenRefresher null
                 torveVerboseLog { "TORVE_RD: refresh succeeded newTokenLength=${tokens.accessToken.length}" }
                 secretStore.put(com.torve.domain.integrations.IntegrationSecretKey.DEBRID_API_KEY_REAL_DEBRID, tokens.accessToken)
                 secretStore.put(com.torve.domain.integrations.IntegrationSecretKey.DEBRID_RD_REFRESH_TOKEN, tokens.refreshToken)
@@ -338,7 +347,12 @@ val sharedModule = module {
             subscriptionRepository = get(),
         )
     }
-    single { AccelerationInventorySyncService(get(), get(), get()) }
+    single {
+        val prefs = get<com.torve.domain.repository.PreferencesRepository>()
+        AccelerationInventorySyncService(get(), get(), get()) { provider ->
+            prefs.readPandaDebridActivationSnapshot().isEnabled(provider.pandaProviderId())
+        }
+    }
 
     // User ID provider for DB scoping. Uses a lazy AuthClient lookup so it can be
     // wired into PreferencesRepositoryImpl without forming a circular dependency
@@ -421,7 +435,7 @@ val sharedModule = module {
     }
 
     // Channel Repository
-    single<ChannelRepository> { ChannelRepositoryImpl(get(), get(), get(), get(), get(), get(), get()) }
+    single<ChannelRepository> { ChannelRepositoryImpl(get(), get(), get(), get(), get(), get(), get(), get()) }
 
     // Download Repository
     single<DownloadRepository> { DownloadRepositoryImpl(get(), get()) }
@@ -712,10 +726,14 @@ val sharedModule = module {
         })
     }
     single {
+        val prefs = get<com.torve.domain.repository.PreferencesRepository>()
         com.torve.data.sourceavailability.DebridCacheSourceAvailabilityProvider(
             streamRepository = get(),
             secretStore = get(),
             tmdbToImdbResolver = get(qualifier = named("availability.tmdb_to_imdb")),
+            isProviderEnabled = { provider ->
+                prefs.readPandaDebridActivationSnapshot().isEnabled(provider.pandaProviderId())
+            },
         )
     }
     single {
@@ -936,11 +954,11 @@ val sharedModule = module {
         )
     }
     single { com.torve.data.panda.PandaApiClient(get(), get()) }
-    // Singleton mirror so provider-health checkers can read the Panda
-    // wizard's current config without holding a (factory-bound) VM
-    // reference. The VM publishes its `_state` here on every update.
+    // Singleton mirror so provider-health checkers can read the latest Panda config.
     single { com.torve.presentation.panda.PandaConfigStateStore() }
-    factory {
+    // Keep one account-scoped activation projection so startup, mobile, TV, and
+    // desktop cannot race independent cached copies of the same Panda config.
+    single {
         com.torve.presentation.panda.PandaSetupViewModel(
             get(), get(), get(), get(), get(), get(), get(), get(),
             configStateStore = get(),
