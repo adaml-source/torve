@@ -175,6 +175,13 @@ foreach ($locale in @('en', 'de', 'es', 'fr', 'it', 'pt', 'tr')) {
     if ($localeCopy -notmatch 'openConnectionSetup:' -or $localeCopy -notmatch 'PANDA_ADDON:') {
         throw "Connections localization is incomplete for locale '$locale'."
     }
+    $releaseStatusLines = @($localeCopy -split "`r?`n" | Where-Object {
+        $_ -match '^\s*(launchNote|ctaSub):'
+    })
+    if ($releaseStatusLines.Count -ne 2) {
+        throw "Connections locale '$locale' must define launchNote and ctaSub exactly once."
+    }
+    $releaseStatusCopy = $releaseStatusLines -join [Environment]::NewLine
     foreach ($staleReleasePhrase in @(
         'Launching soon',
         'Bald verfügbar',
@@ -184,7 +191,7 @@ foreach ($locale in @('en', 'de', 'es', 'fr', 'it', 'pt', 'tr')) {
         'Em breve',
         'Yakında'
     )) {
-        if ($localeCopy.IndexOf($staleReleasePhrase, [StringComparison]::OrdinalIgnoreCase) -ge 0) {
+        if ($releaseStatusCopy.IndexOf($staleReleasePhrase, [StringComparison]::OrdinalIgnoreCase) -ge 0) {
             throw "Connections locale '$locale' still contains stale release copy: '$staleReleasePhrase'."
         }
     }
