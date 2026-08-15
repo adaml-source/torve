@@ -504,6 +504,7 @@ class MetadataRepositoryImpl(
         withWatchProviders: String?,
         watchRegion: String?,
         withKeywords: String?,
+        withCompanies: String?,
     ): PagedResult {
         val cacheKey = metadataCacheKey(
             "discover",
@@ -527,6 +528,7 @@ class MetadataRepositoryImpl(
             withWatchProviders,
             watchRegion,
             withKeywords,
+            withCompanies,
         )
         return cachedMetadata(cacheKey, METADATA_LIST_TTL_MS) {
         if (type == "tv") {
@@ -546,6 +548,7 @@ class MetadataRepositoryImpl(
                 withWatchProviders,
                 watchRegion,
                 withKeywords,
+                withCompanies,
                 requestCategory = "catalog.discover.$type.page_$page",
             )
             PagedResult(
@@ -575,6 +578,7 @@ class MetadataRepositoryImpl(
                 withWatchProviders,
                 watchRegion,
                 withKeywords,
+                withCompanies,
                 requestCategory = "catalog.discover.$type.page_$page",
             )
             PagedResult(

@@ -4,7 +4,9 @@ Historical release-hardening document. Any references to paid access, entitlemen
 
 Current canonical positioning: Torve is free software. There are no subscriptions, no paid tiers, no premium features, and no purchase required. Donations are optional and never unlock features.
 
-This private repository should not be made public directly. The public release should be created from a fresh sanitized source export after final audit.
+The repository is public. Build releases from a reviewed commit and immutable
+source tag, while keeping production credentials, signing keys, and generated
+deployment state outside Git.
 
 This document is the operator-facing checklist for taking Torve from
 internal preview to public beta / release. It pairs with the existing
@@ -63,7 +65,7 @@ rotation requires an explicit re-encryption/re-wrap migration; there is
 | `TORVE_RELEASE_BUILD=1` | CI release pipelines | Refuses to bypass missing-VLC gate via `TORVE_PACKAGE_ALLOW_MISSING_RUNTIME` |
 | `TORVE_PACKAGE_ALLOW_MISSING_RUNTIME=1` | Local dev only | Downgrades the VLC-runtime gate to a warning. Refused when `TORVE_RELEASE_BUILD=1`. |
 | `TORVE_UPDATE_FEED` *or* `TORVE_UPDATE_REPO` | In-app updater enabled (runtime override) | Wins over the baked-in URL. Use for dev / QA / Sandbox smoke. Updater idle when neither this nor a baked-in URL is set. |
-| `-PtorveUpdateFeed=…` *or* `TORVE_UPDATE_FEED` at packaging time | **Production builds** | Baked into `Torve.cfg` as `-Dtorve.update.feed=…` so the in-app updater works for end users without any env-var ceremony. Example: `./gradlew :desktopApp:packageMsiCloseApp -PtorveUpdateFeed=https://torve.example/releases/appcast.xml`. The runtime resolver (`UpdateChecker.resolveDefaultFeed`) prefers the env var when present so a packaged build can still be redirected at runtime. |
+| `-PtorveUpdateFeed=…` *or* `TORVE_UPDATE_FEED` at packaging time | **Staging override** | Production packages default to `https://api.torve.app/releases/appcast.xml` and bake it into `Torve.cfg`; these inputs override that URL for QA. `verifyPackagedDesktopUpdateMetadata` rejects blank/non-HTTPS feeds and missing version metadata. The runtime resolver (`UpdateChecker.resolveDefaultFeed`) still prefers the env var when present. |
 | `-PtorveUpdateRepo=…` | Optional GitHub-Releases fallback | Same precedence as the feed flag. Compiled into `-Dtorve.update.repo=…`. Used when the feed URL is unset and the user wants the GitHub `releases/latest` JSON path. |
 | `TORVE_TELEMETRY_SINK` | Optional | `println` for dev logging; unset = NoOp. **All sinks are wrapped in a redacting decorator.** |
 | `SENTRY_DSN` (or whatever `SentryBootstrap.DSN_ENV` resolves to) | Crash reporting | Reporting disabled when unset |

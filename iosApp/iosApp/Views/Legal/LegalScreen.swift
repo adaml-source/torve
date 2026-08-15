@@ -62,7 +62,7 @@ struct LegalScreen: View {
             Section("Data Sources") {
                 dataSourceRow(
                     name: "TMDB",
-                    description: "Movie and TV show metadata provided by The Movie Database (TMDB). This product uses the TMDB API but is not endorsed or certified by TMDB."
+                    description: "Movie and TV show metadata provided by The Movie Database (TMDB). This product uses the TMDB API but is not endorsed or certified by TMDB. Watch-provider availability data supplied through TMDB is powered by JustWatch."
                 )
                 dataSourceRow(
                     name: "Trakt",

@@ -161,7 +161,7 @@ import com.torve.presentation.watchlist.WatchlistViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
@@ -1642,18 +1642,24 @@ fun TvRoot(
 
     // Notification collector — show each notification for 2.4s then clear
     LaunchedEffect(Unit) {
-        TvNotificationQueue.events.collectLatest { notification ->
+        var autoDismissJob: Job? = null
+        TvNotificationQueue.events.collect { notification ->
             if (notification.clear) {
-                if (notification.tag == null || activeNotification?.tag == notification.tag) {
+                if (shouldClearTvNotification(activeNotification, notification)) {
+                    autoDismissJob?.cancel()
+                    autoDismissJob = null
                     activeNotification = null
                 }
-                return@collectLatest
+                return@collect
             }
+            autoDismissJob?.cancel()
             activeNotification = notification
-            notification.durationMs?.let { durationMs ->
-                delay(durationMs)
-                if (activeNotification?.tag == notification.tag && activeNotification?.message == notification.message) {
-                    activeNotification = null
+            autoDismissJob = notification.durationMs?.let { durationMs ->
+                launch {
+                    delay(durationMs)
+                    if (activeNotification == notification) {
+                        activeNotification = null
+                    }
                 }
             }
         }

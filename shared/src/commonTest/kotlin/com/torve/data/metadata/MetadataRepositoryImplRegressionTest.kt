@@ -133,6 +133,58 @@ class MetadataRepositoryImplRegressionTest {
         assertEquals(1, requests)
     }
 
+    @Test
+    fun discoverySendsGlobalMovieStudioFilterToTmdb() = runTest {
+        var requestedCompanies: String? = null
+        val repo = MetadataRepositoryImpl(
+            api = TmdbApiClient(
+                HttpClient(
+                    MockEngine { request ->
+                        requestedCompanies = request.url.parameters["with_companies"]
+                        respond(
+                            content = movieResponse("Studio result"),
+                            status = HttpStatusCode.OK,
+                            headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                        )
+                    },
+                ) {
+                    install(ContentNegotiation) { json(jsonConfig()) }
+                },
+                resolvedHostProvider = { listOf("127.0.0.1") },
+            ),
+        )
+
+        repo.discover(type = "movie", withCompanies = "2|420")
+
+        assertEquals("2|420", requestedCompanies)
+    }
+
+    @Test
+    fun discoveryMapsTvStudioFilterToTmdbNetworks() = runTest {
+        var requestedNetworks: String? = null
+        val repo = MetadataRepositoryImpl(
+            api = TmdbApiClient(
+                HttpClient(
+                    MockEngine { request ->
+                        requestedNetworks = request.url.parameters["with_networks"]
+                        respond(
+                            content = tvResponse("Network result"),
+                            status = HttpStatusCode.OK,
+                            headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                        )
+                    },
+                ) {
+                    install(ContentNegotiation) { json(jsonConfig()) }
+                },
+                resolvedHostProvider = { listOf("127.0.0.1") },
+            ),
+        )
+
+        repo.discover(type = "tv", withCompanies = "49|213")
+
+        assertEquals("49|213", requestedNetworks)
+    }
+
     private fun httpClientWithRoutes(
         successRoutes: Boolean,
         failingPaths: Set<String> = emptySet(),

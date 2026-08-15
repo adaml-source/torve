@@ -509,7 +509,7 @@ private fun DesktopOnboardingRail(
             if (DesktopAdmissionRequirement.ONBOARDING_COMPLETED in snapshot.missingRequirements) {
                 TorveBanner(
                     title = "Finish onboarding",
-                    description = "Set up with Panda or click \"Skip for now\" to enter Torve.",
+                    description = "Choose what you want to connect, or click \"Skip and explore\" to enter Torve.",
                     tone = TorveBannerTone.Warning,
                 )
             }
@@ -685,11 +685,8 @@ private fun DesktopSetupPane(
             )
         }
 
-        // Panda-primary hub. Onboarding is now a single decision:
-        // "Set up with Panda" (recommended), "Skip for now", or
-        // "Configure individual sources" (deep-links to Settings →
-        // Integrations post-admission). The legacy four-card hub
-        // and seven-step guided wizard were retired 2026-05-03.
+        // Outcome-first hub. The user chooses what they want to accomplish;
+        // implementation-specific setup surfaces open after admission.
         //
         // Helper: deep-link + complete onboarding. Errors land on
         // completionError so the hub banner shows them.
@@ -707,10 +704,22 @@ private fun DesktopSetupPane(
                     }
                 }
             DesktopSetupIntentHub(
-                onSetUpWithPanda = {
+                onSetUpStreamingSources = {
                     deepLinkAndComplete(
-                        DesktopOnboardingDeepLink.Target.PandaSetup,
-                        SetupIntent.USENET,
+                        DesktopOnboardingDeepLink.Target.StreamingSources,
+                        SetupIntent.DEBRID,
+                    )
+                },
+                onConnectPersonalLibrary = {
+                    deepLinkAndComplete(
+                        DesktopOnboardingDeepLink.Target.PersonalLibrary,
+                        SetupIntent.PLEX_JELLYFIN,
+                    )
+                },
+                onAddLiveTv = {
+                    deepLinkAndComplete(
+                        DesktopOnboardingDeepLink.Target.LiveTv,
+                        SetupIntent.IPTV,
                     )
                 },
                 onSkipForNow = {
@@ -722,12 +731,6 @@ private fun DesktopSetupPane(
                             ?.message
                         isCompleting = false
                     }
-                },
-                onConfigureSourcesIndividually = {
-                    deepLinkAndComplete(
-                        DesktopOnboardingDeepLink.Target.Integrations,
-                        SetupIntent.PLEX_JELLYFIN,
-                    )
                 },
                 onShowQrReceive = { showQrReceive = true },
                 isCompleting = isCompleting,

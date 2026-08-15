@@ -969,17 +969,17 @@ private fun NotConfiguredBanner(redacted: Boolean, onOpenPandaSetup: () -> Unit)
     ) {
         Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Text(
-                text = if (redacted) "Panda credentials are masked"
-                    else "No NZB indexer configured in Panda",
+                text = if (redacted) "Streaming credentials are masked"
+                    else "No NZB indexer configured",
                 style = MaterialTheme.typography.titleSmall,
                 fontWeight = FontWeight.SemiBold,
                 color = Snow,
             )
             Text(
                 text = if (redacted)
-                    "Panda has an indexer configured but won't share the API key with this device. Re-paste the key in Panda → Usenet → Update."
+                    "An indexer is configured but its API key is unavailable on this device. Re-paste it in Settings → Connections → Streaming sources → Usenet."
                 else
-                    "Set up Usenet via Settings → Connections → Panda → Usenet step. The Sports page reads its credentials directly from Panda.",
+                    "Set up Usenet via Settings → Connections → Streaming sources → Usenet.",
                 style = MaterialTheme.typography.bodySmall,
                 color = Torve.colors.textSecondary,
             )

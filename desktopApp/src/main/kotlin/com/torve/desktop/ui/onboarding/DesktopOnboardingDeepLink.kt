@@ -1,5 +1,7 @@
 package com.torve.desktop.ui.onboarding
 
+import java.util.concurrent.atomic.AtomicReference
+
 /**
  * Hand-off slot for deep-links the user requested **during** onboarding
  * (e.g. "I want to set up Plex/Jellyfin now") that can only be acted on
@@ -18,19 +20,21 @@ package com.torve.desktop.ui.onboarding
 class DesktopOnboardingDeepLink {
 
     sealed interface Target {
-        /** Open Settings → Integrations (Plex / Jellyfin / Trakt / Simkl). */
-        data object Integrations : Target
+        /** Open the guided Debrid / Usenet connection flow. */
+        data object StreamingSources : Target
 
-        /** Open Panda multi-step setup (Usenet stack). */
-        data object PandaSetup : Target
+        /** Open Settings → Integrations (Plex / Jellyfin / Trakt / Simkl). */
+        data object PersonalLibrary : Target
+
+        /** Open Settings → Playlists for M3U / Xtream Live TV. */
+        data object LiveTv : Target
     }
 
-    @Volatile
-    private var pending: Target? = null
+    private val pending = AtomicReference<Target?>(null)
 
     /** Onboarding writes the deep-link before triggering completion. */
     fun set(target: Target) {
-        pending = target
+        pending.set(target)
     }
 
     /**
@@ -39,8 +43,6 @@ class DesktopOnboardingDeepLink {
      * landing still works.
      */
     fun consume(): Target? {
-        val current = pending
-        pending = null
-        return current
+        return pending.getAndSet(null)
     }
 }

@@ -4206,7 +4206,7 @@ internal fun TvSettingsScreen(
                             else -> stringResource(R.string.tv_settings_panda_setup_desc)
                         }
                         TvSettingCard(
-                            title = "Panda",
+                            title = "Debrid & Usenet",
                             subtitle = subtitle,
                             modifier = Modifier.fillMaxWidth().focusProperties {
                                 left = railFocusRequester
@@ -4234,13 +4234,13 @@ internal fun TvSettingsScreen(
                             debridProviderSummary != null -> debridProviderSummary
                             settingsState.debridDeviceCode != null -> "$providerLabel authorization is in progress"
                             settingsState.debridConnected -> settingsState.debridUser?.username?.let {
-                                "$providerLabel connected as $it - managed by Panda"
-                            } ?: "$providerLabel connected - managed by Panda"
+                                "$providerLabel connected as $it"
+                            } ?: "$providerLabel connected"
                             debridError != null -> stringResource(
                                 R.string.tv_settings_realdebrid_managed_reconnect,
                                 debridError,
                             )
-                            else -> "Managed by Panda: Real-Debrid, AllDebrid, Premiumize, TorBox"
+                            else -> "Connect Real-Debrid, AllDebrid, Premiumize, or TorBox"
                         }
                         TvSettingCard(
                             title = "Debrid services",
@@ -4265,7 +4265,7 @@ internal fun TvSettingsScreen(
                                 verticalArrangement = Arrangement.spacedBy(8.dp),
                             ) {
                                 Text(
-                                    text = "Connect debrid through Panda",
+                                    text = "Connect a Debrid service",
                                     style = MaterialTheme.typography.titleMedium,
                                     color = Snow,
                                     fontWeight = FontWeight.SemiBold,
@@ -7698,7 +7698,7 @@ private fun buildDebridProviderSummary(
     }
     val anyDebridRows = entries.any { it.category == ProviderHealthCategory.DEBRID }
     return if (anyDebridRows) {
-        "No debrid services connected. Open Panda to add Real-Debrid, TorBox, AllDebrid, or Premiumize."
+        "No debrid services connected. Open streaming setup to add Real-Debrid, TorBox, AllDebrid, or Premiumize."
     } else {
         null
     }

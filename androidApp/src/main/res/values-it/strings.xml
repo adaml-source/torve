@@ -449,10 +449,10 @@
     <string name="addon_category_subtitles">Sottotitoli</string>
 
     <!-- Manage Panda Screen -->
-    <string name="manage_panda_title">Panda</string>
-    <string name="manage_panda_not_installed">Panda non è ancora installato. Installalo per ottenere una configurazione guidata dello streaming con configurazione lato server.</string>
-    <string name="manage_panda_install">Installa Panda</string>
-    <string name="manage_panda_remove">Rimuovi Panda</string>
+    <string name="manage_panda_title">Sorgenti streaming</string>
+    <string name="manage_panda_not_installed">Le sorgenti streaming non sono ancora configurate. Avvia la procedura guidata per collegare Debrid o Usenet.</string>
+    <string name="manage_panda_install">Configura sorgenti</string>
+    <string name="manage_panda_remove">Rimuovi configurazione sorgenti</string>
     <string name="manage_panda_open_config">Apri configurazione</string>
     <string name="manage_panda_enabled">Attivato</string>
     <string name="manage_panda_version">Versione %1$s</string>
@@ -462,7 +462,7 @@
     <!-- Panda Native Setup -->
     <string name="panda_setup_title">Configura Panda</string>
     <string name="panda_setup_provider_title">Scegli il tuo provider</string>
-    <string name="panda_setup_provider_desc">Seleziona il servizio debrid che vuoi utilizzare con Panda.</string>
+    <string name="panda_setup_provider_desc">Seleziona il servizio debrid che vuoi utilizzare con Torve.</string>
     <string name="panda_setup_auth_title">Connetti %1$s</string>
     <string name="panda_setup_auth_oauth">Accedi con il browser</string>
     <string name="panda_setup_auth_apikey">Inserisci chiave API</string>
@@ -484,7 +484,7 @@
     <string name="panda_setup_review_save">Salva &amp; Installa</string>
     <string name="panda_setup_review_update">Aggiorna configurazione</string>
     <string name="panda_setup_review_saving">Salvataggio…</string>
-    <string name="panda_setup_review_success">Panda installato e pronto.</string>
+    <string name="panda_setup_review_success">Le sorgenti streaming sono collegate e pronte.</string>
     <string name="panda_setup_review_done">Fatto</string>
     <string name="panda_setup_web_fallback">Configura sul web</string>
     <string name="panda_setup_reconfigure">Riconfigura</string>
@@ -517,7 +517,7 @@
     <string name="panda_setup_usenet_indexer_url">URL personalizzato dell\'indexer</string>
     <string name="panda_setup_usenet_client">Client di download</string>
     <string name="panda_setup_sources_title">Fonti torrent</string>
-    <string name="panda_setup_sources_desc">Scegli le fonti torrent che Panda deve cercare. Le impostazioni predefinite vanno bene per la maggior parte degli utenti.</string>
+    <string name="panda_setup_sources_desc">Scegli le fonti torrent che Torve deve cercare. Le impostazioni predefinite vanno bene per la maggior parte degli utenti.</string>
     <string name="panda_setup_usenet_indexer_none">Nessuno</string>
     <string name="panda_setup_usenet_indexer_custom">URL personalizzato</string>
     <string name="panda_setup_usenet_client_none">Nessuno</string>
@@ -1657,8 +1657,8 @@
     <string name="setup_feature_download">Salva contenuti per l\'accesso offline</string>
     <string name="setup_cloud_desc">Connetti il tuo servizio di ottimizzazione streaming per una riproduzione più veloce.</string>
     <string name="setup_panda_title">Configurazione consigliata</string>
-    <string name="setup_panda_desc">Usa Panda per la configurazione più semplice. Lì configuri provider, debrid e qualità in un unico flusso guidato.</string>
-    <string name="setup_panda_open_setup">Apri configurazione Panda</string>
+    <string name="setup_panda_desc">Collega Debrid o Usenet e scegli la qualità in un unico flusso guidato.</string>
+    <string name="setup_panda_open_setup">Configura sorgenti streaming</string>
     <string name="setup_panda_advanced">Configurazione manuale avanzata</string>
     <string name="setup_panda_advanced_desc">Continua a usare qui la configurazione diretta di provider e chiave API se vuoi il massimo controllo manuale.</string>
     <string name="legal_document_loading">Caricamento documento…</string>
@@ -1901,9 +1901,9 @@
     <string name="verify_gate_body_email">Abbiamo inviato un link di conferma a %1$s. Confermalo, poi continua la configurazione.</string>
     <string name="verify_gate_confirmed">Ho confermato la mia email</string>
     <string name="verify_gate_send_again">Invia di nuovo l’email</string>
-    <string name="verify_gate_next">Avanti: scegli come vuoi guardare. Usa Panda per Debrid/Usenet, aggiungi IPTV per la TV live o collega Plex/Jellyfin.</string>
+    <string name="verify_gate_next">Avanti: scegli come vuoi guardare. Collega Debrid o Usenet, aggiungi IPTV per la TV live o collega Plex/Jellyfin.</string>
     <string name="verify_gate_different_account">Usa un altro account</string>
-    <string name="panda_setup_nudge_title">Configura Panda</string>
+    <string name="panda_setup_nudge_title">Configura sorgenti streaming</string>
     <string name="panda_setup_nudge_body">Il modo più semplice per abilitare la scoperta principale delle fonti di Torve: una procedura guidata configura Debrid + Usenet per te.</string>
     <string name="voice_input_no_input">Nessun input vocale rilevato</string>
     <string name="voice_input_unavailable">L’input vocale non è disponibile su questo dispositivo</string>
@@ -2120,7 +2120,7 @@
     <string name="panda_setup_type_title">Scegli il tipo di configurazione</string>
     <string name="panda_setup_type_desc">Inizia con lo streaming cloud debrid oppure passa direttamente alla configurazione Usenet.</string>
     <string name="panda_setup_type_debrid_title">Debrid</string>
-    <string name="panda_setup_type_debrid_subtitle">Usa Real-Debrid, AllDebrid, Premiumize, TorBox o un altro servizio debrid supportato da Panda.</string>
+    <string name="panda_setup_type_debrid_subtitle">Usa Real-Debrid, AllDebrid, Premiumize, TorBox o un altro servizio debrid supportato.</string>
     <string name="panda_setup_type_usenet_title">Solo Usenet</string>
     <string name="panda_setup_type_usenet_subtitle">Salta debrid e configura Usenet, indicizzatori e un client di download.</string>
     <string name="panda_setup_auth_choose_title">Connetti provider debrid</string>
@@ -2194,4 +2194,17 @@
     <string name="detail_library_request_available">Disponibile nella tua libreria</string>
     <string name="detail_library_request_retry">Riprova la richiesta alla libreria</string>
     <string name="detail_library_refresh">Aggiorna stato della libreria</string>
+    <string name="app_update_channel_name">Aggiornamenti di Torve</string>
+    <string name="app_update_channel_description">Notifiche quando è disponibile una nuova versione di Torve</string>
+    <string name="app_update_notification_title">Torve %1$s è disponibile</string>
+    <string name="app_update_notification_body">È pronto un nuovo aggiornamento. Seleziona Scarica e installa per aggiornare Torve.</string>
+    <string name="app_update_download_install">Scarica e installa</string>
+    <string name="app_update_later">Più tardi</string>
+    <string name="app_update_downloading">Download dell’aggiornamento firmato Torve %1$s…</string>
+    <string name="app_update_verifying">Verifica dell’aggiornamento scaricato…</string>
+    <string name="app_update_permission_required">Consenti a Torve di installare questo aggiornamento firmato, quindi torna per continuare.</string>
+    <string name="app_update_allow_installation">Consenti installazione</string>
+    <string name="app_update_opening_installer">Apertura del programma di installazione di sistema…</string>
+    <string name="app_update_download_failed">Impossibile scaricare o verificare l’aggiornamento. Riprova.</string>
+    <string name="app_update_retry">Riprova</string>
 </resources>

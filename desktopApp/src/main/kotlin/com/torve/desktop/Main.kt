@@ -209,8 +209,8 @@ fun desktopNotify(title: String, body: String) {
 /**
  * Process-wide UpdateChecker singleton. Created once at startup with the
  * release version; surfaces (banner, File menu) read the same instance.
- * Disabled (no-op) when neither `TORVE_UPDATE_REPO` nor `TORVE_UPDATE_FEED`
- * is set in the environment.
+ * Disabled (no-op) only when neither a packaged feed nor a runtime override
+ * is configured. Production packages bake in the official Torve feed.
  */
 @Volatile
 internal var globalUpdateChecker: com.torve.desktop.updates.UpdateChecker? = null
@@ -249,6 +249,17 @@ private val launchFullscreen: Boolean =
         ?: System.getProperty("torve.desktop.loginFullscreenPreview", "true").toBoolean()
 
 fun main() {
+    if (!com.torve.desktop.launch.acquireDesktopSingleInstance()) {
+        if (!java.awt.GraphicsEnvironment.isHeadless()) {
+            javax.swing.JOptionPane.showMessageDialog(
+                null,
+                "Torve is already running.",
+                "Torve",
+                javax.swing.JOptionPane.INFORMATION_MESSAGE,
+            )
+        }
+        return
+    }
     // Splash BEFORE application { ... } starts composing. The Compose
     // Window won't become visible for ~350ms, and even then the
     // iconify dance briefly minimizes/restores it -- showing the

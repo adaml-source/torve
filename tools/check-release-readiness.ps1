@@ -20,6 +20,18 @@ try {
         }
     }
 
+    # Root-level UI dumps and smoke screenshots are useful locally but must
+    # never enter a release commit or public source archive.
+    $forbiddenTrackedDiagnostics = @(
+        git ls-files |
+            Where-Object {
+                $_ -match '^(focus-.*\.xml|hero-.*\.xml|provider-.*\.png)$'
+            }
+    )
+    if ($forbiddenTrackedDiagnostics.Count -gt 0) {
+        throw "Tracked local diagnostic artifacts found: $($forbiddenTrackedDiagnostics -join ', '). Remove them from version control before release."
+    }
+
     & powershell -NoProfile -ExecutionPolicy Bypass -File `
         (Join-Path $PSScriptRoot "check-release-version-alignment.ps1") `
         -ManifestPath $ManifestPath
@@ -62,7 +74,7 @@ try {
             @{ Name = "Amazon TV R8 mapping"; Pattern = "androidApp\build\outputs\mapping\amazonTvRelease\mapping.txt" },
             @{ Name = "Google TV R8 mapping"; Pattern = "androidApp\build\outputs\mapping\googleTvRelease\mapping.txt" },
             @{ Name = "Google mobile R8 mapping"; Pattern = "androidApp\build\outputs\mapping\googleMobileRelease\mapping.txt" },
-            @{ Name = "Windows MSI"; Pattern = "desktopApp\build\compose\binaries\main\msi\*.msi" }
+            @{ Name = "Windows MSI"; Pattern = "desktopApp\build\compose\binaries\main-closeapp\msi\*.msi" }
         )
 
         foreach ($requirement in $requirements) {
@@ -78,6 +90,20 @@ try {
                 sha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $newest.FullName).Hash.ToLowerInvariant()
                 writtenUtc = $newest.LastWriteTimeUtc.ToString("o")
             }
+        }
+
+        $desktopConfigPath = Join-Path $repoRoot "desktopApp\build\compose\binaries\main\app\Torve\app\Torve.cfg"
+        if (-not (Test-Path -LiteralPath $desktopConfigPath -PathType Leaf)) {
+            throw "Missing packaged desktop launcher config: $desktopConfigPath."
+        }
+        $feedPrefix = "java-options=-Dtorve.update.feed="
+        $feedLine = Get-Content -LiteralPath $desktopConfigPath |
+            Where-Object { $_.Trim().StartsWith($feedPrefix) } |
+            Select-Object -First 1
+        $feedUrl = if ($null -ne $feedLine) { $feedLine.Trim().Substring($feedPrefix.Length) } else { "" }
+        $parsedFeed = $null
+        if (-not [Uri]::TryCreate($feedUrl, [UriKind]::Absolute, [ref]$parsedFeed) -or $parsedFeed.Scheme -ne "https") {
+            throw "Packaged desktop updater feed must be a non-blank HTTPS URL; found '$feedUrl'."
         }
     }
 

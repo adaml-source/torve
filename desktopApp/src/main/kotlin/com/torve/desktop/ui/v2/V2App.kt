@@ -211,11 +211,15 @@ fun V2App(
     var settingsLandingCategory by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(onboardingDeepLink) {
         when (onboardingDeepLink?.consume()) {
-            com.torve.desktop.ui.onboarding.DesktopOnboardingDeepLink.Target.Integrations -> {
+            com.torve.desktop.ui.onboarding.DesktopOnboardingDeepLink.Target.PersonalLibrary -> {
                 settingsLandingCategory = "INTEGRATIONS"
                 settingsOpen = true
             }
-            com.torve.desktop.ui.onboarding.DesktopOnboardingDeepLink.Target.PandaSetup -> {
+            com.torve.desktop.ui.onboarding.DesktopOnboardingDeepLink.Target.LiveTv -> {
+                settingsLandingCategory = "PLAYLISTS"
+                settingsOpen = true
+            }
+            com.torve.desktop.ui.onboarding.DesktopOnboardingDeepLink.Target.StreamingSources -> {
                 pandaSetupOpen = true
             }
             null -> Unit
@@ -475,7 +479,7 @@ fun V2App(
             }.orEmpty()
         } else ""
         if (torboxKey.isBlank()) {
-            premiumGateReason = "TorBox isn't configured. Open Manage Panda → Download client → TorBox to enable usenet playback."
+            premiumGateReason = "TorBox isn't configured. Open Settings → Connections → Streaming sources and choose TorBox as the download client."
             return
         }
         val isSeries = item.type == com.torve.domain.model.MediaType.SERIES

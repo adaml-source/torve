@@ -112,7 +112,7 @@ fun SetupIntentHubScreen(
             fontWeight = FontWeight.Bold,
         )
         Text(
-            text = "Start with one source. Panda covers Debrid and Usenet; IPTV is separate for live TV; Plex/Jellyfin connects your existing library.",
+            text = "Start with one source. Connect Debrid or Usenet for streaming, IPTV for live TV, or Plex/Jellyfin for an existing library.",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )

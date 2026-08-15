@@ -455,6 +455,7 @@ class TmdbApiClient(
         withWatchProviders: String? = null,
         watchRegion: String? = null,
         withKeywords: String? = null,
+        withCompanies: String? = null,
         requestCategory: String = "tmdb.discover.movie",
     ): TmdbResponse<TmdbMovie> {
         return get(
@@ -481,6 +482,7 @@ class TmdbApiClient(
                 withWatchProviders?.let { add("with_watch_providers" to it) }
                 watchRegion?.let { add("watch_region" to it) }
                 withKeywords?.let { add("with_keywords" to it) }
+                withCompanies?.let { add("with_companies" to it) }
                 // Rating-sorted discovery is otherwise dominated by lightly
                 // voted titles and requires excessive external verification.
                 add("vote_count.gte" to if (sortBy == "vote_average.desc") 500 else 100)
@@ -504,6 +506,7 @@ class TmdbApiClient(
         withWatchProviders: String? = null,
         watchRegion: String? = null,
         withKeywords: String? = null,
+        withCompanies: String? = null,
         requestCategory: String = "tmdb.discover.tv",
     ): TmdbResponse<TmdbTv> {
         return get(
@@ -526,6 +529,10 @@ class TmdbApiClient(
                 withWatchProviders?.let { add("with_watch_providers" to it) }
                 watchRegion?.let { add("watch_region" to it) }
                 withKeywords?.let { add("with_keywords" to it) }
+                // The TV filter exposes networks (Netflix, HBO, etc.); TMDB's
+                // equivalent discovery parameter is with_networks rather than
+                // the movie endpoint's with_companies.
+                withCompanies?.let { add("with_networks" to it) }
                 add("vote_count.gte" to if (sortBy == "vote_average.desc") 500 else 100)
             },
         )

@@ -103,6 +103,7 @@ import com.torve.presentation.settings.SettingsViewModel
 import com.torve.domain.model.hasRichExternalRating
 import com.torve.domain.model.needsExternalRatingEnrichment
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -303,14 +304,14 @@ internal fun TvSeeAllScreen(
     var restoreSortToggleNonce by remember(railKey, mediaType) { mutableIntStateOf(0) }
     var focusFirstFilterAfterOpen by remember(railKey, mediaType) { mutableStateOf(false) }
     val defaultSortKey = defaultSortKeyForRail(railKey, sortOptions)
+    val supportsGlobalTmdbFilters = remember(railKey) { supportsGlobalTmdbSeeAllQuery(railKey) }
     val hasActiveFilters = selectedGenreIds.isNotEmpty() ||
         selectedStudioIds.isNotEmpty() ||
         selectedYearRangeIds.isNotEmpty() ||
         selectedMinRating != null ||
         titleQuery.isNotBlank()
-    // See All is a scoped expansion of the rail that opened it. Sort/filter
-    // must transform the loaded rail source only; it must not switch to a
-    // broader discovery query to "refill" results.
+    val usesGlobalTmdbQuery = supportsGlobalTmdbFilters &&
+        (hasActiveFilters || selectedSortKey != defaultSortKey)
     val filterSourceItems = filterOptionItems.toList().ifEmpty { loadedItems }
     val filterMediaType = remember(railKey, mediaType, providerContentType) {
         if (isProviderSearchRail) providerContentType else mediaType.takeIf { it == "movie" || it == "tv" }
@@ -319,8 +320,8 @@ internal fun TvSeeAllScreen(
                 else -> "movie"
             }
     }
-    val availableGenres = remember(filterSourceItems, filterMediaType, isProviderSearchRail) {
-        if (isProviderSearchRail) {
+    val availableGenres = remember(filterSourceItems, filterMediaType, isProviderSearchRail, supportsGlobalTmdbFilters) {
+        if (isProviderSearchRail || supportsGlobalTmdbFilters) {
             defaultSeeAllGenres(filterMediaType)
         } else {
             filterSourceItems.availableSeeAllGenres()
@@ -328,13 +329,17 @@ internal fun TvSeeAllScreen(
                 .take(TV_SEE_ALL_FILTER_GENRE_LIMIT)
         }
     }
-    val availableStudios = remember(filterSourceItems, filterMediaType) {
-        filterSourceItems.availableSeeAllStudios()
-            .ifEmpty { defaultSeeAllStudios(filterMediaType) }
-            .take(TV_SEE_ALL_FILTER_STUDIO_LIMIT)
+    val availableStudios = remember(filterSourceItems, filterMediaType, supportsGlobalTmdbFilters) {
+        if (supportsGlobalTmdbFilters) {
+            defaultSeeAllStudios(filterMediaType)
+        } else {
+            filterSourceItems.availableSeeAllStudios()
+                .ifEmpty { defaultSeeAllStudios(filterMediaType) }
+                .take(TV_SEE_ALL_FILTER_STUDIO_LIMIT)
+        }
     }
-    val availableYearRanges = remember(filterSourceItems, isProviderSearchRail) {
-        if (isProviderSearchRail) {
+    val availableYearRanges = remember(filterSourceItems, isProviderSearchRail, supportsGlobalTmdbFilters) {
+        if (isProviderSearchRail || supportsGlobalTmdbFilters) {
             providerSeeAllYearRanges()
         } else {
             filterSourceItems.mapNotNull { it.year }
@@ -358,26 +363,39 @@ internal fun TvSeeAllScreen(
         selectedYearRanges,
         selectedMinRating,
         titleQuery,
+        usesGlobalTmdbQuery,
     ) {
-        val normalizedTitleQuery = titleQuery.trim()
-        sortSeeAllItems(
-            items = loadedItems
-                .filterSeeAllItems(
-                    genreIds = selectedGenreIds,
-                    studioIds = selectedStudioIds,
-                    yearRanges = selectedYearRanges.map { it.startYear..it.endYear },
-                    minRating = selectedMinRating,
-                )
-                .filter { item ->
-                    normalizedTitleQuery.isBlank() ||
-                        item.title.contains(normalizedTitleQuery, ignoreCase = true) ||
-                        item.overview.orEmpty().contains(normalizedTitleQuery, ignoreCase = true)
-                },
-            sortKey = selectedSortKey,
-        )
+        if (usesGlobalTmdbQuery) {
+            loadedItems
+        } else {
+            val normalizedTitleQuery = titleQuery.trim()
+            sortSeeAllItems(
+                items = loadedItems
+                    .filterSeeAllItems(
+                        genreIds = selectedGenreIds,
+                        studioIds = selectedStudioIds,
+                        yearRanges = selectedYearRanges.map { it.startYear..it.endYear },
+                        minRating = selectedMinRating,
+                    )
+                    .filter { item ->
+                        normalizedTitleQuery.isBlank() ||
+                            item.title.contains(normalizedTitleQuery, ignoreCase = true) ||
+                            item.overview.orEmpty().contains(normalizedTitleQuery, ignoreCase = true)
+                    },
+                sortKey = selectedSortKey,
+            )
+        }
     }
-    val renderedItems = remember(displayedItems, loadedItems, selectedSortKey, hasActiveFilters, isProviderSearchRail) {
-        if (!isProviderSearchRail && hasActiveFilters && displayedItems.isEmpty() && loadedItems.isNotEmpty() && loading) {
+    val renderedItems = remember(
+        displayedItems,
+        loadedItems,
+        selectedSortKey,
+        hasActiveFilters,
+        isProviderSearchRail,
+        usesGlobalTmdbQuery,
+        loading,
+    ) {
+        if (!isProviderSearchRail && !usesGlobalTmdbQuery && hasActiveFilters && displayedItems.isEmpty() && loadedItems.isNotEmpty() && loading) {
             sortSeeAllItems(loadedItems, selectedSortKey)
         } else {
             displayedItems
@@ -411,8 +429,15 @@ internal fun TvSeeAllScreen(
             "${selectedYearRangeIds.sorted()}|${selectedMinRating ?: "all"}|$selectedSortKey|" +
             "${titleQuery.trim().lowercase()}|${providerRegionQueries.entries.sortedBy { it.key }}"
     }
-    val cacheKey = remember(railKey, mediaType, providerQuerySignature) {
-        if (isProviderSearchRail) "$railKey|$providerQuerySignature" else "$railKey|$mediaType"
+    val catalogQuerySignature = remember(supportsGlobalTmdbFilters, filterSignature) {
+        if (supportsGlobalTmdbFilters) filterSignature else "scoped"
+    }
+    val cacheKey = remember(railKey, mediaType, providerQuerySignature, catalogQuerySignature) {
+        when {
+            isProviderSearchRail -> "$railKey|$providerQuerySignature"
+            supportsGlobalTmdbFilters -> "$railKey|$mediaType|$catalogQuerySignature"
+            else -> "$railKey|$mediaType"
+        }
     }
     var filterBackfillAttempts by remember(filterSignature) { mutableIntStateOf(0) }
     val context = LocalContext.current
@@ -536,14 +561,14 @@ internal fun TvSeeAllScreen(
         }
     }
 
-    val shouldLoadMore by remember(loading, currentPage, totalPages, displayedItems.size) {
+    val shouldLoadMore by remember(loading, currentPage, totalPages, renderedItems.size) {
         derivedStateOf {
             val layoutInfo = gridState.layoutInfo
             val lastVisibleIndex = layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
             val totalItems = layoutInfo.totalItemsCount
             !loading &&
                 currentPage < totalPages &&
-                displayedItems.isNotEmpty() &&
+                renderedItems.isNotEmpty() &&
                 lastVisibleIndex >= totalItems - 10
         }
     }
@@ -563,10 +588,10 @@ internal fun TvSeeAllScreen(
                 railKey == "trending-tv" -> metadataRepo.getTrendingPaged("tv", page)
                 railKey == "popular-movies" -> metadataRepo.getPopularPaged("movie", page)
                 railKey == "popular-tv" -> metadataRepo.getPopularPaged("tv", page)
-                railKey == "top-rated" -> metadataRepo.getPopularPaged("movie", page)
+                railKey == "top-rated" -> metadataRepo.getTopRatedPaged("movie", page)
                 railKey.startsWith("trending_") -> metadataRepo.getTrendingPaged(queryType, page)
                 railKey.startsWith("popular_") -> metadataRepo.getPopularPaged(queryType, page)
-                railKey.startsWith("top_rated_") -> metadataRepo.getPopularPaged(queryType, page)
+                railKey.startsWith("top_rated_") -> metadataRepo.getTopRatedPaged(queryType, page)
                 railKey.startsWith("genre_") -> {
                     val genreId = railKey.substringAfterLast("_")
                     metadataRepo.discover(type = queryType, page = page, withGenres = genreId)
@@ -647,6 +672,51 @@ internal fun TvSeeAllScreen(
                 currentPage = 1
                 loading = false
                 initialLoad = false
+                persistSeeAllCache()
+                return
+            }
+            if (usesGlobalTmdbQuery) {
+                val queryType = queryMediaType()
+                val categoryGenreId = railKey
+                    .takeIf { it.startsWith("genre_") }
+                    ?.substringAfterLast("_")
+                    ?.toIntOrNull()
+                val genreQuery = buildTmdbGenreQuery(categoryGenreId, selectedGenreIds)
+                val yearPlans: List<TvSeeAllYearRange?> = selectedYearRanges
+                    .takeIf { it.isNotEmpty() }
+                    ?.map { it }
+                    ?: listOf(null)
+                val effectiveMinRating = when {
+                    railKey == "hidden_gems" -> maxOf(7.5, selectedMinRating ?: 7.5)
+                    else -> selectedMinRating
+                }
+                val results = coroutineScope {
+                    yearPlans.map { yearRange ->
+                        async {
+                            metadataRepo.discover(
+                                type = queryType,
+                                page = page,
+                                sortBy = providerDiscoverSortBy(queryType, selectedSortKey),
+                                withGenres = genreQuery,
+                                minRating = effectiveMinRating?.toFloat(),
+                                year = yearRange?.startYear,
+                                yearTo = yearRange?.endYear,
+                                withCompanies = selectedStudioIds
+                                    .takeIf { it.isNotEmpty() }
+                                    ?.sorted()
+                                    ?.joinToString("|"),
+                            )
+                        }
+                    }.map { it.await() }
+                }
+                if (replace || page == 1) items.clear()
+                val existingKeys = items.mapTo(mutableSetOf()) { it.seeAllStableKey() }
+                val pageItems = results
+                    .flatMap { it.items }
+                    .distinctBy { it.seeAllStableKey() }
+                items.addAll(pageItems.filter { existingKeys.add(it.seeAllStableKey()) })
+                currentPage = page
+                totalPages = results.maxOfOrNull { it.totalPages } ?: page
                 persistSeeAllCache()
                 return
             }
@@ -915,6 +985,7 @@ internal fun TvSeeAllScreen(
             currentPage = page
             persistSeeAllCache()
         } catch (error: Throwable) {
+            if (error is CancellationException) throw error
             Log.w(
                 TV_SEE_ALL_LOG_TAG,
                 "loadPage failed rail=$railKey mediaType=$mediaType page=$page replace=$replace: ${error::class.simpleName}",
@@ -925,7 +996,7 @@ internal fun TvSeeAllScreen(
         }
     }
 
-    LaunchedEffect(railKey, mediaType, providerQuerySignature) {
+    LaunchedEffect(railKey, mediaType, providerQuerySignature, catalogQuerySignature) {
         if (isProviderSearchRail && providerDefaultRegion == null) return@LaunchedEffect
         if (isProviderDiscoveryRail && selectedProviderRegions.isEmpty()) return@LaunchedEffect
         if (isStreamingCatalogRail && providerRegionQueries.isEmpty()) return@LaunchedEffect
@@ -956,13 +1027,6 @@ internal fun TvSeeAllScreen(
             loadPage(currentPage + 1)
             if (totalPages == 1) break
         }
-    }
-
-    LaunchedEffect(filterSignature) {
-        if (initialLoad) return@LaunchedEffect
-        // Keep focus and scroll stable. displayedItems is derived from the
-        // scoped source list, so no reload or global discovery fallback is
-        // needed when sort/filter state changes.
     }
 
     LaunchedEffect(shouldLoadMore) {
@@ -1292,7 +1356,10 @@ internal fun TvSeeAllScreen(
                 if (isStreamingCatalogRail) {
                     TvClickToEditSearchField(
                         value = titleQuery,
-                        onValueChange = { titleQuery = it },
+                        onValueChange = {
+                            providerControlsInteracted = true
+                            titleQuery = it
+                        },
                         placeholder = "Search movies or series",
                         onNavigateDown = {
                             runCatching { providerMovieRequester.requestFocus() }
@@ -1542,7 +1609,7 @@ internal fun TvSeeAllScreen(
                         selectedYearRangeIds = emptySet()
                         selectedMinRating = null
                         titleQuery = ""
-                        if (isProviderSearchRail) providerControlsInteracted = true
+                        providerControlsInteracted = true
                         restoreFocusAfterClearNonce++
                     },
                 )
@@ -1580,14 +1647,14 @@ internal fun TvSeeAllScreen(
                 onToggleGenre = { id ->
                     val next = if (id in selectedGenreIds) selectedGenreIds - id else selectedGenreIds + id
                     selectedGenreIds = next
-                    if (isProviderSearchRail) providerControlsInteracted = true
+                    providerControlsInteracted = true
                 },
                 studios = availableStudios,
                 selectedStudioIds = selectedStudioIds,
                 onToggleStudio = { id ->
                     val next = if (id in selectedStudioIds) selectedStudioIds - id else selectedStudioIds + id
                     selectedStudioIds = next
-                    if (isProviderSearchRail) providerControlsInteracted = true
+                    providerControlsInteracted = true
                 },
                 years = availableYearRanges.map { it.id to it.label },
                 selectedYearIds = selectedYearRangeIds,
@@ -1597,13 +1664,13 @@ internal fun TvSeeAllScreen(
                     } else {
                         selectedYearRangeIds + yearRangeId
                     }
-                    if (isProviderSearchRail) providerControlsInteracted = true
+                    providerControlsInteracted = true
                 },
                 selectedMinRating = selectedMinRating,
                 onSelectRating = { rating ->
                     val next = if (selectedMinRating == rating) null else rating
                     selectedMinRating = next
-                    if (isProviderSearchRail) providerControlsInteracted = true
+                    providerControlsInteracted = true
                 },
                 ratingThresholds = availableRatingThresholds,
                 railFocusRequester = railFocusRequester,
@@ -1660,7 +1727,7 @@ internal fun TvSeeAllScreen(
                         },
                         onClick = {
                             selectedSortKey = option.key
-                            if (isProviderSearchRail) providerControlsInteracted = true
+                            providerControlsInteracted = true
                             showSortOptions = false
                             restoreSortToggleNonce++
                         },
@@ -2029,6 +2096,39 @@ private fun providerDiscoverSortBy(mediaType: String, sortKey: TvSeeAllSortKey):
         TvSeeAllSortKey.OLDEST_RELEASE -> if (mediaType == "tv") "first_air_date.asc" else "primary_release_date.asc"
         TvSeeAllSortKey.DEFAULT -> "popularity.desc"
     }
+
+internal fun supportsGlobalTmdbSeeAllQuery(railKey: String): Boolean = when {
+    railKey.startsWith("trending_") -> true
+    railKey.startsWith("popular_") -> true
+    railKey.startsWith("top_rated_") -> true
+    railKey.startsWith("genre_") -> true
+    railKey in setOf(
+        "trending-movies",
+        "trending-tv",
+        "popular-movies",
+        "popular-tv",
+        "top-rated",
+        "now-playing",
+        "upcoming",
+        "hidden_gems",
+    ) -> true
+    else -> false
+}
+
+internal fun buildTmdbGenreQuery(
+    fixedGenreId: Int?,
+    selectedGenreIds: Set<Int>,
+): String? {
+    val selected = selectedGenreIds
+        .filter { it > 0 && it != fixedGenreId }
+        .sorted()
+    return when {
+        fixedGenreId != null && selected.isNotEmpty() -> "$fixedGenreId,${selected.joinToString("|")}"
+        fixedGenreId != null -> fixedGenreId.toString()
+        selected.isNotEmpty() -> selected.joinToString("|")
+        else -> null
+    }
+}
 
 private fun sortOptionsForRail(railKey: String): List<TvSeeAllSortOption> {
     val firstLabel = if (railKey.startsWith("continue_watching")) "Recent Viewed" else "Default"

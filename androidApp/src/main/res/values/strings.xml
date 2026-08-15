@@ -742,7 +742,7 @@
     <string name="addon_popular_cinemeta_name">Cinemeta</string>
     <string name="addon_popular_cinemeta_desc">Movie &amp; series info from IMDB/TMDB</string>
     <string name="addon_popular_panda_name">Panda</string>
-    <string name="addon_popular_panda_desc">Recommended guided setup for Torve streaming. Configure providers, debrid, and quality in Panda.</string>
+    <string name="addon_popular_panda_desc">Torve streaming connection service for Debrid, Usenet, source selection, and quality preferences.</string>
     <string name="addon_popular_torrentio_name">Torrentio</string>
     <string name="addon_popular_torrentio_desc">Popular stream extension for torrent sources. Install it optionally if you want Torrentio-based streaming.</string>
     <string name="addon_popular_tmdb_name">The Movie Database Addon</string>
@@ -761,10 +761,10 @@
     <string name="addon_category_subtitles">Subtitles</string>
 
     <!-- Manage Panda Screen -->
-    <string name="manage_panda_title">Panda</string>
-    <string name="manage_panda_not_installed">Panda is not installed yet. Install it to get guided streaming setup with server-side configuration.</string>
-    <string name="manage_panda_install">Install Panda</string>
-    <string name="manage_panda_remove">Remove Panda</string>
+    <string name="manage_panda_title">Streaming sources</string>
+    <string name="manage_panda_not_installed">Streaming sources are not set up yet. Start the guided flow to connect Debrid or Usenet.</string>
+    <string name="manage_panda_install">Set up sources</string>
+    <string name="manage_panda_remove">Remove source setup</string>
     <string name="manage_panda_open_config">Open Configuration</string>
     <string name="manage_panda_enabled">Enabled</string>
     <string name="manage_panda_version">Version %1$s</string>
@@ -772,15 +772,15 @@
     <string name="manage_panda_manage">Manage</string>
 
     <!-- Panda Native Setup -->
-    <string name="panda_setup_title">Set up Panda</string>
+    <string name="panda_setup_title">Set up streaming sources</string>
     <string name="panda_setup_type_title">Choose setup type</string>
     <string name="panda_setup_type_desc">Start with debrid cloud streaming or skip straight to Usenet configuration.</string>
     <string name="panda_setup_type_debrid_title">Debrid</string>
-    <string name="panda_setup_type_debrid_subtitle">Use Real-Debrid, AllDebrid, Premiumize, TorBox, or another supported Panda debrid service.</string>
+    <string name="panda_setup_type_debrid_subtitle">Use Real-Debrid, AllDebrid, Premiumize, TorBox, or another supported debrid service.</string>
     <string name="panda_setup_type_usenet_title">Usenet only</string>
     <string name="panda_setup_type_usenet_subtitle">Skip debrid and configure Usenet, indexers, and a download client.</string>
     <string name="panda_setup_provider_title">Choose debrid provider</string>
-    <string name="panda_setup_provider_desc">Select the debrid service you want to use with Panda.</string>
+    <string name="panda_setup_provider_desc">Select the debrid service you want Torve to use.</string>
     <string name="panda_setup_auth_title">Connect %1$s</string>
     <string name="panda_setup_auth_choose_title">Connect debrid provider</string>
     <string name="panda_setup_auth_inline_hint">Choose a provider, then connect it directly below the selected row.</string>
@@ -795,7 +795,7 @@
     <string name="panda_setup_auth_waiting">Waiting for authorization…</string>
     <string name="panda_setup_auth_oauth_unsupported">%1$s does not support browser sign-in. Enter your API key instead.</string>
     <string name="panda_setup_sources_title">Torrent sources</string>
-    <string name="panda_setup_sources_desc">Choose which torrent sources Panda should search. The defaults work well for most users.</string>
+    <string name="panda_setup_sources_desc">Choose which torrent sources Torve should search. The defaults work well for most users.</string>
     <string name="panda_setup_quality_title">Quality preferences</string>
     <string name="panda_setup_quality_max">Maximum quality</string>
     <string name="panda_setup_quality_profile">Quality profile</string>
@@ -806,7 +806,7 @@
     <string name="panda_setup_review_save">Save &amp; Install</string>
     <string name="panda_setup_review_update">Update Configuration</string>
     <string name="panda_setup_review_saving">Saving…</string>
-    <string name="panda_setup_review_success">Panda installed and ready.</string>
+    <string name="panda_setup_review_success">Streaming sources are connected and ready.</string>
     <string name="panda_setup_review_done">Done</string>
     <string name="panda_setup_web_fallback">Set up on web instead</string>
     <string name="panda_setup_reconfigure">Reconfigure</string>
@@ -970,12 +970,12 @@
     <string name="setup_lets_go">Let\'s set things up in a few quick steps.</string>
     <string name="setup_terms_title">Terms of Use</string>
     <string name="setup_terms_text">Torve is a media organizer and player. You are responsible for ensuring you have the right to access any content through third-party sources you configure. Torve does not host, provide, or control any media content.</string>
-    <string name="setup_tmdb_text">This product uses the TMDB API but is not endorsed or certified by TMDB.</string>
+    <string name="setup_tmdb_text">This product uses the TMDB API but is not endorsed or certified by TMDB. Watch-provider availability data supplied through TMDB is powered by JustWatch.</string>
     <string name="setup_accept_terms">I understand and accept these terms</string>
     <string name="setup_cloud_desc">Connect your streaming optimization service for faster playback.</string>
     <string name="setup_panda_title">Recommended setup</string>
-    <string name="setup_panda_desc">Use Panda for the easiest setup. It configures providers, debrid, and quality in one guided flow.</string>
-    <string name="setup_panda_open_setup">Open Panda setup</string>
+    <string name="setup_panda_desc">Connect Debrid or Usenet and choose source quality in one guided flow.</string>
+    <string name="setup_panda_open_setup">Set up streaming sources</string>
     <string name="setup_panda_advanced">Advanced manual setup</string>
     <string name="setup_panda_advanced_desc">Keep using direct provider and API-key setup here if you want maximum manual control.</string>
     <string name="setup_connected_success">Connected successfully!</string>
@@ -2096,10 +2096,10 @@
     <string name="verify_gate_body_email">We sent a confirmation link to %1$s. Confirm it, then continue to setup.</string>
     <string name="verify_gate_confirmed">I\'ve confirmed my email</string>
     <string name="verify_gate_send_again">Send email again</string>
-    <string name="verify_gate_next">Next: choose how you want to watch. Use Panda for Debrid/Usenet, add IPTV for live TV, or connect Plex/Jellyfin.</string>
+    <string name="verify_gate_next">Next: choose how you want to watch. Connect Debrid or Usenet, add IPTV for live TV, or connect Plex/Jellyfin.</string>
     <string name="verify_gate_different_account">Use a different account</string>
-    <string name="panda_setup_nudge_title">Set up Panda</string>
-    <string name="panda_setup_nudge_body">Easiest way to enable Torve\'s core source discovery — a guided wizard wires debrid + Usenet for you.</string>
+    <string name="panda_setup_nudge_title">Set up streaming sources</string>
+    <string name="panda_setup_nudge_body">Connect Debrid or Usenet with a guided setup, then check that the connection is ready to play.</string>
     <string name="voice_input_no_input">No voice input detected</string>
     <string name="voice_input_unavailable">Voice input is not available on this device</string>
     <string name="voice_input_failed_start">Voice input failed to start</string>

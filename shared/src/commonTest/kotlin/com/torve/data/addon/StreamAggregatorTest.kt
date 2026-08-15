@@ -4,7 +4,9 @@ import com.torve.domain.model.AddonManifest
 import com.torve.domain.model.InstalledAddon
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNull
+import kotlin.test.assertTrue
 
 class StreamAggregatorTest {
 
@@ -98,6 +100,30 @@ class StreamAggregatorTest {
 
         assertEquals(listOf("https://legacy-addon.example"), urls)
     }
+
+    @Test
+    fun mergeDebridPreflightResults_preservesUnverifiedAndUncheckedCandidates() {
+        val verifiedCandidate = parsedStream("verified", "hash-1")
+        val transientFailure = parsedStream("transient", "hash-2")
+        val beyondPreflightLimit = parsedStream("unchecked", "hash-3")
+
+        val merged = mergeDebridPreflightResults(
+            candidates = listOf(verifiedCandidate, transientFailure, beyondPreflightLimit),
+            verified = listOf(verifiedCandidate.copy(isCached = true)),
+        )
+
+        assertEquals(3, merged.size)
+        assertTrue(merged.first { it.infoHash == "hash-1" }.isCached)
+        assertFalse(merged.first { it.infoHash == "hash-2" }.isCached)
+        assertFalse(merged.first { it.infoHash == "hash-3" }.isCached)
+    }
+
+    private fun parsedStream(title: String, infoHash: String): ParsedStream = ParsedStream(
+        addonName = "test",
+        quality = "1080p",
+        title = title,
+        infoHash = infoHash,
+    )
 
     private fun installedAddon(
         manifestUrl: String,

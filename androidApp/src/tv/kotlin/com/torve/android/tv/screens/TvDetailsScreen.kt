@@ -148,6 +148,8 @@ private enum class TvStreamSourceFilter(val label: String) {
 
 private const val TV_USENET_PREPARING_NOTIFICATION_TAG = "tv_usenet_preparing"
 private const val TV_STREAM_RESOLVING_NOTIFICATION_TAG = "tv_stream_resolving"
+private const val TV_SOURCE_ERROR_NOTIFICATION_TAG = "tv_source_error"
+private const val TV_SOURCE_ERROR_NOTIFICATION_DURATION_MS = 5_000L
 
 private sealed class DownloadAction {
     data object None : DownloadAction()
@@ -320,6 +322,8 @@ fun TvDetailsScreen(
     DisposableEffect(Unit) {
         onDispose {
             TvNotificationQueue.clear(TV_USENET_PREPARING_NOTIFICATION_TAG)
+            TvNotificationQueue.clear(TV_STREAM_RESOLVING_NOTIFICATION_TAG)
+            TvNotificationQueue.clear(TV_SOURCE_ERROR_NOTIFICATION_TAG)
         }
     }
     BackHandler(enabled = showWatchlistPicker) {
@@ -395,7 +399,12 @@ fun TvDetailsScreen(
         queueSourceOriginFocusRestore(
             terminalEpisodeFocusTarget(state, sourcePickerOriginEpisode, resolvingEpisodeTarget),
         )
-        TvNotificationQueue.post(resolveTvDetailMessage(context, error), NotificationType.ERROR)
+        TvNotificationQueue.post(
+            message = resolveTvDetailMessage(context, error),
+            type = NotificationType.ERROR,
+            tag = TV_SOURCE_ERROR_NOTIFICATION_TAG,
+            durationMs = TV_SOURCE_ERROR_NOTIFICATION_DURATION_MS,
+        )
     }
 
     LaunchedEffect(state.resolveError, state.resolvedStream, state.isResolving) {
@@ -412,7 +421,30 @@ fun TvDetailsScreen(
         } else {
             resolvingEpisodeTarget = null
         }
-        TvNotificationQueue.post(resolveTvDetailMessage(context, error), NotificationType.ERROR)
+        TvNotificationQueue.post(
+            message = resolveTvDetailMessage(context, error),
+            type = NotificationType.ERROR,
+            tag = TV_SOURCE_ERROR_NOTIFICATION_TAG,
+            durationMs = TV_SOURCE_ERROR_NOTIFICATION_DURATION_MS,
+        )
+    }
+
+    LaunchedEffect(
+        state.isLoadingStreams,
+        state.isResolving,
+        state.preparing,
+        state.resolvedStream,
+        state.streams.size,
+    ) {
+        if (
+            state.isLoadingStreams ||
+            state.isResolving ||
+            state.preparing != null ||
+            state.resolvedStream != null ||
+            state.streams.isNotEmpty()
+        ) {
+            TvNotificationQueue.clear(TV_SOURCE_ERROR_NOTIFICATION_TAG)
+        }
     }
 
     LaunchedEffect(state.showStreamPicker, state.resolvedStream) {

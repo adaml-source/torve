@@ -5,14 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Privacy Policy - Torve</title>
 <style>
-  body {
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-    line-height: 1.6;
-    color: #e5e7eb;
-    background-color: #020617;
-    padding: 16px;
-    margin: 0;
-  }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; line-height: 1.6; color: #e5e7eb; background-color: #020617; padding: 16px; margin: 0; }
   h1 { color: #f8fafc; font-size: 1.5em; }
   h2 { color: #f8fafc; font-size: 1.2em; margin-top: 1.5em; }
   p, li { color: #cbd5e1; }
@@ -22,40 +15,62 @@
 </head>
 <body>
 <h1>Privacy Policy</h1>
-<p><strong>Last updated: February 2026</strong></p>
+<p><strong>Last updated: August 15, 2026</strong></p>
 
-<h2>1. Data We Collect</h2>
-<p>Torve stores data locally on your device, including watch history and progress, preferences, API keys you enter for third-party services, playlist URLs, and favorites. This data is stored on your device and is not sent to Torve servers by default.</p>
+<h2>1. Scope and local data</h2>
+<p>Torve is a media companion application. It stores preferences, cached metadata and artwork, playback state, playlists, connected-service configuration, and authentication material on your device. Clearing app storage or uninstalling removes local data from that device, but it does not by itself delete data already synchronized to a Torve account or a connected third-party service.</p>
 
-<h2>2. Data Sent to Third Parties</h2>
-<p>When you use external integrations, Torve may send data to the services you configure.</p>
+<h2>2. Torve accounts and synchronization</h2>
+<p>If you create or use a Torve account, Torve's backend processes the information needed to provide that account and its synchronization features. This may include:</p>
 <ul>
-  <li>TMDB: search queries and media IDs for metadata lookup</li>
-  <li>Trakt.tv: watch history and watchlist if sync is enabled</li>
-  <li>AI providers: search queries sent to the AI API you configure</li>
-  <li>Streaming optimization services: content identifiers and your API key for availability checks</li>
-  <li>Jellyfin or Plex: library and playback requests for your connected media server</li>
+  <li>your email address, optional display name, account identifier, password hash, verification state, and authentication/session tokens;</li>
+  <li>installation and device identifiers, device type and name, app version, paired-device state, activation state, and last-seen information;</li>
+  <li>account-backed settings, favorites, watch state, playback progress, and synchronization revisions;</li>
+  <li>connection metadata and, only when you choose account storage, encrypted credentials for supported integrations;</li>
+  <li>security, rate-limit, service, and diagnostic records needed to operate and protect the service.</li>
+</ul>
+<p>Device-only credentials remain on that device. Credentials explicitly saved to your account are encrypted before server-side storage and may be restored to your other signed-in devices. Torve does not use account or synchronization data for advertising.</p>
+
+<h2>3. Connected services</h2>
+<p>Torve sends requests to services you choose to use. Depending on your configuration, these may include:</p>
+<ul>
+  <li>TMDB for searches, content identifiers, metadata, artwork, and watch-provider availability;</li>
+  <li>Trakt or SIMKL for watch history, progress, ratings, and watchlists;</li>
+  <li>debrid, Usenet, indexer, addon, IPTV, and download services for source discovery and playback;</li>
+  <li>Jellyfin, Plex, Seerr, Sonarr, Radarr, and similar personal-media or automation services;</li>
+  <li>AI providers for the search text you submit when AI search is enabled;</li>
+  <li>email-delivery, application-store, diagnostics, and support providers used to operate Torve.</li>
+</ul>
+<p>Those services receive the network information and request data needed to answer the request and operate under their own privacy policies and terms. Torve does not control third-party services.</p>
+
+<h2>4. Analytics, crash reporting, and diagnostics</h2>
+<p>Google Play builds include Firebase Analytics and Firebase Crashlytics. Those Google services may process app interactions, device or installation identifiers, crash information, diagnostics, and related request metadata. Amazon builds do not include Firebase Analytics or Crashlytics. Current desktop and iOS builds do not include Firebase.</p>
+<p>In-app diagnostic and support reports are sent only when you explicitly submit or share them. Torve is designed to redact known secrets, but you should still review a report before sending it and never include passwords, API keys, private playlist URLs, or access tokens.</p>
+
+<h2>5. Sharing and sale</h2>
+<p>Torve does not sell personal data and does not share personal data with advertisers or data brokers. Data is disclosed only to operate user-requested features, provide infrastructure and support, comply with law, or protect users and the service.</p>
+
+<h2>6. Security and retention</h2>
+<p>Torve uses platform-provided secure storage where available for local credentials and encrypts credentials selected for account storage. No storage or transmission method is completely secure.</p>
+<p>Account data is retained while the account is active and for limited periods afterward where required for backups, security, fraud prevention, dispute resolution, or legal obligations. Password-reset and verification tokens expire. Connected third parties apply their own retention rules.</p>
+
+<h2>7. Your controls</h2>
+<ul>
+  <li>Disconnect or disable individual integrations in Torve settings.</li>
+  <li>Choose device-only or account storage where that choice is offered.</li>
+  <li>Export supported account data and delete your Torve account from the app or at <a href="https://torve.app/account-deletion.html">torve.app/account-deletion.html</a>.</li>
+  <li>Clear local app storage or uninstall Torve to remove data held on that device.</li>
+  <li>Contact <a href="mailto:privacy@torve.app">privacy@torve.app</a> to request access, correction, deletion, or other applicable privacy rights.</li>
 </ul>
 
-<h2>3. Analytics and Crash Reporting</h2>
-<p>The Google Play version of Torve includes Firebase Analytics and Crashlytics for crash reports and anonymous usage information. The Amazon Appstore version does not include Firebase or analytics SDKs.</p>
+<h2>8. Children and international processing</h2>
+<p>Torve is not directed to children under 13. Account and connected-service data may be processed outside your country of residence by Torve's infrastructure and the providers you choose, subject to applicable safeguards and those providers' policies.</p>
 
-<h2>4. Data Sharing</h2>
-<p>Torve does not sell, share, or transfer your personal data to advertisers or data brokers.</p>
+<h2>9. Attribution</h2>
+<p>This product uses the TMDB API but is not endorsed or certified by TMDB. Watch-provider availability data supplied through TMDB is powered by JustWatch.</p>
 
-<h2>5. Third-Party Services</h2>
-<p>Third-party services connected to Torve are governed by their own privacy policies. Review those policies before connecting your accounts.</p>
-
-<h2>6. Data Security</h2>
-<p>API keys and sensitive credentials are encrypted using the Android Keystore. Other local app data is stored in the app's private storage.</p>
-
-<h2>7. Data Deletion</h2>
-<p>You can remove app data by clearing storage in Android Settings or uninstalling the app. Individual data such as watch history, playlists, and API keys can also be managed inside the app.</p>
-
-<h2>8. Contact</h2>
-<p>For privacy-related questions or concerns, contact <a href="mailto:privacy@torve.app">privacy@torve.app</a>.</p>
-
-<h2>TMDB Attribution</h2>
-<p>This product uses the TMDB API but is not endorsed or certified by TMDB.</p>
+<h2>10. Changes and contact</h2>
+<p>Torve may update this policy as the product or its providers change. The current policy is available in the app and at <a href="https://torve.app/privacy.html">torve.app/privacy.html</a>.</p>
+<p>Privacy questions: <a href="mailto:privacy@torve.app">privacy@torve.app</a>. General support: <a href="mailto:support@torve.app">support@torve.app</a>.</p>
 </body>
 </html>

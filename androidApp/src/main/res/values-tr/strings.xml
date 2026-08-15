@@ -450,10 +450,10 @@
     <string name="addon_category_subtitles">Altyazılar</string>
 
     <!-- Manage Panda Screen -->
-    <string name="manage_panda_title">Panda</string>
-    <string name="manage_panda_not_installed">Panda henüz yüklenmedi. Sunucu taraflı yapılandırma ile rehberli akış kurulumu için yükleyin.</string>
-    <string name="manage_panda_install">Panda Yükle</string>
-    <string name="manage_panda_remove">Panda Kaldır</string>
+    <string name="manage_panda_title">Yayın kaynakları</string>
+    <string name="manage_panda_not_installed">Yayın kaynakları henüz yapılandırılmadı. Debrid veya Usenet bağlamak için rehberli kurulumu başlatın.</string>
+    <string name="manage_panda_install">Kaynakları ayarla</string>
+    <string name="manage_panda_remove">Kaynak kurulumunu kaldır</string>
     <string name="manage_panda_open_config">Yapılandırmayı Aç</string>
     <string name="manage_panda_enabled">Etkin</string>
     <string name="manage_panda_version">Sürüm %1$s</string>
@@ -463,7 +463,7 @@
     <!-- Panda Native Setup -->
     <string name="panda_setup_title">Panda Kurulumu</string>
     <string name="panda_setup_provider_title">Sağlayıcınızı seçin</string>
-    <string name="panda_setup_provider_desc">Panda ile kullanmak istediğiniz debrid hizmetini seçin.</string>
+    <string name="panda_setup_provider_desc">Torve ile kullanmak istediğiniz debrid hizmetini seçin.</string>
     <string name="panda_setup_auth_title">%1$s Bağlan</string>
     <string name="panda_setup_auth_oauth">Tarayıcı ile giriş yap</string>
     <string name="panda_setup_auth_apikey">API anahtarı gir</string>
@@ -485,7 +485,7 @@
     <string name="panda_setup_review_save">Kaydet &amp; Kur</string>
     <string name="panda_setup_review_update">Yapılandırmayı güncelle</string>
     <string name="panda_setup_review_saving">Kaydediliyor…</string>
-    <string name="panda_setup_review_success">Panda kuruldu ve hazır.</string>
+    <string name="panda_setup_review_success">Yayın kaynakları bağlı ve hazır.</string>
     <string name="panda_setup_review_done">Tamam</string>
     <string name="panda_setup_web_fallback">Bunun yerine web üzerinden kur</string>
     <string name="panda_setup_reconfigure">Yeniden yapılandır</string>
@@ -518,7 +518,7 @@
     <string name="panda_setup_usenet_indexer_url">Özel indexer URL</string>
     <string name="panda_setup_usenet_client">İndirme istemcisi</string>
     <string name="panda_setup_sources_title">Torrent kaynakları</string>
-    <string name="panda_setup_sources_desc">Panda\'nın arayacağı torrent kaynaklarını seç. Varsayılanlar çoğu kullanıcı için iyi çalışır.</string>
+    <string name="panda_setup_sources_desc">Torve\'nin arayacağı torrent kaynaklarını seç. Varsayılanlar çoğu kullanıcı için iyi çalışır.</string>
     <string name="panda_setup_usenet_indexer_none">Yok</string>
     <string name="panda_setup_usenet_indexer_custom">Özel URL</string>
     <string name="panda_setup_usenet_client_none">Yok</string>
@@ -1657,8 +1657,8 @@
     <string name="setup_feature_download">Çevrimdışı erişim için medya kaydedin</string>
     <string name="setup_cloud_desc">Daha hızlı oynatma için yayın optimizasyon servisinizi bağlayın.</string>
     <string name="setup_panda_title">Önerilen kurulum</string>
-    <string name="setup_panda_desc">En kolay kurulum için Panda\'yı kullanın. Sağlayıcılar, debrid ve kalite tek bir yönlendirmeli akışta ayarlanır.</string>
-    <string name="setup_panda_open_setup">Panda kurulumunu aç</string>
+    <string name="setup_panda_desc">Debrid veya Usenet\'i bağlayın ve kaliteyi tek bir rehberli akışta seçin.</string>
+    <string name="setup_panda_open_setup">Yayın kaynaklarını ayarla</string>
     <string name="setup_panda_advanced">Gelişmiş manuel kurulum</string>
     <string name="setup_panda_advanced_desc">Maksimum manuel kontrol istiyorsanız burada doğrudan sağlayıcı ve API anahtarı kurulumunu kullanmaya devam edin.</string>
     <string name="legal_document_loading">Belge yükleniyor…</string>
@@ -1901,9 +1901,9 @@
     <string name="verify_gate_body_email">%1$s adresine bir onay bağlantısı gönderdik. Onayla, sonra kuruluma devam et.</string>
     <string name="verify_gate_confirmed">E-postamı onayladım</string>
     <string name="verify_gate_send_again">E-postayı tekrar gönder</string>
-    <string name="verify_gate_next">Sonraki: Nasıl izlemek istediğini seç. Debrid/Usenet için Panda’yı kullan, canlı TV için IPTV ekle veya Plex/Jellyfin bağla.</string>
+    <string name="verify_gate_next">Sonraki: Nasıl izlemek istediğini seç. Debrid veya Usenet bağla, canlı TV için IPTV ekle veya Plex/Jellyfin bağla.</string>
     <string name="verify_gate_different_account">Farklı hesap kullan</string>
-    <string name="panda_setup_nudge_title">Panda’yı kur</string>
+    <string name="panda_setup_nudge_title">Yayın kaynaklarını ayarla</string>
     <string name="panda_setup_nudge_body">Torve’nin temel kaynak keşfini etkinleştirmenin en kolay yolu: rehberli sihirbaz Debrid + Usenet’i senin için bağlar.</string>
     <string name="voice_input_no_input">Sesli giriş algılanmadı</string>
     <string name="voice_input_unavailable">Sesli giriş bu cihazda kullanılamıyor</string>
@@ -2120,7 +2120,7 @@
     <string name="panda_setup_type_title">Kurulum türünü seçin</string>
     <string name="panda_setup_type_desc">Debrid bulut akışıyla başlayın veya doğrudan Usenet yapılandırmasına geçin.</string>
     <string name="panda_setup_type_debrid_title">Debrid</string>
-    <string name="panda_setup_type_debrid_subtitle">Real-Debrid, AllDebrid, Premiumize, TorBox veya Panda tarafından desteklenen başka bir debrid hizmetini kullanın.</string>
+    <string name="panda_setup_type_debrid_subtitle">Real-Debrid, AllDebrid, Premiumize, TorBox veya desteklenen başka bir debrid hizmetini kullanın.</string>
     <string name="panda_setup_type_usenet_title">Yalnızca Usenet</string>
     <string name="panda_setup_type_usenet_subtitle">Debrid adımını atlayıp Usenet, indeksleyiciler ve bir indirme istemcisi yapılandırın.</string>
     <string name="panda_setup_auth_choose_title">Debrid sağlayıcısını bağla</string>
@@ -2194,4 +2194,17 @@
     <string name="detail_library_request_available">Kitaplığınızda kullanılabilir</string>
     <string name="detail_library_request_retry">Kitaplık isteğini yeniden dene</string>
     <string name="detail_library_refresh">Kitaplık durumunu yenile</string>
+    <string name="app_update_channel_name">Torve güncellemeleri</string>
+    <string name="app_update_channel_description">Yeni bir Torve sürümü kullanıma sunulduğunda bildirimler</string>
+    <string name="app_update_notification_title">Torve %1$s kullanıma hazır</string>
+    <string name="app_update_notification_body">Yeni bir güncelleme hazır. Torve’yi güncellemek için İndir ve yükle’yi seçin.</string>
+    <string name="app_update_download_install">İndir ve yükle</string>
+    <string name="app_update_later">Daha sonra</string>
+    <string name="app_update_downloading">İmzalı Torve %1$s güncellemesi indiriliyor…</string>
+    <string name="app_update_verifying">İndirilen güncelleme doğrulanıyor…</string>
+    <string name="app_update_permission_required">Torve’nin bu imzalı güncellemeyi yüklemesine izin verin, ardından devam etmek için geri dönün.</string>
+    <string name="app_update_allow_installation">Yüklemeye izin ver</string>
+    <string name="app_update_opening_installer">Sistem yükleyicisi açılıyor…</string>
+    <string name="app_update_download_failed">Güncelleme indirilemedi veya doğrulanamadı. Lütfen tekrar deneyin.</string>
+    <string name="app_update_retry">Tekrar dene</string>
 </resources>

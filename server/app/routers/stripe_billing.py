@@ -62,7 +62,7 @@ def _metadata_get(value: Any, key: str) -> str | None:
     return item if isinstance(item, str) and item.strip() else None
 
 
-@router.post("/checkout-session")
+@router.post("/checkout-session", response_model=None)
 def create_checkout_session(
     body: StripeCheckoutRequest,
     user_id: str = Depends(get_current_user_id),
@@ -94,7 +94,7 @@ def create_checkout_session(
     return {"checkout_url": checkout_url}
 
 
-@router.post("/portal-session")
+@router.post("/portal-session", response_model=None)
 def create_portal_session(
     user_id: str = Depends(get_current_user_id),
     db: Session = Depends(get_db),
@@ -231,7 +231,7 @@ def _handle_subscription_changed(db: Session, subscription: Any) -> bool:
     return False
 
 
-@webhook_router.post("/stripe")
+@webhook_router.post("/stripe", response_model=None)
 async def stripe_webhook(
     request: Request,
     stripe_signature: str | None = Header(default=None, alias="Stripe-Signature"),

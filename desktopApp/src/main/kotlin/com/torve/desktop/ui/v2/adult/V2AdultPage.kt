@@ -45,6 +45,8 @@ import com.torve.desktop.adult.NewznabCategory
 import com.torve.desktop.adult.NewznabItem
 import com.torve.desktop.adult.NzbBrowseStateHolder
 import com.torve.desktop.download.DesktopDownloadManager
+import com.torve.desktop.diagnostics.DiagnosticsRedactor
+import com.torve.desktop.launch.launchGuardLog
 import com.torve.domain.nzb.NzbResolver
 import com.torve.desktop.ui.components.TorveBanner
 import com.torve.desktop.ui.components.TorveBannerTone
@@ -289,12 +291,12 @@ fun V2AdultPage(
                             color = colors.textPrimary,
                         )
                         Text(
-                            text = "Direct in-app playback needs a download client. In Panda, set Download client = TorBox (cloud) or enable Usenet with an NzbDAV integration.",
+                            text = "Direct in-app playback needs a download client. Open streaming-source setup and choose TorBox (cloud), or enable Usenet with an NzbDAV integration.",
                             style = MaterialTheme.typography.bodySmall,
                             color = colors.textSecondary,
                         )
                         TorvePrimaryButton(
-                            text = ds("Open Panda setup"),
+                            text = ds("Open streaming setup"),
                             onClick = onOpenPandaSetup,
                         )
                     }
@@ -440,31 +442,31 @@ fun V2AdultPage(
                     Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         if (indexerSecretsRedacted) {
                             Text(
-                                text = ds("Panda credentials are masked"),
+                                text = ds("Indexer credentials need attention"),
                                 style = MaterialTheme.typography.titleSmall,
                                 fontWeight = FontWeight.SemiBold,
                                 color = colors.textPrimary,
                             )
                             Text(
-                                text = "Panda has an indexer configured but won't share the API key with this device because the management token isn't cached locally. Open Panda setup → Usenet step → re-paste the indexer API key (and TorBox key if needed) → Update Panda. The Adult page picks them up automatically after that.",
+                                text = "This device cannot read the saved indexer key. Open streaming setup → Usenet, re-enter the indexer API key (and TorBox key if needed), then save the connections. Adult results will update automatically.",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = colors.textSecondary,
                             )
                         } else {
                             Text(
-                                text = ds("No NZB indexer configured in Panda"),
+                                text = ds("No NZB indexer connected"),
                                 style = MaterialTheme.typography.titleSmall,
                                 fontWeight = FontWeight.SemiBold,
                                 color = colors.textPrimary,
                             )
                             Text(
-                                text = "Add an indexer (scenenzbs, NZBgeek, etc.) under Settings → Add-ons → Panda → Configure → Usenet step. The Adult page reads its credentials directly from Panda's config.",
+                                text = "Add an indexer such as SceneNZBs or NZBgeek under Settings → Connections → Streaming sources → Usenet.",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = colors.textSecondary,
                             )
                         }
                         TorvePrimaryButton(
-                            text = ds("Open Panda setup"),
+                            text = ds("Open streaming setup"),
                             onClick = onOpenPandaSetup,
                         )
                     }
@@ -507,7 +509,6 @@ fun V2AdultPage(
                                 // ~30s while the NZB downloads from the indexer.
                                 if (resolveStatus[rowKey] != null) return@NewznabRow
                                 resolveStatus = resolveStatus + (rowKey to "Starting...")
-                                println("TORVE ADULT ┃ play clicked: ${item.title}")
                                 scope.launch {
                                     val res = withContext(Dispatchers.IO) {
                                         resolver.resolve(playableNzbUrl(item.nzbUrl)) { msg ->
@@ -523,16 +524,19 @@ fun V2AdultPage(
                                 }
                             },
                             onDownload = downloadManager?.let { dm ->
-                                {
+                                download@{
                                     // Same resolve path as Play but instead of
                                     // streaming we hand the resolved URL to
                                     // DesktopDownloadManager. queueNzbDownload
                                     // gates on the per-surface folder being
                                     // configured; if not, surface a banner
                                     // that routes to Settings.
-                                    if (resolveStatus[rowKey] != null) return@let
+                                    if (resolveStatus[rowKey] != null) return@download
+                                    if (!dm.isDownloadFolderConfigured(DesktopDownloadManager.NzbDownloadSurface.ADULT)) {
+                                        needsFolderPrompt = "Set an Adult download folder before downloading."
+                                        return@download
+                                    }
                                     resolveStatus = resolveStatus + (rowKey to "Starting...")
-                                    println("TORVE ADULT ┃ download clicked: ${item.title}")
                                     scope.launch {
                                         val res = withContext(Dispatchers.IO) {
                                             resolver.resolve(playableNzbUrl(item.nzbUrl)) { msg ->
@@ -549,9 +553,17 @@ fun V2AdultPage(
                                             )
                                             if (outcome is DesktopDownloadManager.QueueResult.NeedsFolder) {
                                                 needsFolderPrompt = "Set an Adult download folder before downloading."
+                                            } else if (outcome is DesktopDownloadManager.QueueResult.Error) {
+                                                resolveStatus = resolveStatus + (rowKey to outcome.message)
                                             }
                                         }.onFailure { t ->
-                                            resolveStatus = resolveStatus + (rowKey to (t.message ?: "Unknown error"))
+                                            val message = t.message ?: "Unknown error"
+                                            resolveStatus = resolveStatus + (rowKey to message)
+                                            launchGuardLog(
+                                                "adult_download_resolve_failed",
+                                                "type" to t::class.simpleName,
+                                                "message" to DiagnosticsRedactor.redact(message).take(300),
+                                            )
                                         }
                                     }
                                 }
@@ -633,7 +645,7 @@ private fun NewznabRow(
             )
             if (showReconfigure) {
                 TorvePrimaryButton(
-                    text = ds("Reconfigure Panda"),
+                    text = ds("Reconfigure streaming sources"),
                     onClick = onReconfigure,
                 )
             } else {

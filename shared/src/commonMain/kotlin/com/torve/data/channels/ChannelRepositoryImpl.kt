@@ -2647,7 +2647,7 @@ internal fun channelSnapshotSignature(channels: List<Channel>): String {
         mix(channel.catchupSource)
         mix(channel.userAgent)
         channel.vlcOptions.forEach(::mix)
-        channel.kodiProps.toSortedMap().forEach { (key, value) ->
+        channel.kodiProps.entries.sortedBy { it.key }.forEach { (key, value) ->
             mix(key)
             mix(value)
         }

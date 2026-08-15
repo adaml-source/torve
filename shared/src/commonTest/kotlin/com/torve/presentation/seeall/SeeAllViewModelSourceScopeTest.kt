@@ -346,6 +346,7 @@ class SeeAllViewModelSourceScopeTest {
             withWatchProviders: String?,
             watchRegion: String?,
             withKeywords: String?,
+            withCompanies: String?,
         ): PagedResult {
             discoverCalls++
             val genreKey = "$type:${withGenres.orEmpty()}:$page"

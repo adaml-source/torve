@@ -5,7 +5,9 @@ is live. Do not run this from public pull requests or untrusted forks.
 
 Torve is free software. There are no subscriptions, no paid tiers, no premium features, and no purchase required. Donations are optional and never unlock features.
 
-This private repository should not be made public directly. The public release should be created from a fresh sanitized source export after final audit.
+Build public releases from a reviewed public commit and immutable source tag.
+Keep production credentials, signing keys, and generated deployment state out of
+the repository; do not create a separate history-less source export.
 
 ## One-time setup
 

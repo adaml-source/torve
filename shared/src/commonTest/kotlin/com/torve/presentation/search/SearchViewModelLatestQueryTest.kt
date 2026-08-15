@@ -461,6 +461,7 @@ class SearchViewModelLatestQueryTest {
             withWatchProviders: String?,
             watchRegion: String?,
             withKeywords: String?,
+            withCompanies: String?,
         ): PagedResult {
             val items = discoverResults[type to page].orEmpty()
             return PagedResult(

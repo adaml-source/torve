@@ -308,21 +308,21 @@ fun V2SportsPage(
                 ) {
                     Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         Text(
-                            text = if (indexerSecretsRedacted) "Panda credentials are masked"
-                                else "No NZB indexer configured in Panda",
+                            text = if (indexerSecretsRedacted) "Indexer credentials need attention"
+                                else "No NZB indexer connected",
                             style = MaterialTheme.typography.titleSmall,
                             fontWeight = FontWeight.SemiBold,
                             color = colors.textPrimary,
                         )
                         Text(
                             text = if (indexerSecretsRedacted)
-                                "Panda has an indexer configured but won't share the API key with this device. Open Panda → Usenet → re-paste the key → Update."
+                                "This device cannot read the saved indexer key. Open streaming setup → Usenet, re-enter the key, then save the connections."
                             else
-                                "Set up Usenet via Settings → Add-ons → Panda → Configure → Usenet step. The Sports page reads its credentials directly from Panda's config.",
+                                "Set up Usenet under Settings → Connections → Streaming sources → Usenet.",
                             style = MaterialTheme.typography.bodySmall,
                             color = colors.textSecondary,
                         )
-                        TorvePrimaryButton(text = ds("Open Panda setup"), onClick = onOpenPandaSetup)
+                        TorvePrimaryButton(text = ds("Open streaming setup"), onClick = onOpenPandaSetup)
                     }
                 }
                 loading -> Box(
@@ -491,7 +491,7 @@ private fun SportsRow(
                 },
             )
             if (showReconfigure) {
-                TorvePrimaryButton(text = ds("Reconfigure Panda"), onClick = onReconfigure)
+                TorvePrimaryButton(text = ds("Reconfigure streaming sources"), onClick = onReconfigure)
             } else {
                 val isWorking = statusText != null && !statusText.startsWith("Failed") &&
                     !statusText.startsWith("TorBox error")

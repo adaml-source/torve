@@ -275,12 +275,18 @@ class StreamRepositoryImpl(
             } else {
                 localStreams
             }
-            memoryMutex.withLock {
-                startupCache[request.contentKey] = PrefetchedStreamBatch(
-                    streams = mergedStreams,
-                    fetchedAt = now,
-                    policy = fetchPolicy,
-                )
+            // Empty aggregation can mean every remote addon timed out. Do not
+            // turn that transient failure into a two-minute authoritative
+            // "no sources" result; the next user attempt must perform a real
+            // lookup.
+            if (mergedStreams.isNotEmpty()) {
+                memoryMutex.withLock {
+                    startupCache[request.contentKey] = PrefetchedStreamBatch(
+                        streams = mergedStreams,
+                        fetchedAt = now,
+                        policy = fetchPolicy,
+                    )
+                }
             }
             mergedStreams
         }

@@ -1,68 +1,125 @@
 # Torve Public Release Checklist
 
-This private repository is not ready to be made public. Do not change repository visibility, create a public GitHub repository, push public branches, publish releases, or rewrite history as part of preparation work.
+This is the public Torve source repository. Treat every committed file and every
+pushed branch as public. Never commit credentials, signing material, private
+user data, production logs, database exports, or generated release bundles.
 
-## Recommended Publication Path
+This checklist governs source releases and the relationship between public
+source, distributed binaries, the website, and app-store submissions.
 
-Use a fresh sanitized public repository created from a clean source export after free-software conversion work is complete. Do not make this private repository public unless the full git history, archives, generated bundles, local files, and release artifacts have been audited and cleaned.
+## Release Source Integrity
 
-Minimum path for a future public repository:
+For every public binary release:
 
-1. Confirm backend, shared client, and platform-client free-software refactors remain complete.
-2. Export only source files, public-safe docs, public-safe examples, and public-safe build scripts into a clean directory without `.git`.
-3. Exclude local secrets, signing assets, generated archives, audit bundles, logs, dumps, databases, screenshots with sensitive data, and private assessment bundles.
-4. Verify legal, license, and donation policy copy matches `AGPL-3.0-or-later` and the free-software product model.
-5. Verify the top-level `LICENSE` and public `README` are present and accurate.
-6. Run a secret scan over the clean export before the first public commit.
-7. Create the public repository only after the sanitized export is reviewed.
+1. Start from a reviewed, committed source revision.
+2. Run the secret and artifact checks before creating a tag.
+3. Ensure the version in Android, shared, desktop, backend, updater metadata,
+   and store metadata agrees.
+4. Create an immutable source tag for the exact released revision.
+5. Build release artifacts from that revision using protected signing
+   credentials outside the repository.
+6. Publish checksums and associate every binary with its source tag.
+7. Verify the website, updater feed, and store listing point to the intended
+   version.
+8. Preserve previous release artifacts and metadata needed for rollback.
 
-## Current Publication Blockers
+Do not publish binaries built from a dirty working tree or from an unpublished
+source revision.
 
-- Local signing and developer configuration files exist in the working tree and must remain ignored.
-- Firebase configuration files are committed and require public-safe review before reuse in a public export.
-- Audit archives and assessment bundles are tracked or present in history and should not be included in a public repository.
-- The project license is `AGPL-3.0-or-later`; final audit must verify all package metadata and app legal surfaces agree.
-- Product documentation has been rewritten or marked obsolete, but final audit must confirm no user-facing paid-product copy remains.
-- Release scripts and release docs reference private deployment or billing secrets by variable name and require hardening before public use.
-- Final audit must confirm the top-level license is included in the sanitized export.
+## Secret and Artifact Handling
 
-## Secret And Artifact Handling
+- Keep production `.env` files, keystores, passwords, API keys, service-account
+  keys, admin tokens, webhook secrets, signing certificates, and store
+  credentials outside the repository.
+- Keep examples placeholder-only.
+- Review Firebase client configuration and restrict its API keys to the intended
+  applications and APIs.
+- Do not commit audit bundles, database dumps, local app data, diagnostic logs,
+  screenshots containing account data, or generated release archives.
+- If a credential may have entered Git history or a distributed bundle, rotate
+  it; deleting the current file is not sufficient.
+- Run a history-aware secret scan before major public releases.
 
-Before any public release:
+## Legal and Product Copy
 
-- Rotate credentials that appeared in local secret files or could have been copied into bundles.
-- Keep keystore passwords, signing keys, service-account files, API keys, webhook secrets, and production credentials outside the repository.
-- Keep `.env.example` and config examples placeholder-only.
-- Review committed Firebase config files for public exposure risk.
-- Exclude archives such as audit bundles, assessment bundles, generated release bundles, logs, database dumps, and local app data from the public export.
+Verify that every platform and public surface consistently states:
 
-## Licensing And Documentation
+- Torve is free software under `AGPL-3.0-or-later`.
+- There are no subscriptions, paid tiers, or paid-only features.
+- Donations are optional and never unlock product capabilities.
+- Torve does not provide media, playlists, subscriptions, or content rights.
+- Users connect their own lawful services and sources.
+- TMDB attribution is present.
+- Watch-provider availability supplied through TMDB is attributed to JustWatch.
+- Privacy disclosures match the Torve account backend, device and settings sync,
+  optional credential sync, connected services, diagnostics, and the exact
+  Firebase behavior of each release flavor.
 
-Project license: `AGPL-3.0-or-later`.
+Remove obsolete billing, premium, founder, and entitlement copy from user-facing
+surfaces. Historical billing code or records must never affect free product
+access.
 
-Files and areas that need replacement or cleanup before public release:
+## Public Project Surface
 
-- top-level `LICENSE`
-- `desktopApp/LICENSE`
-- top-level `README` if added or restored
-- store listing docs under `release/store/`
-- premium, billing, entitlement, device-management, and market-readiness docs under `docs/`
-- release scripts and release docs that reference billing or private deployment paths
+Before announcing a release, verify:
 
-Future public docs should state:
+- the public repository, license, README, contribution guide, security policy,
+  and issue tracker are reachable without authentication;
+- the landing page and source page link to the correct repository;
+- build instructions name the actual modules and commands;
+- release notes identify the source tag and supported platforms;
+- support and privacy contact addresses work;
+- password reset, account deletion, and email verification links return a
+  successful page on both `torve.app` and `www.torve.app`.
 
-- Torve is free software.
-- There are no subscriptions.
-- There are no paid tiers.
-- There are no premium features.
-- Donations are optional and never unlock features, badges, quota, storage, sync, themes, quality settings, devices, or content.
+## CI and Deployment Safety
 
-## CI And Release Hardening
+Public pull requests must run tests and static checks without production
+secrets. They must not automatically:
 
-Public CI should run tests and static checks without private secrets. Deployment, store upload, desktop signing, app signing, and release publication jobs should be gated by protected branches, tags, environments, or manual approval, and must not run on untrusted pull requests.
+- sign or publish application binaries;
+- deploy the backend or website;
+- upload store releases;
+- modify updater feeds;
+- access production user data.
 
-Release scripts that reference production secrets should either be excluded from the first public export or rewritten to use documented placeholder configuration.
+Signing, deployments, store uploads, and release publication must use protected
+branches/tags, protected environments, or deliberate operator actions.
 
-## Final Audit Gate
+## Store Release Gates
 
-Public release remains blocked until secrets are rotated as needed, store metadata cleanup is completed externally, final cross-client audit passes, and a fresh sanitized public repository is prepared.
+### Google Play / Google TV
+
+- Required store screenshots and listing assets are complete.
+- Data Safety matches the exact release build and backend behavior.
+- A review account and reviewer instructions work.
+- TV D-pad, Back, focus restoration, search input, and 16 KB page-size behavior
+  are verified on current hardware or an appropriate runtime environment.
+- Provider branding and artwork do not imply unaffiliated endorsement.
+
+### Amazon Fire TV
+
+- The signed release APK—not a debug APK—is installed for final smoke testing.
+- Direct update metadata points to a signed release APK with a verified checksum.
+- No Firebase SDK is present in the Amazon artifact.
+- D-pad, Back, playback, account recovery, and update installation pass on the
+  supported Fire TV devices.
+
+### Desktop
+
+- The installer is tested on a clean Windows environment.
+- Update metadata, download checksum, install, relaunch, rollback, and uninstall
+  behavior are verified.
+- Signing and SmartScreen limitations are documented honestly.
+
+## Final Gate
+
+A public release is ready only when:
+
+- the relevant release builds and tests are green;
+- no debug build is installed as part of release verification;
+- legal/privacy/store copy matches actual behavior;
+- the source tag and binary versions agree;
+- account recovery and deletion work;
+- known high-impact playback, navigation, or synchronization regressions are
+  either fixed or explicitly block the release.

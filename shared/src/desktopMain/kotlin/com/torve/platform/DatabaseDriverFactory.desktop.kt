@@ -1,9 +1,11 @@
 package com.torve.platform
 
 import app.cash.sqldelight.db.SqlDriver
+import app.cash.sqldelight.driver.jdbc.ConnectionManager
 import app.cash.sqldelight.driver.jdbc.sqlite.JdbcSqliteDriver
 import com.torve.db.TorveDatabase
 import java.io.File
+import java.util.Properties
 
 actual class DatabaseDriverFactory {
     actual fun createDriver(): SqlDriver {
@@ -11,7 +13,11 @@ actual class DatabaseDriverFactory {
         val isFreshFile = !dbFile.exists()
         dbFile.parentFile?.mkdirs()
 
-        val driver = JdbcSqliteDriver("jdbc:sqlite:${dbFile.absolutePath}")
+        val driver = JdbcSqliteDriver(
+            "jdbc:sqlite:${dbFile.absolutePath}",
+            desktopSqliteProperties(),
+        )
+        configureDesktopSqlite(driver)
         val targetVersion = TorveDatabase.Schema.version
 
         if (isFreshFile) {
@@ -45,6 +51,39 @@ actual class DatabaseDriverFactory {
         }
         ensureDesktopIncrementalMigrations(driver)
         return driver
+    }
+}
+
+internal fun desktopSqliteProperties(): Properties = Properties().apply {
+    // The desktop driver creates one JDBC connection per worker thread, so
+    // connection-wide settings must be supplied as driver properties. A PRAGMA
+    // executed once during startup would configure only the startup thread.
+    setProperty("busy_timeout", "10000")
+    setProperty("foreign_keys", "true")
+    setProperty("journal_mode", "WAL")
+    setProperty("synchronous", "NORMAL")
+}
+
+/**
+ * Desktop runs catalog refresh, EPG ingestion, account sync, and downloads on
+ * independent coroutines. WAL lets readers continue while one writer commits,
+ * while the busy timeout absorbs short write bursts instead of surfacing
+ * SQLITE_BUSY to the UI. A process-level single-instance guard prevents a
+ * second Torve process from becoming a competing writer to the same file.
+ */
+internal fun configureDesktopSqlite(driver: JdbcSqliteDriver) {
+    val connection = (driver as ConnectionManager).getConnection()
+    connection.createStatement().use { statement ->
+        statement.execute("PRAGMA busy_timeout = 10000")
+        statement.execute("PRAGMA foreign_keys = ON")
+    }
+    runCatching {
+        connection.createStatement().use { statement ->
+            statement.executeQuery("PRAGMA journal_mode = WAL").use { result ->
+                if (result.next()) result.getString(1)
+            }
+            statement.execute("PRAGMA synchronous = NORMAL")
+        }
     }
 }
 

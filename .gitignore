@@ -114,6 +114,9 @@ tv_focus_audit.txt
 /window_home.xml
 /torve_home_fixed_final.xml
 /fire*_diag.png
+/focus-*.xml
+/hero-*.xml
+/provider-*.png
 /latest_*_data_app_anr.txt
 /docs_extract_frontend.zip
 

@@ -674,7 +674,7 @@ private fun HomeZeroSourceEmptyState(
             Text(
                 text = "You're signed in, but no streaming source is connected yet. " +
                     "Built-in addons + Plex/Jellyfin auto-discovery will populate Home as soon as they find content. " +
-                    "To enable debrid / Newznab / Usenet sources, set up Panda or configure them in Settings.",
+                    "To enable debrid, Newznab, or Usenet sources, open streaming-source setup from Settings → Connections.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = colors.textSecondary,
             )

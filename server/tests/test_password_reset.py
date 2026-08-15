@@ -89,3 +89,28 @@ def test_password_reset_website_assets_are_wired():
     assert '"/web/auth/password-reset/request"' in reset_script
     assert '"/web/auth/password-reset/confirm"' in reset_script
     assert 'window.history.replaceState' in reset_script
+
+
+def test_public_legal_pages_match_account_and_provider_behavior():
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[2]
+    privacy = (root / "web" / "privacy.html").read_text(encoding="utf-8")
+    terms = (root / "web" / "terms.html").read_text(encoding="utf-8")
+
+    for required in (
+        "email address",
+        "device identifiers",
+        "account-backed settings",
+        "encrypted credentials",
+        "Firebase Analytics",
+        "Firebase Crashlytics",
+        "account deletion",
+        "powered by JustWatch",
+    ):
+        assert required in privacy
+
+    assert "AGPL-3.0-or-later" in terms
+    assert 'href="/source.html"' in terms
+    assert "powered by JustWatch" in terms
+    assert "private development repository" not in terms

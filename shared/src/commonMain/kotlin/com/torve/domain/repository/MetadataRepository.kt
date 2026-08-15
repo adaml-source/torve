@@ -52,6 +52,7 @@ interface MetadataRepository {
         withWatchProviders: String? = null,
         watchRegion: String? = null,
         withKeywords: String? = null,
+        withCompanies: String? = null,
     ): PagedResult
     suspend fun searchKeywords(query: String): List<TmdbKeyword>
     suspend fun searchMultiPaged(query: String, page: Int = 1, type: String? = null): PagedResult

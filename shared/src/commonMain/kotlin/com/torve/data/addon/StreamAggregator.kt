@@ -214,7 +214,7 @@ class StreamAggregator(
             "TORVE_STREAMS: torrentPreflight start raw=${streams.size} passthrough=${passthrough.size} " +
                 "candidates=${allCandidates.size} checking=${candidates.size} policy=${fetchPolicy.label}"
         }
-        if (candidates.isEmpty()) return@coroutineScope passthrough
+        if (candidates.isEmpty()) return@coroutineScope passthrough + allCandidates
 
         val semaphore = Semaphore(TORRENT_PREFLIGHT_CONCURRENCY)
         val resolved = candidates.map { stream ->
@@ -229,7 +229,11 @@ class StreamAggregator(
             "TORVE_STREAMS: torrentPreflight candidates=${candidates.size} verified=${resolved.size} " +
                 "passthrough=${passthrough.size}"
         }
-        passthrough + resolved
+        // Preflight is an availability hint, not an authoritative source
+        // filter. A timeout or temporary debrid error must not erase a stream
+        // that an addon just returned, and candidates beyond the bounded
+        // preflight window must remain selectable as well.
+        passthrough + mergeDebridPreflightResults(allCandidates, resolved)
     }
 
     private suspend fun preflightDebridCandidate(
@@ -315,6 +319,18 @@ class StreamAggregator(
         }
     }
 }
+
+internal fun mergeDebridPreflightResults(
+    candidates: List<ParsedStream>,
+    verified: List<ParsedStream>,
+): List<ParsedStream> {
+    val verifiedByKey = verified.associateBy(ParsedStream::debridPreflightKey)
+    return candidates.map { candidate ->
+        verifiedByKey[candidate.debridPreflightKey()] ?: candidate
+    }
+}
+
+private fun ParsedStream.debridPreflightKey(): String = magnetUrl ?: infoHash ?: title
 
 internal fun resolveStreamAddonBaseUrls(
     addons: List<InstalledAddon>,

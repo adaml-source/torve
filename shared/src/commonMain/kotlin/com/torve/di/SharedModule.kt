@@ -934,6 +934,9 @@ val sharedModule = module {
             vm.onIntegrationSaved = { type, credential, label, config ->
                 get<AccountSessionCoordinator>().saveIntegrationToBackend(type, credential, label, config)
             }
+            vm.onIntegrationDeleted = { type ->
+                get<AccountSessionCoordinator>().deleteIntegrationFromBackend(type)
+            }
             // Sync app language → TMDB content language.
             val tmdb = get<TmdbApiClient>()
             vm.onLanguageChanged = { language ->

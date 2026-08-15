@@ -38,4 +38,5 @@ Required external cleanup:
 
 Publication note:
 
-This private repository should not be made public directly. The public release should be created from a fresh sanitized source export after final audit.
+Publish from a reviewed public commit and immutable source tag. Keep production
+credentials, signing keys, and generated deployment state outside the repository.

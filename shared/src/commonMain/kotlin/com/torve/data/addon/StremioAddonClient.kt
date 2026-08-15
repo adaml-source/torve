@@ -70,34 +70,30 @@ class StremioAddonClient(
             imdbId
         }
 
-        return try {
-            val url = "${baseUrl.trimEnd('/')}/stream/$stremioType/$stremioId.json"
-            // CRITICAL: send the same browser-shaped headers we use for
-            // /manifest.json. Some addon backends (Panda observed
-            // 2026-05-04) silently return `streams: []` for /stream/
-            // requests that arrive with Ktor's default Java-engine
-            // User-Agent. The manifest fetch worked, the stream fetch
-            // didn't, and the desktop got zero results while the
-            // Android build (different Ktor engine -> different default
-            // UA) worked with the same Panda config.
-            val response = httpClient.get(url) {
-                header("User-Agent", "Mozilla/5.0 (Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36")
-                header("Accept", "application/json,text/plain;q=0.9,*/*;q=0.8")
-                header("Accept-Language", "en-US,en;q=0.9")
-            }
-            val streamResponse = json.decodeFromString<StremioStreamResponse>(
-                response.safeAddonBodyAsText(maxBytes = ADDON_STREAM_MAX_BYTES),
-            )
-            val addonName = try {
-                getManifest(baseUrl).name
-            } catch (_: Exception) {
-                baseUrl.substringAfter("://").substringBefore("/")
-            }
-            val addonOrigin = addonOriginForStream(baseUrl)
-            streamResponse.streams.map { StreamParser.parse(it, addonName, addonBaseUrl = addonOrigin) }
-        } catch (e: Exception) {
-            emptyList()
+        val url = "${baseUrl.trimEnd('/')}/stream/$stremioType/$stremioId.json"
+        // CRITICAL: send the same browser-shaped headers we use for
+        // /manifest.json. Some addon backends (Panda observed
+        // 2026-05-04) silently return `streams: []` for /stream/
+        // requests that arrive with Ktor's default Java-engine
+        // User-Agent. The manifest fetch worked, the stream fetch
+        // didn't, and the desktop got zero results while the
+        // Android build (different Ktor engine -> different default
+        // UA) worked with the same Panda config.
+        val response = httpClient.get(url) {
+            header("User-Agent", "Mozilla/5.0 (Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36")
+            header("Accept", "application/json,text/plain;q=0.9,*/*;q=0.8")
+            header("Accept-Language", "en-US,en;q=0.9")
         }
+        val streamResponse = json.decodeFromString<StremioStreamResponse>(
+            response.safeAddonBodyAsText(maxBytes = ADDON_STREAM_MAX_BYTES),
+        )
+        val addonName = try {
+            getManifest(baseUrl).name
+        } catch (_: Exception) {
+            baseUrl.substringAfter("://").substringBefore("/")
+        }
+        val addonOrigin = addonOriginForStream(baseUrl)
+        return streamResponse.streams.map { StreamParser.parse(it, addonName, addonBaseUrl = addonOrigin) }
     }
 
     /**

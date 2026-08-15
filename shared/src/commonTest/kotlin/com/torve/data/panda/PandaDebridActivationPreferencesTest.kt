@@ -95,6 +95,17 @@ class PandaDebridActivationPreferencesTest {
     }
 
     @Test
+    fun localReconnectClearsDisconnectBeforeAccountCredentialIsSaved() {
+        val reconnected = PandaDebridActivationSnapshot(
+            disconnectedProviderIds = setOf("realdebrid"),
+        ).withExplicitMutation("realdebrid", enabled = true)
+
+        assertTrue(reconnected.isEnabled("realdebrid"))
+        assertTrue(reconnected.disconnectedProviderIds.isEmpty())
+        assertEquals(setOf("realdebrid"), reconnected.pendingProviderIds)
+    }
+
+    @Test
     fun newerServerRemovalPropagatesDisconnectToAnotherDevice() {
         val deviceB = PandaDebridActivationSnapshot(
             enabledByProvider = mapOf("realdebrid" to true, "torbox" to true),

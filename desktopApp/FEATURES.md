@@ -31,7 +31,7 @@ mechanism it relies on.
 | Feature | Where | Notes |
 |---|---|---|
 | Sentry crash reporting | `desktop/diagnostics/SentryBootstrap.kt` | DSN read at runtime from `TORVE_SENTRY_DSN`. No DSN → no SDK init → zero traffic. Crashes tagged with `thread.kind` (awt/compose/coroutine/vlc/other). PII off, max 50 breadcrumbs, no perf tracing yet. |
-| In-app update checker | `desktop/updates/UpdateChecker.kt` | Auto-detects feed format. Source: `TORVE_UPDATE_FEED` (full URL) wins, then `TORVE_UPDATE_REPO` (`owner/name` for GitHub Releases). Parses both Sparkle/WinSparkle appcast XML and GitHub Releases JSON. |
+| In-app update checker | `desktop/updates/UpdateChecker.kt` | Auto-detects feed format. Packaged releases use the official Torve appcast; `TORVE_UPDATE_FEED` (full URL) or `TORVE_UPDATE_REPO` (`owner/name`) can override it for QA. Parses both Sparkle/WinSparkle appcast XML and GitHub Releases JSON. |
 | Update banner | `desktop/updates/UpdateBanner.kt` | Slim pill at top-center when a newer release is detected. **View release** opens the URL in the system browser; **Dismiss** hides per-session. |
 | Update preferences | `desktop/updates/UpdateCheckerPreferences.kt` | Properties file under `desktopDataDir()`. Stores `autoCheckOnLaunch`. Toggle exposed in Settings → Diagnostics & Updates. |
 | Diagnostics & Updates settings card | `desktop/ui/v2/settings/V2SettingsPage.kt` | Live read-only state of Sentry + update channel, env-var names with **Copy** buttons, "Check for updates now" trigger, auto-check toggle. |
@@ -161,7 +161,7 @@ painted over by a heavyweight peer.
 | Native installer scaffolding | `desktopApp/build.gradle.kts:nativeDistributions` | All targets declared: Windows EXE/MSI, macOS DMG, Linux DEB/AppImage. Per-OS metadata (UpgradeUUID, bundleID, Linux package name, app categories). macOS code-signing + notarization wired through `TORVE_MAC_*` env vars. Run `./gradlew :desktopApp:packageDmg` / `packageMsi` / `packageDeb` / `packageAppImage` on the appropriate host. |
 | Bundled VLC runtime (Windows) | `desktopApp/runtime/windows/vlc/` | Optional drop-in libvlc + plugins so end-users don't need a system VLC install. |
 | jpackage prereq check | `desktopApp/build.gradle.kts:verifyWindowsPackagingPrereqs` | Validates a JDK with jpackage exists; gates package tasks. |
-| Sample appcast generator | `desktopApp/build.gradle.kts:generateSampleAppcast` | `./gradlew :desktopApp:generateSampleAppcast` writes `release/appcast.sample.xml`. Edit version + URL, host on CDN, set `TORVE_UPDATE_FEED` to enable in-app update detection. |
+| Sample appcast generator | `desktopApp/build.gradle.kts:generateSampleAppcast` | `./gradlew :desktopApp:generateSampleAppcast` writes `release/appcast.sample.xml`. Production packages use `https://api.torve.app/releases/appcast.xml`; `TORVE_UPDATE_FEED` can override it for staging. |
 | WINDOWS_PACKAGING.md | `desktopApp/WINDOWS_PACKAGING.md` | Manual packaging checklist. |
 
 ---

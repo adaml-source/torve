@@ -18,7 +18,7 @@ See [LICENSE](LICENSE).
 
 | Area | Purpose | Local check |
 | --- | --- | --- |
-| `backend/` | FastAPI backend and sync services | `cd backend && pytest` |
+| `server/` | FastAPI backend and sync services | `cd server && pytest` |
 | `shared/` | Kotlin Multiplatform client core | `./gradlew :shared:compileKotlinMetadata` |
 | `androidApp/` Google mobile | Android mobile build | `./gradlew :androidApp:assembleGoogleMobileDebug` |
 | `androidApp/` Google TV | Android TV / Google TV build | `./gradlew :androidApp:assembleGoogleTvDebug` |

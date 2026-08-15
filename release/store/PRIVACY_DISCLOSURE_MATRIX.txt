@@ -8,6 +8,9 @@ Firebase Crashlytics      YES            NO                NO
 Advertising SDKs          NO             NO                NO
 Advertising ID (GAID)     NO             NO                NO
 TMDB API (metadata)       YES            YES               YES
+Torve account backend     YES            YES               YES
+Account/device sync       YES            YES               YES
+Optional credential sync YES            YES               YES
 Trakt.tv (user-initiated) YES            YES               YES
 SIMKL (user-initiated)    YES            YES               YES
 AI Providers (user keys)  YES            YES               YES
@@ -20,19 +23,36 @@ DATA TYPES COLLECTED (Google Play Data Safety):
 - Crash logs (Crashlytics) — automatic, encrypted in transit
 - App interactions (Analytics) — automatic, encrypted in transit
 - Device identifiers (Analytics) — automatic, encrypted in transit
-- NO names, emails, phone numbers, or payment info collected by the app
+- Email address, optional display name, user ID, authentication state, and service emails — account functionality
+- Installation/device identifiers, device type/name, app version, paired-device state, and last-seen data — device management and security
+- Account-backed settings, favorites, watch state, playback progress, and sync revisions — app functionality and synchronization
+- Integration metadata and credentials selected for account storage — app functionality; credentials are encrypted server-side
+- User-submitted diagnostics/support reports — support and reliability
+- No phone number or advertising profile is required by Torve
 - NO data shared with third parties for advertising
 - NO data used for cross-app tracking
 
+The Play Console declaration must be checked against the exact release build,
+Firebase configuration, backend behavior, retention, deletion flow, and Google's
+current definitions before every production submission. This file is an
+engineering inventory, not a substitute for completing Data Safety accurately.
+
 APPLE APP PRIVACY (Nutrition Labels):
-- "Data Not Collected" — correct for iOS build
-  (no Firebase, no analytics, no crash SDKs)
+- Do NOT select "Data Not Collected" while Torve accounts or account-backed sync
+  are available. Disclose the account identity, device, settings/watch-state,
+  connected-service, support, and optional iCloud data used by the shipped build.
+- Current iOS source does not include Firebase Analytics or Crashlytics, but that
+  does not make account and synchronization data "not collected."
 
 AMAZON APPSTORE:
 - No analytics or telemetry SDKs included
-- Privacy disclosure: data stored on-device only
+- Disclose Torve account identity, device registration, synchronization, optional
+  credential storage, transactional email, and user-submitted diagnostics.
+- Do not claim that all data stays on-device.
 
 IN-APP PRIVACY POLICY TEXT:
-- Android: Section 3 now discloses Firebase Analytics + Crashlytics for Google Play builds
-- Android: Section 3 notes Amazon builds have no analytics
-- iOS: "Data We Do NOT Collect" section updated — confirms no analytics SDKs in iOS build
+- Android bundled policies now consistently disclose the Torve backend, account
+  and device sync, optional encrypted credential storage, connected services,
+  Google-only Firebase behavior, deletion controls, and TMDB/JustWatch attribution.
+- The public website policy and every store listing must remain consistent with
+  this inventory and the production backend.

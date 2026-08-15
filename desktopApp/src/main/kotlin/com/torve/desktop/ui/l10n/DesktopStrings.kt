@@ -2583,10 +2583,10 @@ private val GERMAN = mapOf(
     "Refresh Access" to "Zugriff aktualisieren",
     "Session issue" to "Sitzungsproblem",
     // Settings - Integrations (Panda, Trakt, SIMKL)
-    "Panda (guided setup)" to "Panda (geführte Einrichtung)",
-    "Configure debrid providers, torrent sources, usenet, and quality - Panda installs itself as an add-on."
-        to "Konfigurieren Sie Debrid-Anbieter, Torrent-Quellen, Usenet und Qualität - Panda installiert sich selbst als Add-on.",
-    "Open Panda setup" to "Panda-Einrichtung öffnen",
+    "Streaming sources" to "Streaming-Quellen",
+    "Connect Debrid or Usenet, choose source and quality preferences, and check connection health in one place."
+        to "Debrid oder Usenet verbinden, Quellen- und Qualitätseinstellungen wählen und den Verbindungsstatus an einem Ort prüfen.",
+    "Open streaming setup" to "Streaming-Einrichtung öffnen",
     "Connect Trakt from desktop, sync now, and control scrobbling locally."
         to "Verbinden Sie Trakt vom Desktop, synchronisieren Sie jetzt und steuern Sie das Scrobbling lokal.",
     "Connected" to "Verbunden",
@@ -2901,7 +2901,7 @@ private val GERMAN = mapOf(
     "Open Settings" to "Einstellungen öffnen",
     "Couldn't load" to "Konnte nicht geladen werden",
     "Copy NZB" to "NZB kopieren",
-    "Reconfigure Panda" to "Panda neu konfigurieren",
+    "Reconfigure streaming sources" to "Streaming-Quellen neu konfigurieren",
     // Misc
     "Type a command or page..." to "Befehl oder Seite eingeben...",
     "Acting" to "Schauspielerei",
@@ -2911,8 +2911,8 @@ private val GERMAN = mapOf(
     "Adult" to "Erwachsene",
     "TorBox not configured" to "TorBox nicht konfiguriert",
     "Filter results (Enter to search)" to "Ergebnisse filtern (Enter zum Suchen)",
-    "Panda credentials are masked" to "Panda-Anmeldedaten sind maskiert",
-    "No NZB indexer configured in Panda" to "Kein NZB-Indexer in Panda konfiguriert",
+    "Indexer credentials need attention" to "Indexer-Anmeldedaten müssen geprüft werden",
+    "No NZB indexer connected" to "Kein NZB-Indexer verbunden",
     "Movies via Usenet" to "Filme via Usenet",
     "Search movies (Enter)" to "Filme suchen (Enter)",
     "No results." to "Keine Ergebnisse.",
@@ -3168,10 +3168,10 @@ private val SPANISH = mapOf(
     "Refresh Access" to "Actualizar acceso",
     "Session issue" to "Problema de sesión",
     // Settings - Integrations (Panda, Trakt, SIMKL)
-    "Panda (guided setup)" to "Panda (configuración guiada)",
-    "Configure debrid providers, torrent sources, usenet, and quality - Panda installs itself as an add-on."
-        to "Configura proveedores debrid, fuentes torrent, usenet y calidad - Panda se instala como un complemento.",
-    "Open Panda setup" to "Abrir configuración de Panda",
+    "Streaming sources" to "Fuentes de streaming",
+    "Connect Debrid or Usenet, choose source and quality preferences, and check connection health in one place."
+        to "Conecta Debrid o Usenet, elige las preferencias de fuentes y calidad y comprueba la conexión en un solo lugar.",
+    "Open streaming setup" to "Abrir configuración de streaming",
     "Connect Trakt from desktop, sync now, and control scrobbling locally."
         to "Conecta Trakt desde el escritorio, sincroniza ahora y controla el scrobbling localmente.",
     "Connected" to "Conectado",
@@ -3486,7 +3486,7 @@ private val SPANISH = mapOf(
     "Open Settings" to "Abrir ajustes",
     "Couldn't load" to "No se pudo cargar",
     "Copy NZB" to "Copiar NZB",
-    "Reconfigure Panda" to "Reconfigurar Panda",
+    "Reconfigure streaming sources" to "Reconfigurar fuentes de streaming",
     // Misc
     "Type a command or page..." to "Escribe un comando o página...",
     "Acting" to "Actuación",
@@ -3496,8 +3496,8 @@ private val SPANISH = mapOf(
     "Adult" to "Adulto",
     "TorBox not configured" to "TorBox no configurado",
     "Filter results (Enter to search)" to "Filtrar resultados (Intro para buscar)",
-    "Panda credentials are masked" to "Las credenciales de Panda están enmascaradas",
-    "No NZB indexer configured in Panda" to "Ningún indexador NZB configurado en Panda",
+    "Indexer credentials need attention" to "Las credenciales del indexador requieren atención",
+    "No NZB indexer connected" to "No hay ningún indexador NZB conectado",
     "Movies via Usenet" to "Películas vía Usenet",
     "Search movies (Enter)" to "Buscar películas (Intro)",
     "No results." to "Sin resultados.",
@@ -3752,10 +3752,10 @@ private val FRENCH = mapOf(
     "Refresh Access" to "Rafraîchir l'accès",
     "Session issue" to "Problème de session",
     // Settings - Integrations (Panda, Trakt, SIMKL)
-    "Panda (guided setup)" to "Panda (configuration guidée)",
-    "Configure debrid providers, torrent sources, usenet, and quality - Panda installs itself as an add-on."
-        to "Configurez les fournisseurs debrid, sources torrent, usenet et qualité - Panda s'installe comme module.",
-    "Open Panda setup" to "Ouvrir la configuration de Panda",
+    "Streaming sources" to "Sources de streaming",
+    "Connect Debrid or Usenet, choose source and quality preferences, and check connection health in one place."
+        to "Connectez Debrid ou Usenet, choisissez les sources et la qualité, puis vérifiez la connexion au même endroit.",
+    "Open streaming setup" to "Ouvrir la configuration du streaming",
     "Connect Trakt from desktop, sync now, and control scrobbling locally."
         to "Connectez Trakt depuis le bureau, synchronisez et contrôlez le scrobbling localement.",
     "Connected" to "Connecté",
@@ -4070,7 +4070,7 @@ private val FRENCH = mapOf(
     "Open Settings" to "Ouvrir les paramètres",
     "Couldn't load" to "Impossible de charger",
     "Copy NZB" to "Copier le NZB",
-    "Reconfigure Panda" to "Reconfigurer Panda",
+    "Reconfigure streaming sources" to "Reconfigurer les sources de streaming",
     // Misc
     "Type a command or page..." to "Tapez une commande ou page...",
     "Acting" to "Interprétation",
@@ -4080,8 +4080,8 @@ private val FRENCH = mapOf(
     "Adult" to "Adulte",
     "TorBox not configured" to "TorBox non configuré",
     "Filter results (Enter to search)" to "Filtrer les résultats (Entrée pour rechercher)",
-    "Panda credentials are masked" to "Les identifiants Panda sont masqués",
-    "No NZB indexer configured in Panda" to "Aucun indexeur NZB configuré dans Panda",
+    "Indexer credentials need attention" to "Les identifiants de l’indexeur nécessitent votre attention",
+    "No NZB indexer connected" to "Aucun indexeur NZB connecté",
     "Movies via Usenet" to "Films via Usenet",
     "Search movies (Enter)" to "Rechercher des films (Entrée)",
     "No results." to "Aucun résultat.",
@@ -4335,10 +4335,10 @@ private val ITALIAN = mapOf(
     "Refresh Access" to "Aggiorna accesso",
     "Session issue" to "Problema di sessione",
     // Settings - Integrations (Panda, Trakt, SIMKL)
-    "Panda (guided setup)" to "Panda (configurazione guidata)",
-    "Configure debrid providers, torrent sources, usenet, and quality - Panda installs itself as an add-on."
-        to "Configura provider debrid, sorgenti torrent, usenet e qualità - Panda si installa come add-on.",
-    "Open Panda setup" to "Apri configurazione Panda",
+    "Streaming sources" to "Sorgenti streaming",
+    "Connect Debrid or Usenet, choose source and quality preferences, and check connection health in one place."
+        to "Connetti Debrid o Usenet, scegli fonti e qualità e controlla lo stato della connessione in un unico posto.",
+    "Open streaming setup" to "Apri configurazione streaming",
     "Connect Trakt from desktop, sync now, and control scrobbling locally."
         to "Collega Trakt dal desktop, sincronizza ora e controlla lo scrobbling localmente.",
     "Connected" to "Connesso",
@@ -4653,7 +4653,7 @@ private val ITALIAN = mapOf(
     "Open Settings" to "Apri impostazioni",
     "Couldn't load" to "Impossibile caricare",
     "Copy NZB" to "Copia NZB",
-    "Reconfigure Panda" to "Riconfigura Panda",
+    "Reconfigure streaming sources" to "Riconfigura sorgenti streaming",
     // Misc
     "Type a command or page..." to "Digita un comando o pagina...",
     "Acting" to "Recitazione",
@@ -4663,8 +4663,8 @@ private val ITALIAN = mapOf(
     "Adult" to "Adulti",
     "TorBox not configured" to "TorBox non configurato",
     "Filter results (Enter to search)" to "Filtra risultati (Invio per cercare)",
-    "Panda credentials are masked" to "Le credenziali Panda sono mascherate",
-    "No NZB indexer configured in Panda" to "Nessun indexer NZB configurato in Panda",
+    "Indexer credentials need attention" to "Le credenziali dell’indexer richiedono attenzione",
+    "No NZB indexer connected" to "Nessun indexer NZB connesso",
     "Movies via Usenet" to "Film via Usenet",
     "Search movies (Enter)" to "Cerca film (Invio)",
     "No results." to "Nessun risultato.",
@@ -4918,10 +4918,10 @@ private val PORTUGUESE = mapOf(
     "Refresh Access" to "Atualizar acesso",
     "Session issue" to "Problema de sessão",
     // Settings - Integrations (Panda, Trakt, SIMKL)
-    "Panda (guided setup)" to "Panda (configuração guiada)",
-    "Configure debrid providers, torrent sources, usenet, and quality - Panda installs itself as an add-on."
-        to "Configure fornecedores debrid, fontes torrent, usenet e qualidade - Panda instala-se como extensão.",
-    "Open Panda setup" to "Abrir configuração do Panda",
+    "Streaming sources" to "Fontes de streaming",
+    "Connect Debrid or Usenet, choose source and quality preferences, and check connection health in one place."
+        to "Conecte Debrid ou Usenet, escolha fontes e qualidade e verifique a conexão em um só lugar.",
+    "Open streaming setup" to "Abrir configuração de streaming",
     "Connect Trakt from desktop, sync now, and control scrobbling locally."
         to "Ligue Trakt a partir do ambiente de trabalho, sincronize agora e controle o scrobbling localmente.",
     "Connected" to "Ligado",
@@ -5236,7 +5236,7 @@ private val PORTUGUESE = mapOf(
     "Open Settings" to "Abrir definições",
     "Couldn't load" to "Não foi possível carregar",
     "Copy NZB" to "Copiar NZB",
-    "Reconfigure Panda" to "Reconfigurar Panda",
+    "Reconfigure streaming sources" to "Reconfigurar fontes de streaming",
     // Misc
     "Type a command or page..." to "Escreva um comando ou página...",
     "Acting" to "Interpretação",
@@ -5246,8 +5246,8 @@ private val PORTUGUESE = mapOf(
     "Adult" to "Adulto",
     "TorBox not configured" to "TorBox não configurado",
     "Filter results (Enter to search)" to "Filtrar resultados (Enter para pesquisar)",
-    "Panda credentials are masked" to "As credenciais do Panda estão mascaradas",
-    "No NZB indexer configured in Panda" to "Nenhum indexador NZB configurado no Panda",
+    "Indexer credentials need attention" to "As credenciais do indexador precisam de atenção",
+    "No NZB indexer connected" to "Nenhum indexador NZB conectado",
     "Movies via Usenet" to "Filmes via Usenet",
     "Search movies (Enter)" to "Pesquisar filmes (Enter)",
     "No results." to "Sem resultados.",
@@ -5502,10 +5502,10 @@ private val TURKISH = mapOf(
     "Refresh Access" to "Erişimi yenile",
     "Session issue" to "Oturum sorunu",
     // Settings - Integrations (Panda, Trakt, SIMKL)
-    "Panda (guided setup)" to "Panda (rehberli kurulum)",
-    "Configure debrid providers, torrent sources, usenet, and quality - Panda installs itself as an add-on."
-        to "Debrid sağlayıcıları, torrent kaynakları, usenet ve kaliteyi yapılandırın - Panda kendini eklenti olarak yükler.",
-    "Open Panda setup" to "Panda kurulumunu aç",
+    "Streaming sources" to "Yayın kaynakları",
+    "Connect Debrid or Usenet, choose source and quality preferences, and check connection health in one place."
+        to "Debrid veya Usenet'i bağlayın, kaynak ve kalite tercihlerini seçin ve bağlantı durumunu tek yerde kontrol edin.",
+    "Open streaming setup" to "Yayın kurulumunu aç",
     "Connect Trakt from desktop, sync now, and control scrobbling locally."
         to "Trakt'ı masaüstünden bağlayın, şimdi senkronize edin ve scrobbling'i yerel olarak kontrol edin.",
     "Connected" to "Bağlı",
@@ -5820,7 +5820,7 @@ private val TURKISH = mapOf(
     "Open Settings" to "Ayarları aç",
     "Couldn't load" to "Yüklenemedi",
     "Copy NZB" to "NZB'yi kopyala",
-    "Reconfigure Panda" to "Panda'yı yeniden yapılandır",
+    "Reconfigure streaming sources" to "Yayın kaynaklarını yeniden yapılandır",
     // Misc
     "Type a command or page..." to "Komut veya sayfa yazın...",
     "Acting" to "Oyunculuk",
@@ -5830,8 +5830,8 @@ private val TURKISH = mapOf(
     "Adult" to "Yetişkin",
     "TorBox not configured" to "TorBox yapılandırılmadı",
     "Filter results (Enter to search)" to "Sonuçları filtrele (aramak için Enter)",
-    "Panda credentials are masked" to "Panda kimlik bilgileri maskelendi",
-    "No NZB indexer configured in Panda" to "Panda'da NZB indexer yapılandırılmamış",
+    "Indexer credentials need attention" to "Dizin oluşturucu kimlik bilgileri kontrol edilmeli",
+    "No NZB indexer connected" to "Bağlı NZB dizin oluşturucu yok",
     "Movies via Usenet" to "Usenet üzerinden filmler",
     "Search movies (Enter)" to "Film ara (Enter)",
     "No results." to "Sonuç yok.",

@@ -121,7 +121,7 @@ private enum class SettingsCategory(
     val label: String,
     val description: String,
 ) {
-    SOURCES("Sources", "Setup intents and provider health"),
+    SOURCES("Connections", "Set up, check, and repair connected services"),
     CUSTOMIZATION("Preferences", "Playback, quality, language, browsing"),
     ACCOUNT("Account", "Session, access, identity"),
     INTEGRATIONS("Integrations", "Sync, APIs, media servers"),
@@ -300,9 +300,7 @@ fun V2SettingsPage(
                 subtitle = ds(selectedCategory.description),
             )
 
-            // Persistent (until-dismissed) Panda nudge - easiest path to
-            // wiring debrid + indexer access. Shown to signed-in verified
-            // users; add-ons are no longer payment-gated.
+            // Persistent (until dismissed) streaming-source setup nudge.
             val pandaNudgeEligible = authState.user != null &&
                 authState.user?.isVerified == true
             DesktopPandaSetupNudgeCard(
@@ -1251,11 +1249,11 @@ private fun DesktopIntegrationReadinessCard(summary: IntegrationReadinessSummary
 @Composable
 private fun PandaSection(onOpenPandaSetup: () -> Unit) {
     TorveSectionCard(
-        title = ds("Panda (guided setup)"),
-        supportingText = ds("Configure debrid providers, torrent sources, usenet, and quality - Panda installs itself as an add-on."),
+        title = ds("Streaming sources"),
+        supportingText = ds("Connect Debrid or Usenet, choose source and quality preferences, and check connection health in one place."),
     ) {
         TorvePrimaryButton(
-            text = ds("Open Panda setup"),
+            text = ds("Open streaming setup"),
             onClick = onOpenPandaSetup,
         )
     }
@@ -3247,8 +3245,8 @@ private fun AboutSection(
             )
 
             // Update channel
-            val updateRepo = System.getenv(com.torve.desktop.updates.UpdateChecker.REPO_ENV)?.takeIf { it.isNotBlank() }
-            val updateFeed = System.getenv(com.torve.desktop.updates.UpdateChecker.FEED_ENV)?.takeIf { it.isNotBlank() }
+            val updateRepo = com.torve.desktop.updates.UpdateChecker.resolveDefaultRepo()
+            val updateFeed = com.torve.desktop.updates.UpdateChecker.resolveDefaultFeed()
             val updateChannel = updateFeed ?: updateRepo?.let { "github.com/$it" }
             TorveListRow(
                 title = ds("Update channel"),
@@ -3323,7 +3321,7 @@ private fun AboutSection(
                     },
                 )
                 val statusText: String? = when {
-                    !checkerEnabled -> "Disabled — set TORVE_UPDATE_REPO or TORVE_UPDATE_FEED."
+                    !checkerEnabled -> "Update checks are unavailable in this build."
                     checkInProgress -> null  // button label already conveys this
                     lastCheckedAt == null -> null  // never run yet from this button
                     else -> when (val s = updaterState) {
@@ -4304,8 +4302,8 @@ private fun SourcesSection(
     val colors = TorveDesktopThemeTokens.colors
     if (setupIntentsViewModel == null) {
         TorveSectionCard(
-            title = ds("Setup & Sources"),
-            supportingText = ds("Provider health is initializing..."),
+            title = ds("Connections"),
+            supportingText = ds("Connection health is initializing..."),
         ) {}
         return
     }
@@ -4313,8 +4311,8 @@ private fun SourcesSection(
     val rawEntries by setupIntentsViewModel.rawEntries.collectAsState()
 
     TorveSectionCard(
-        title = ds("Setup & Sources"),
-        supportingText = ds("Tell Torve what you have. Each path is tested as soon as you save credentials."),
+        title = ds("Connections"),
+        supportingText = ds("Choose what you want to connect. Torve checks each path after credentials are saved."),
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
             summaries.forEach { summary ->
@@ -4333,13 +4331,8 @@ private fun SourcesSection(
                     },
                     onOpenSetup = {
                         when (summary.intent) {
-                            // Debrid + Usenet both flow through Panda's
-                            // guided setup. Routing DEBRID to the
-                            // Account category was the legacy path
-                            // (account-attached API keys); the modern
-                            // path is the Panda OAuth/API-key wizard
-                            // which also handles AllDebrid / Premiumize
-                            // / TorBox under the same surface.
+                            // Debrid + Usenet share the guided streaming-source
+                            // flow; Panda remains an internal orchestration detail.
                             com.torve.presentation.setup.SetupIntent.DEBRID ->
                                 onOpenPandaSetup()
                             com.torve.presentation.setup.SetupIntent.IPTV ->
@@ -4521,14 +4514,14 @@ private fun SourcesSection(
                 ) {
                     // "Set up manually" used to just close the card -
                     // now it dismisses the recovery card AND nudges the
-                    // user to use the per-provider Setup & Sources rows
+                    // user to use the per-provider Connections rows
                     // above. The card naturally re-appears on next
                     // refresh if categories are still missing.
                     TorveGhostButton(
                         text = ds("Set up manually"),
                         onClick = {
                             recoverySnap = null
-                            redirectNotice = "Use the Setup & Sources cards above - " +
+                            redirectNotice = "Use the Connections cards above - " +
                                 "tap \"Open setup\" on each row that says \"Not set up\"."
                         },
                     )

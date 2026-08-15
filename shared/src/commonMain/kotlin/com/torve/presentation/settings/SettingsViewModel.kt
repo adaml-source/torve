@@ -6,6 +6,7 @@ import com.torve.data.ai.AiProvider
 import com.torve.data.ai.AiSuggestClient
 import com.torve.data.debrid.DebridClient
 import com.torve.data.panda.readPandaDebridActivationSnapshot
+import com.torve.data.panda.writePandaDebridActivationSnapshot
 import com.torve.data.panda.enabledCredentials
 import com.torve.data.panda.pandaProviderId
 import com.torve.data.kodi.KodiClient
@@ -136,6 +137,13 @@ class SettingsViewModel(
      */
     var onIntegrationSaved:
         (suspend (String, Map<String, String>, String?, Map<String, String>) -> Boolean)? = null
+
+    /**
+     * Removes an account-backed integration after an explicit disconnect.
+     * The local disconnect tombstone remains authoritative when this write is
+     * offline; account restore retries the backend deletion on the next sync.
+     */
+    var onIntegrationDeleted: (suspend (String) -> Boolean)? = null
 
     /** Notifies the TMDB client when the user changes the app language. Set by DI. */
     var onLanguageChanged: ((AppLanguage) -> Unit)? = null
@@ -792,6 +800,11 @@ class SettingsViewModel(
             _state.update { it.copy(debridLoading = true, debridError = null) }
             val result = debridClient.verifyApiKey(provider, apiKey)
             if (result.success) {
+                val providerId = provider.pandaProviderId()
+                prefsRepo.writePandaDebridActivationSnapshot(
+                    prefsRepo.readPandaDebridActivationSnapshot()
+                        .withExplicitMutation(providerId, enabled = true),
+                )
                 integrationSecretStore.put(debridSecretKey(provider), apiKey)
                 if (provider == DebridServiceType.TORBOX) {
                     integrationSecretStore.syncTorBoxCredentialPair(apiKey)
@@ -863,6 +876,11 @@ class SettingsViewModel(
                     code.userCode,
                 )
                 if (result.done && result.apiKey != null) {
+                    val providerId = provider.pandaProviderId()
+                    prefsRepo.writePandaDebridActivationSnapshot(
+                        prefsRepo.readPandaDebridActivationSnapshot()
+                            .withExplicitMutation(providerId, enabled = true),
+                    )
                     integrationSecretStore.put(debridSecretKey(provider), result.apiKey)
                     if (provider == DebridServiceType.TORBOX) {
                         integrationSecretStore.syncTorBoxCredentialPair(result.apiKey)
@@ -948,13 +966,34 @@ class SettingsViewModel(
         debridPollJob?.cancel()
         val provider = _state.value.debridProvider
         scope.launch {
+            val providerId = provider.pandaProviderId()
+            // Persist intent before touching credentials. A refresh, OAuth
+            // completion, or stale account restore can then no longer put the
+            // provider back into the usable resolution set.
+            prefsRepo.writePandaDebridActivationSnapshot(
+                prefsRepo.readPandaDebridActivationSnapshot()
+                    .withExplicitDisconnect(providerId),
+            )
             integrationSecretStore.remove(debridSecretKey(provider))
+            integrationSecretStore.remove(IntegrationSecretKey.DEBRID_API_KEY)
+            prefsRepo.remove(KEY_DEBRID_API_KEY)
             if (provider == DebridServiceType.REAL_DEBRID) {
                 integrationSecretStore.remove(IntegrationSecretKey.DEBRID_RD_REFRESH_TOKEN)
                 integrationSecretStore.remove(IntegrationSecretKey.DEBRID_RD_CLIENT_ID)
                 integrationSecretStore.remove(IntegrationSecretKey.DEBRID_RD_CLIENT_SECRET)
                 prefsRepo.remove(KEY_DEBRID_RD_EXPIRES_AT)
             }
+            val removedFromAccount = runCatching {
+                onIntegrationDeleted?.invoke("DEBRID_API_KEY_${provider.name}") ?: true
+            }.getOrDefault(false)
+            if (!removedFromAccount) {
+                _state.update {
+                    it.copy(
+                        debridError = "Disconnected on this device. Account removal will retry when Torve can sync.",
+                    )
+                }
+            }
+            settingsRefreshNotifier.notifyRefresh(Clock.System.now().toEpochMilliseconds())
         }
         val updated = _state.value.connectedDebridProviders.toMutableMap()
         updated.remove(provider)

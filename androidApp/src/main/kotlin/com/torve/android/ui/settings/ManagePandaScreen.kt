@@ -236,7 +236,7 @@ fun ManagePandaScreen(
                         Spacer(Modifier.height(4.dp))
                         Text(
                             if (hasConfiguredDebrid) {
-                                "Your credentials are retained, but no debrid provider is enabled for use. Reconfigure Panda to enable one."
+                                "Your credentials are retained, but no debrid provider is enabled for use. Open streaming-source setup to enable one."
                             } else {
                                 "Your debrid token may have expired. Go to Settings → Integrations → Debrid to reconnect, then tap Reconfigure below to sync."
                             },

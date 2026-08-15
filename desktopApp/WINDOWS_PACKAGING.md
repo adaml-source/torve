@@ -262,9 +262,10 @@ property at startup. CI defines one job per channel; default is
 
 ## Update Path
 
-The desktop shell shows a slim "Torve update available" banner at the top
-when `TORVE_UPDATE_FEED` (or `TORVE_UPDATE_REPO`) points at a release
-manifest. When the feed is a Sparkle/WinSparkle appcast and the latest
+Production packages poll `https://api.torve.app/releases/appcast.xml` and
+show a slim "Torve update available" banner at the top when a newer release
+is published. `TORVE_UPDATE_FEED` (or `TORVE_UPDATE_REPO`) can override the
+production channel for QA. When the feed is a Sparkle/WinSparkle appcast and the latest
 `<item>` includes a direct `<enclosure url="...">`, the banner shows
 **Download & install** in addition to **View release**.
 
@@ -294,7 +295,8 @@ To generate a sample appcast for your CDN:
 
 Edit version, URL, and SHA-256 (compute via `Get-FileHash -Algorithm SHA256`
 on Windows or `shasum -a 256` on Unix), then host the file at a stable
-URL and point `TORVE_UPDATE_FEED` at it for distributed builds.
+URL and point `TORVE_UPDATE_FEED` at it for staging tests. Release builds
+use the official Torve feed unless explicitly overridden.
 
 ## Known Remaining Release Work
 

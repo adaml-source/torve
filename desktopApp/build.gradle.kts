@@ -88,6 +88,28 @@ val bundledMpvMacosDir = layout.projectDirectory.dir("runtime/macos/mpv")
 val bundledMpvLinuxDir = layout.projectDirectory.dir("runtime/linux/mpv")
 val bundledVlcLinuxDir = layout.projectDirectory.dir("runtime/linux/vlc")
 
+// Production packages must discover updates without requiring an operator to
+// remember a build flag. Environment/property overrides remain available for
+// staging and QA, but the public Torve feed is the safe release default.
+val officialDesktopUpdateFeed = "https://api.torve.app/releases/appcast.xml"
+val desktopUpdateFeedUrl = providers.environmentVariable("TORVE_UPDATE_FEED")
+    .orElse(providers.gradleProperty("torveUpdateFeed"))
+    .orElse(officialDesktopUpdateFeed)
+    .get()
+
+tasks.register("verifyDesktopUpdateFeed") {
+    group = "verification"
+    description = "Rejects desktop packages whose baked-in updater feed is blank or non-HTTPS."
+    inputs.property("desktopUpdateFeedUrl", desktopUpdateFeedUrl)
+    doLast {
+        if (!desktopUpdateFeedUrl.startsWith("https://") || desktopUpdateFeedUrl.any(Char::isWhitespace)) {
+            throw GradleException(
+                "Desktop update feed must be a non-blank HTTPS URL; got '$desktopUpdateFeedUrl'.",
+            )
+        }
+    }
+}
+
 tasks.register("verifyWindowsPackagingPrereqs") {
     group = "distribution"
     description = "Checks Windows desktop packaging prerequisites for Torve."
@@ -309,7 +331,7 @@ tasks.register("generateSampleAppcast") {
     doLast {
         val out = layout.projectDirectory.file("release/appcast.sample.xml").asFile
         out.parentFile?.mkdirs()
-        val version = "1.1.4"
+        val version = "1.1.5"
         val pubDate = DateTimeFormatter
             .ofPattern("EEE, dd MMM yyyy HH:mm:ss Z", Locale.US)
             .withZone(ZoneId.of("UTC"))
@@ -394,14 +416,40 @@ if (isLinuxHost()) {
 //
 // Use this task — NOT `packageMsi` — for any release that ships the
 // updater. CI for `release/*` branches must call `packageMsiCloseApp`.
+tasks.register("verifyPackagedDesktopUpdateMetadata") {
+    group = "verification"
+    description = "Checks that the packaged desktop launcher contains the release version and updater feed."
+    dependsOn("createDistributable", "verifyDesktopUpdateFeed")
+    val packagedConfig = layout.buildDirectory.file("compose/binaries/main/app/Torve/app/Torve.cfg")
+    val expectedVersion = (project.findProperty("torveMsiVersion") as String?) ?: "1.1.5"
+    inputs.file(packagedConfig)
+    inputs.property("expectedDesktopVersion", expectedVersion)
+    inputs.property("expectedDesktopUpdateFeed", desktopUpdateFeedUrl)
+    doLast {
+        val configFile = packagedConfig.get().asFile
+        if (!configFile.isFile) {
+            throw GradleException("Packaged desktop config is missing: ${configFile.absolutePath}")
+        }
+        val lines = configFile.readLines().map(String::trim)
+        val expectedVersionLine = "java-options=-Dtorve.desktop.version=$expectedVersion"
+        val expectedFeedLine = "java-options=-Dtorve.update.feed=$desktopUpdateFeedUrl"
+        if (expectedVersionLine !in lines) {
+            throw GradleException("Packaged desktop config is missing '$expectedVersionLine'.")
+        }
+        if (expectedFeedLine !in lines) {
+            throw GradleException("Packaged desktop config is missing '$expectedFeedLine'.")
+        }
+    }
+}
+
 tasks.register("packageMsiCloseApp") {
     group = "distribution"
     description = "Builds the Torve MSI with a util:CloseApplication element so the in-app updater can upgrade without 'Files in Use' prompts. Override version with -PtorveMsiVersion=X.Y.Z."
-    dependsOn("verifyWindowsPackagingPrereqs", "createDistributable")
+    dependsOn("verifyWindowsPackagingPrereqs", "verifyPackagedDesktopUpdateMetadata")
     // Single source of truth shared with compose.desktop.application
     // (jvmArgs `-Dtorve.desktop.version` + packageVersion). Override per
     // build via `-PtorveMsiVersion=X.Y.Z`.
-    val torveVersion = (project.findProperty("torveMsiVersion") as String?) ?: "1.1.4"
+    val torveVersion = (project.findProperty("torveMsiVersion") as String?) ?: "1.1.5"
     val wixResourceDir = layout.projectDirectory.dir("wix-resources")
     val licenseFile = layout.projectDirectory.file("LICENSE")
     val iconFile = layout.projectDirectory.file("src/main/resources/torve.ico")
@@ -417,7 +465,7 @@ tasks.register("packageMsiCloseApp") {
     // BUILD SUCCESSFUL that quietly serves a stale MSI.
     inputs.dir(appImageDir).withPropertyName("appImage").withPathSensitivity(PathSensitivity.RELATIVE)
     inputs.property("torveVersion", torveVersion)
-    inputs.property("torveUpdateFeed", project.findProperty("torveUpdateFeed") as String? ?: "")
+    inputs.property("torveUpdateFeed", desktopUpdateFeedUrl)
     outputs.dir(outDir)
 
     doLast {
@@ -595,7 +643,7 @@ compose.desktop {
         // consumed by the packageMsiCloseApp task and the Compose Desktop
         // packageVersion below, so the JVM-reported version, the MSI's
         // ProductVersion, and the in-app About panel all stay in lockstep.
-        val torveAppVersion = (project.findProperty("torveMsiVersion") as String?) ?: "1.1.4"
+        val torveAppVersion = (project.findProperty("torveMsiVersion") as String?) ?: "1.1.5"
         // Auto-update feed URL — baked into the packaged build so the
         // in-app updater works out of the box for end users without
         // any TORVE_UPDATE_FEED env-var ceremony. The runtime resolver
@@ -604,12 +652,8 @@ compose.desktop {
         // Sandbox cloudflared tunnel or staging feed without rebuilding.
         //
         // Set at build time via `-PtorveUpdateFeed=…` or the
-        // TORVE_UPDATE_FEED env var. Empty string by default — dev
-        // builds with no feed configured stay no-op (no ping).
-        val updateFeedUrl = providers.environmentVariable("TORVE_UPDATE_FEED")
-            .orElse(providers.gradleProperty("torveUpdateFeed"))
-            .orElse("")
-            .get()
+        // TORVE_UPDATE_FEED env var. Packaged releases otherwise use
+        // the official public feed defined above.
         val updateRepo = providers.environmentVariable("TORVE_UPDATE_REPO")
             .orElse(providers.gradleProperty("torveUpdateRepo"))
             .orElse("")
@@ -621,7 +665,7 @@ compose.desktop {
             "-Dtorve.desktop.vendor=Torve",
             "-Dtorve.desktop.description=Torve desktop for Windows with embedded VLC playback.",
             "-Dtorve.desktop.channel=$releaseChannel",
-            "-Dtorve.update.feed=$updateFeedUrl",
+            "-Dtorve.update.feed=$desktopUpdateFeedUrl",
             "-Dtorve.update.repo=$updateRepo",
             // Java's HttpURLConnection pools max 5 connections per host
             // by default. With ~32 parallel image loads on a detail
@@ -658,8 +702,9 @@ compose.desktop {
             //                  module was missing from the runtime image)
             // jdk.crypto.ec  - Elliptic-curve TLS cipher suites for HTTPS to
             //                  ngrok / GitHub / generic CDNs
+            // jdk.httpserver - local-LAN library server used by TV clients
             // jdk.unsupported - sun.misc.Unsafe used transitively by some libs
-            modules("java.sql", "java.net.http", "jdk.crypto.ec", "jdk.unsupported")
+            modules("java.sql", "java.net.http", "jdk.httpserver", "jdk.crypto.ec", "jdk.unsupported")
             // All three host families. The Compose Gradle plugin only
             // produces formats it can actually build on the current host
             // (Windows can't sign a DMG; Linux can't make MSIs), but
