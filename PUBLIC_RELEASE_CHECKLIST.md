@@ -107,6 +107,11 @@ branches/tags, protected environments, or deliberate operator actions.
 - The signed release APK—not a debug APK—is installed for final smoke testing.
 - `tools/check-connected-release-devices.ps1` passes and confirms that no
   `com.torve.app*.debug` package or debuggable/test build remains installed.
+- `tools/tv-release-startup-probe.ps1` captures repeatable cold/warm launch
+  timings and refuses debug, debuggable, or test-only packages.
+- `tools/tv-playback-soak.ps1 -RequireForeground` is used when Torve itself must
+  remain visible; the harness fails on process death, fatal logs, or focus loss
+  to another application and also refuses debug/test packages.
 - Direct update metadata points to a signed release APK with a verified checksum.
 - No Firebase SDK is present in the Amazon artifact.
 - D-pad, Back, playback, account recovery, and update installation pass on the

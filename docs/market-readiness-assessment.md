@@ -2,11 +2,10 @@
 
 Last updated: 2026-08-15
 
-Assessment baseline: the current local workspace at
-`C:\Users\Anwender\StudioProjects\streamvault`, including committed version
-`1.1.5`, the uncommitted source-resolution and TV catalog fixes, existing
-physical-device reports, fresh host-runnable tests, and an August 2026 review of
-the current media-app market.
+Assessment baseline: the source-tagged `1.1.6` release, its signed Android and
+Windows artifacts, the live production website/update feeds, current
+physical-device evidence, fresh host-runnable tests, and an August 2026 review
+of the current media-app market.
 
 This supersedes the obsolete paid-product assessment. Torve is assessed here as
 free software. There are no subscriptions, paid tiers, premium features, or
@@ -17,8 +16,9 @@ advice.
 
 ## Executive verdict
 
-Torve is a credible, unusually capable **controlled Android/Fire TV beta**, but
-it is not yet a credible public free-software launch or broad app-store release.
+Torve is a credible, unusually capable **public direct-download beta** and a
+strong controlled Android/Fire TV beta, but it is not yet ready for a broad
+app-store or consumer-stable release.
 
 The product is no longer blocked by a lack of features. It now combines:
 
@@ -37,10 +37,10 @@ personally guiding each installation.
 
 The harsh conclusion is:
 
-> Torve has enough product to compete and now has a live public website and
-> unauthenticated public source repository. Its strongest user journey is still
-> harder to discover than it should be, search visibility is weak, and the
-> current release candidate is not yet fully verified.
+> Torve now has a source-tagged, checksummed public release, automatic update
+> feeds, account recovery, and an outcome-first Connections surface. Its largest
+> remaining constraints are store/hardware proof, rights-safe store assets,
+> clean-machine signing reputation, discoverability, and community scale.
 
 ## Readiness ratings
 
@@ -48,22 +48,22 @@ Scores describe readiness for the named outcome, not code volume.
 
 | Target | Score | Verdict |
 | --- | ---: | --- |
-| Controlled existing-user beta | 8.0/10 | **GO.** Fire TV and Android paths have strong real-device evidence and active operator feedback. |
-| Direct Fire TV staged release | 7.8/10 | **GO with monitoring.** Signed release, two-device validation, and an in-app update path exist. Long-session soak and regression discipline still matter. |
-| Android mobile beta | 7.0/10 | **GO for controlled testing.** Core flow is viable, but mobile is less differentiated and Google policy/privacy work is incomplete. |
-| Google TV internal testing | 6.7/10 | **GO.** AAB, TV UX, both ABIs, and unit tests exist. A current physical Google TV and 16 KB runtime smoke are still missing. |
-| Windows direct beta | 6.5/10 | **CONDITIONAL GO.** MSI and updater work exist; signing reputation and a current clean-machine end-to-end pass remain weak points. |
-| Public direct-download beta | 6.8/10 | **CONDITIONAL.** Website, source, downloads, and updater exist. Finish legal deployment, release verification, documentation, and onboarding cleanup first. |
-| Google Play / Google TV public release | 4.8/10 | **NO-GO today.** Privacy disclosure, JustWatch attribution, third-party IP presentation, store assets, review access, and current-device evidence are incomplete. |
-| Public free-software project launch | 6.2/10 | **CONDITIONAL.** The repository, AGPL license, source page, issue tracker, contribution guide, and security policy are public. Discoverability, tagged binary/source correspondence, and community proof remain weak. |
+| Controlled existing-user beta | 8.4/10 | **GO.** Fire TV and Android paths have strong real-device evidence, active operator feedback, and automated release checks. |
+| Direct Fire TV staged release | 8.3/10 | **GO with monitoring.** Signed 1.1.6, automatic notification/install handoff, immutable provenance, and repeatable soak tooling exist. |
+| Android mobile beta | 7.2/10 | **GO for controlled testing.** Recovery and Connections are stronger; mobile remains less differentiated and still needs current store/device proof. |
+| Google TV internal testing | 7.1/10 | **GO.** Signed AAB, both ARM ABIs, 16 KB bundle/ELF verification, TV UX tests, and unit tests pass. A physical Google TV/16 KB runtime smoke remains manual. |
+| Windows direct beta | 7.0/10 | **CONDITIONAL GO.** Public MSI, automatic appcast, recovery, and checksum validation exist; signing reputation and a current clean-machine pass remain weak points. |
+| Public direct-download beta | 7.8/10 | **GO with monitoring.** Website, legal pages, recovery, tagged source, provenance, downloads, and update feeds are live and production-verified. |
+| Google Play / Google TV public release | 5.3/10 | **NO-GO today.** Store assets, rights review, review access, policy-form submission, and physical-device evidence remain incomplete. |
+| Public free-software project launch | 7.5/10 | **GO for a small beta.** Public source, tag/artifact correspondence, AGPL, issue templates, contribution/security guidance, self-hosting notes, and provenance are live. Discoverability and community proof remain weak. |
 | iOS / macOS release | 3.5/10 | **NO-GO.** The common-source compile regression is fixed locally, but Apple builds and devices are not operator-verified. |
-| Broad consumer stable release | 4.6/10 | **NO-GO.** Reliability, supportability, public trust, policy proof, and distribution lag behind the feature set. |
+| Broad consumer stable release | 5.2/10 | **NO-GO.** Long-term reliability, support capacity, store proof, signing reputation, and distribution still lag behind the feature set. |
 
 ## What changed since July 2026
 
 ### Material improvements
 
-- Android and desktop versions align at `1.1.5`.
+- Android and desktop versions align at `1.1.6`.
 - Provider-backed browsing and filtering now exist on TV.
 - Provider artwork, cinematic title artwork, focus restoration, source failure
   handling, and TV details behavior received substantial real-device work.
@@ -72,12 +72,12 @@ Scores describe readiness for the named outcome, not code volume.
 - Debrid activation preference is separated from credentials and synchronized.
 - Fire TV now has an application update worker and guided download/install
   activity.
-- Password-reset web pages and Android/TV entry points exist.
-- Fresh Amazon TV, Google TV, and Google mobile release artifacts were built on
-  2026-08-15. The Amazon APK signature verifies against the Torve release
-  certificate; these final artifacts were deliberately not installed during the
-  host verification pass.
-- Fresh host-runnable test outputs on 2026-08-15 contain 2,320 passing tests and
+- Password-reset web pages and Android/TV entry points exist; Desktop sign-in
+  now invokes the same non-enumerating recovery API.
+- Fresh Amazon TV, Google TV, and Google mobile `1.1.6` release artifacts were
+  built on 2026-08-15. The Amazon APK verifies against the Torve release
+  certificate and the public APK/MSI hashes and byte lengths match provenance.
+- Fresh host-runnable test outputs on 2026-08-15 contain 2,327 passing tests and
   zero test failures across shared desktop, desktop, Amazon TV, Google TV, and
   Google mobile suites.
 
@@ -86,17 +86,16 @@ Scores describe readiness for the named outcome, not code volume.
 - The iOS simulator regression at `ChannelRepositoryImpl.kt:2650` was fixed by
   replacing JVM-only map sorting with a common Kotlin operation.
   `:shared:compileKotlinIosSimulatorArm64` and `:shared:allTests` now pass.
-- The current working tree is dirty with source-resolution, notification, TMDB
-  pagination, Search, and TV See All changes plus local diagnostic artifacts.
-  Those fixes cannot be described as a clean release candidate yet.
+- Release source is committed at `bef4824ab1e1e906fb31b53d5913bbbb91c03d21`,
+  tagged `v1.1.6`, published, and separated from local ignored diagnostics.
 - The complete backend gate passes 652/652 against an isolated PostgreSQL
   database migrated from revision 0001 through 0033. The run also
   exposed and fixed invalid FastAPI response-model inference on three Stripe
   routes, which had prevented the production app module from importing.
 - The store positioning script passes its copy check but reports **0/6 required
   screenshots present**.
-- Corrected policy/legal files are present in source; the public website copies
-  still need deployment and production verification.
+- Corrected policy/legal, recovery, download, source, and Connections pages are
+  deployed and verified from the production VPS.
 - Direct free competitors have moved closer to Torve's feature set.
 
 ## Current product wedge
@@ -267,8 +266,14 @@ Risks:
 
 - Recent regressions repeatedly affected D-pad focus, provider actions, source
   error overlays, next-episode overlays, and pagination.
-- A repeatable two-hour soak harness exists, but current real-device long-session
-  evidence is not recorded as a release gate.
+- A two-hour 1.1.5 Raven run completed with 234 samples, no process death, and no
+  matching fatal/ANR/OOM record. Only 24 samples had Torve in the foreground;
+  SmartTube owned the remainder, so this is background process-survival evidence,
+  not a two-hour Torve playback claim.
+- The exact signed 1.1.6 production APK was then installed in place. A strict
+  three-minute Raven smoke retained Torve foreground ownership for all 31
+  samples, captured memory in every sample, and recorded no process death,
+  fatal/ANR/OOM event, or foreground loss.
 - Fire TV update installation still depends on platform permission and should be
   smoothed and documented for nontechnical users.
 
@@ -281,10 +286,11 @@ The product is technically promising but store proof is incomplete.
   current architecture compatibility. From 2026-08-01 TV apps must support both
   32-bit and 64-bit architectures and 16 KB page-size requirements. Source:
   [Android TV app quality](https://developer.android.com/docs/quality-guidelines/tv-app-quality).
-- Torve declares both `armeabi-v7a` and `arm64-v8a`, and a current Google TV
-  release APK passed `zipalign -c -P 16 -v 4`.
-- This assessment did not verify every native ELF segment or run on a 16 KB
-  emulator/device, so Play compatibility is not fully proven.
+- Torve declares both `armeabi-v7a` and `arm64-v8a`. The 1.1.6 Amazon APK passed
+  16 KB ZIP alignment; both Google AABs declare `PAGE_ALIGNMENT_16K`; and every
+  packaged 64-bit ELF `PT_LOAD` segment passed the 16 KB alignment gate.
+- A physical or emulated 16 KB Google runtime smoke is still required because
+  static bundle/ELF validation cannot prove device runtime behavior.
 - The July report explicitly lacked a physical Google TV smoke. Fire TV parity is
   valuable but not a substitute for Google TV review-device behavior.
 
@@ -328,8 +334,8 @@ Do not market Torve as fully cross-platform until these targets are proven.
 
 ## Policy, legal, and privacy readiness
 
-Deployment of the corrected legal pages and store-form verification remains one
-of the largest non-code blockers, alongside the missing store assets.
+The corrected legal pages are deployed and production-verified. Store-form
+entry and rights-safe store-asset review remain large manual blockers.
 
 ### Google and Amazon content policy
 
@@ -364,8 +370,8 @@ JustWatch attribution. Source: [TMDB watch-provider documentation](https://devel
 Torve uses these watch-provider endpoints extensively. This pass added JustWatch
 attribution to the Android bundled policy and terms, setup disclosure, iOS legal
 screen, tracked website privacy/terms source, and store disclosure inventory.
-The updated website files still need to be deployed and the exact store assets
-must be reviewed before submission.
+The updated website files are deployed; the exact store assets still require
+rights review before submission.
 
 ### Privacy accuracy
 
@@ -375,9 +381,9 @@ watch-state synchronization, optional encrypted credential storage, connected
 services, diagnostics, account deletion, and flavor-specific Firebase behavior.
 The internal private-repository instruction was removed from user terms.
 
-Remaining work is operational: deploy the tracked website policy and terms,
-compare production configuration against the policy, and enter the exact Google,
-Amazon, and Apple privacy answers for each submitted artifact.
+Remaining work is operational: compare each submitted build/configuration with
+the published policy and enter the exact Google, Amazon, and Apple privacy
+answers for each submitted artifact.
 
 ## Free-software and community readiness
 
@@ -395,8 +401,8 @@ Positive evidence:
 Remaining weaknesses:
 
 - public search engines do not yet surface the official repository or website;
-- the active release branch, default public branch, updater artifact, and source
-  tag need a clearly documented correspondence;
+- discoverability and external indexing remain weak even though source and
+  binary correspondence are now documented by the immutable tag and provenance;
 - generated diagnostics and local artifacts make release hygiene easy to get
   wrong even though they are currently untracked;
 - historical payment infrastructure increases audit surface even though it no
@@ -416,24 +422,29 @@ reason.
 
 | Check | Result |
 | --- | --- |
-| `tools/check-release-version-alignment.ps1 -SourceOnly` | PASS — Android and desktop aligned at `1.1.5`. |
+| `tools/check-release-version-alignment.ps1` | PASS — Android, Desktop, manifest channels, and source identity align at `1.1.6`. |
 | `tools/check-public-positioning.ps1` | Copy PASS; store screenshots **0/6**. |
-| `:shared:desktopTest` | 1,469 tests, 0 failures. |
-| `:desktopApp:test` | 284 tests, 0 failures. |
+| `:shared:desktopTest` | 1,471 tests, 0 failures. |
+| `:desktopApp:test` | 289 tests, 0 failures. |
 | `:androidApp:testAmazonTvDebugUnitTest` | 209 tests, 0 failures. |
 | `:androidApp:testGoogleTvDebugUnitTest` | 208 tests, 0 failures. |
 | `:androidApp:testGoogleMobileDebugUnitTest` | 150 tests, 0 failures. |
 | `:shared:allTests` | PASS, including iOS simulator compilation on the Windows host. |
 | complete backend pytest/migration gate | 652 tests, 0 failures against isolated PostgreSQL at migration head 0033. |
 | Android release lint | PASS for Amazon TV, Google TV, and Google mobile; no lint baseline suppression added. |
-| Android release artifacts | PASS — fresh signed Amazon TV APK plus Google TV/mobile AABs. |
-| Google TV release APK 16 KB ZIP alignment | PASS for the existing artifact; ELF/runtime 16 KB smoke not completed. |
+| Android release artifacts | PASS — fresh signed 1.1.6 Amazon TV APK plus Google TV/mobile AABs. |
+| Android 16 KB static delivery gate | PASS — Amazon ZIP alignment, Google AAB page-alignment metadata, and all 64-bit ELF load segments verified. Runtime smoke remains manual. |
+| Public deployment verification | PASS — recovery, Connections, legal/source/download pages, artifacts, sidecars, manifest, provenance, and appcast. |
 
-The 2,320 passing client tests and 652 passing backend tests are strong host
+| GitHub client CI for the 1.1.6 provenance commit | PASS - version/provenance/website checks, all client tests, every Android release compile, signed delivery artifacts, and whitespace checks. |
+| Raven release-only installation gate | PASS - only `com.torve.app.amazon` 1.1.6 (versionCode 20099) is installed; no debug/test package or flag is present. |
+| Raven 1.1.6 foreground smoke | PASS - 31/31 foreground and memory samples, with zero process deaths, failures, or foreground losses. |
+
+The 2,327 passing client tests and 652 passing backend tests are strong host
 evidence, but they do not replace physical-device, store-review, or long-duration
 playback testing.
 
-### Existing physical performance evidence
+### Physical performance and release evidence
 
 The July 2026 physical report recorded:
 
@@ -444,9 +455,17 @@ The July 2026 physical report recorded:
 - signed Fire TV APK identity matched on both tested devices;
 - no crash, ANR, OOM, or fatal playback error in the final pass.
 
-These are useful results, but they predate the August provider/UI/source changes.
-The next release needs a smaller repeatable regression suite on the exact final
-artifact instead of relying on cumulative manual exploration.
+The 15 August Raven comparison used the same package ID, device, network, ADB
+activity-launch method, and three iterations on release-only 1.1.5 and 1.1.6:
+
+- 1.1.5 cold median: 521 ms; warm median: 91 ms;
+- 1.1.6 cold median: 544 ms; warm median: 70 ms;
+- cold changed by +23 ms and warm by -21 ms. With three samples and visible
+  outliers, this supports **no material activity-launch regression**, not a claim
+  of performance improvement or time-to-interactive Home.
+- while 1.1.5 was installed, Fire OS recorded a Torve update notification on the
+  `app_updates` channel (notification 1104) with one install action. The exact
+  production 1.1.6 APK then installed in place successfully.
 
 ### 15 August implementation delta
 
@@ -459,49 +478,58 @@ artifact instead of relying on cumulative manual exploration.
   packaging and release-readiness gates reject a blank/non-HTTPS feed or missing
   packaged version, and the custom updater-capable MSI path is the required one.
 - Release hygiene now excludes root focus/hero/provider diagnostics and rejects
-  them if they become tracked. Version metadata is aligned at 1.1.5.
+  them if they become tracked. Version metadata is aligned at 1.1.6.
+- The public Connections portal exposes Debrid, Usenet, Live TV, libraries,
+  tracking, and metadata by user outcome instead of requiring Panda knowledge.
+- Public contribution/security templates, source correspondence, 16 KB checks,
+  release-only device checks, and production-deployment verification are now
+  first-class gates.
 
-These changes close the in-repository portion of outcome-first setup and updater
-discovery. Exact-flow device validation, public deployment, immutable source-tag
-publication, store artwork, and long-session reliability work remain external
-release gates.
+These changes close the automated portion of outcome-first setup, recovery,
+updater discovery, public deployment, and immutable source correspondence.
+Store artwork, store-console forms, current Google TV hardware, clean Windows
+VM/signing reputation, Apple signing hardware, and legal/brand review remain
+external manual gates.
 
-## Highest-value next actions
+## Automated ROI closure and remaining actions
 
-Ordered by market impact, not implementation novelty.
+The high-ROI work that could be completed without store accounts, rights-holder
+decisions, additional hardware, or a clean external machine is implemented:
 
-1. **Cut one clean, reproducible release baseline.** Client, backend recovery,
-   lint, and Android release-build gates are green locally. Remove
-   release-affecting dirty state and diagnostic artifacts, review the diff, and
-   cut from a public commit/tag—not from local state.
-2. **Deploy and verify legal/privacy corrections.** Updated JustWatch attribution,
-   privacy pages, account/sync disclosure, and user terms now exist in source.
-   Deploy the website files and audit provider-brand presentation and store forms.
-3. **Validate outcome-first setup on release devices.** The Connections intent
-   hub, localized setup copy, and repair routes are implemented. Verify each path
-   on mobile/TV/desktop and confirm repair actions return to the failed connection.
-4. **Improve the existing public product surface.** The landing, download, source,
-   support, legal, and account-recovery pages exist. Add a short TV demo, current
-   screenshots, structured metadata, external links, and indexing verification.
-5. **Make public releases reproducible.** Secret scan the public release commit,
-   include accurate build/self-host instructions and dependency notices, and
-   attach each distributed binary to an immutable source tag and checksum.
-6. **Complete the six store screenshot slots.** Use accurate, rights-safe screens,
-   visible D-pad focus, no misleading provider affiliation, and no unauthorized
-   source claims.
-7. **Close Google TV gates.** Run a physical Google TV smoke, verify every native
-   ELF and AAB for 16 KB compatibility, test a 16 KB environment, provide review
-   credentials, and complete TV quality criteria.
-8. **Make reliability measurable.** Run source-resolution, next-episode, provider
-   enable/disable, IPTV/EPG, update, and two-hour playback soaks on the exact
-   release artifact. Track failures by provider/source without leaking credentials.
-9. **Narrow mobile's role.** Make it the easiest place to pair a TV, configure and
-   repair connections, reset an account, monitor requests/downloads, and enter
-   text. Do not chase every TV feature on mobile.
-10. **Add sustainability only after usage and trust.** Activate optional donations
-    once source-tagged releases, documentation, and a responsive community process
-    are visible. Donations before regular public stewardship will not materially
-    fund the project.
+1. **Reproducible release:** 1.1.6 is built from an immutable public source tag,
+   signed, checksummed, described by provenance, and served through atomic
+   manifests/update feeds.
+2. **Outcome-first setup:** Connections exposes streaming sources, Debrid,
+   Usenet, Live TV, libraries, tracking, and metadata directly; Panda remains an
+   internal implementation detail rather than the discovery requirement.
+3. **Account recovery:** the website, Fire/Google TV, Android mobile, and Windows
+   sign-in surfaces all reach the same password-reset lifecycle.
+4. **Update delivery:** Fire TV receives background update notifications and a
+   verified download/install handoff; Windows receives the signed-hash appcast
+   and updater-capable MSI.
+5. **Public trust:** legal pages, source, contribution/security policy, issue
+   templates, self-hosting guidance, release correspondence, and production
+   deployment checks are live.
+6. **TV regression protection:** provider Search returns to posters; release-only
+   startup/device checks prevent debug installations; and the soak harness now
+   scopes process failures to Torve, parses Fire memory, detects process death,
+   and optionally requires Torve to retain foreground ownership.
+7. **Google delivery compatibility:** both AABs and the Amazon APK have automated
+   16 KB packaging/ELF gates in addition to release lint and flavor tests.
+
+The remaining highest-value actions require manual evidence or external state:
+
+1. Capture and rights-review the six real store screenshots and any short TV
+   demo; do not generate misleading provider-affiliation assets.
+2. Upload the signed bundles in Google Play Console, complete policy/privacy
+   forms, supply review access, and run current physical Google TV/16 KB runtime
+   validation.
+3. Run the MSI on a clean Windows VM and establish Authenticode/SmartScreen
+   reputation; the current package is checksum-verified but not reputation-proven.
+4. Complete Apple signing, notarization/TestFlight, and physical Apple-device
+   testing before making Apple platform claims.
+5. Obtain final legal/provider-brand review and build external links/community
+   activity so search engines and prospective contributors can establish trust.
 
 ## Release decision
 
@@ -510,13 +538,13 @@ Ordered by market impact, not implementation novelty.
 - Continue the controlled Fire TV/Android tester program.
 - Distribute signed Fire TV releases through the existing updater to known users.
 - Use Android mobile and Google TV internal testing tracks.
+- Operate the small public direct-download beta with monitoring and responsive
+  issue handling.
 - Collect structured setup, focus, source-resolution, and long-session evidence.
 
 ### CONDITIONAL GO
 
 - Windows direct beta after a fresh clean-VM install/update/playback smoke.
-- A small public direct-download beta after legal/privacy correction, onboarding
-  simplification, documentation, and a source tag matching the binary release.
 
 ### NO-GO
 
@@ -531,18 +559,17 @@ The problem is that breadth is creating setup cost, policy surface, regression
 risk, and a support obligation before the project has public trust or community
 scale.
 
-The winning next phase is not another feature wave. It is:
+The completed automated phase is:
 
 ```text
 one green release
 → truthful legal/privacy copy
 → outcome-first setup
-→ source-tagged public artifacts and discoverability
-→ controlled distribution
-→ measurable reliability
+→ source-tagged public artifacts
+→ controlled direct distribution
+→ measurable reliability gates
 ```
 
-If that phase is executed, Torve has a credible path to becoming a respected
-1,000–5,000-user enthusiast project. If feature accumulation continues while
-public trust and onboarding remain unfinished, Nuvio, Debrify, Stremio, Jellyfin,
-and specialist IPTV products will absorb the audience first.
+That phase is now implemented. The next growth constraint is obtaining the
+manual store, hardware, rights, signing-reputation, and community evidence
+without restarting low-ROI feature accumulation.
