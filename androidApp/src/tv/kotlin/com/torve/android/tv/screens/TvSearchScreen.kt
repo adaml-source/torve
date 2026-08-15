@@ -111,6 +111,9 @@ import com.torve.domain.integrations.IntegrationSecretStore
 import com.torve.domain.model.MediaItem
 import com.torve.domain.model.MediaType
 import com.torve.domain.model.RatingDisplayPrefs
+import com.torve.domain.model.extractImdbIdOrNull
+import com.torve.domain.model.extractTmdbIdOrNull
+import com.torve.domain.model.hasExternalRatingLookupIdentity
 import com.torve.domain.model.needsExternalRatingEnrichment
 import com.torve.domain.model.withFallbackTmdbScore
 import com.torve.domain.repository.MetadataRepository
@@ -134,12 +137,18 @@ private enum class TvSearchDensity(val columns: Int, val label: String) {
     COMPACT(6, "6"),
 }
 
-private enum class TvSearchSort(val label: String) {
+internal enum class TvSearchSort(val label: String) {
     RELEVANCE("Best match"),
-    RATING_DESC("Rating high"),
-    RATING_ASC("Rating low"),
-    VOTES_DESC("Votes high"),
-    VOTES_ASC("Votes low"),
+    IMDB_DESC("IMDb rating high"),
+    IMDB_ASC("IMDb rating low"),
+    ROTTEN_TOMATOES_DESC("Rotten Tomatoes high"),
+    ROTTEN_TOMATOES_ASC("Rotten Tomatoes low"),
+    RT_AUDIENCE_DESC("RT audience high"),
+    RT_AUDIENCE_ASC("RT audience low"),
+    TMDB_DESC("TMDB rating high"),
+    TMDB_ASC("TMDB rating low"),
+    VOTES_DESC("IMDb votes high"),
+    VOTES_ASC("IMDb votes low"),
     POPULARITY_DESC("Popular"),
     POPULARITY_ASC("Least popular"),
     TITLE_ASC("A-Z"),
@@ -258,6 +267,7 @@ internal fun TvSearchScreen(
     var selectedAvailabilityFilter by remember { mutableStateOf(restoredContentCache?.selectedAvailabilityFilter) }
     var sourceAvailabilityByTmdbId by remember { mutableStateOf<Map<Int, SourceAvailabilityRecord>>(emptyMap()) }
     var selectedSort by remember { mutableStateOf(restoredContentCache?.selectedSort ?: TvSearchSort.RELEVANCE) }
+    var sortApplyNonce by remember { mutableStateOf(0) }
     var aiResultTitle by remember { mutableStateOf(restoredContentCache?.aiResultTitle) }
     var aiFallback by remember { mutableStateOf(restoredContentCache?.aiFallback ?: false) }
     var filtersVisible by rememberSaveable { mutableStateOf(restoredContentCache?.filtersVisible ?: false) }
@@ -425,17 +435,25 @@ internal fun TvSearchScreen(
 
     LaunchedEffect(results) {
         val resultKeys = results.map { it.tvSearchStableKey() }.toSet()
+        val focusedKeyWasRemoved = focusedResultKey?.let { it !in resultKeys } == true
         resultRequesters.keys.retainAll(resultKeys)
         val preferredKey = selectedResultKey ?: selectedResult?.tvSearchStableKey()
         selectedResult = preferredKey?.let { key ->
             results.firstOrNull { it.tvSearchStableKey() == key }
         } ?: results.firstOrNull()
         selectedResultKey = selectedResult?.tvSearchStableKey()
+        if (focusedKeyWasRemoved && results.isNotEmpty()) {
+            // A filter/hydration race can legitimately remove a focused row.
+            // Keep focus inside the visible grid instead of allowing the root
+            // navigation rail's default requester to take ownership.
+            focusedResultKey = null
+            resultFocusRequestNonce += 1
+        }
     }
 
     // Sorting is an explicit user action. Re-sorting whenever ratings or other
     // metadata hydrate moves posters underneath the current D-pad focus.
-    LaunchedEffect(selectedSort) {
+    LaunchedEffect(selectedSort, sortApplyNonce) {
         val sorted = results.sortedForTvSearch(selectedSort)
         if (sorted != results) results = sorted
     }
@@ -521,7 +539,7 @@ internal fun TvSearchScreen(
             val cachedByKey = cachedRatings.associateBy { it.tvSearchStableKey() }
             baseResults = baseResults.map { cachedByKey[it.tvSearchStableKey()] ?: it }
             workingResults = workingResults.map { cachedByKey[it.tvSearchStableKey()] ?: it }
-            results = workingResults.filterTvSearchItems(
+            val filtered = workingResults.filterTvSearchItems(
                 genreIds = selectedGenreIds,
                 studioIds = selectedStudioIds,
                 year = selectedYear,
@@ -531,6 +549,7 @@ internal fun TvSearchScreen(
                 availabilityFilter = selectedAvailabilityFilter,
                 sourceAvailabilityByTmdbId = sourceAvailabilityByTmdbId,
             )
+            results = stableTvSearchProjection(results, filtered, TV_SEARCH_MAX_RESULTS)
         }
         val targets = workingResults
             .filter { it.tmdbId != null && (it.genres.isEmpty() || it.studios.isEmpty()) }
@@ -562,7 +581,7 @@ internal fun TvSearchScreen(
             if (hydrated.isEmpty()) return@launch
             withContext(Dispatchers.Main) {
                 baseResults = baseResults.map { hydrated[it.tvSearchStableKey()] ?: it }
-                results = baseResults.filterTvSearchItems(
+                val filtered = baseResults.filterTvSearchItems(
                     genreIds = selectedGenreIds,
                     studioIds = selectedStudioIds,
                     year = selectedYear,
@@ -572,6 +591,7 @@ internal fun TvSearchScreen(
                     availabilityFilter = selectedAvailabilityFilter,
                     sourceAvailabilityByTmdbId = sourceAvailabilityByTmdbId,
                 )
+                results = stableTvSearchProjection(results, filtered, TV_SEARCH_MAX_RESULTS)
             }
         }
     }
@@ -579,12 +599,25 @@ internal fun TvSearchScreen(
     // Enrich only the newly focused card beyond the initial visible batch.
     // The debounce prevents fast D-pad navigation from producing requests,
     // and the result is merged in place so neither focus nor poster order moves.
-    LaunchedEffect(focusedResultKey) {
+    val focusedResultEnrichmentKey = remember(focusedResultKey, results) {
+        focusedResultKey?.let { itemKey ->
+            results.firstOrNull { it.tvSearchStableKey() == itemKey }?.let { item ->
+                listOf(
+                    itemKey,
+                    item.tmdbId,
+                    item.imdbId,
+                    item.ratings?.imdbScore,
+                    item.ratings?.rottenTomatoesScore,
+                ).joinToString("|")
+            }
+        }
+    }
+    LaunchedEffect(focusedResultEnrichmentKey) {
         val itemKey = focusedResultKey ?: return@LaunchedEffect
         delay(320)
         val currentItem = results.firstOrNull { it.tvSearchStableKey() == itemKey }
             ?: return@LaunchedEffect
-        if (currentItem.ratings?.imdbScore != null) return@LaunchedEffect
+        if (!currentItem.needsTvSearchPrimaryRatingEnrichment()) return@LaunchedEffect
         val apiKey = withContext(Dispatchers.IO) {
             runCatching {
                 secretStore.get(IntegrationSecretKey.MDBLIST_API_KEY)
@@ -593,7 +626,11 @@ internal fun TvSearchScreen(
             }.getOrDefault(MdbListApi.DEFAULT_API_KEY)
         }
         val enriched = withContext(Dispatchers.IO) {
-            ratingsEnricher.enrichList(listOf(currentItem), apiKey).firstOrNull()
+            ratingsEnricher.enrichList(
+                items = listOf(currentItem),
+                apiKey = apiKey,
+                requirePrimaryProviders = true,
+            ).firstOrNull()
         } ?: return@LaunchedEffect
         if (enriched.ratings == currentItem.ratings) return@LaunchedEffect
         baseResults = baseResults.map { if (it.tvSearchStableKey() == itemKey) enriched else it }
@@ -627,7 +664,11 @@ internal fun TvSearchScreen(
         var current = snapshot
         repeat(3) { attempt ->
             val enriched = withContext(Dispatchers.IO) {
-                ratingsEnricher.enrichList(current, apiKey)
+                ratingsEnricher.enrichList(
+                    items = current,
+                    apiKey = apiKey,
+                    requirePrimaryProviders = true,
+                )
             }
             if (tvSearchRatingsChanged(current, enriched)) {
                 val enrichedByKey = current.zip(enriched).associate { (before, after) ->
@@ -635,7 +676,7 @@ internal fun TvSearchScreen(
                 }
                 current = current.map { enrichedByKey[it.tvSearchStableKey()] ?: it }
                 baseResults = baseResults.map { enrichedByKey[it.tvSearchStableKey()] ?: it }
-                results = baseResults.filterTvSearchItems(
+                val filtered = baseResults.filterTvSearchItems(
                         genreIds = selectedGenreIds,
                         studioIds = selectedStudioIds,
                         year = selectedYear,
@@ -645,6 +686,7 @@ internal fun TvSearchScreen(
                         availabilityFilter = selectedAvailabilityFilter,
                         sourceAvailabilityByTmdbId = sourceAvailabilityByTmdbId,
                     )
+                results = stableTvSearchProjection(results, filtered, TV_SEARCH_MAX_RESULTS)
             }
             val remainingMs = ratingsEnricher.rateLimitRemainingMs()
             if (remainingMs <= 0L || attempt == 2) return@LaunchedEffect
@@ -1471,7 +1513,10 @@ internal fun TvSearchScreen(
                 selectedYear = selectedYear,
                 selectedMinRating = selectedMinRating,
                 selectedSort = selectedSort,
-                onSelectSort = { selectedSort = it },
+                onSelectSort = {
+                    selectedSort = it
+                    sortApplyNonce += 1
+                },
                 onQuickDiscovery = { quick ->
                     when (quick) {
                         "trending" -> {
@@ -4308,9 +4353,18 @@ private fun TvSearchResultCard(
     }
 }
 
-private fun MediaItem.tvSearchStableKey(): String {
+internal fun MediaItem.tvSearchStableKey(): String {
+    // `id` belongs to the result row and survives metadata/rating hydration.
+    // tmdbId/imdbId can appear later; using them first changes the LazyGrid key,
+    // destroys the focused node, and lets the navigation rail steal focus.
+    val sourceId = id.trim().takeIf { it.isNotEmpty() }
+    val sourceTmdbId = sourceId?.extractTmdbIdOrNull()
+    val sourceImdbId = sourceId?.extractImdbIdOrNull()
     val imdb = imdbId?.takeIf { it.isNotBlank() }
     return when {
+        sourceTmdbId != null -> "${type.name}:tmdb:$sourceTmdbId"
+        sourceImdbId != null -> "${type.name}:imdb:${sourceImdbId.lowercase()}"
+        sourceId != null -> "${type.name}:id:${sourceId.lowercase()}"
         tmdbId != null -> "${type.name}:tmdb:$tmdbId"
         imdb != null -> "${type.name}:imdb:${imdb.lowercase()}"
         else -> "${type.name}:title:${title.tvSearchNormalizeTitle()}:${year ?: 0}"
@@ -4352,6 +4406,10 @@ private fun tvSearchEffectiveQuery(
 
 private fun List<MediaItem>.needsTvSearchRatingEnrichment(): Boolean =
     any { item -> item.needsExternalRatingEnrichment() }
+
+internal fun MediaItem.needsTvSearchPrimaryRatingEnrichment(): Boolean =
+    hasExternalRatingLookupIdentity() &&
+        (ratings?.imdbScore == null || ratings?.rottenTomatoesScore == null)
 
 private fun tvSearchRatingsChanged(
     before: List<MediaItem>,
@@ -4448,7 +4506,7 @@ private fun List<MediaItem>.dedupeTvSearchResults(): List<MediaItem> {
     return byKey.values.toList()
 }
 
-private fun stableTvSearchProjection(
+internal fun stableTvSearchProjection(
     existing: List<MediaItem>,
     available: List<MediaItem>,
     limit: Int,
@@ -4770,19 +4828,29 @@ private fun List<MediaItem>.availableTvSearchStudios(): List<Pair<Int, String>> 
         .sortedByDescending { it.value }
         .map { it.key }
 
-private fun List<MediaItem>.sortedForTvSearch(sort: TvSearchSort): List<MediaItem> = when (sort) {
+internal fun List<MediaItem>.sortedForTvSearch(sort: TvSearchSort): List<MediaItem> = when (sort) {
     TvSearchSort.RELEVANCE -> this
-    TvSearchSort.RATING_DESC -> sortedByDescending { it.tvSearchSortRating() ?: -1.0 }
-    TvSearchSort.RATING_ASC -> sortedBy { it.tvSearchSortRating() ?: Double.MAX_VALUE }
-    TvSearchSort.VOTES_DESC -> sortedByDescending { it.ratings?.imdbVotes ?: it.voteCount ?: -1 }
-    TvSearchSort.VOTES_ASC -> sortedBy { it.ratings?.imdbVotes ?: it.voteCount ?: Int.MAX_VALUE }
+    TvSearchSort.IMDB_DESC -> sortedByDescending { it.ratings?.imdbScore ?: -1f }
+    TvSearchSort.IMDB_ASC -> sortedBy { it.ratings?.imdbScore ?: Float.MAX_VALUE }
+    TvSearchSort.ROTTEN_TOMATOES_DESC -> sortedByDescending { it.ratings?.rottenTomatoesScore ?: -1 }
+    TvSearchSort.ROTTEN_TOMATOES_ASC -> sortedBy { it.ratings?.rottenTomatoesScore ?: Int.MAX_VALUE }
+    TvSearchSort.RT_AUDIENCE_DESC -> sortedByDescending { it.ratings?.rtAudienceScore ?: -1 }
+    TvSearchSort.RT_AUDIENCE_ASC -> sortedBy { it.ratings?.rtAudienceScore ?: Int.MAX_VALUE }
+    TvSearchSort.TMDB_DESC -> sortedByDescending {
+        it.ratings?.tmdbScore ?: it.rating?.toFloat() ?: -1f
+    }
+    TvSearchSort.TMDB_ASC -> sortedBy {
+        it.ratings?.tmdbScore ?: it.rating?.toFloat() ?: Float.MAX_VALUE
+    }
+    TvSearchSort.VOTES_DESC -> sortedByDescending { it.ratings?.imdbVotes ?: -1 }
+    TvSearchSort.VOTES_ASC -> sortedBy { it.ratings?.imdbVotes ?: Int.MAX_VALUE }
     TvSearchSort.POPULARITY_DESC -> sortedByDescending { it.popularity ?: -1.0 }
     TvSearchSort.POPULARITY_ASC -> sortedBy { it.popularity ?: Double.MAX_VALUE }
     TvSearchSort.TITLE_ASC -> sortedBy { it.title.lowercase() }
     TvSearchSort.TITLE_DESC -> sortedByDescending { it.title.lowercase() }
 }
 
-private fun MediaItem.tvSearchSortRating(): Double? =
+private fun MediaItem.tvSearchBestAvailableRating(): Double? =
     ratings?.imdbScore?.takeIf { it > 0f }?.toDouble()
         ?: ratings?.tmdbScore?.takeIf { it > 0f }?.toDouble()
         ?: rating?.takeIf { it > 0.0 }
@@ -4838,7 +4906,7 @@ private fun Int?.tvSearchYearToForApi(): Int? = when (this) {
 
 internal fun MediaItem.matchesTvSearchMinRating(minRating: Double?, minImdbVotes: Int?): Boolean {
     if (minRating == TV_SEARCH_TOP_RATED_FILTER) {
-        val score = tvSearchSortRating() ?: return false
+        val score = tvSearchBestAvailableRating() ?: return false
         val votes = ratings?.imdbVotes ?: voteCount ?: return false
         return score >= TV_SEARCH_TOP_RATED_MIN_SCORE && votes >= TV_SEARCH_TOP_RATED_MIN_VOTES
     }

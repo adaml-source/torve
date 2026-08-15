@@ -28,8 +28,7 @@ class OmdbClient(
      * Returns null if OMDB key not configured or request fails.
      */
     suspend fun fetchRatings(imdbId: String): MediaRatings? {
-        val apiKey = secretStore.get(IntegrationSecretKey.OMDB_API_KEY)
-            ?: prefsRepo.getString(KEY_OMDB_API_KEY)
+        val apiKey = configuredApiKey()
         if (apiKey.isNullOrBlank()) {
             logOmdbDisabled()
             return null
@@ -72,6 +71,12 @@ class OmdbClient(
             )
         }.getOrNull()
     }
+
+    suspend fun isConfigured(): Boolean = !configuredApiKey().isNullOrBlank()
+
+    private suspend fun configuredApiKey(): String? =
+        secretStore.get(IntegrationSecretKey.OMDB_API_KEY)
+            ?: prefsRepo.getString(KEY_OMDB_API_KEY)
 
     private fun logOmdbDisabled() {
         if (loggedOmdbDisabled) return

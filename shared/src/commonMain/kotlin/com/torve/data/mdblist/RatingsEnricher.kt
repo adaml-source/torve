@@ -9,6 +9,8 @@ import com.torve.domain.model.MediaRatings
 import com.torve.domain.model.MediaType
 import com.torve.domain.model.extractImdbIdOrNull
 import com.torve.domain.model.extractTmdbIdOrNull
+import com.torve.domain.model.hasExternalRatingLookupIdentity
+import com.torve.domain.model.needsExternalRatingEnrichment
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -86,7 +88,11 @@ class RatingsEnricher(
      *
      * All fetched ratings are merged and cached for 30 days.
      */
-    suspend fun enrichSingle(item: MediaItem, apiKey: String): MediaItem {
+    suspend fun enrichSingle(
+        item: MediaItem,
+        apiKey: String,
+        requirePrimaryProviders: Boolean = false,
+    ): MediaItem {
         // Addon catalog items (Trending, Latest Releases, Popular, Language,
         // Year, …) arrive with namespaced ids like "tmdb:1523145" or "tt0111161"
         // while `tmdbId` / `imdbId` are left unset. Without recovering those,
@@ -111,7 +117,11 @@ class RatingsEnricher(
             if (cached != null) {
                 val trustedCached = cached.withoutLegacyTraktImdbFallback()
                 trustedExisting = mergeRatings(trustedExisting, trustedCached)
-                if (trustedCached.imdbScore != null && trustedCached.imdbVotes != null) {
+                if (
+                    trustedCached.imdbScore != null &&
+                    trustedCached.imdbVotes != null &&
+                    (!requirePrimaryProviders || trustedCached.rottenTomatoesScore != null)
+                ) {
                     return item.copy(
                         tmdbId = tmdbId,
                         ratings = trustedExisting,
@@ -249,28 +259,65 @@ class RatingsEnricher(
         )
     }
 
-    suspend fun enrichList(items: List<MediaItem>, apiKey: String): List<MediaItem> = withContext(Dispatchers.Default) {
+    suspend fun enrichList(
+        items: List<MediaItem>,
+        apiKey: String,
+        requirePrimaryProviders: Boolean = false,
+    ): List<MediaItem> = withContext(Dispatchers.Default) {
         if (items.isEmpty()) return@withContext items
         val backend = backendRatingsApi?.fetch(items)
-        if (backend?.reachable == true) {
-            if (backend.ratings.isEmpty()) return@withContext items
-            return@withContext items.map { item ->
-                val tmdbId = item.tmdbId ?: return@map item
-                val key = "${item.type.name}:$tmdbId"
-                val remote = backend.ratings[key] ?: return@map item
+        var hydrated = items
+        if (backend?.reachable == true && backend.ratings.isNotEmpty()) {
+            backend.ratings.forEach { (key, remote) ->
                 cacheRepo.put(key, remote)
-                item.copy(ratings = mergeRatings(item.ratings, remote))
+            }
+            hydrated = items.map { item ->
+                val tmdbId = item.tmdbId ?: item.id.extractTmdbIdOrNull()
+                val cacheKey = tmdbId?.let { "${item.type.name}:$it" }
+                val remote = cacheKey?.let(backend.ratings::get)
+                if (remote == null) item else item.copy(ratings = mergeRatings(item.ratings, remote))
             }
         }
+
+        // Preserve the backend's role as the fan-out boundary. When it is
+        // reachable but has no result, only continue locally when this account
+        // actually configured OMDb or MDBList. Otherwise every Home/Search
+        // batch would perform TMDB/Trakt fallback calls that cannot produce the
+        // requested IMDb + Rotten Tomatoes pair.
+        val hasConfiguredLocalProvider =
+            apiKey.isUsableMdbListApiKey() || omdbClient.isConfigured()
+        if (backend?.reachable == true && !hasConfiguredLocalProvider) {
+            return@withContext hydrated
+        }
+
+        // A reachable backend is transport evidence, not proof that a rating
+        // provider was configured or returned every requested title. Production
+        // can legitimately return an empty/partial batch (for example when the
+        // operator keys are absent). Continue through the existing account/local
+        // provider chain only for unresolved items instead of pinning Search to
+        // the TMDB fallback forever.
+        if (hydrated.none { it.needsRatingLookup(requirePrimaryProviders) }) {
+            return@withContext hydrated
+        }
+
         coroutineScope {
-        val enriched = items.map { item ->
-            async {
-                globalSemaphore.withPermit {
-                    runCatching { enrichSingle(item, apiKey) }.getOrDefault(item)
+            hydrated.map { item ->
+                async {
+                    if (!item.needsRatingLookup(requirePrimaryProviders)) {
+                        item
+                    } else {
+                        globalSemaphore.withPermit {
+                            runCatching {
+                                enrichSingle(
+                                    item = item,
+                                    apiKey = apiKey,
+                                    requirePrimaryProviders = requirePrimaryProviders,
+                                )
+                            }.getOrDefault(item)
+                        }
+                    }
                 }
-            }
-        }.awaitAll()
-        enriched
+            }.awaitAll()
         }
     }
 
@@ -411,6 +458,14 @@ class RatingsEnricher(
         isNotBlank() &&
             this != MdbListApi.DEFAULT_API_KEY &&
             !contains("INSERT", ignoreCase = true)
+
+    private fun MediaItem.needsRatingLookup(requirePrimaryProviders: Boolean): Boolean =
+        needsExternalRatingEnrichment() ||
+            (
+                requirePrimaryProviders &&
+                    hasExternalRatingLookupIdentity() &&
+                    (ratings?.imdbScore == null || ratings?.rottenTomatoesScore == null)
+                )
 
     private fun logMdbListDisabled() {
         if (loggedMdbListDisabled) return
