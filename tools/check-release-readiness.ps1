@@ -1,9 +1,11 @@
 param(
     [string]$ManifestPath = ".codex-deploy\releases.json",
+    [string]$ProvenancePath = "release\provenance\1.1.6.json",
     [switch]$AllowDirty,
     [switch]$SkipTests,
     [switch]$SkipArtifacts,
-    [switch]$SkipStoreAssets
+    [switch]$SkipStoreAssets,
+    [switch]$CheckConnectedDevices
 )
 
 $ErrorActionPreference = "Stop"
@@ -45,6 +47,13 @@ try {
         (Join-Path $PSScriptRoot "check-public-positioning.ps1") @positioningArgs
     if ($LASTEXITCODE -ne 0) {
         throw "Public positioning or store screenshot gate failed."
+    }
+
+    & powershell -NoProfile -ExecutionPolicy Bypass -File `
+        (Join-Path $PSScriptRoot "check-public-website.ps1") `
+        -ManifestPath $ManifestPath
+    if ($LASTEXITCODE -ne 0) {
+        throw "Public website/release truth verification failed."
     }
 
     if (-not $SkipTests) {
@@ -105,6 +114,26 @@ try {
         if (-not [Uri]::TryCreate($feedUrl, [UriKind]::Absolute, [ref]$parsedFeed) -or $parsedFeed.Scheme -ne "https") {
             throw "Packaged desktop updater feed must be a non-blank HTTPS URL; found '$feedUrl'."
         }
+
+        & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot "check-android-16kb-compatibility.ps1")
+        if ($LASTEXITCODE -ne 0) {
+            throw "Android 16 KB packaging/ELF compatibility verification failed."
+        }
+    }
+
+    if ($CheckConnectedDevices) {
+        & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot "check-connected-release-devices.ps1")
+        if ($LASTEXITCODE -ne 0) {
+            throw "Connected-device release-only installation verification failed."
+        }
+    }
+
+    $provenanceArgs = @('-ProvenancePath', $ProvenancePath, '-RequireTag')
+    if (-not $SkipArtifacts) { $provenanceArgs += '-RequireArtifacts' }
+    & powershell -NoProfile -ExecutionPolicy Bypass -File `
+        (Join-Path $PSScriptRoot "check-release-provenance.ps1") @provenanceArgs
+    if ($LASTEXITCODE -ne 0) {
+        throw "Release provenance verification failed."
     }
 
     New-Item -ItemType Directory -Force -Path $reportDirectory | Out-Null

@@ -37,10 +37,30 @@ data class DesktopAuthUiState(
     val user: AuthUser? = null,
     val statusMessage: String = "Restoring saved session...",
     val authError: String? = null,
+    val recoveryMessage: String? = null,
     val subscriptionState: SubscriptionUiState = SubscriptionUiState(),
     val accessState: SubscriptionAccessPresentation = SubscriptionUiState().accessPresentation(),
     val accountSessionState: AccountSessionState = AccountSessionState(),
 )
+
+internal fun DesktopAuthUiState.withPasswordResetResult(
+    success: Boolean,
+    error: String?,
+): DesktopAuthUiState = if (success) {
+    copy(
+        phase = DesktopAuthPhase.LOGGED_OUT,
+        authError = null,
+        recoveryMessage = "If an account exists for that email, a secure reset link has been sent.",
+        statusMessage = "Password-reset request sent.",
+    )
+} else {
+    copy(
+        phase = DesktopAuthPhase.AUTH_ERROR,
+        authError = error ?: "Password-reset request failed.",
+        recoveryMessage = null,
+        statusMessage = "Password-reset request failed.",
+    )
+}
 
 class DesktopAuthController(
     private val authClient: AuthClient,
@@ -68,6 +88,7 @@ class DesktopAuthController(
             current.copy(
                 email = value,
                 authError = null,
+                recoveryMessage = null,
                 phase = if (current.phase == DesktopAuthPhase.AUTH_ERROR && current.user == null) {
                     DesktopAuthPhase.LOGGED_OUT
                 } else {
@@ -113,6 +134,7 @@ class DesktopAuthController(
                 it.copy(
                     phase = DesktopAuthPhase.LOADING,
                     authError = null,
+                    recoveryMessage = null,
                     statusMessage = "Signing in to Torve...",
                 )
             }
@@ -180,6 +202,7 @@ class DesktopAuthController(
                 it.copy(
                     phase = DesktopAuthPhase.LOADING,
                     authError = null,
+                    recoveryMessage = null,
                     statusMessage = "Creating your Torve account...",
                 )
             }
@@ -239,6 +262,23 @@ class DesktopAuthController(
                     )
                 }
             }
+        }
+    }
+
+    fun requestPasswordReset() {
+        val email = state.value.email.trim()
+        scope.launch {
+            _state.update {
+                it.copy(
+                    phase = DesktopAuthPhase.LOADING,
+                    authError = null,
+                    recoveryMessage = null,
+                    statusMessage = "Requesting a password-reset email...",
+                )
+            }
+
+            val result = authClient.requestPasswordReset(email)
+            _state.update { it.withPasswordResetResult(result.success, result.error) }
         }
     }
 

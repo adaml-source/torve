@@ -22,6 +22,8 @@ For every public binary release:
 7. Verify the website, updater feed, and store listing point to the intended
    version.
 8. Preserve previous release artifacts and metadata needed for rollback.
+9. Run `tools/check-release-provenance.ps1 -RequireArtifacts -RequireTag`
+   and publish the resulting provenance document beside the downloads.
 
 Do not publish binaries built from a dirty working tree or from an unpublished
 source revision.
@@ -95,11 +97,16 @@ branches/tags, protected environments, or deliberate operator actions.
 - A review account and reviewer instructions work.
 - TV D-pad, Back, focus restoration, search input, and 16 KB page-size behavior
   are verified on current hardware or an appropriate runtime environment.
+- `tools/check-android-16kb-compatibility.ps1` passes for the signed Fire TV
+  APK and both Google Play AABs, including AAB page-alignment metadata, APK ZIP
+  alignment, both ARM ABIs, and every 64-bit ELF `PT_LOAD` segment.
 - Provider branding and artwork do not imply unaffiliated endorsement.
 
 ### Amazon Fire TV
 
 - The signed release APK—not a debug APK—is installed for final smoke testing.
+- `tools/check-connected-release-devices.ps1` passes and confirms that no
+  `com.torve.app*.debug` package or debuggable/test build remains installed.
 - Direct update metadata points to a signed release APK with a verified checksum.
 - No Firebase SDK is present in the Amazon artifact.
 - D-pad, Back, playback, account recovery, and update installation pass on the

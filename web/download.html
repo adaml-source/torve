@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Download Torve</title>
+  <meta name="description" content="Download Torve for supported platforms. Torve is free software with no subscriptions, no paid tiers, and no purchase required." />
+  <link rel="canonical" href="https://torve.app/download.html" />
+  <meta property="og:title" content="Download Torve" />
+  <meta property="og:description" content="Free software downloads for supported Torve platforms." />
+  <meta property="og:type" content="website" />
+  <meta property="og:url" content="https://torve.app/download.html" />
+  <meta property="og:image" content="https://torve.app/assets/new_screenshots/mobile/1%20-%20Home%20Screen.jpg" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="robots" content="index,follow,max-image-preview:large" />
+  <link rel="icon" type="image/png" href="assets/favicon.png" />
+  <link rel="stylesheet" href="assets/site-base.css?v=20260701-storecopy" />
+  <link rel="stylesheet" href="assets/style.css?v=20260701-storecopy" />
+</head>
+<body class="download-page">
+  <a class="skip-link" href="#main">Skip to content</a>
+  <header class="site-header">
+    <div class="site-header-inner">
+      <a href="/"><img src="assets/torve-logo-transparent.png" alt="Torve" class="site-header-logo" /></a>
+      <button class="site-header-toggle nav-toggle" aria-label="Menu" aria-expanded="false"><span></span></button>
+      <nav class="site-header-nav nav-links">
+        <a href="/">Home</a>
+        <a class="active" href="/download.html">Download</a>
+        <a href="/source.html">Source</a>
+        <a href="/account-deletion.html">Account deletion</a>
+      </nav>
+      <div class="site-header-spacer"></div>
+      <div class="site-header-actions">
+        <a href="/signin.html" class="t-btn t-btn-secondary t-btn-sm">Sign in</a>
+      </div>
+    </div>
+  </header>
+
+  <main id="main">
+    <section class="page-hero">
+      <div class="container article-wide center">
+        <div class="eyebrow">Downloads</div>
+        <h1 class="section-title">Download Torve</h1>
+        <p class="section-subtitle">Torve is free software. No subscriptions, no paid tiers, and no purchase required. Sign in only for cross-device sync, device linking, and account-backed data.</p>
+      </div>
+    </section>
+
+    <section class="section" id="downloads" aria-label="Download options">
+      <div class="container">
+        <div class="section-header center">
+          <div class="eyebrow">Supported platforms</div>
+          <h2 class="section-title">Choose your device</h2>
+          <p class="section-subtitle">Signed Fire TV and Windows downloads are public. Google Play phone and TV builds remain in controlled testing.</p>
+        </div>
+
+        <div class="trust-grid">
+          <article class="trust-item fade-in">
+            <h3>Android phone &amp; tablet</h3>
+            <p>The signed Google Play mobile bundle is in controlled testing. A public Play listing is not available yet.</p>
+            <div class="button-row">
+              <span class="btn btn-secondary" aria-disabled="true">Controlled testing</span>
+            </div>
+          </article>
+
+          <article class="trust-item fade-in">
+            <h3>Google TV &amp; Android TV</h3>
+            <p>The signed Google TV bundle is in controlled testing while current-device and store-review gates are completed.</p>
+            <div class="button-row">
+              <span class="btn btn-secondary" aria-disabled="true">Controlled testing</span>
+            </div>
+          </article>
+
+          <article class="trust-item fade-in">
+            <h3>Fire TV</h3>
+            <p id="fireTvDownloadCopy">Fire TV uses the direct APK sideload path. Version 1.1.6 is signed and listed in the public release manifest.</p>
+            <div class="button-row">
+              <a id="fireTvDownloadBtn" class="btn btn-primary" href="/downloads/android/torve-android-tv-1.1.6-20260815.apk">Download Fire TV APK</a>
+              <a id="fireTvShaBtn" class="btn btn-secondary" href="/downloads/android/torve-android-tv-1.1.6-20260815.apk.sha256">SHA-256</a>
+            </div>
+          </article>
+
+          <article class="trust-item fade-in">
+            <h3>Desktop</h3>
+            <p id="windowsDownloadCopy">Windows desktop build 1.1.6 is available. macOS and Linux packages are not publicly available yet.</p>
+            <div class="button-row">
+              <a id="windowsDownloadBtn" class="btn btn-primary" href="/downloads/windows/torve-windows-1.1.6-20260815.msi">Download Windows</a>
+              <a id="windowsShaBtn" class="btn btn-secondary" href="/downloads/windows/torve-windows-1.1.6-20260815.msi.sha256">SHA-256</a>
+            </div>
+          </article>
+
+          <article class="trust-item fade-in">
+            <h3>iPhone &amp; iPad</h3>
+            <p>Torve is not publicly available for iOS yet.</p>
+            <div class="button-row">
+              <span class="btn btn-secondary" aria-disabled="true">Unavailable</span>
+            </div>
+          </article>
+
+          <article class="trust-item fade-in">
+            <h3>Source code</h3>
+            <p>Review, build, and contribute through the public AGPL-3.0-or-later source repository.</p>
+            <div class="button-row">
+              <a class="btn btn-primary" href="https://github.com/adaml-source/torve/tree/v1.1.6">View 1.1.6 source</a>
+              <a class="btn btn-secondary" href="/downloads/provenance/torve-1.1.6.json">Build provenance</a>
+              <a class="btn btn-secondary" href="https://github.com/adaml-source/torve/issues">Issue tracker</a>
+            </div>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section class="section section-dark" id="install-notes">
+      <div class="container">
+        <div class="section-header center">
+          <div class="eyebrow">Install notes</div>
+          <h2 class="section-title">What to expect</h2>
+        </div>
+        <div class="faq-list">
+          <details class="faq-item fade-in">
+            <summary>Why does sync require sign-in?</summary>
+            <p>Sync, device linking, account-backed watch state, preferences, exports, and account deletion are tied to your Torve account so the service can enforce account ownership.</p>
+          </details>
+          <details class="faq-item fade-in">
+            <summary>Do downloads include content?</summary>
+            <p>No. Torve does not provide content, channels, playlists, streams, movies, series, IPTV subscriptions, or rights to third-party media. You are responsible for your own lawful sources.</p>
+          </details>
+          <details class="faq-item fade-in">
+            <summary>Do donations change app access?</summary>
+            <p>No. Donations are optional and never unlock features.</p>
+          </details>
+        </div>
+      </div>
+    </section>
+
+    <section class="section-sm">
+      <div class="container">
+        <div class="cta-block fade-in">
+          <h2 class="cta-title">Free software, account-backed sync</h2>
+          <p class="cta-sub">Local app workflows do not require payment. Sign in only for sync, device linking, account-backed data, data export, and account deletion.</p>
+          <div class="button-row">
+            <a class="btn btn-primary" href="/download.html">Download Torve</a>
+            <a class="btn btn-secondary" href="/source.html">View source</a>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <div class="container footer-row">
+      <div>&copy; <span data-current-year></span> Torve. Free software under AGPL-3.0-or-later.</div>
+      <div class="footer-links">
+        <a href="/">Home</a>
+        <a href="/source.html">Source</a>
+        <a href="/privacy.html">Privacy</a>
+        <a href="/terms.html">Terms</a>
+        <a href="/account-deletion.html">Account Deletion</a>
+      </div>
+    </div>
+  </footer>
+
+  <script src="assets/app/download-releases.js?v=20260706"></script>
+  <script src="assets/script.js"></script>
+</body>
+</html>

@@ -40,6 +40,7 @@ class TvProviderCatalogModelTest {
         assertTrue(".width(if (isNetflix) 176.dp else 220.dp)" in seeAllSource)
         assertTrue(".height(if (isNetflix) 53.dp else 66.dp)" in seeAllSource)
         assertTrue("providerService.tmdbProviderId == NETFLIX_TMDB_PROVIDER_ID" in seeAllSource)
+        assertTrue("down = firstPosterRequester ?: FocusRequester.Default" in readSource("screens/TvProviderCatalogScreen.kt"))
     }
 
     @Test

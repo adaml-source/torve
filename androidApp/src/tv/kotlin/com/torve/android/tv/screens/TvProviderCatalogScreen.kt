@@ -93,6 +93,7 @@ internal fun TvProviderCatalogScreen(
     var focusedItem by remember(providerId) { mutableStateOf<MediaItem?>(null) }
     var heroItem by remember(providerId) { mutableStateOf<MediaItem?>(null) }
     var heroArtworkLookupKey by remember(providerId) { mutableStateOf<String?>(null) }
+    var firstPosterRequester by remember(providerId) { mutableStateOf<FocusRequester?>(null) }
     var loading by remember(providerId) { mutableStateOf(true) }
     var loadFailed by remember(providerId) { mutableStateOf(false) }
     val currentYear = remember { Calendar.getInstance().get(Calendar.YEAR) }
@@ -307,7 +308,10 @@ internal fun TvProviderCatalogScreen(
             rails = rails,
             railFocusRequester = railFocusRequester,
             onMediaClick = onMediaClick,
-            onFirstContentRequester = onFirstContentRequester,
+            onFirstContentRequester = { requester ->
+                firstPosterRequester = requester
+                onFirstContentRequester(requester)
+            },
             onContentFocused = onContentFocused,
             screenId = "provider_catalog_${providerId}_worldwide",
             loading = loading,
@@ -332,6 +336,7 @@ internal fun TvProviderCatalogScreen(
                     artworkLookupPending = heroArtworkLookupKey == focusedItem?.providerCatalogStableKey(),
                     searchRequester = searchRequester,
                     railFocusRequester = railFocusRequester,
+                    firstPosterRequester = firstPosterRequester,
                     onSearchFocused = onContentFocused,
                     onBrowseAll = browseAll,
                 )
@@ -355,6 +360,7 @@ private fun TvProviderCatalogHero(
     artworkLookupPending: Boolean,
     searchRequester: FocusRequester,
     railFocusRequester: FocusRequester,
+    firstPosterRequester: FocusRequester?,
     onSearchFocused: (FocusRequester) -> Unit,
     onBrowseAll: () -> Unit,
 ) {
@@ -381,7 +387,7 @@ private fun TvProviderCatalogHero(
                     .focusRequester(searchRequester)
                     .focusProperties {
                         left = railFocusRequester
-                        down = railFocusRequester
+                        down = firstPosterRequester ?: FocusRequester.Default
                     },
                 onFocused = { onSearchFocused(searchRequester) },
                 onClick = onBrowseAll,

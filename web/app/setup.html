@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Connections - Torve</title>
+  <link rel="icon" type="image/png" href="/assets/favicon.png" />
+  <link rel="stylesheet" href="/assets/site-base.css?v=20260517-mobile" />
+  <link rel="stylesheet" href="/assets/app/app.css?v=1774286000" />
+  <link rel="stylesheet" href="/assets/app/setup-page.css?v=20260516" />
+  <script src="/assets/app/i18n.js"></script>
+</head>
+<body class="app-body">
+  <div id="loading" class="app-loading"><div class="spinner"></div> Loading...</div>
+  <div id="appShell" style="display:none;">
+    <div id="verifyBanner" class="verify-banner">Your email is not yet verified. Check your inbox or <a href="#" id="resendLink">resend verification email</a>.</div>
+
+    <header class="site-header">
+      <div class="site-header-inner">
+        <a href="/account.html"><img src="/assets/torve-logo-transparent.png" alt="Torve" class="site-header-logo" /></a>
+        <nav class="site-header-nav">
+          <a href="/account.html">Account overview</a>
+          <a href="/app/setup.html">Connections</a>
+          <a href="/app/extensions.html">Extensions</a>
+          <a href="/app/devices.html">Devices</a>
+          <a href="/app/help.html">Help</a>
+          <a href="/account.html#seerr-setup">Media automation</a>
+        </nav>
+        <div class="site-header-spacer"></div>
+        <div class="site-header-actions">
+          <span class="portal-user-email" id="userEmail"></span>
+          <button class="t-btn t-btn-secondary t-btn-sm" id="signoutBtn">Sign out</button>
+        </div>
+      </div>
+    </header>
+
+    <div class="setup-page">
+      <div class="setup-layout">
+        <!-- Main content column -->
+        <div class="setup-primary">
+          <h1 class="setup-page-title">Connections</h1>
+          <p class="setup-page-intro">Choose what you want to connect: streaming sources, Debrid, Usenet, Live TV, tracking, or metadata. Connected services sync to your signed-in devices.</p>
+          <p class="note">Seerr and *Arr automation are managed in <a href="/account.html#seerr-setup">Account overview - Media automation</a>.</p>
+          <div id="setupSections"></div>
+        </div>
+
+        <!-- Sticky right rail -->
+        <aside class="setup-rail" id="setupRail">
+          <!-- Progress card -->
+          <div class="rail-card">
+            <div class="rail-progress-header">
+              <span class="rail-progress-title">Progress</span>
+              <span class="rail-progress-count"><span id="progressCount">0</span> / <span id="progressTotal">0</span></span>
+            </div>
+            <div class="rail-progress-bar">
+              <div class="rail-progress-fill" id="progressFill" style="width:0%"></div>
+            </div>
+            <div class="rail-next" id="nextStepArea" style="display:none">
+              <div class="rail-next-label">Recommended next</div>
+              <div class="rail-next-title" id="nextStepTitle"></div>
+              <div class="rail-next-desc" id="nextStepDesc"></div>
+              <button class="rail-next-btn" id="nextStepBtn">Set up</button>
+            </div>
+            <div id="allDoneArea" style="display:none">
+              <div style="font-size:13px;color:#4ade80;font-weight:500">All recommended services connected.</div>
+            </div>
+          </div>
+
+          <!-- Section nav -->
+          <div class="rail-card">
+            <ul class="rail-nav" id="railNav">
+              <li><a href="#essentials" data-section="essentials">Streaming sources</a></li>
+              <li><a href="#personalization" data-section="personalization">Enhancements</a></li>
+              <li><a href="#channels" data-section="channels">Live TV</a></li>
+              <li><a href="#sync" data-section="sync">Sync</a></li>
+            </ul>
+            <a href="/app/help.html#article:setup-order" class="rail-help-link">Connections guide</a>
+          </div>
+        </aside>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal -->
+  <div class="modal-overlay" id="modal">
+    <div class="modal">
+      <h2 id="modalTitle"></h2>
+      <p class="subtitle" id="modalSubtitle"></p>
+      <div id="modalNote" class="note" style="display:none"></div>
+      <div id="modalAlert" class="modal-alert"></div>
+      <form id="modalForm"></form>
+      <div class="modal-actions">
+        <button class="btn-sm btn-edit" id="modalCancel" type="button">Cancel</button>
+        <button class="btn-sm btn-setup" id="modalSave" type="button">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+  <script src="/assets/app/lang/en.js?v=20260815-connections"></script>
+  <script src="/assets/app/lang/de.js?v=20260815-connections"></script>
+  <script src="/assets/app/lang/es.js?v=20260815-connections"></script>
+  <script src="/assets/app/lang/fr.js?v=20260815-connections"></script>
+  <script src="/assets/app/lang/it.js?v=20260815-connections"></script>
+  <script src="/assets/app/lang/pt.js?v=20260815-connections"></script>
+  <script src="/assets/app/lang/tr.js?v=20260815-connections"></script>
+  <script src="/assets/app/lang-switcher.js"></script>
+  <script src="/assets/app/api.js"></script>
+  <script src="/assets/app/shell.js?v=20260328"></script>
+  <script src="/assets/app/analytics.js"></script>
+  <script src="/assets/app/setup.js?v=20260815-connections"></script>
+  <script src="/assets/app/sync-ui.js"></script>
+  <script src="/assets/app/page-setup.js?v=20260815-connections"></script>
+</body>
+</html>

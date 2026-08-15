@@ -1,0 +1,35 @@
+name: Feature request
+description: Propose a user outcome or workflow improvement.
+title: "[Feature]: "
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: User problem
+      description: Explain the blocked outcome rather than only the proposed control or technology.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+    validations:
+      required: true
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Primary platform
+      options:
+        - Fire TV / Amazon TV
+        - Google TV / Android TV
+        - Android mobile
+        - Windows desktop
+        - Website / account
+        - Shared / all platforms
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered

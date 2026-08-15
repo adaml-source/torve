@@ -541,8 +541,9 @@ private fun AuthCardContent(
                 ) {
                     TorveAuthLinkButton(
                         text = "Forgot password?",
-                        onClick = { /* recovery flow not wired yet */ },
+                        onClick = authController::requestPasswordReset,
                         scale = scale,
+                        enabled = !isBusy,
                     )
                 }
             }
@@ -556,6 +557,20 @@ private fun AuthCardContent(
                         lineHeight = scaledSp(18f, scale),
                     ),
                     color = colors.error,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+
+            authState.recoveryMessage?.takeIf { it.isNotBlank() }?.let { message ->
+                Spacer(Modifier.height(scaledDp(10f, scale)))
+                Text(
+                    text = message,
+                    style = MaterialTheme.typography.bodySmall.copy(
+                        fontSize = scaledSp(14f, scale),
+                        lineHeight = scaledSp(18f, scale),
+                    ),
+                    color = GoldSoft,
                     textAlign = TextAlign.Center,
                     modifier = Modifier.fillMaxWidth(),
                 )

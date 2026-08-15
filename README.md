@@ -44,3 +44,18 @@ Firebase `google-services.json` files require public-safe review before reuse in
 ## Contributions
 
 Torve is maintained as free software. Issues and pull requests are welcome, but there is no guaranteed response time.
+
+## Accounts, local use, and self-hosting
+
+A Torve account is not a payment gate. It is used for cross-device sync,
+device linking, account-backed watch state and preferences, encrypted
+connection restoration when explicitly selected, data export, and account
+deletion. Device-local browsing, configuration, and playback workflows do not
+require a paid plan.
+
+The account and sync service is also free software in [`server/`](server/).
+To run it yourself, follow [`server/README.md`](server/README.md): provision
+PostgreSQL, copy `server/.env.example` to a private `.env`, set the documented
+authentication and encryption secrets, run Alembic migrations, and start the
+FastAPI application. Production secrets, signing keys, and user data must never
+be committed to this repository.

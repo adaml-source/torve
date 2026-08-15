@@ -1,0 +1,66 @@
+name: Bug report
+description: Report a reproducible Torve problem without exposing private data.
+title: "[Bug]: "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: "Never include passwords, API keys, playlist/stream URLs, account emails, or unredacted diagnostics. Report security issues using SECURITY.md."
+  - type: input
+    id: version
+    attributes:
+      label: Torve version
+      placeholder: "1.1.5 (version code if Android)"
+    validations:
+      required: true
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      options:
+        - Fire TV / Amazon TV
+        - Google TV / Android TV
+        - Android mobile
+        - Windows desktop
+        - Website / account
+        - Backend / self-hosted
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: device
+    attributes:
+      label: Device and OS
+      placeholder: "Model, OS version, display resolution"
+  - type: textarea
+    id: steps
+    attributes:
+      label: Reproduction steps
+      description: For TV focus issues, include every D-pad/Back press and the expected focus owner.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Redacted diagnostics
+      description: Paste only the smallest relevant excerpt after removing credentials, URLs, emails, and user data.
+      render: shell
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: Privacy check
+      options:
+        - label: I removed credentials, private URLs, account data, and copyrighted screenshots/media.
+          required: true

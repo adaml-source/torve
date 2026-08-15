@@ -58,12 +58,13 @@ import com.torve.android.ui.theme.Silver
 import com.torve.android.ui.theme.Snow
 import com.torve.android.ui.theme.Steel
 import com.torve.presentation.addon.AddonViewModel
+import com.torve.presentation.legal.LegalUrls
 import com.torve.presentation.panda.PandaSetupViewModel
 import com.torve.presentation.settings.SettingsViewModel
 import org.koin.compose.koinInject
 
-private const val HELP_URL_MANAGEMENT_TOKEN =
-    "https://torve.app/help.html#article:panda-management-token"
+private val HELP_URL_MANAGEMENT_TOKEN =
+    "${LegalUrls.HELP}#article:panda-management-token"
 
 @Composable
 fun ManagePandaScreen(

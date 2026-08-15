@@ -14,6 +14,8 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -22,9 +24,21 @@ jobs:
       - name: Verify source version alignment
         shell: powershell
         run: ./tools/check-release-version-alignment.ps1 -SourceOnly
+      - name: Verify release source provenance
+        shell: powershell
+        run: ./tools/check-release-provenance.ps1 -RequireTag
       - name: Verify public positioning copy
         shell: powershell
         run: ./tools/check-public-positioning.ps1
+      - name: Verify public website and recovery paths
+        shell: powershell
+        run: ./tools/check-public-website.ps1
+      - name: Validate public website JavaScript syntax
+        shell: powershell
+        run: |
+          node --check web/assets/app/setup.js
+          node --check web/assets/app/page-setup.js
+          Get-ChildItem web/assets/app/lang/*.js | ForEach-Object { node --check $_.FullName }
       - name: Run shared, desktop, TV, and mobile tests
         shell: powershell
         run: >-
@@ -44,6 +58,17 @@ jobs:
           :androidApp:compileGoogleMobileReleaseKotlin
           :androidApp:lintGoogleMobileRelease
           --console=plain
+      - name: Build and validate Android delivery artifacts
+        shell: powershell
+        run: |
+          $ciKeystore = Join-Path $env:RUNNER_TEMP "torve-ci-release.jks"
+          keytool -genkeypair -noprompt -keystore $ciKeystore -storepass "ci-release-only" -keypass "ci-release-only" -alias "ci-release" -dname "CN=Torve CI, O=Torve CI, C=DE" -keyalg RSA -keysize 2048 -validity 2
+          $env:TORVE_KEYSTORE_PATH = $ciKeystore
+          $env:TORVE_KEYSTORE_PASSWORD = "ci-release-only"
+          $env:TORVE_KEY_ALIAS = "ci-release"
+          $env:TORVE_KEY_PASSWORD = "ci-release-only"
+          ./gradlew.bat :androidApp:assembleAmazonTvRelease :androidApp:bundleGoogleTvRelease :androidApp:bundleGoogleMobileRelease --console=plain
+          ./tools/check-android-16kb-compatibility.ps1
       - name: Reject whitespace and conflict-marker damage
         shell: powershell
         run: git diff --check HEAD

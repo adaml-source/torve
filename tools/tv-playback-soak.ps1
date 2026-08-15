@@ -14,7 +14,8 @@ if ($state -ne "device") {
 }
 
 $stamp = Get-Date -Format "yyyyMMdd-HHmmss"
-$reportDirectory = Join-Path $OutputDirectory "$Serial-$stamp"
+$safeSerial = $Serial -replace '[^A-Za-z0-9._-]', '_'
+$reportDirectory = Join-Path $OutputDirectory "$safeSerial-$stamp"
 New-Item -ItemType Directory -Force -Path $reportDirectory | Out-Null
 $samplesPath = Join-Path $reportDirectory "samples.jsonl"
 $failuresPath = Join-Path $reportDirectory "failures.txt"
@@ -24,10 +25,13 @@ $logcatPath = Join-Path $reportDirectory "logcat.txt"
 $startedAt = [DateTimeOffset]::UtcNow
 $deadline = $startedAt.AddSeconds($DurationSeconds)
 $failurePattern = "FATAL EXCEPTION|ANR in $PackageName|am_crash|am_anr|Fatal signal|OutOfMemoryError"
+$processDeathDetected = $false
+$sampleCount = 0
 
 while ([DateTimeOffset]::UtcNow -lt $deadline) {
     $now = [DateTimeOffset]::UtcNow
-    $pid = (& adb -s $Serial shell pidof $PackageName 2>&1 | Out-String).Trim()
+    # $PID is a read-only automatic PowerShell variable (names are case-insensitive).
+    $appProcessId = (& adb -s $Serial shell pidof $PackageName 2>&1 | Out-String).Trim()
     $activity = (& adb -s $Serial shell dumpsys activity activities 2>&1 |
         Select-String -Pattern "mResumedActivity|topResumedActivity" |
         Select-Object -First 1 | Out-String).Trim()
@@ -40,12 +44,17 @@ while ([DateTimeOffset]::UtcNow -lt $deadline) {
     [ordered]@{
         timestampUtc = $now.ToString("o")
         elapsedSeconds = [math]::Round(($now - $startedAt).TotalSeconds)
-        processAlive = -not [string]::IsNullOrWhiteSpace($pid)
-        pid = $pid
+        processAlive = -not [string]::IsNullOrWhiteSpace($appProcessId)
+        pid = $appProcessId
         resumedActivity = $activity
         totalPss = $memory
         failureDetected = -not [string]::IsNullOrWhiteSpace($recentFailures)
     } | ConvertTo-Json -Compress | Add-Content -Path $samplesPath
+
+    $sampleCount++
+    if ([string]::IsNullOrWhiteSpace($appProcessId)) {
+        $processDeathDetected = $true
+    }
 
     if (-not [string]::IsNullOrWhiteSpace($recentFailures)) {
         Add-Content -Path $failuresPath -Value "[$($now.ToString("o"))]"
@@ -69,11 +78,13 @@ $failureCount = if (Test-Path $failuresPath) {
     startedAtUtc = $startedAt.ToString("o")
     completedAtUtc = [DateTimeOffset]::UtcNow.ToString("o")
     requestedDurationSeconds = $DurationSeconds
+    sampleCount = $sampleCount
     failureCount = $failureCount
-    passed = $failureCount -eq 0
+    processDeathDetected = $processDeathDetected
+    passed = $failureCount -eq 0 -and -not $processDeathDetected
 } | ConvertTo-Json | Set-Content -Path (Join-Path $reportDirectory "summary.json")
 
 Write-Output "TV soak report: $reportDirectory"
-if ($failureCount -gt 0) {
+if ($failureCount -gt 0 -or $processDeathDetected) {
     exit 1
 }

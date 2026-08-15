@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security report
+    url: https://github.com/adaml-source/torve/blob/master/SECURITY.md
+    about: Report vulnerabilities privately; do not post secrets in an issue.
+  - name: Torve support
+    url: https://torve.app/support.html
+    about: Account and installation help.
