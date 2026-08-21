@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "version": "1.1.14",
+  "released_at_utc": "2026-08-21T21:35:00Z",
+  "source": {
+    "repository": "https://github.com/adaml-source/torve",
+    "commit": "pending",
+    "branch": "codex-publish-local-updates"
+  },
+  "artifacts": [
+    {
+      "id": "amazon_tv_apk",
+      "local_path": "androidApp/build/outputs/apk/amazonTv/release/androidApp-amazon-tv-release.apk",
+      "public_url": "https://torve.app/downloads/android/torve-android-tv-1.1.14-20260821.apk",
+      "bytes": 92335601,
+      "sha256": "35d49006655f4b6e232952a2d61acc17a1db0e3e71d9acc4b68d16f8264b70c0"
+    }
+  ],
+  "notes": "Proper OOM fix: streaming channel persistence. Live, VOD, and series channels are now fetched and persisted sequentially (fetch one type, insert into DB in a single transaction, release the list, then fetch the next type). This reduces peak heap from sum(live+VOD+series) to max(live, VOD, series) — typically 65MB instead of 180MB+ for large providers. insertChannelGroupAllRaw added alongside persistXtreamChannelsStreaming to handle per-type batched inserts with sort_index offsets. The largeHeap flag from 1.1.13 is retained as belt-and-suspenders."
+}
