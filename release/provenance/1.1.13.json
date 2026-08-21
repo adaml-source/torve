@@ -4,7 +4,7 @@
   "released_at_utc": "2026-08-21T20:15:00Z",
   "source": {
     "repository": "https://github.com/adaml-source/torve",
-    "commit": "pending",
+    "commit": "f53df16",
     "branch": "codex-publish-local-updates"
   },
   "artifacts": [
