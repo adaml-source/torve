@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "version": "1.1.13",
+  "released_at_utc": "2026-08-21T20:15:00Z",
+  "source": {
+    "repository": "https://github.com/adaml-source/torve",
+    "commit": "pending",
+    "branch": "codex-publish-local-updates"
+  },
+  "artifacts": [
+    {
+      "id": "amazon_tv_apk",
+      "local_path": "androidApp/build/outputs/apk/amazonTv/release/androidApp-amazon-tv-release.apk",
+      "public_url": "https://torve.app/downloads/android/torve-android-tv-1.1.13-20260821.apk",
+      "bytes": 92335601,
+      "sha256": "bbb7ae69838aeb01b5201d3835ab76d61e26c0d2fef329d25c08cc62ca8cb834"
+    }
+  ],
+  "notes": "OOM fix: android:largeHeap=true raises heap ceiling from ~192MB to ~512MB on Fire TV 4K. Channel accumulation during Xtream playlist refresh (live + VOD + series all in memory simultaneously) was exhausting the 192MB heap, leaving no room for GrowingXtreamByteBuffer.wrappedBuffer to grow to its 2MB max. The same crash existed in 1.1.11 (not a 1.1.12 regression). Streaming-to-DB refactor planned for a future release to eliminate the in-memory accumulation entirely."
+}
