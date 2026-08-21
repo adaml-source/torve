@@ -970,6 +970,12 @@ fun PlayerScreen(
         )
     }
 
+    LaunchedEffect(exoPlayerView, useMpv) {
+        if (!useMpv) {
+            (engine as? ExoPlayerEngine)?.setBuiltInSubtitleView(exoPlayerView?.subtitleView)
+        }
+    }
+
     LaunchedEffect(useMpv, pictureFormat) {
         if (useMpv) {
             (engine as? MPVPlayerEngine)?.setPictureFormat(
@@ -1185,6 +1191,12 @@ fun PlayerScreen(
             }
             showAudioDelayDialog -> {
                 showAudioDelayDialog = false
+                showControls = true
+                topMenuFocusTick++
+                true
+            }
+            showSubtitleDelayDialog -> {
+                showSubtitleDelayDialog = false
                 showControls = true
                 topMenuFocusTick++
                 true
@@ -2245,6 +2257,7 @@ fun PlayerScreen(
         showResumePrompt -> PlaybackUiMode.ResumePrompt
         showTrackDialog -> PlaybackUiMode.TrackSelection
         showAudioDelayDialog -> PlaybackUiMode.AudioDelay
+        showSubtitleDelayDialog -> PlaybackUiMode.SubtitleDelay
         showPictureFormatPicker -> PlaybackUiMode.PictureFormat
         showEqualizerSheet -> PlaybackUiMode.Equalizer
         showDevicePicker -> PlaybackUiMode.DevicePicker
@@ -2545,7 +2558,7 @@ fun PlayerScreen(
                 if (keyEvent.type != KeyEventType.KeyDown) {
                     return@onPreviewKeyEvent false
                 }
-                if ((errorMessage != null || showTrackDialog || showAudioDelayDialog || showPictureFormatPicker || showEqualizerSheet || showDevicePicker || showResumePrompt || showNextEpisodeOverlay || showSubtitleSearch) && keyEvent.key != Key.Back) {
+                if ((errorMessage != null || showTrackDialog || showAudioDelayDialog || showSubtitleDelayDialog || showPictureFormatPicker || showEqualizerSheet || showDevicePicker || showResumePrompt || showNextEpisodeOverlay || showSubtitleSearch) && keyEvent.key != Key.Back) {
                     return@onPreviewKeyEvent false
                 }
 
@@ -3010,17 +3023,22 @@ fun PlayerScreen(
         }
 
         if (showSubtitleDelayDialog && isTv) {
+            RegisterFocusRegion(focusCoordinator, PlaybackFocusRegion.SubtitleDelayOverlay) { true }
             TvSubtitleDelayOverlay(
                 currentDelayMs = subtitleDelayMs,
+                onPreviewDelay = { engine.setSubtitleDelay(it) },
                 onSave = { newDelay ->
                     subtitleDelayMs = newDelay
                     engine.setSubtitleDelay(newDelay)
+                    showSubtitleDelayDialog = false
+                    topMenuFocusTick++
                 },
                 onReset = {
                     subtitleDelayMs = 0
                     engine.setSubtitleDelay(0)
                 },
                 onDismiss = {
+                    engine.setSubtitleDelay(subtitleDelayMs) // restore to last saved value
                     showSubtitleDelayDialog = false
                     topMenuFocusTick++
                 },

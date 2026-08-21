@@ -229,15 +229,9 @@ fun TvAudioDelayOverlay(
 
     var localDelay by remember(currentDelayMs) { mutableIntStateOf(currentDelayMs) }
     val sliderFocusRequester = remember { FocusRequester() }
-    var dismissKey by remember { mutableIntStateOf(0) }
 
     LaunchedEffect(Unit) {
         requestFocusWithRetry(sliderFocusRequester)
-    }
-
-    LaunchedEffect(dismissKey) {
-        delay(3_000)
-        onDismiss()
     }
 
     val delayLabel = stringResource(R.string.player_audio_delay_value, localDelay)
@@ -245,7 +239,6 @@ fun TvAudioDelayOverlay(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .onPreviewKeyEvent { dismissKey++; false }
             .background(Obsidian.copy(alpha = 0.95f)),
         contentAlignment = Alignment.Center,
     ) {
@@ -320,14 +313,13 @@ fun TvSubtitleDelayOverlay(
     onSave: (Int) -> Unit,
     onReset: () -> Unit,
     onDismiss: () -> Unit,
+    onPreviewDelay: ((Int) -> Unit)? = null,
 ) {
     BackHandler(onBack = onDismiss)
     var localDelay by remember(currentDelayMs) { mutableIntStateOf(currentDelayMs) }
     val sliderFocusRequester = remember { FocusRequester() }
-    var dismissKey by remember { mutableIntStateOf(0) }
 
     LaunchedEffect(Unit) { requestFocusWithRetry(sliderFocusRequester) }
-    LaunchedEffect(dismissKey) { delay(3_000); onDismiss() }
 
     val delayLabel = run {
         val sign = if (localDelay >= 0) "+" else ""
@@ -337,7 +329,6 @@ fun TvSubtitleDelayOverlay(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .onPreviewKeyEvent { dismissKey++; false }
             .background(Obsidian.copy(alpha = 0.95f)),
         contentAlignment = Alignment.Center,
     ) {
@@ -367,7 +358,10 @@ fun TvSubtitleDelayOverlay(
                 label = "Subtitle Delay",
                 formatValue = { delayLabel },
                 focusRequester = sliderFocusRequester,
-                onValueChange = { localDelay = it },
+                onValueChange = {
+                    localDelay = it
+                    onPreviewDelay?.invoke(it)
+                },
                 onCenterClick = { onSave(localDelay) },
             )
             Row(

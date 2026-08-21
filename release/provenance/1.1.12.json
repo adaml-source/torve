@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "version": "1.1.12",
+  "released_at_utc": "2026-08-21T09:00:00Z",
+  "source": {
+    "repository": "https://github.com/adaml-source/torve",
+    "commit": "39d0df8fabd3227f85e96b3b5d984e033e9cc336",
+    "branch": "codex-publish-local-updates"
+  },
+  "artifacts": [
+    {
+      "id": "amazon_tv_apk",
+      "local_path": "androidApp/build/outputs/apk/amazonTv/release/androidApp-amazon-tv-release.apk",
+      "public_url": "https://torve.app/downloads/android/torve-android-tv-1.1.12-20260821.apk",
+      "bytes": 92335597,
+      "sha256": "682ef2d3ed2a1598727366e5bea1292218cd491b2f6d1f4a0ea69a8faada305d"
+    }
+  ],
+  "notes": "Subtitle delay: real-time preview as slider moves (MPV applies immediately; no longer requires Save to hear effect). ExoPlayer fallback now intercepts cue delivery and applies positive subtitle delay via Handler.postDelayed + built-in SubtitleView visibility management."
+}
