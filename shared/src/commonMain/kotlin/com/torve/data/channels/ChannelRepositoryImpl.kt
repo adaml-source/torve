@@ -21,6 +21,7 @@ import com.torve.domain.diagnostics.DiagnosticsRedactor
 import com.torve.domain.repository.ChannelRepository
 import com.torve.domain.repository.ChannelPlaylistSummary
 import com.torve.domain.repository.PlaylistAddProgress
+import com.torve.domain.repository.EpgRefreshProgress
 import com.torve.domain.repository.VodCategoryTypeCount
 import com.torve.data.network.HttpClientFactory
 import com.torve.platform.torveVerboseLog
@@ -41,9 +42,12 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
+import io.ktor.http.Url
 import kotlin.time.TimeSource
 
 class ChannelRepositoryImpl(
@@ -65,7 +69,11 @@ class ChannelRepositoryImpl(
         private const val EPG_SOCKET_TIMEOUT_MS = 120_000L
         private const val EPG_MAX_FETCH_ATTEMPTS = 3
         private const val EPG_MAX_DOWNLOAD_BYTES = 100L * 1024L * 1024L
-        private const val EPG_MAX_UNCOMPRESSED_PARSE_BYTES = 100L * 1024L * 1024L
+        // Streaming byte guard, not a memory allocation. Real-world aggregate
+        // XMLTV feeds can exceed 400MB after gzip expansion while retaining a
+        // small, windowed result set in memory/database.
+        private const val EPG_MAX_UNCOMPRESSED_PARSE_BYTES = 768L * 1024L * 1024L
+        private const val EPG_OVERALL_IMPORT_TIMEOUT_MS = 10L * 60L * 1000L
         private const val EPG_FORCE_IDENTITY_ACCEPT_ENCODING = true
         private const val EPG_MAX_PROGRAMMES_PER_CHANNEL_INGEST = 240
         private const val EPG_MAX_PROGRAMMES_TOTAL_INGEST = 150_000
@@ -318,6 +326,13 @@ class ChannelRepositoryImpl(
         val byXmltvId: Map<String, String>,
         val byNormalizedName: Map<String, String>,
         val allowedCanonicalKeys: Set<String>,
+    )
+
+    private data class DownloadedEpg(
+        val download: EpgDownloadResult,
+        val contentEncoding: String,
+        val contentLength: Long?,
+        val downloadMs: Long,
     )
 
     override suspend fun addPlaylist(
@@ -790,6 +805,8 @@ class ChannelRepositoryImpl(
         removeXtreamPassword(id) // clear from secure storage
         database.torveQueries.deletePlaylist(userId = uid(), playlistId = id)
         database.torveQueries.deleteChannelsForPlaylist(userId = uid(), playlistId = id)
+        database.torveQueries.deleteEpgProgrammesForPlaylist(userId = uid(), playlistId = id)
+        database.torveQueries.deleteEpgChannelsForPlaylist(userId = uid(), playlistId = id)
         playlistCache.remove(id)
         epgCache.remove(id)
         epgErrorCache.remove(id)
@@ -997,6 +1014,22 @@ class ChannelRepositoryImpl(
     }
 
     override suspend fun refreshEpg(playlistId: String, hiddenChannelIds: Set<String>) {
+        refreshEpgInternal(playlistId, hiddenChannelIds, null)
+    }
+
+    override suspend fun refreshEpg(
+        playlistId: String,
+        hiddenChannelIds: Set<String>,
+        onProgress: (EpgRefreshProgress) -> Unit,
+    ) {
+        refreshEpgInternal(playlistId, hiddenChannelIds, onProgress)
+    }
+
+    private suspend fun refreshEpgInternal(
+        playlistId: String,
+        hiddenChannelIds: Set<String>,
+        onProgress: ((EpgRefreshProgress) -> Unit)?,
+    ) {
         refreshEpgMutexFor(playlistId).withLock {
             // This method is used by the explicit "Refresh EPG" action and by
             // the scheduled worker. Do not skip just because a small/stale cache
@@ -1020,7 +1053,7 @@ class ChannelRepositoryImpl(
                 } else {
                     null
                 }
-            refreshEpgForPlaylist(playlistId, sourceUrl, hiddenChannelIds)
+            refreshEpgForPlaylist(playlistId, sourceUrl, hiddenChannelIds, onProgress)
         }
     }
 
@@ -2322,7 +2355,12 @@ class ChannelRepositoryImpl(
         }
     }
 
-    private suspend fun refreshEpgForPlaylist(playlistId: String, sourceUrl: String?, hiddenChannelIds: Set<String> = emptySet()) {
+    private suspend fun refreshEpgForPlaylist(
+        playlistId: String,
+        sourceUrl: String?,
+        hiddenChannelIds: Set<String> = emptySet(),
+        onProgress: ((EpgRefreshProgress) -> Unit)? = null,
+    ) {
         val normalizedUrl = sourceUrl?.trim()?.takeIf { it.isNotEmpty() }
         if (normalizedUrl == null) {
             epgCache.remove(playlistId)
@@ -2334,48 +2372,69 @@ class ChannelRepositoryImpl(
         }
 
         setEpgLoadState(playlistId, EPG_STATE_LOADING)
-        val parsedEpg = fetchAndParseEpg(playlistId, normalizedUrl, hiddenChannelIds)
-        if (parsedEpg != null) {
-            epgCache[playlistId] = parsedEpg
-            epgErrorCache[playlistId] = null
-            setEpgLoadState(playlistId, EPG_STATE_READY)
-            println(
-                "ChannelsEPG: parse success playlistId=$playlistId sourceConfigured=true generation=${parsedEpg.generationId ?: -1} channels=${parsedEpg.channels.size} programmes=${parsedEpg.programmes.size} groupedKeys=${parsedEpg.programmesByChannelKey.size}",
-            )
-        } else {
-            setEpgLoadState(playlistId, EPG_STATE_ERROR)
+        epgErrorCache[playlistId] = null
+        epgProgressCache.remove(playlistId)
+        try {
+            val parsedEpg = withTimeoutOrNull(EPG_OVERALL_IMPORT_TIMEOUT_MS) {
+                fetchAndParseEpg(playlistId, normalizedUrl, hiddenChannelIds, onProgress)
+            }
+            if (parsedEpg != null) {
+                epgCache[playlistId] = parsedEpg
+                epgErrorCache[playlistId] = null
+                epgProgressCache.remove(playlistId)
+                setEpgLoadState(playlistId, EPG_STATE_READY)
+                println(
+                    "ChannelsEPG: terminal state=success playlistId=$playlistId generation=${parsedEpg.generationId ?: -1} channels=${parsedEpg.channels.size} programmes=${parsedEpg.programmes.size} groupedKeys=${parsedEpg.programmesByChannelKey.size}",
+                )
+            } else {
+                if (epgErrorCache[playlistId].isNullOrBlank()) {
+                    epgErrorCache[playlistId] = "EPG import timed out. Check the EPG URL or try again."
+                }
+                epgProgressCache.remove(playlistId)
+                setEpgLoadState(playlistId, EPG_STATE_ERROR)
+                println("ChannelsEPG: terminal state=error playlistId=$playlistId")
+            }
+        } catch (cancelled: CancellationException) {
+            epgErrorCache[playlistId] = "EPG refresh cancelled."
+            epgProgressCache.remove(playlistId)
+            setEpgLoadState(playlistId, EPG_STATE_IDLE)
+            println("ChannelsEPG: terminal state=cancelled playlistId=$playlistId")
+            throw cancelled
         }
     }
 
-    private suspend fun fetchAndParseEpg(playlistId: String, sourceUrl: String, hiddenChannelIds: Set<String> = emptySet()): EpgData? = withContext(ioDispatcher) {
+    private suspend fun fetchAndParseEpg(
+        playlistId: String,
+        sourceUrl: String,
+        hiddenChannelIds: Set<String> = emptySet(),
+        onProgress: ((EpgRefreshProgress) -> Unit)? = null,
+    ): EpgData? = withContext(ioDispatcher) {
         val refreshStartedAt = TimeSource.Monotonic.markNow()
         var lastError: String? = null
-        var inFlightGeneration: Long? = null
+        var downloaded: DownloadedEpg? = null
 
         for (attempt in 1..EPG_MAX_FETCH_ATTEMPTS) {
             try {
                 println(
-                    "ChannelsEPG: fetch start playlistId=$playlistId sourceConfigured=true attempt=$attempt/$EPG_MAX_FETCH_ATTEMPTS requestTimeoutMs=$EPG_REQUEST_TIMEOUT_MS",
+                    "ChannelsEPG: request started playlistId=$playlistId endpoint=${redactEpgEndpoint(sourceUrl)} attempt=$attempt/$EPG_MAX_FETCH_ATTEMPTS requestTimeoutMs=$EPG_REQUEST_TIMEOUT_MS",
                 )
                 var failedStatusCode: Int? = null
-                val result: EpgData? = epgHttpClient.prepareGet(sourceUrl) {
+                downloaded = epgHttpClient.prepareGet(sourceUrl) {
                     timeout {
                         connectTimeoutMillis = EPG_CONNECT_TIMEOUT_MS
                         requestTimeoutMillis = EPG_REQUEST_TIMEOUT_MS
                         socketTimeoutMillis = EPG_SOCKET_TIMEOUT_MS
                     }
                 }.execute { response ->
-                    println(
-                        "ChannelsEPG: got response object playlistId=$playlistId status=${response.status.value}",
-                    )
                     val statusCode = response.status.value
                     val contentType = response.headers["Content-Type"].orEmpty()
                     val contentEncoding = response.headers["Content-Encoding"].orEmpty()
                     val contentLength = response.headers["Content-Length"]?.toLongOrNull()
+                    val finalUrl = response.call.request.url.toString()
 
                     if (!response.status.isSuccess()) {
                         failedStatusCode = statusCode
-                        lastError = "EPG request failed ($statusCode)"
+                        lastError = epgHttpErrorMessage(statusCode)
                         return@execute null
                     }
                     if (contentLength != null && contentLength > EPG_MAX_DOWNLOAD_BYTES) {
@@ -2387,164 +2446,237 @@ class ChannelRepositoryImpl(
                         return@execute null
                     }
 
-                    val (windowStart, windowEnd) = resolveEpgWindowBounds()
-                    val nextGeneration = Clock.System.now().toEpochMilliseconds()
-                    val channelMappingStartedAt = TimeSource.Monotonic.markNow()
-                    val channelMapping = buildEpgChannelMapping(playlistId, hiddenChannelIds)
-                    val channelMappingMs = channelMappingStartedAt.elapsedNow().inWholeMilliseconds
-                    inFlightGeneration = nextGeneration
-                    val ingestStartedAt = TimeSource.Monotonic.markNow()
-                    var tempFilePath: String? = null
-
                     println(
-                        "ChannelsEPG: fetch response playlistId=$playlistId sourceConfigured=true attempt=$attempt status=$statusCode contentType=$contentType contentEncoding=$contentEncoding contentLength=${contentLength ?: -1}",
+                        "ChannelsEPG: response playlistId=$playlistId status=$statusCode finalEndpoint=${redactEpgEndpoint(finalUrl)} redirected=${redactEpgEndpoint(sourceUrl) != redactEpgEndpoint(finalUrl)} contentType=${contentType.ifBlank { "missing" }} contentEncoding=${contentEncoding.ifBlank { "missing" }} contentLength=${contentLength ?: -1}",
                     )
-                    try {
-                        val downloadStartedAt = TimeSource.Monotonic.markNow()
-                        val downloadResult = GzipSupport.downloadToTempFile(
-                            response = response,
-                            maxCompressedBytes = EPG_MAX_DOWNLOAD_BYTES,
-                        )
-                        if (downloadResult == null) {
-                            clearEpgGenerationRows(playlistId, nextGeneration)
-                            epgErrorCache[playlistId] = "EPG download failed."
-                            return@execute null
-                        }
-                        val downloadMs = downloadStartedAt.elapsedNow().inWholeMilliseconds
-                        tempFilePath = downloadResult.tempFilePath
-
-                        val parseStartedAt = TimeSource.Monotonic.markNow()
-                        val ingestResult = GzipSupport.parseXmlTvAutoFromFileToDbOrNull(
-                            tempFilePath = downloadResult.tempFilePath,
-                            parser = epgParser,
-                            db = database,
-                            userId = uid(),
-                            playlistId = playlistId,
-                            generationId = nextGeneration,
-                            windowStartMs = windowStart,
-                            windowEndMs = windowEnd,
-                            contentEncoding = downloadResult.contentEncoding.ifBlank { contentEncoding },
-                            contentLength = downloadResult.contentLength ?: contentLength,
-                        maxUncompressedBytes = EPG_MAX_UNCOMPRESSED_PARSE_BYTES,
-                        channelFilter = channelMapping.allowedCanonicalKeys.takeIf { it.isNotEmpty() },
-                        resolveEpgChannelKey = { xmltvId, xmltvDisplayName ->
-                            channelMapping.byXmltvId[xmltvId.trim()]
-                                ?: channelMapping.byNormalizedName[normalizeEpgMatchKey(xmltvId)]
-                                ?: channelMapping.byNormalizedName[normalizeEpgMatchKey(xmltvDisplayName)]
-                        },
-                        batchSize = 200,
-                        maxProgrammesPerChannel = EPG_MAX_PROGRAMMES_PER_CHANNEL_INGEST,
-                        maxProgrammesTotal = EPG_MAX_PROGRAMMES_TOTAL_INGEST,
-                        onProgress = { progress ->
-                            epgProgressCache[playlistId] = progress
-                            println(
-                                "ChannelsEPG: db ingest progress playlistId=$playlistId totalSeen=${progress.totalSeen} kept=${progress.kept} skippedByWindow=${progress.skippedByWindow} skippedByChannelFilter=${progress.skippedByChannelFilter} skippedByInvalidTime=${progress.skippedByInvalidTime} skippedByNoMapping=${progress.skippedByNoMapping} skippedByCap=${progress.skippedByCap} batches=${progress.batchesCommitted} heapUsedMb=${progress.heapUsedMb} heapFreeMb=${progress.heapFreeMb}",
+                    val downloadStartedAt = TimeSource.Monotonic.markNow()
+                    var lastProgressBytes = -1L
+                    val downloadResult = GzipSupport.downloadToTempFile(
+                        response = response,
+                        maxCompressedBytes = EPG_MAX_DOWNLOAD_BYTES,
+                        onProgress = { bytesRead, totalBytes ->
+                            if (lastProgressBytes < 0L || bytesRead - lastProgressBytes >= 512L * 1024L) {
+                                lastProgressBytes = bytesRead
+                                onProgress?.invoke(
+                                    EpgRefreshProgress(
+                                        phase = EpgRefreshProgress.Phase.DOWNLOADING,
+                                        bytesRead = bytesRead,
+                                        totalBytes = totalBytes,
+                                    ),
                                 )
-                            },
-                        )
-
-                        if (ingestResult == null) {
-                            clearEpgGenerationRows(playlistId, nextGeneration)
-                            epgErrorCache[playlistId] = "EPG XML data could not be parsed."
-                            return@execute null
-                        }
-                        val parseAndPersistenceMs = parseStartedAt.elapsedNow().inWholeMilliseconds
-                        val stats = ingestResult.stats
-                        val ingestDurationMs = ingestStartedAt.elapsedNow().inWholeMilliseconds
-                        println(
-                            "ChannelsEPG: ingest transport playlistId=$playlistId generation=$nextGeneration contentLength=${downloadResult.contentLength ?: contentLength ?: -1} usedTempFile=true bytesDownloaded=${downloadResult.bytesDownloaded} gzipDetected=${ingestResult.isGzipDetected} bytesParsed=${ingestResult.bytesParsed} durationMs=$ingestDurationMs",
-                        )
-                        if (stats.abortedByGlobalCap) {
-                            clearEpgGenerationRows(playlistId, nextGeneration)
-                            epgErrorCache[playlistId] = "EPG too large. Reduce EPG days or guide window."
-                            println(
-                                "ChannelsEPG: db ingest aborted playlistId=$playlistId generation=$nextGeneration totalSeen=${stats.totalProgrammesSeen} kept=${stats.programmesKept} skippedByCap=${stats.programmesSkippedByCap}",
-                            )
-                            return@execute null
-                        }
-                        println(
-                            "ChannelsEPG: db ingest complete playlistId=$playlistId generation=$nextGeneration totalSeen=${stats.totalProgrammesSeen} kept=${stats.programmesKept} skippedByWindow=${stats.programmesSkippedByWindow} skippedByChannelFilter=${stats.programmesSkippedByChannelFilter} skippedByInvalidTime=${stats.programmesSkippedByInvalidTime} skippedByNoMapping=${stats.programmesSkippedByNoMapping} skippedByCap=${stats.programmesSkippedByCap} durationMs=${stats.parseDurationMs}",
-                        )
-                        setActiveEpgGeneration(playlistId, nextGeneration)
-                        database.torveQueries.deleteEpgProgrammesOlderGenerations(userId = uid(), playlistId = playlistId, generationId = nextGeneration)
-                        database.torveQueries.deleteEpgChannelsOlderGenerations(userId = uid(), playlistId = playlistId, generationId = nextGeneration)
-                        inFlightGeneration = null
-                        val databaseLoadStartedAt = TimeSource.Monotonic.markNow()
-                        val loaded = loadEpgFromDatabase(playlistId, nextGeneration, windowStart, windowEnd)
-                        println(
-                            "TorvePerf: epg stages playlistId=$playlistId channelMappingMs=$channelMappingMs " +
-                                "downloadMs=$downloadMs parseAndPersistenceMs=$parseAndPersistenceMs " +
-                                "persistenceMs=${stats.persistenceDurationMs} " +
-                                "databaseLoadMs=${databaseLoadStartedAt.elapsedNow().inWholeMilliseconds} " +
-                                "bytesDownloaded=${downloadResult.bytesDownloaded} bytesParsed=${ingestResult.bytesParsed} " +
-                                "programmeCount=${stats.programmesKept} completeMs=${refreshStartedAt.elapsedNow().inWholeMilliseconds}",
-                        )
-                        loaded
-                    } finally {
-                        tempFilePath?.let { GzipSupport.deleteTempFile(it) }
-                    }
-                }
-
-                if (failedStatusCode != null) {
-                    val statusCode = failedStatusCode ?: 0
-                    if (attempt < EPG_MAX_FETCH_ATTEMPTS && shouldRetryEpgStatus(statusCode)) {
-                        val retryDelayMs = epgRetryDelayMs(attempt)
-                        println(
-                            "ChannelsEPG: retry scheduled playlistId=$playlistId sourceConfigured=true attempt=$attempt waitMs=$retryDelayMs",
-                        )
-                        delay(retryDelayMs)
-                        continue
-                    }
-                    epgErrorCache[playlistId] = lastError
-                    return@withContext null
-                }
-
-                if (result != null) {
-                    return@withContext result
-                }
-                return@withContext null
-            } catch (e: Exception) {
-                inFlightGeneration?.let { generation ->
-                    clearEpgGenerationRows(playlistId, generation)
-                }
-                inFlightGeneration = null
-                lastError = e.message ?: e::class.simpleName ?: "Failed to fetch EPG"
-                val isTimeout = lastError.contains("timeout", ignoreCase = true)
-                println(
-                    "ChannelsEPG: fetch failed playlistId=$playlistId sourceConfigured=true attempt=$attempt error=${DiagnosticsRedactor.redact(lastError)}",
-                )
-                if (attempt < EPG_MAX_FETCH_ATTEMPTS && isTimeout) {
-                    val retryDelayMs = epgRetryDelayMs(attempt)
-                    println(
-                        "ChannelsEPG: timeout retry scheduled playlistId=$playlistId sourceConfigured=true attempt=$attempt waitMs=$retryDelayMs",
+                            }
+                        },
+                    ) ?: return@execute null
+                    DownloadedEpg(
+                        download = downloadResult,
+                        contentEncoding = contentEncoding,
+                        contentLength = contentLength,
+                        downloadMs = downloadStartedAt.elapsedNow().inWholeMilliseconds,
                     )
+                }
+
+                if (downloaded != null) break
+                val statusCode = failedStatusCode
+                if (statusCode != null && attempt < EPG_MAX_FETCH_ATTEMPTS && shouldRetryEpgStatus(statusCode)) {
+                    val retryDelayMs = epgRetryDelayMs(attempt)
+                    println("ChannelsEPG: retry scheduled playlistId=$playlistId attempt=$attempt waitMs=$retryDelayMs")
                     delay(retryDelayMs)
                     continue
                 }
-                epgErrorCache[playlistId] = if (isTimeout) {
-                    "EPG request timed out. Check XMLTV URL/provider and retry."
-                } else {
-                    lastError
-                }
+                epgErrorCache[playlistId] = lastError ?: "EPG download failed."
                 return@withContext null
-            } catch (throwable: Throwable) {
-                if (throwable.isOutOfMemory()) {
-                    val message = "EPG too large. Reduce EPG days or guide window."
-                    epgErrorCache[playlistId] = message
-                    println(
-                        "ChannelsEPG: oom playlistId=$playlistId sourceConfigured=true attempt=$attempt error=${DiagnosticsRedactor.redact(throwable.message)}",
-                    )
-                    inFlightGeneration?.let { generation ->
-                        clearEpgGenerationRows(playlistId, generation)
-                    }
-                    return@withContext null
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (e: Exception) {
+                lastError = e.message ?: e::class.simpleName ?: "Failed to download EPG"
+                val isTimeout = lastError.contains("timeout", ignoreCase = true)
+                println(
+                    "ChannelsEPG: download failed playlistId=$playlistId attempt=$attempt error=${DiagnosticsRedactor.redact(lastError)}",
+                )
+                if (attempt < EPG_MAX_FETCH_ATTEMPTS && isTimeout) {
+                    delay(epgRetryDelayMs(attempt))
+                    continue
                 }
-                throw throwable
+                epgErrorCache[playlistId] = classifyEpgFailure(lastError, isTimeout)
+                return@withContext null
             }
         }
 
-        epgErrorCache[playlistId] = lastError ?: "Failed to fetch EPG"
-        return@withContext null
+        val payload = downloaded ?: run {
+            epgErrorCache[playlistId] = lastError ?: "EPG download failed."
+            return@withContext null
+        }
+
+        val (windowStart, windowEnd) = resolveEpgWindowBounds()
+        val nextGeneration = Clock.System.now().toEpochMilliseconds()
+        val channelMappingStartedAt = TimeSource.Monotonic.markNow()
+        val channelMapping = buildEpgChannelMapping(playlistId, hiddenChannelIds)
+        val channelMappingMs = channelMappingStartedAt.elapsedNow().inWholeMilliseconds
+        var exactMatches = 0
+        var nameMatches = 0
+        var unmatchedChannels = 0
+        val parseStartedAt = TimeSource.Monotonic.markNow()
+
+        try {
+            onProgress?.invoke(
+                EpgRefreshProgress(
+                    phase = EpgRefreshProgress.Phase.PARSING,
+                    bytesRead = payload.download.bytesDownloaded,
+                    totalBytes = payload.download.contentLength ?: payload.contentLength,
+                ),
+            )
+            val ingestResult = GzipSupport.parseXmlTvAutoFromFileToDbOrNull(
+                tempFilePath = payload.download.tempFilePath,
+                parser = epgParser,
+                db = database,
+                userId = uid(),
+                playlistId = playlistId,
+                generationId = nextGeneration,
+                windowStartMs = windowStart,
+                windowEndMs = windowEnd,
+                contentEncoding = payload.download.contentEncoding.ifBlank { payload.contentEncoding },
+                contentLength = payload.download.contentLength ?: payload.contentLength,
+                maxUncompressedBytes = EPG_MAX_UNCOMPRESSED_PARSE_BYTES,
+                channelFilter = channelMapping.allowedCanonicalKeys.takeIf { it.isNotEmpty() },
+                resolveEpgChannelKey = { xmltvId, xmltvDisplayName ->
+                    val exact = channelMapping.byXmltvId[xmltvId.trim()]
+                    if (xmltvDisplayName != null) {
+                        when {
+                            exact != null -> exactMatches++
+                            channelMapping.byNormalizedName[normalizeEpgMatchKey(xmltvDisplayName)] != null -> nameMatches++
+                            else -> unmatchedChannels++
+                        }
+                    }
+                    exact ?: xmltvDisplayName
+                        ?.let(::normalizeEpgMatchKey)
+                        ?.takeIf { it.isNotEmpty() }
+                        ?.let(channelMapping.byNormalizedName::get)
+                },
+                batchSize = 200,
+                maxProgrammesPerChannel = EPG_MAX_PROGRAMMES_PER_CHANNEL_INGEST,
+                maxProgrammesTotal = EPG_MAX_PROGRAMMES_TOTAL_INGEST,
+                onProgress = { progress ->
+                    epgProgressCache[playlistId] = progress
+                    onProgress?.invoke(
+                        EpgRefreshProgress(
+                            phase = EpgRefreshProgress.Phase.PARSING,
+                            bytesRead = payload.download.bytesDownloaded,
+                            totalBytes = payload.download.contentLength ?: payload.contentLength,
+                            programmesParsed = progress.totalSeen,
+                            programmesSaved = progress.kept,
+                        ),
+                    )
+                },
+            ) ?: run {
+                clearEpgGenerationRows(playlistId, nextGeneration)
+                epgErrorCache[playlistId] = "EPG XML data could not be parsed."
+                return@withContext null
+            }
+
+            val stats = ingestResult.stats
+            println(
+                "ChannelsEPG: matching stats playlistId=$playlistId epgChannels=${stats.channelsSeen} torveChannels=${channelMapping.allowedCanonicalKeys.size} exactIdMatches=$exactMatches manualMatches=0 nameFallbackMatches=$nameMatches unmatched=$unmatchedChannels",
+            )
+            if (stats.abortedByGlobalCap) {
+                clearEpgGenerationRows(playlistId, nextGeneration)
+                epgErrorCache[playlistId] = "EPG is too large to scan safely. Reduce provider EPG days."
+                return@withContext null
+            }
+            if (stats.channelsSeen == 0 && stats.totalProgrammesSeen == 0) {
+                clearEpgGenerationRows(playlistId, nextGeneration)
+                epgErrorCache[playlistId] = "The EPG response did not contain XMLTV channel or programme data."
+                return@withContext null
+            }
+            if (stats.totalProgrammesSeen > 0 && stats.channelsMatched == 0) {
+                clearEpgGenerationRows(playlistId, nextGeneration)
+                epgErrorCache[playlistId] = "EPG downloaded, but no channels matched. Check playlist tvg-id mappings."
+                return@withContext null
+            }
+
+            onProgress?.invoke(
+                EpgRefreshProgress(
+                    phase = EpgRefreshProgress.Phase.MATCHING,
+                    channelsParsed = stats.channelsSeen,
+                    programmesParsed = stats.totalProgrammesSeen,
+                    programmesSaved = stats.programmesKept,
+                ),
+            )
+            onProgress?.invoke(
+                EpgRefreshProgress(
+                    phase = EpgRefreshProgress.Phase.SAVING,
+                    channelsParsed = stats.channelsSeen,
+                    programmesParsed = stats.totalProgrammesSeen,
+                    programmesSaved = stats.programmesKept,
+                ),
+            )
+            val databaseLoadStartedAt = TimeSource.Monotonic.markNow()
+            val loaded = loadEpgFromDatabase(playlistId, nextGeneration, windowStart, windowEnd)
+            // The staged guide has now been parsed, persisted, validated, and
+            // read back successfully. Publish it and retire the previous
+            // generation as one atomic database change so a failed refresh
+            // can never expose a half-transitioned guide.
+            database.transaction {
+                setActiveEpgGeneration(playlistId, nextGeneration)
+                database.torveQueries.deleteEpgProgrammesOlderGenerations(
+                    userId = uid(),
+                    playlistId = playlistId,
+                    generationId = nextGeneration,
+                )
+                database.torveQueries.deleteEpgChannelsOlderGenerations(
+                    userId = uid(),
+                    playlistId = playlistId,
+                    generationId = nextGeneration,
+                )
+            }
+            println(
+                "TorvePerf: epg stages playlistId=$playlistId channelMappingMs=$channelMappingMs downloadMs=${payload.downloadMs} " +
+                    "parseAndPersistenceMs=${parseStartedAt.elapsedNow().inWholeMilliseconds} persistenceMs=${stats.persistenceDurationMs} " +
+                    "databaseLoadMs=${databaseLoadStartedAt.elapsedNow().inWholeMilliseconds} bytesDownloaded=${payload.download.bytesDownloaded} " +
+                    "bytesParsed=${ingestResult.bytesParsed} gzipDetected=${ingestResult.isGzipDetected} " +
+                    "decompressionReadMs=${ingestResult.decompressionAndReadDurationMs} programmesParsed=${stats.totalProgrammesSeen} " +
+                    "programmeCount=${stats.programmesKept} completeMs=${refreshStartedAt.elapsedNow().inWholeMilliseconds}",
+            )
+            return@withContext loaded
+        } catch (cancelled: CancellationException) {
+            clearEpgGenerationRows(playlistId, nextGeneration)
+            throw cancelled
+        } catch (throwable: Throwable) {
+            clearEpgGenerationRows(playlistId, nextGeneration)
+            val detail = throwable.message ?: throwable::class.simpleName.orEmpty()
+            epgErrorCache[playlistId] = when {
+                throwable.isOutOfMemory() -> "EPG is too large for this device. Reduce provider EPG days."
+                throwable is EpgStreamLimitException -> detail
+                detail.contains("gzip", ignoreCase = true) || detail.contains("zip", ignoreCase = true) ->
+                    "The EPG compression could not be decoded."
+                detail.contains("xml", ignoreCase = true) || detail.contains("parse", ignoreCase = true) ->
+                    "The EPG contains malformed XMLTV data."
+                else -> "The EPG could not be saved. Try again."
+            }
+            println("ChannelsEPG: parse failed playlistId=$playlistId error=${DiagnosticsRedactor.redact(detail)}")
+            return@withContext null
+        } finally {
+            GzipSupport.deleteTempFile(payload.download.tempFilePath)
+        }
+    }
+
+    private fun redactEpgEndpoint(url: String): String = runCatching {
+        val parsed = Url(url)
+        "${parsed.protocol.name}://${parsed.host}/<redacted>"
+    }.getOrDefault("<invalid>")
+
+    private fun epgHttpErrorMessage(statusCode: Int): String = when (statusCode) {
+        404 -> "EPG URL was not found (HTTP 404)."
+        in 500..599 -> "EPG provider returned an error (HTTP $statusCode). Try again later."
+        else -> "EPG request failed (HTTP $statusCode)."
+    }
+
+    private fun classifyEpgFailure(detail: String, isTimeout: Boolean): String = when {
+        isTimeout -> "EPG download timed out. Check the EPG URL or try again."
+        detail.contains("unknown host", ignoreCase = true) || detail.contains("resolve", ignoreCase = true) ->
+            "The EPG server could not be reached. Check the URL and network connection."
+        detail.contains("url", ignoreCase = true) -> "The EPG URL is invalid."
+        detail.contains("redirect", ignoreCase = true) -> "The EPG redirect could not be resolved."
+        else -> "The EPG download failed. Check the URL or try again."
     }
 
     private fun buildXtreamEpgUrl(server: String, username: String, password: String): String {
@@ -2678,8 +2810,21 @@ class ChannelRepositoryImpl(
     private fun buildEpgChannelMapping(playlistId: String, hiddenChannelIds: Set<String> = emptySet()): EpgChannelMapping {
         val byXmltvId = mutableMapOf<String, String>()
         val byNormalizedName = mutableMapOf<String, String>()
+        val ambiguousNormalizedNames = mutableSetOf<String>()
         val allowedKeys = mutableSetOf<String>()
         var skippedHidden = 0
+
+        fun addUniqueName(value: String?, canonical: String) {
+            val normalized = normalizeEpgMatchKey(value)
+            if (normalized.isEmpty() || normalized in ambiguousNormalizedNames) return
+            val existing = byNormalizedName[normalized]
+            if (existing == null) {
+                byNormalizedName[normalized] = canonical
+            } else if (existing != canonical) {
+                byNormalizedName.remove(normalized)
+                ambiguousNormalizedNames += normalized
+            }
+        }
 
         val generationId = getActiveChannelGeneration(playlistId) ?: return EpgChannelMapping(
             byXmltvId = emptyMap(),
@@ -2711,17 +2856,9 @@ class ChannelRepositoryImpl(
 
             channel.tvg_id?.trim()?.takeIf { it.isNotEmpty() }?.let { tvgId ->
                 if (tvgId !in byXmltvId) byXmltvId[tvgId] = canonical
-                val normalizedTvgId = normalizeEpgMatchKey(tvgId)
-                if (normalizedTvgId !in byNormalizedName) byNormalizedName[normalizedTvgId] = canonical
             }
-            channel.tvg_name?.trim()?.takeIf { it.isNotEmpty() }?.let { tvgName ->
-                val normalizedTvgName = normalizeEpgMatchKey(tvgName)
-                if (normalizedTvgName !in byNormalizedName) byNormalizedName[normalizedTvgName] = canonical
-            }
-            channel.name.trim().takeIf { it.isNotEmpty() }?.let { name ->
-                val normalizedName = normalizeEpgMatchKey(name)
-                if (normalizedName !in byNormalizedName) byNormalizedName[normalizedName] = canonical
-            }
+            addUniqueName(channel.tvg_name, canonical)
+            addUniqueName(channel.name, canonical)
         }
 
         if (skippedHidden > 0) {

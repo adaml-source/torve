@@ -93,6 +93,7 @@ import com.torve.domain.model.programmesForEpgChannel
 import com.torve.domain.model.stableChannelId
 import com.torve.domain.repository.DeviceLocalSettingsRepository
 import com.torve.presentation.channels.EpgState
+import com.torve.presentation.channels.userMessage
 import com.torve.presentation.channels.ChannelsViewModel
 import com.torve.android.ui.player.ActivePlaybackState
 import com.torve.presentation.tvhome.TvHomeOutcomeViewModel
@@ -1530,7 +1531,12 @@ fun TvIptvScreen(
                             ) {
                                 CircularProgressIndicator(color = Amber)
                                 Spacer(modifier = Modifier.height(12.dp))
-                                Text(text = stringResource(R.string.tv_iptv_loading_epg), color = Silver)
+                                Text(
+                                    text = state.epgRefreshProgress?.let {
+                                        it.userMessage()
+                                    } ?: stringResource(R.string.tv_iptv_loading_epg),
+                                    color = Silver,
+                                )
                             }
                         }
 

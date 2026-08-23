@@ -16,6 +16,8 @@ private const val DEFAULT_DB_BATCH_SIZE = 75
 private const val TITLE_MAX_LEN = 120
 private const val MAX_PROGRAMMES_PER_CHANNEL_DEFAULT = 240
 private const val MAX_PROGRAMMES_TOTAL_DEFAULT = 150_000
+private const val MAX_PROGRAMMES_SCANNED = 2_000_000
+private const val PROGRESS_SCAN_INTERVAL = 25_000
 private const val MB_DIVISOR = 1024L * 1024L
 
 private data class EpgChannelInsert(
@@ -193,8 +195,10 @@ internal suspend fun EpgParser.parseXmlTvStreamingToDb(
     val insertedChannelKeys = HashSet<String>()
     val programmeCountsByChannel = HashMap<String, Int>()
     val channelMetaByKey = HashMap<String, ChannelMeta>()
+    val resolvedXmltvChannelKeys = HashMap<String, String>()
 
     var channelsSeen = 0
+    var channelsMatched = 0
     var totalProgrammesSeen = 0
     var programmesKept = 0
     var programmesSkippedByWindow = 0
@@ -311,11 +315,13 @@ internal suspend fun EpgParser.parseXmlTvStreamingToDb(
                         val xmltvChannelId = xmlParser.getAttributeValue(null, "id")
                             ?.trim()
                             .orEmpty()
-                        val resolvedKey = resolveEpgChannelKey?.invoke(xmltvChannelId, null)
+                        val meta = consumeChannelTag(xmlParser)
+                        val resolvedKey = resolveEpgChannelKey?.invoke(xmltvChannelId, meta?.displayName ?: "")
                             ?.trim()
                             ?.takeIf { it.isNotEmpty() }
-                        val meta = consumeChannelTag(xmlParser)
                         if (!resolvedKey.isNullOrBlank() && (channelFilter == null || resolvedKey in channelFilter)) {
+                            channelsMatched++
+                            if (xmltvChannelId.isNotBlank()) resolvedXmltvChannelKeys[xmltvChannelId] = resolvedKey
                             val normalizedDisplay = meta?.displayName?.takeIf { it.isNotBlank() } ?: resolvedKey
                             channelMetaByKey[resolvedKey] = ChannelMeta(
                                 displayName = normalizedDisplay,
@@ -331,11 +337,40 @@ internal suspend fun EpgParser.parseXmlTvStreamingToDb(
                     }
                     "programme" -> {
                         totalProgrammesSeen++
+                        if (totalProgrammesSeen > MAX_PROGRAMMES_SCANNED) {
+                            abortedByGlobalCap = true
+                            consumeProgrammeTagAndReadTitle(xmlParser, shouldCaptureTitle = false)
+                            break
+                        }
+                        if (totalProgrammesSeen % PROGRESS_SCAN_INTERVAL == 0) {
+                            onProgress?.invoke(progressSnapshot())
+                        }
                         val xmltvChannelId = xmlParser.getAttributeValue(null, "channel")
                             ?.trim()
                             .orEmpty()
                         val startRaw = xmlParser.getAttributeValue(null, "start")
                         val stopRaw = xmlParser.getAttributeValue(null, "stop")
+
+                        // Resolve the channel before parsing timestamps or child metadata.
+                        // Global XMLTV feeds commonly contain over a million programmes,
+                        // while a playlist needs only a small fraction of them.
+                        val epgChannelKey = resolvedXmltvChannelKeys[xmltvChannelId]
+                            ?: resolveEpgChannelKey?.invoke(xmltvChannelId, null)
+                            ?.trim()
+                            ?.takeIf { it.isNotEmpty() }
+                        if (epgChannelKey == null) {
+                            programmesSkippedByNoMapping++
+                            consumeProgrammeTagAndReadTitle(xmlParser, shouldCaptureTitle = false)
+                            eventType = xmlParser.next()
+                            continue
+                        }
+
+                        if (channelFilter != null && epgChannelKey !in channelFilter) {
+                            programmesSkippedByChannelFilter++
+                            consumeProgrammeTagAndReadTitle(xmlParser, shouldCaptureTitle = false)
+                            eventType = xmlParser.next()
+                            continue
+                        }
 
                         if (startRaw.isNullOrBlank() || stopRaw.isNullOrBlank() || xmltvChannelId.isBlank()) {
                             programmesSkippedByInvalidTime++
@@ -355,24 +390,6 @@ internal suspend fun EpgParser.parseXmlTvStreamingToDb(
 
                         if (stopMs < windowStartMs || startMs > windowEndMs) {
                             programmesSkippedByWindow++
-                            consumeProgrammeTagAndReadTitle(xmlParser, shouldCaptureTitle = false)
-                            eventType = xmlParser.next()
-                            continue
-                        }
-
-                        val epgChannelKey = resolveEpgChannelKey?.invoke(xmltvChannelId, null)
-                            ?.trim()
-                            ?.takeIf { it.isNotEmpty() }
-
-                        if (epgChannelKey == null) {
-                            programmesSkippedByNoMapping++
-                            consumeProgrammeTagAndReadTitle(xmlParser, shouldCaptureTitle = false)
-                            eventType = xmlParser.next()
-                            continue
-                        }
-
-                        if (channelFilter != null && epgChannelKey !in channelFilter) {
-                            programmesSkippedByChannelFilter++
                             consumeProgrammeTagAndReadTitle(xmlParser, shouldCaptureTitle = false)
                             eventType = xmlParser.next()
                             continue
@@ -439,6 +456,7 @@ internal suspend fun EpgParser.parseXmlTvStreamingToDb(
 
     EpgDbParseStats(
         channelsSeen = channelsSeen,
+        channelsMatched = channelsMatched,
         totalProgrammesSeen = totalProgrammesSeen,
         programmesKept = programmesKept,
         programmesSkippedByWindow = programmesSkippedByWindow,

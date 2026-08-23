@@ -35,6 +35,7 @@ import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -85,6 +86,7 @@ class ChannelsViewModel(
     private val searchQueryFlow = MutableStateFlow("")
     private var guideJob: Job? = null
     private var epgRefreshJob: Job? = null
+    private var epgRefreshRequestId: Long = 0L
     private var catalogLoadJob: Job? = null
     private var startupPhase = "idle"
     private val liveCategoryCountsMutex = Mutex()
@@ -817,6 +819,22 @@ class ChannelsViewModel(
 
         // Load programme data for guide timeline — local-first, never block on network.
         // Cancel any previous guide build to avoid overlapping state updates.
+        // Keep the import independent from guide search/filter/category jobs.
+        // Those jobs are intentionally cancellable; the import must still
+        // reach a success, error, or cancelled terminal state.
+        if (forceRefreshEpg) {
+            _state.update {
+                it.copy(
+                    guideChannels = guide,
+                    isLoadingGuide = true,
+                    guideError = null,
+                    epgState = EpgState.Loading,
+                )
+            }
+            ensureEpgLoaded(playlistId, forceRefresh = true)
+            return
+        }
+
         guideJob?.cancel()
         guideJob = scope.launch {
             val buildStartedAt = Clock.System.now().toEpochMilliseconds()
@@ -826,18 +844,6 @@ class ChannelsViewModel(
                 )
 
                 // Force refresh requested (manual retry) — fetch from network first.
-                if (forceRefreshEpg) {
-                    _state.update {
-                        it.copy(
-                            guideChannels = guide,
-                            isLoadingGuide = true,
-                            guideError = null,
-                            epgState = EpgState.Loading,
-                        )
-                    }
-                    withContext(backgroundDispatcher) { channelRepo.refreshEpg(playlistId, _state.value.hiddenChannels) }
-                }
-
                 // Load EPG from local cache/DB — this is fast and never hits network.
                 val epgData = withContext(backgroundDispatcher) { channelRepo.getEpg(playlistId) }
                 val epgLoadError = withContext(backgroundDispatcher) { channelRepo.getEpgLoadError(playlistId) }
@@ -881,42 +887,9 @@ class ChannelsViewModel(
                     )
                 }
 
-                if (!forceRefreshEpg) {
-                    println("ChannelsEPG: no local EPG for playlistId=$playlistId, fetching from network")
-                    try {
-                        withContext(backgroundDispatcher) { channelRepo.refreshEpg(playlistId, _state.value.hiddenChannels) }
-                    } catch (e: Exception) {
-                        println("ChannelsEPG: refresh failed playlistId=$playlistId error=${DiagnosticsRedactor.redact(e.message)}")
-                    }
-                }
-
-                val freshEpgData = withContext(backgroundDispatcher) { channelRepo.getEpg(playlistId) }
-                val freshEpgLoadError = withContext(backgroundDispatcher) { channelRepo.getEpgLoadError(playlistId) }
-
-                if (freshEpgData.programmesByChannelKey.isEmpty() && !freshEpgLoadError.isNullOrBlank()) {
-                    throw IllegalStateException(freshEpgLoadError)
-                }
-
-                val buildResult = buildEpgGuideResult(guide, playlistId, freshEpgData)
-                debugLog(
-                    "ChannelsEPG: guide build complete playlistId=$playlistId generation=${freshEpgData.generationId ?: -1} buildMs=${Clock.System.now().toEpochMilliseconds() - buildStartedAt} channels=${guide.size} programmeRows=${freshEpgData.programmes.size} guideMapSize=${buildResult.programmesByKey.size}",
-                )
-
-                _state.update {
-                    it.copy(
-                        guideChannels = guide,
-                        guideProgrammes = buildResult.programmesByKey,
-                        isLoadingGuide = false,
-                        guideError = null,
-                        epgState = EpgState.Loaded(
-                            sourceUrl = epgSourceUrl,
-                            sourceChannelCount = freshEpgData.channels.size,
-                            sourceProgrammeCount = freshEpgData.programmes.size,
-                            matchedChannelCount = buildResult.matchedChannels,
-                            unmatchedChannelCount = buildResult.unmatchedChannels,
-                        ),
-                    )
-                }
+                println("ChannelsEPG: no local EPG for playlistId=$playlistId, starting independent refresh")
+                ensureEpgLoaded(playlistId, forceRefresh = false)
+                return@launch
             } catch (e: Exception) {
                 val message = e.message ?: "Failed to load EPG"
                 println("ChannelsEPG: load failed playlistId=$playlistId sourceConfigured=${epgSourceUrl.isNotBlank()} error=${DiagnosticsRedactor.redact(message)}")
@@ -1235,6 +1208,7 @@ class ChannelsViewModel(
             }
             return
         }
+
         scope.launch {
             _state.update {
                 it.copy(
@@ -1504,6 +1478,10 @@ class ChannelsViewModel(
     }
 
     fun removePlaylist(playlistId: String) {
+        if (_state.value.selectedPlaylistId == playlistId) {
+            epgRefreshRequestId++
+            epgRefreshJob?.cancel()
+        }
         scope.launch {
             try {
                 withContext(backgroundDispatcher) {
@@ -1591,6 +1569,10 @@ class ChannelsViewModel(
     }
 
     fun deletePlaylist(id: String) {
+        if (_state.value.selectedPlaylistId == id) {
+            epgRefreshRequestId++
+            epgRefreshJob?.cancel()
+        }
         scope.launch {
             try {
                 withContext(backgroundDispatcher) { channelRepo.removePlaylist(id) }
@@ -2336,6 +2318,8 @@ class ChannelsViewModel(
         if (epgRefreshJob?.isActive == true && !forceRefresh) {
             return
         }
+        if (forceRefresh) epgRefreshJob?.cancel()
+        val requestId = ++epgRefreshRequestId
 
         epgRefreshJob = scope.launch {
             val cachedEpg = withContext(backgroundDispatcher) { channelRepo.getEpg(playlistId) }
@@ -2356,19 +2340,32 @@ class ChannelsViewModel(
                         ),
                         guideProgrammes = cachedEpg.programmesByChannelKey,
                         guideError = null,
+                        epgRefreshProgress = null,
                     )
                 }
                 refreshSelectedCategoryChannels(playlistId)
                 return@launch
             }
 
-            _state.update { it.copy(epgState = EpgState.Loading, guideError = null) }
-            val refreshed = runCatching {
-                withContext(backgroundDispatcher) { channelRepo.refreshEpg(playlistId, _state.value.hiddenChannels) }
-                withContext(backgroundDispatcher) { channelRepo.getEpg(playlistId) }
+            _state.update {
+                it.copy(
+                    epgState = EpgState.Loading,
+                    guideError = null,
+                    epgRefreshProgress = com.torve.domain.repository.EpgRefreshProgress(
+                        phase = com.torve.domain.repository.EpgRefreshProgress.Phase.DOWNLOADING,
+                    ),
+                )
             }
-
-            refreshed.onSuccess { epg ->
+            try {
+                withContext(backgroundDispatcher) {
+                    channelRepo.refreshEpg(playlistId, _state.value.hiddenChannels) { progress ->
+                        if (requestId == epgRefreshRequestId && _state.value.selectedPlaylistId == playlistId) {
+                            _state.update { it.copy(epgRefreshProgress = progress) }
+                        }
+                    }
+                }
+                val epg = withContext(backgroundDispatcher) { channelRepo.getEpg(playlistId) }
+                if (requestId != epgRefreshRequestId) return@launch
                 if (epg.programmesByChannelKey.isNotEmpty()) {
                     _state.update {
                         it.copy(
@@ -2381,6 +2378,8 @@ class ChannelsViewModel(
                             ),
                             guideProgrammes = epg.programmesByChannelKey,
                             guideError = null,
+                            isLoadingGuide = false,
+                            epgRefreshProgress = null,
                         )
                     }
                     refreshSelectedCategoryChannels(playlistId)
@@ -2392,10 +2391,25 @@ class ChannelsViewModel(
                         it.copy(
                             epgState = EpgState.Error(message),
                             guideError = message,
+                            isLoadingGuide = false,
+                            epgRefreshProgress = null,
                         )
                     }
                 }
-            }.onFailure { error ->
+            } catch (cancelled: CancellationException) {
+                if (requestId == epgRefreshRequestId) {
+                    _state.update {
+                        it.copy(
+                            epgState = EpgState.Error("EPG refresh cancelled."),
+                            guideError = "EPG refresh cancelled.",
+                            isLoadingGuide = false,
+                            epgRefreshProgress = null,
+                        )
+                    }
+                }
+                throw cancelled
+            } catch (error: Throwable) {
+                if (requestId != epgRefreshRequestId) return@launch
                 val message = error.message
                     ?: withContext(backgroundDispatcher) { channelRepo.getEpgLoadError(playlistId) }
                     ?: "Failed to load EPG"
@@ -2403,6 +2417,8 @@ class ChannelsViewModel(
                     it.copy(
                         epgState = EpgState.Error(message),
                         guideError = message,
+                        isLoadingGuide = false,
+                        epgRefreshProgress = null,
                     )
                 }
             }

@@ -9,6 +9,7 @@ internal actual object GzipSupport {
     actual suspend fun downloadToTempFile(
         response: HttpResponse,
         maxCompressedBytes: Long,
+        onProgress: ((bytesRead: Long, totalBytes: Long?) -> Unit)?,
     ): EpgDownloadResult? = null
 
     actual suspend fun parseXmlTvAutoFromFileToDbOrNull(

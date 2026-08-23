@@ -18,6 +18,7 @@ internal data class EpgStreamIngestResult(
     val usedTempFile: Boolean,
     val bytesDownloaded: Long,
     val bytesParsed: Long,
+    val decompressionAndReadDurationMs: Long,
 )
 
 internal class EpgStreamLimitException(message: String) : IllegalStateException(message)
@@ -26,6 +27,7 @@ internal expect object GzipSupport {
     suspend fun downloadToTempFile(
         response: HttpResponse,
         maxCompressedBytes: Long,
+        onProgress: ((bytesRead: Long, totalBytes: Long?) -> Unit)? = null,
     ): EpgDownloadResult?
 
     suspend fun parseXmlTvAutoFromFileToDbOrNull(

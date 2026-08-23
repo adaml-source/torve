@@ -110,6 +110,7 @@ import com.torve.domain.model.NextEpisodeMode
 import com.torve.domain.model.NextEpisodePreparationMode
 import com.torve.domain.player.LiveAudioOutputMode
 import com.torve.presentation.channels.EpgState
+import com.torve.presentation.channels.userMessage
 import com.torve.presentation.addon.AddonViewModel
 import com.torve.presentation.channels.ChannelsViewModel
 import com.torve.presentation.mdblist.MdbListTab
@@ -5542,7 +5543,9 @@ internal fun TvSettingsScreen(
                 val selectedPlaylist = channelsState.playlists.firstOrNull { it.id == channelsState.selectedPlaylistId }
                     ?: channelsState.playlists.firstOrNull()
                 val subtitle = when (val epgState = channelsState.epgState) {
-                    EpgState.Loading -> stringResource(R.string.tv_settings_refresh_epg_loading)
+                    EpgState.Loading -> channelsState.epgRefreshProgress?.let {
+                        it.userMessage()
+                    } ?: stringResource(R.string.tv_settings_refresh_epg_loading)
                     EpgState.NotConfigured -> stringResource(R.string.tv_settings_refresh_epg_not_configured)
                     is EpgState.Error -> epgState.message
                     is EpgState.Loaded -> stringResource(

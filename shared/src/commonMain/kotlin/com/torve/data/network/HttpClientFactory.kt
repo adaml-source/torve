@@ -1,6 +1,7 @@
 package com.torve.data.network
 
 import io.ktor.client.HttpClient
+import io.ktor.client.HttpClientConfig
 import io.ktor.client.plugins.HttpTimeout
 import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.client.plugins.defaultRequest
@@ -80,20 +81,28 @@ object HttpClientFactory {
     fun createEpgStreamingClient(
         forceIdentityEncoding: Boolean,
     ): HttpClient = HttpClient(createEpgStreamingEngineFactory(forceIdentityEncoding)) {
-        expectSuccess = false
-
-        install(HttpTimeout) {
-            requestTimeoutMillis = EPG_REQUEST_TIMEOUT_MS
-            connectTimeoutMillis = EPG_CONNECT_TIMEOUT_MS
-            socketTimeoutMillis = EPG_SOCKET_TIMEOUT_MS
-        }
-
-        install(Logging) {
-            level = LogLevel.NONE
-        }
+        configureEpgStreamingClient()
     }
 
     private fun isSensitiveHeader(name: String): Boolean =
         name.equals("Authorization", ignoreCase = true) ||
             name.equals("X-Api-Key", ignoreCase = true)
+}
+
+internal fun HttpClientConfig<*>.configureEpgStreamingClient() {
+    expectSuccess = false
+    // Ktor follows 301/302/303/307/308 and bounds redirect sends through
+    // its HttpSend limit. Keep this explicit because XMLTV download links
+    // commonly redirect to CDN object storage.
+    followRedirects = true
+
+    install(HttpTimeout) {
+        requestTimeoutMillis = HttpClientFactory.EPG_REQUEST_TIMEOUT_MS
+        connectTimeoutMillis = HttpClientFactory.EPG_CONNECT_TIMEOUT_MS
+        socketTimeoutMillis = HttpClientFactory.EPG_SOCKET_TIMEOUT_MS
+    }
+
+    install(Logging) {
+        level = LogLevel.NONE
+    }
 }

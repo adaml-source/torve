@@ -103,6 +103,8 @@ import com.torve.domain.repository.AddonRepository
 import com.torve.presentation.channels.EpgState
 import com.torve.presentation.channels.ChannelsUiState
 import com.torve.presentation.channels.ChannelsViewModel
+import com.torve.presentation.channels.userMessage
+import com.torve.domain.repository.EpgRefreshProgress
 import com.torve.presentation.session.AccountSessionCoordinator
 import com.torve.presentation.settings.AppLanguage
 import com.torve.presentation.settings.IntegrationReadinessStatus
@@ -2401,7 +2403,7 @@ private fun PlaylistsSection(
             }
             TorveListRow(
                 title = selectedPlaylist?.name ?: ds("No playlist selected"),
-                subtitle = describeEpgState(channelsState.epgState),
+                subtitle = describeEpgState(channelsState.epgState, channelsState.epgRefreshProgress),
                 trailing = {
                     Row(
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -3633,8 +3635,8 @@ private fun formatCategoryLabel(
     return if (code != null) "[$code] $resolvedName" else resolvedName
 }
 
-private fun describeEpgState(state: EpgState): String = when (state) {
-    EpgState.Loading -> "Loading programme guide data for the selected playlist."
+private fun describeEpgState(state: EpgState, progress: EpgRefreshProgress? = null): String = when (state) {
+    EpgState.Loading -> progress?.userMessage() ?: "Loading programme guide data for the selected playlist."
     EpgState.NotConfigured -> "No EPG source is configured for the selected playlist."
     is EpgState.Loaded -> buildString {
         append("Loaded ${state.sourceProgrammeCount} programmes across ${state.sourceChannelCount} EPG channels")

@@ -14,7 +14,6 @@ import java.io.FilterInputStream
 import java.io.InputStream
 import java.io.PushbackInputStream
 import java.util.zip.GZIPInputStream
-import java.util.zip.ZipException
 
 private const val DOWNLOAD_BUFFER_BYTES = 32 * 1024
 private const val PARSE_BUFFER_BYTES = 64 * 1024
@@ -35,9 +34,13 @@ private class CountingLimitInputStream(
 ) : FilterInputStream(delegate) {
     var totalBytesRead: Long = 0L
         private set
+    var sourceReadDurationNanos: Long = 0L
+        private set
 
     override fun read(): Int {
+        val startedAt = System.nanoTime()
         val value = super.read()
+        sourceReadDurationNanos += System.nanoTime() - startedAt
         if (value >= 0) {
             onRead(1L)
         }
@@ -45,7 +48,9 @@ private class CountingLimitInputStream(
     }
 
     override fun read(b: ByteArray, off: Int, len: Int): Int {
+        val startedAt = System.nanoTime()
         val read = super.read(b, off, len)
+        sourceReadDurationNanos += System.nanoTime() - startedAt
         if (read > 0) {
             onRead(read.toLong())
         }
@@ -64,6 +69,7 @@ internal actual object GzipSupport {
     actual suspend fun downloadToTempFile(
         response: HttpResponse,
         maxCompressedBytes: Long,
+        onProgress: ((bytesRead: Long, totalBytes: Long?) -> Unit)?,
     ): EpgDownloadResult? {
         val tempFile = createTempFile()
         val contentEncoding = response.headers["Content-Encoding"].orEmpty()
@@ -90,6 +96,7 @@ internal actual object GzipSupport {
                     "EPG too large (${bytes.toMegabytes()}MB compressed). Reduce provider EPG days."
                 },
                 onBytesWritten = { bytesWritten ->
+                    onProgress?.invoke(bytesWritten, contentLength)
                     if (bytesWritten >= nextProgressLogAt) {
                         println("ChannelsEPG: downloadToTempFile PROGRESS bytesDownloaded=$bytesWritten")
                         while (bytesWritten >= nextProgressLogAt) {
@@ -140,6 +147,7 @@ internal actual object GzipSupport {
         var stats: EpgDbParseStats? = null
         var bytesParsed = 0L
         var gzipDetected = false
+        var decompressionAndReadDurationMs = 0L
 
         FileInputStream(file).use { fileInput ->
             BufferedInputStream(fileInput, PARSE_BUFFER_BYTES).use { buffered ->
@@ -171,6 +179,7 @@ internal actual object GzipSupport {
                             onProgress = onProgress,
                         )
                         bytesParsed = counted.totalBytesRead
+                        decompressionAndReadDurationMs = counted.sourceReadDurationNanos / 1_000_000L
                     }
                 }
             }
@@ -183,6 +192,7 @@ internal actual object GzipSupport {
                 usedTempFile = true,
                 bytesDownloaded = file.length(),
                 bytesParsed = bytesParsed,
+                decompressionAndReadDurationMs = decompressionAndReadDurationMs,
             )
         }
     }
@@ -377,8 +387,6 @@ private fun prepareXmlInput(
     if (first >= 0) pushback.unread(first)
 
     val magicGzip = first == GZIP_MAGIC_BYTE_1 && second == GZIP_MAGIC_BYTE_2
-    val encodingGzip = contentEncoding?.contains("gzip", ignoreCase = true) == true
-
     if (magicGzip) {
         return PreparedXmlInput(
             input = GZIPInputStream(pushback, PARSE_BUFFER_BYTES),
@@ -386,21 +394,10 @@ private fun prepareXmlInput(
         )
     }
 
-    if (encodingGzip) {
-        return try {
-            PreparedXmlInput(
-                input = GZIPInputStream(pushback, PARSE_BUFFER_BYTES),
-                isGzipDetected = true,
-            )
-        } catch (_: ZipException) {
-            println(
-                "ChannelsEPG: gzip header mismatch contentEncoding=$contentEncoding contentLength=${contentLength ?: -1}, parsing as raw XML",
-            )
-            PreparedXmlInput(
-                input = pushback,
-                isGzipDetected = false,
-            )
-        }
+    if (contentEncoding?.contains("gzip", ignoreCase = true) == true) {
+        println(
+            "ChannelsEPG: gzip header mismatch contentEncoding=gzip contentLength=${contentLength ?: -1}, parsing as raw XML",
+        )
     }
 
     return PreparedXmlInput(

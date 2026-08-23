@@ -22,6 +22,7 @@ data class EpgBatchProgress(
 
 data class EpgDbParseStats(
     val channelsSeen: Int,
+    val channelsMatched: Int,
     val totalProgrammesSeen: Int,
     val programmesKept: Int,
     val programmesSkippedByWindow: Int,
@@ -335,18 +336,25 @@ class EpgParser {
      * Parse XMLTV timestamp: "20250221180000 +0000" → epoch millis.
      */
     internal fun parseXmltvTimestamp(ts: String): Long {
-        val d = ts.take(14)
-        if (d.length < 14) return 0L
+        val trimmed = ts.trim()
+        val d = trimmed.takeWhile { it in '0'..'9' }
+        if (d.length !in setOf(4, 6, 8, 10, 12, 14)) return 0L
+
+        fun component(start: Int, fallback: Int): Int =
+            if (d.length >= start + 2) d.substring(start, start + 2).toIntOrNull() ?: -1 else fallback
 
         val year = d.substring(0, 4).toIntOrNull() ?: return 0L
-        val month = d.substring(4, 6).toIntOrNull() ?: return 0L
-        val day = d.substring(6, 8).toIntOrNull() ?: return 0L
-        val hour = d.substring(8, 10).toIntOrNull() ?: return 0L
-        val minute = d.substring(10, 12).toIntOrNull() ?: return 0L
-        val second = d.substring(12, 14).toIntOrNull() ?: return 0L
+        val month = component(4, 1)
+        val day = component(6, 1)
+        val hour = component(8, 0)
+        val minute = component(10, 0)
+        val second = component(12, 0)
+        if (year < 1970 || month !in 1..12 || hour !in 0..23 || minute !in 0..59 || second !in 0..59) {
+            return 0L
+        }
 
         // Simple epoch calculation (ignoring leap seconds)
-        val tzPart = ts.substring(14).trim()
+        val tzPart = trimmed.substring(d.length).trim()
         val offsetMinutes = parseOffsetMinutes(tzPart)
 
         // Days from epoch to year
@@ -356,6 +364,7 @@ class EpgParser {
         }
         val daysInMonth = intArrayOf(0, 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31)
         if (isLeapYear(year)) daysInMonth[2] = 29
+        if (day !in 1..daysInMonth[month]) return 0L
         for (m in 1 until month) {
             days += daysInMonth[m]
         }

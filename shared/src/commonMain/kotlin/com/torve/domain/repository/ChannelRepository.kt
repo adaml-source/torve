@@ -22,6 +22,18 @@ data class PlaylistAddProgress(
     enum class Phase { DOWNLOADING, PARSING, SAVING }
 }
 
+/** User-visible, credential-safe progress for a single XMLTV refresh. */
+data class EpgRefreshProgress(
+    val phase: Phase,
+    val bytesRead: Long = 0L,
+    val totalBytes: Long? = null,
+    val channelsParsed: Int = 0,
+    val programmesParsed: Int = 0,
+    val programmesSaved: Int = 0,
+) {
+    enum class Phase { DOWNLOADING, PARSING, MATCHING, SAVING }
+}
+
 data class VodCategoryTypeCount(
     val groupTitle: String,
     val contentType: ChannelContentType,
@@ -98,6 +110,13 @@ interface ChannelRepository {
         refreshPlaylist(playlistId)
     }
     suspend fun refreshEpg(playlistId: String, hiddenChannelIds: Set<String> = emptySet())
+    suspend fun refreshEpg(
+        playlistId: String,
+        hiddenChannelIds: Set<String>,
+        onProgress: (EpgRefreshProgress) -> Unit,
+    ) {
+        refreshEpg(playlistId, hiddenChannelIds)
+    }
     suspend fun getChannels(playlistId: String): List<Channel>
     suspend fun getChannelsByGroup(playlistId: String): Map<String, List<Channel>>
     suspend fun getEnrichedChannels(playlistId: String): List<EnrichedChannel>

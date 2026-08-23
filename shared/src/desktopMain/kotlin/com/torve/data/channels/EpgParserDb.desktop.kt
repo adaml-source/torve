@@ -16,6 +16,8 @@ private const val DEFAULT_DB_BATCH_SIZE = 75
 private const val TITLE_MAX_LEN = 120
 private const val MAX_PROGRAMMES_PER_CHANNEL_DEFAULT = 240
 private const val MAX_PROGRAMMES_TOTAL_DEFAULT = 150_000
+private const val MAX_PROGRAMMES_SCANNED = 2_000_000
+private const val PROGRESS_SCAN_INTERVAL = 25_000
 private const val MB_DIVISOR = 1024L * 1024L
 
 private data class EpgChannelInsert(
@@ -196,8 +198,10 @@ internal suspend fun EpgParser.parseXmlTvStreamingToDbDesktop(
     val insertedChannelKeys = HashSet<String>()
     val programmeCountsByChannel = HashMap<String, Int>()
     val channelMetaByKey = HashMap<String, ChannelMeta>()
+    val resolvedXmltvChannelKeys = HashMap<String, String>()
 
     var channelsSeen = 0
+    var channelsMatched = 0
     var totalProgrammesSeen = 0
     var programmesKept = 0
     var programmesSkippedByWindow = 0
@@ -305,11 +309,13 @@ internal suspend fun EpgParser.parseXmlTvStreamingToDbDesktop(
                 "channel" -> {
                     channelsSeen++
                     val xmltvChannelId = reader.getAttributeValue(null, "id")?.trim().orEmpty()
-                    val resolvedKey = resolveEpgChannelKey?.invoke(xmltvChannelId, null)
+                    val meta = consumeChannelElement(reader)
+                    val resolvedKey = resolveEpgChannelKey?.invoke(xmltvChannelId, meta?.displayName ?: "")
                         ?.trim()
                         ?.takeIf { it.isNotEmpty() }
-                    val meta = consumeChannelElement(reader)
                     if (!resolvedKey.isNullOrBlank() && (channelFilter == null || resolvedKey in channelFilter)) {
+                        channelsMatched++
+                        if (xmltvChannelId.isNotBlank()) resolvedXmltvChannelKeys[xmltvChannelId] = resolvedKey
                         val normalizedDisplay = meta?.displayName?.takeIf { it.isNotBlank() } ?: resolvedKey
                         channelMetaByKey[resolvedKey] = ChannelMeta(normalizedDisplay, meta?.iconUrl)
                         enqueueChannel(
@@ -322,9 +328,32 @@ internal suspend fun EpgParser.parseXmlTvStreamingToDbDesktop(
                 }
                 "programme" -> {
                     totalProgrammesSeen++
+                    if (totalProgrammesSeen > MAX_PROGRAMMES_SCANNED) {
+                        abortedByGlobalCap = true
+                        consumeProgrammeElement(reader, captureTitle = false)
+                        break
+                    }
+                    if (totalProgrammesSeen % PROGRESS_SCAN_INTERVAL == 0) {
+                        onProgress?.invoke(progressSnapshot())
+                    }
                     val xmltvChannelId = reader.getAttributeValue(null, "channel")?.trim().orEmpty()
                     val startRaw = reader.getAttributeValue(null, "start")
                     val stopRaw = reader.getAttributeValue(null, "stop")
+
+                    val epgChannelKey = resolvedXmltvChannelKeys[xmltvChannelId]
+                        ?: resolveEpgChannelKey?.invoke(xmltvChannelId, null)
+                        ?.trim()
+                        ?.takeIf { it.isNotEmpty() }
+                    if (epgChannelKey == null) {
+                        programmesSkippedByNoMapping++
+                        consumeProgrammeElement(reader, captureTitle = false)
+                        continue
+                    }
+                    if (channelFilter != null && epgChannelKey !in channelFilter) {
+                        programmesSkippedByChannelFilter++
+                        consumeProgrammeElement(reader, captureTitle = false)
+                        continue
+                    }
 
                     if (startRaw.isNullOrBlank() || stopRaw.isNullOrBlank() || xmltvChannelId.isBlank()) {
                         programmesSkippedByInvalidTime++
@@ -344,19 +373,6 @@ internal suspend fun EpgParser.parseXmlTvStreamingToDbDesktop(
                         continue
                     }
 
-                    val epgChannelKey = resolveEpgChannelKey?.invoke(xmltvChannelId, null)
-                        ?.trim()
-                        ?.takeIf { it.isNotEmpty() }
-                    if (epgChannelKey == null) {
-                        programmesSkippedByNoMapping++
-                        consumeProgrammeElement(reader, captureTitle = false)
-                        continue
-                    }
-                    if (channelFilter != null && epgChannelKey !in channelFilter) {
-                        programmesSkippedByChannelFilter++
-                        consumeProgrammeElement(reader, captureTitle = false)
-                        continue
-                    }
                     val channelCount = programmeCountsByChannel[epgChannelKey] ?: 0
                     if (channelCount >= maxPerChannel) {
                         programmesSkippedByCap++
@@ -414,6 +430,7 @@ internal suspend fun EpgParser.parseXmlTvStreamingToDbDesktop(
 
     EpgDbParseStats(
         channelsSeen = channelsSeen,
+        channelsMatched = channelsMatched,
         totalProgrammesSeen = totalProgrammesSeen,
         programmesKept = programmesKept,
         programmesSkippedByWindow = programmesSkippedByWindow,
