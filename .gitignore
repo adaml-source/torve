@@ -125,6 +125,9 @@ tv_focus_audit.txt
 .android-*/
 .codex_tmp/
 /.codex*/
+/release/epg/*.xml.gz
+/release/epg/*.xml.gz.json
+/release/epg/*.xml.gz.sha256
 /.codex*.png
 /.codex*.txt
 /.public-export/
