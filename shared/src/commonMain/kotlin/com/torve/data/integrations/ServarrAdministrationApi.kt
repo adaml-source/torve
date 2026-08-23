@@ -212,13 +212,70 @@ internal class ServarrAdministrationApi(private val httpClient: HttpClient) {
         if (!instance.serviceType.isSonarrOrRadarr()) return unsupported()
         if (query.mediaId <= 0) return invalid("Select a library item first")
         val params = if (instance.serviceType == AutomationServiceType.SONARR) {
-            query.episodeId?.let { mapOf("episodeId" to it.toString()) }
-                ?: mapOf("seriesId" to query.mediaId.toString())
+            val episodeId = query.episodeId
+                ?: return invalid("Choose a specific Sonarr episode before finding releases")
+            mapOf("episodeId" to episodeId.toString())
         } else {
             mapOf("movieId" to query.mediaId.toString())
         }
         return requestJson(instance, apiKey, RequestKind.GET, "/api/v3/release", params)
             .mapValue { element -> element.rows().mapNotNull(::parseRelease) }
+    }
+
+    /**
+     * Starts Sonarr's automatic search for the series' monitored missing episodes.
+     * A series-only GET /release is not equivalent: Sonarr treats that request as
+     * the general RSS feed unless a season or episode is supplied.
+     */
+    suspend fun searchMissingEpisodes(
+        instance: AutomationInstance,
+        apiKey: String,
+        seriesId: Int,
+        monitorRegularSeasons: Boolean = false,
+    ): AutomationAdminResult<Unit> {
+        if (instance.serviceType != AutomationServiceType.SONARR) return unsupported()
+        if (seriesId <= 0) return invalid("Select a managed series first")
+        if (monitorRegularSeasons) {
+            when (val monitorResult = enableRegularSeasons(instance, apiKey, seriesId)) {
+                is AutomationAdminResult.Failure -> return monitorResult
+                is AutomationAdminResult.Success -> Unit
+            }
+        }
+        val body = buildJsonObject {
+            put("name", "SeriesSearch")
+            put("seriesId", seriesId)
+        }
+        return requestJson(instance, apiKey, RequestKind.POST, "/api/v3/command", body = body).toUnit()
+    }
+
+    private suspend fun enableRegularSeasons(
+        instance: AutomationInstance,
+        apiKey: String,
+        seriesId: Int,
+    ): AutomationAdminResult<Unit> {
+        val currentResult = requestJson(instance, apiKey, RequestKind.GET, "/api/v3/series/$seriesId")
+        val current = when (currentResult) {
+            is AutomationAdminResult.Failure -> return currentResult
+            is AutomationAdminResult.Success -> currentResult.value as? JsonObject
+                ?: return invalid("Sonarr returned an invalid series record")
+        }
+        val updatedSeasons = current.array("seasons")?.map { element ->
+            val season = element as? JsonObject ?: return@map element
+            if ((season.int("seasonNumber") ?: 0) <= 0) return@map element
+            JsonObject(season.toMutableMap().apply { put("monitored", JsonPrimitive(true)) })
+        }
+        val updated = JsonObject(current.toMutableMap().apply {
+            put("monitored", JsonPrimitive(true))
+            put("monitorNewItems", JsonPrimitive("all"))
+            updatedSeasons?.let { put("seasons", JsonArray(it)) }
+        })
+        return requestJson(
+            instance,
+            apiKey,
+            RequestKind.PUT,
+            "/api/v3/series/$seriesId",
+            body = updated,
+        ).toUnit()
     }
 
     suspend fun grabRelease(
@@ -745,6 +802,9 @@ internal class ServarrAdministrationApi(private val httpClient: HttpClient) {
         val title = row.string("title") ?: return null
         val kind = if (type == AutomationServiceType.SONARR) AutomationMediaKind.SERIES else AutomationMediaKind.MOVIE
         val statistics = row.obj("statistics")
+        val regularSeasons = row.array("seasons")
+            ?.mapNotNull { it as? JsonObject }
+            ?.filter { (it.int("seasonNumber") ?: 0) > 0 }
         return AutomationLibraryItem(
             id = row.int("id") ?: 0,
             kind = kind,
@@ -759,6 +819,10 @@ internal class ServarrAdministrationApi(private val httpClient: HttpClient) {
             hasFile = if (lookup) false else {
                 row.boolean("hasFile") ?: ((statistics?.int("episodeFileCount") ?: 0) > 0)
             },
+            episodeCount = statistics?.int("episodeCount"),
+            episodeFileCount = statistics?.int("episodeFileCount"),
+            seasonCount = regularSeasons?.size,
+            monitoredSeasonCount = regularSeasons?.count { it.boolean("monitored") == true },
         )
     }
 

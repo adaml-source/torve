@@ -5,6 +5,7 @@ import com.torve.domain.integrations.AutomationAdminResult
 import com.torve.domain.integrations.AutomationCapability
 import com.torve.domain.integrations.AutomationInstance
 import com.torve.domain.integrations.AutomationQueueRemoval
+import com.torve.domain.integrations.AutomationReleaseQuery
 import com.torve.domain.integrations.AutomationIndexerCreateRequest
 import com.torve.domain.integrations.AutomationIndexerProtocol
 import com.torve.domain.integrations.AutomationServiceType
@@ -65,6 +66,93 @@ class ServarrAdministrationApiTest {
         assertEquals("/api/v3/series/lookup", request?.url?.encodedPath)
         assertEquals("Example", request?.url?.parameters?.get("term"))
         assertEquals("secret", request?.headers?.get("X-Api-Key"))
+    }
+
+    @Test
+    fun `sonarr library exposes monitoring and episode progress`() = runTest {
+        val api = ServarrAdministrationApi(client {
+            jsonResponse(
+                """[{"id":12,"title":"Example Show","year":2003,"monitored":true,"seasons":[{"seasonNumber":0,"monitored":false},{"seasonNumber":1,"monitored":true},{"seasonNumber":2,"monitored":false}],"statistics":{"episodeFileCount":3,"episodeCount":24}}]""",
+            )
+        })
+
+        val result = api.listLibrary(instance(AutomationServiceType.SONARR), "secret")
+
+        val items = assertIs<AutomationAdminResult.Success<*>>(result).value as List<*>
+        val item = items.single() as com.torve.domain.integrations.AutomationLibraryItem
+        assertTrue(item.monitored)
+        assertEquals(2, item.seasonCount)
+        assertEquals(1, item.monitoredSeasonCount)
+        assertEquals(24, item.episodeCount)
+        assertEquals(3, item.episodeFileCount)
+    }
+
+    @Test
+    fun `sonarr series-only interactive release lookup is rejected before rss fallback`() = runTest {
+        var requestCount = 0
+        val api = ServarrAdministrationApi(client {
+            requestCount += 1
+            jsonResponse("[]")
+        })
+
+        val result = api.interactiveSearch(
+            instance(AutomationServiceType.SONARR),
+            "secret",
+            AutomationReleaseQuery(mediaId = 12),
+        )
+
+        val failure = assertIs<AutomationAdminResult.Failure>(result)
+        assertEquals(AutomationAdminErrorCode.INVALID_REQUEST, failure.code)
+        assertEquals(0, requestCount)
+    }
+
+    @Test
+    fun `sonarr missing search submits series search command`() = runTest {
+        val requests = mutableListOf<HttpRequestData>()
+        val api = ServarrAdministrationApi(client { request ->
+            requests += request
+            jsonResponse("""{"id":44,"name":"SeriesSearch","status":"queued"}""", HttpStatusCode.Created)
+        })
+
+        val result = api.searchMissingEpisodes(instance(AutomationServiceType.SONARR), "key", 12)
+
+        assertIs<AutomationAdminResult.Success<*>>(result)
+        assertEquals(listOf(HttpMethod.Post), requests.map { it.method })
+        assertEquals("/api/v3/command", requests.single().url.encodedPath)
+        val body = (requests.single().body as TextContent).text
+        assertTrue(body.contains("\"name\":\"SeriesSearch\""))
+        assertTrue(body.contains("\"seriesId\":12"))
+    }
+
+    @Test
+    fun `monitor and search enables regular seasons but leaves specials unchanged`() = runTest {
+        val requests = mutableListOf<HttpRequestData>()
+        val api = ServarrAdministrationApi(client { request ->
+            requests += request
+            when {
+                request.method == HttpMethod.Get -> jsonResponse(
+                    """{"id":12,"title":"Example Show","monitored":false,"qualityProfileId":1,"path":"/tv/example","seasons":[{"seasonNumber":0,"monitored":false},{"seasonNumber":1,"monitored":false}]}""",
+                )
+                request.method == HttpMethod.Put -> jsonResponse("""{"id":12,"title":"Example Show"}""")
+                else -> jsonResponse("""{"id":44,"name":"SeriesSearch","status":"queued"}""", HttpStatusCode.Created)
+            }
+        })
+
+        val result = api.searchMissingEpisodes(
+            instance(AutomationServiceType.SONARR),
+            "key",
+            12,
+            monitorRegularSeasons = true,
+        )
+
+        assertIs<AutomationAdminResult.Success<*>>(result)
+        assertEquals(listOf(HttpMethod.Get, HttpMethod.Put, HttpMethod.Post), requests.map { it.method })
+        val updateBody = (requests[1].body as TextContent).text
+        assertTrue(updateBody.contains("\"monitored\":true"))
+        assertTrue(updateBody.contains("\"monitorNewItems\":\"all\""))
+        assertTrue(updateBody.contains("\"seasonNumber\":0,\"monitored\":false"))
+        assertTrue(updateBody.contains("\"seasonNumber\":1,\"monitored\":true"))
+        assertTrue(updateBody.contains("\"path\":\"/tv/example\""))
     }
 
     @Test

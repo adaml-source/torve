@@ -55,6 +55,8 @@ import com.torve.domain.integrations.TdarrWorkerLimitRequest
 import com.torve.presentation.integrations.AutomationAdminSection
 import com.torve.presentation.integrations.AutomationAdministrationUiState
 import com.torve.presentation.integrations.AutomationAdministrationViewModel
+import com.torve.presentation.integrations.primaryActionLabel
+import com.torve.presentation.integrations.statusParts
 import com.torve.presentation.integrations.AutomationConfirmationKind
 import com.torve.presentation.integrations.AutomationSettingsViewModel
 import org.koin.mp.KoinPlatform
@@ -303,21 +305,23 @@ private fun DesktopLibraryAdmin(
         }
     }
     if (state.library.isNotEmpty()) Text("Managed library (${state.library.size})", fontWeight = FontWeight.SemiBold)
-    state.library.forEach { item -> DesktopMediaRow(item, "Find releases") { viewModel.searchReleases(item.id) } }
+    state.library.forEach { item ->
+        DesktopMediaRow(item, item.primaryActionLabel()) { viewModel.activateLibraryItem(item) }
+    }
 }
 
 @Composable
 private fun DesktopMediaRow(item: AutomationLibraryItem, action: String, onClick: () -> Unit) {
     TorveListRow(
         title = item.title,
-        subtitle = listOfNotNull(item.year?.toString(), item.kind.name.lowercase(), if (item.hasFile) "downloaded" else null).joinToString(" · "),
+        subtitle = item.statusParts().joinToString(" · "),
         trailing = { TorveSecondaryButton(action, onClick) },
     )
 }
 
 @Composable
 private fun DesktopReleaseAdmin(state: AutomationAdministrationUiState, viewModel: AutomationAdministrationViewModel) {
-    if (state.releases.isEmpty()) Text("Choose Find releases from the Library tab.", color = TorveDesktopThemeTokens.colors.textSecondary)
+    if (state.releases.isEmpty()) Text("Choose Find releases on a managed movie.", color = TorveDesktopThemeTokens.colors.textSecondary)
     state.releases.forEach { release ->
         TorveListRow(
             title = release.title,

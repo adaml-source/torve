@@ -74,6 +74,8 @@ import com.torve.domain.integrations.TdarrWorkerLimitRequest
 import com.torve.presentation.integrations.AutomationAdminSection
 import com.torve.presentation.integrations.AutomationAdministrationUiState
 import com.torve.presentation.integrations.AutomationAdministrationViewModel
+import com.torve.presentation.integrations.primaryActionLabel
+import com.torve.presentation.integrations.statusParts
 import com.torve.presentation.integrations.AutomationConfirmationKind
 import kotlinx.coroutines.delay
 import org.koin.compose.koinInject
@@ -330,7 +332,7 @@ private fun LibraryAdmin(
     if (state.library.isNotEmpty()) {
         Text("Managed library (${state.library.size})", color = Snow, fontWeight = FontWeight.SemiBold)
         state.library.forEach { item ->
-            MediaAdminRow(item, "Find releases") { viewModel.searchReleases(item.id) }
+            MediaAdminRow(item, item.primaryActionLabel()) { viewModel.activateLibraryItem(item) }
         }
     }
 }
@@ -342,7 +344,7 @@ private fun MediaAdminRow(item: AutomationLibraryItem, action: String, onClick: 
             Column(Modifier.weight(1f)) {
                 Text(item.title, color = Snow, fontWeight = FontWeight.SemiBold)
                 Text(
-                    listOfNotNull(item.year?.toString(), item.kind.name.lowercase(), if (item.hasFile) "downloaded" else null).joinToString(" · "),
+                    item.statusParts().joinToString(" · "),
                     color = Silver,
                     style = MaterialTheme.typography.bodySmall,
                 )
@@ -354,7 +356,7 @@ private fun MediaAdminRow(item: AutomationLibraryItem, action: String, onClick: 
 
 @Composable
 private fun ReleaseAdmin(releases: List<AutomationRelease>, viewModel: AutomationAdministrationViewModel) {
-    EmptyHint(releases.isEmpty(), "Choose Find releases from a managed movie or series.")
+    EmptyHint(releases.isEmpty(), "Choose Find releases from a managed movie.")
     releases.forEach { release ->
         AdminCard {
             Text(release.title, color = Snow, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)

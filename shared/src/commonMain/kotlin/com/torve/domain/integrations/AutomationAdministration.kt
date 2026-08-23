@@ -58,6 +58,12 @@ data class AutomationLibraryItem(
     val externalId: Int? = null,
     val monitored: Boolean = false,
     val hasFile: Boolean = false,
+    /** Sonarr statistics for aired/eligible episodes. Null for lookup results and non-series services. */
+    val episodeCount: Int? = null,
+    val episodeFileCount: Int? = null,
+    /** Regular seasons only; specials (season zero) are deliberately excluded. */
+    val seasonCount: Int? = null,
+    val monitoredSeasonCount: Int? = null,
     val seasonNumber: Int? = null,
     val episodeNumber: Int? = null,
 )

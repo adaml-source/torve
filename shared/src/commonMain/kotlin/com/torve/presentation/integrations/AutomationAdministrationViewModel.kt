@@ -9,6 +9,7 @@ import com.torve.domain.integrations.AutomationIndexerCreateRequest
 import com.torve.domain.integrations.AutomationInstance
 import com.torve.domain.integrations.AutomationInstanceRepository
 import com.torve.domain.integrations.AutomationLibraryItem
+import com.torve.domain.integrations.AutomationMediaKind
 import com.torve.domain.integrations.AutomationQualityProfile
 import com.torve.domain.integrations.AutomationQueueItem
 import com.torve.domain.integrations.AutomationQueueRemoval
@@ -262,6 +263,46 @@ class AutomationAdministrationViewModel(
         )
     }
 
+    fun activateLibraryItem(item: AutomationLibraryItem) {
+        when (item.kind) {
+            AutomationMediaKind.SERIES -> searchMissingEpisodes(item)
+            AutomationMediaKind.MOVIE,
+            AutomationMediaKind.EPISODE -> searchReleases(item.id)
+        }
+    }
+
+    private fun searchMissingEpisodes(item: AutomationLibraryItem) {
+        if (item.id <= 0) return
+        val monitorRegularSeasons = item.requiresSeasonMonitoring()
+        perform(
+            action = if (monitorRegularSeasons) "Monitoring and searching ${item.title}" else "Searching missing episodes",
+            successMessage = if (monitorRegularSeasons) {
+                "Sonarr is monitoring regular seasons and searching missing episodes for ${item.title}"
+            } else {
+                "Sonarr started searching monitored missing episodes for ${item.title}"
+            },
+            operation = { instance, key ->
+                adminClient.searchMissingEpisodes(instance, key, item.id, monitorRegularSeasons)
+            },
+            onSuccess = {
+                if (monitorRegularSeasons) {
+                    _state.update { state ->
+                        state.copy(
+                            library = state.library.map { existing ->
+                                if (existing.id == item.id) {
+                                    existing.copy(
+                                        monitored = true,
+                                        monitoredSeasonCount = existing.seasonCount,
+                                    )
+                                } else existing
+                            },
+                        )
+                    }
+                }
+            },
+        )
+    }
+
     fun grabRelease(release: AutomationRelease) = perform(
         action = "Sending release to download client",
         successMessage = "Release sent to the configured download client",
@@ -510,5 +551,31 @@ class AutomationAdministrationViewModel(
         AutomationServiceType.PROWLARR -> AutomationAdminSection.INDEXERS
         AutomationServiceType.BAZARR -> AutomationAdminSection.SUBTITLES
         AutomationServiceType.TDARR -> AutomationAdminSection.TDARR
+    }
+}
+
+fun AutomationLibraryItem.requiresSeasonMonitoring(): Boolean =
+    kind == AutomationMediaKind.SERIES &&
+        (!monitored || (seasonCount != null && monitoredSeasonCount != null && monitoredSeasonCount < seasonCount))
+
+fun AutomationLibraryItem.primaryActionLabel(): String = when (kind) {
+    AutomationMediaKind.SERIES -> if (requiresSeasonMonitoring()) "Monitor seasons + search" else "Search missing"
+    AutomationMediaKind.MOVIE,
+    AutomationMediaKind.EPISODE -> "Find releases"
+}
+
+fun AutomationLibraryItem.statusParts(): List<String> = buildList {
+    year?.let { add(it.toString()) }
+    add(kind.name.lowercase())
+    if (kind == AutomationMediaKind.SERIES) {
+        if (!monitored) add("not monitored")
+        if (seasonCount != null && monitoredSeasonCount != null) {
+            add("$monitoredSeasonCount/$seasonCount seasons monitored")
+        }
+        if (episodeCount != null && episodeFileCount != null) {
+            add("$episodeFileCount/$episodeCount episodes downloaded")
+        }
+    } else if (hasFile) {
+        add("downloaded")
     }
 }
