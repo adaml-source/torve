@@ -220,7 +220,7 @@ def atomic_write_json(path: Path, value: dict[str, object]) -> None:
         temporary.unlink(missing_ok=True)
 
 
-def build(output_path: Path) -> dict[str, object]:
+def build(output_path: Path, feeds: tuple[FeedSpec, ...] = FEEDS) -> dict[str, object]:
     if fcntl is None:
         raise RuntimeError("Scheduled EPG builds require a POSIX file lock.")
     lock_path = output_path.with_suffix(output_path.suffix + ".lock")
@@ -230,7 +230,7 @@ def build(output_path: Path) -> dict[str, object]:
         with tempfile.TemporaryDirectory(prefix="torve-epg-download-") as download_dir_name:
             download_dir = Path(download_dir_name)
             source_files: list[tuple[FeedSpec, Path]] = []
-            for spec in FEEDS:
+            for spec in feeds:
                 destination = download_dir / spec.filename
                 download_feed(spec, destination)
                 source_files.append((spec, destination))
@@ -242,8 +242,19 @@ def build(output_path: Path) -> dict[str, object]:
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument(
+        "--profile",
+        choices=("full", "core", "us-locals"),
+        default="full",
+        help="core omits the very large US local-stations bundle",
+    )
     args = parser.parse_args()
-    stats = build(args.output.resolve())
+    feeds = {
+        "full": FEEDS,
+        "core": tuple(feed for feed in FEEDS if feed.filename != "epg_ripper_US_LOCALS1.xml.gz"),
+        "us-locals": tuple(feed for feed in FEEDS if feed.filename == "epg_ripper_US_LOCALS1.xml.gz"),
+    }[args.profile]
+    stats = build(args.output.resolve(), feeds)
     print(json.dumps(stats, sort_keys=True))
 
 

@@ -54,3 +54,13 @@ def test_streaming_merge_filters_ukraine_and_deduplicates(tmp_path):
     assert [entry.attrib["channel"] for entry in root.findall("programme")] == ["de.one", "Ukraine.1.cz"]
     assert stats["channels"] == 2
     assert stats["programmes"] == 2
+
+
+def test_core_profile_excludes_only_us_local_stations():
+    core = tuple(
+        feed for feed in epg_merge.FEEDS
+        if feed.filename != "epg_ripper_US_LOCALS1.xml.gz"
+    )
+    assert any(feed.filename == "epg_ripper_US2.xml.gz" for feed in core)
+    assert any(feed.filename == "epg_ripper_US_SPORTS1.xml.gz" for feed in core)
+    assert not any(feed.filename == "epg_ripper_US_LOCALS1.xml.gz" for feed in core)
