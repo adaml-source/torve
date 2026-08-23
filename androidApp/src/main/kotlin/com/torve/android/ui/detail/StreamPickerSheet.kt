@@ -63,6 +63,22 @@ import com.torve.presentation.detail.StreamFilterUiText
 
 private enum class StreamSourceFilter { ALL, TORRENT, USENET }
 
+private enum class StreamSortMode { DEFAULT, SIZE_DESC, SIZE_ASC }
+
+private fun ParsedStream.sizeBytes(): Long {
+    val raw = size ?: return -1L
+    val match = Regex("""([\d.]+)\s*(TB|GB|MB|KB)""", RegexOption.IGNORE_CASE).find(raw.trim())
+        ?: return -1L
+    val value = match.groupValues[1].toDoubleOrNull() ?: return -1L
+    return when (match.groupValues[2].uppercase()) {
+        "TB" -> (value * 1024.0 * 1024.0 * 1024.0 * 1024.0).toLong()
+        "GB" -> (value * 1024.0 * 1024.0 * 1024.0).toLong()
+        "MB" -> (value * 1024.0 * 1024.0).toLong()
+        "KB" -> (value * 1024.0).toLong()
+        else -> -1L
+    }
+}
+
 private fun ParsedStream.sourceFilter(): StreamSourceFilter =
     when {
         isUsenetStream() -> StreamSourceFilter.USENET
@@ -92,12 +108,30 @@ fun StreamPickerSheet(
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     var activeFilter by remember { mutableStateOf(StreamSourceFilter.ALL) }
+    var activeSortMode by remember { mutableStateOf(StreamSortMode.DEFAULT) }
 
     val filteredStreams = remember(streams, activeFilter) {
         if (activeFilter == StreamSourceFilter.ALL) streams
         else streams.filter { it.sourceFilter() == activeFilter }
     }
-    val groups = groupPlaybackOptionStreams(filteredStreams, startupCandidates)
+    val sortedStreams = remember(filteredStreams, activeSortMode) {
+        when (activeSortMode) {
+            StreamSortMode.DEFAULT -> filteredStreams
+            StreamSortMode.SIZE_DESC -> {
+                val withSize = filteredStreams.filter { it.sizeBytes() >= 0 }.sortedByDescending { it.sizeBytes() }
+                val noSize = filteredStreams.filter { it.sizeBytes() < 0 }
+                withSize + noSize
+            }
+            StreamSortMode.SIZE_ASC -> {
+                val withSize = filteredStreams.filter { it.sizeBytes() >= 0 }.sortedBy { it.sizeBytes() }
+                val noSize = filteredStreams.filter { it.sizeBytes() < 0 }
+                withSize + noSize
+            }
+        }
+    }
+    val groups = remember(filteredStreams, startupCandidates) {
+        groupPlaybackOptionStreams(filteredStreams, startupCandidates)
+    }
     val startupCandidateMap = startupCandidates.associateBy { it.streamKey }
 
     ModalBottomSheet(
@@ -149,7 +183,11 @@ fun StreamPickerSheet(
 
             Spacer(Modifier.height(10.dp))
 
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
                 listOf(
                     StreamSourceFilter.ALL to stringResource(R.string.catalog_all),
                     StreamSourceFilter.TORRENT to stringResource(R.string.stream_filter_torrent),
@@ -173,6 +211,32 @@ fun StreamPickerSheet(
                             fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
                         )
                     }
+                }
+                Spacer(Modifier.weight(1f))
+                val sortActive = activeSortMode != StreamSortMode.DEFAULT
+                Box(
+                    modifier = Modifier
+                        .background(if (sortActive) Amber else Gunmetal, RoundedCornerShape(20.dp))
+                        .clickable {
+                            activeSortMode = when (activeSortMode) {
+                                StreamSortMode.DEFAULT -> StreamSortMode.SIZE_DESC
+                                StreamSortMode.SIZE_DESC -> StreamSortMode.SIZE_ASC
+                                StreamSortMode.SIZE_ASC -> StreamSortMode.DEFAULT
+                            }
+                        }
+                        .padding(horizontal = 12.dp, vertical = 6.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        text = when (activeSortMode) {
+                            StreamSortMode.DEFAULT -> "Size"
+                            StreamSortMode.SIZE_DESC -> "Size ↓"
+                            StreamSortMode.SIZE_ASC -> "Size ↑"
+                        },
+                        style = MaterialTheme.typography.labelMedium,
+                        color = if (sortActive) Charcoal else Torve.colors.textSecondary,
+                        fontWeight = if (sortActive) FontWeight.SemiBold else FontWeight.Normal,
+                    )
                 }
             }
 
@@ -254,20 +318,41 @@ fun StreamPickerSheet(
                     verticalArrangement = Arrangement.spacedBy(6.dp),
                     contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 24.dp),
                 ) {
-                    groups.forEach { group ->
+                    if (activeSortMode != StreamSortMode.DEFAULT) {
                         item {
                             GroupHeader(
-                                stringResource(group.titleRes),
-                                group.subtitleRes?.let { stringResource(it) },
+                                title = when (activeSortMode) {
+                                    StreamSortMode.SIZE_DESC -> "Largest first"
+                                    StreamSortMode.SIZE_ASC -> "Smallest first"
+                                    else -> "By size"
+                                },
+                                subtitle = if (sortedStreams.any { it.sizeBytes() < 0 }) "Sources without size info at end" else null,
                             )
                         }
-                        items(group.items) { stream ->
+                        items(sortedStreams) { stream ->
                             StreamItem(
                                 stream = stream,
                                 startupCandidate = startupCandidateMap[stream.streamUiKey()],
                                 usenetRowState = stream.accelerationSourceKey?.let { usenetCandidates[it] },
                                 onClick = { onStreamSelected(stream) },
                             )
+                        }
+                    } else {
+                        groups.forEach { group ->
+                            item {
+                                GroupHeader(
+                                    stringResource(group.titleRes),
+                                    group.subtitleRes?.let { stringResource(it) },
+                                )
+                            }
+                            items(group.items) { stream ->
+                                StreamItem(
+                                    stream = stream,
+                                    startupCandidate = startupCandidateMap[stream.streamUiKey()],
+                                    usenetRowState = stream.accelerationSourceKey?.let { usenetCandidates[it] },
+                                    onClick = { onStreamSelected(stream) },
+                                )
+                            }
                         }
                     }
                 }

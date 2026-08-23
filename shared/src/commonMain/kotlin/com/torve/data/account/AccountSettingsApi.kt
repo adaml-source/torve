@@ -315,10 +315,11 @@ class AccountSettingsApi(
 
     suspend fun deletePlaylist(accessToken: String, playlistId: String): Boolean {
         return try {
-            httpClient.delete("${baseUrl()}/me/playlists/$playlistId") {
+            val status = httpClient.delete("${baseUrl()}/me/playlists/$playlistId") {
                 bearerAuth(accessToken)
                 appendBackendHeaders()
-            }.status.isSuccess()
+            }.status
+            status.isSuccess() || status.value == 404
         } catch (_: Exception) {
             false
         }

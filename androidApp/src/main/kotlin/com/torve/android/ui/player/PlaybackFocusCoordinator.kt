@@ -16,6 +16,7 @@ sealed interface PlaybackUiMode {
     data object ControlsVisible : PlaybackUiMode
     data object TrackSelection : PlaybackUiMode
     data object AudioDelay : PlaybackUiMode
+    data object SubtitleDelay : PlaybackUiMode
     data object PictureFormat : PlaybackUiMode
     data object Equalizer : PlaybackUiMode
     data object DevicePicker : PlaybackUiMode
@@ -32,6 +33,7 @@ enum class PlaybackFocusRegion {
     Timeline,
     TrackSelectionOverlay,
     AudioDelayOverlay,
+    SubtitleDelayOverlay,
     PictureFormatOverlay,
     EqualizerOverlay,
     DevicePickerOverlay,
@@ -168,6 +170,7 @@ class PlaybackFocusCoordinator {
             )
             is PlaybackUiMode.TrackSelection -> listOf(PlaybackFocusRegion.TrackSelectionOverlay)
             is PlaybackUiMode.AudioDelay -> listOf(PlaybackFocusRegion.AudioDelayOverlay)
+            is PlaybackUiMode.SubtitleDelay -> listOf(PlaybackFocusRegion.SubtitleDelayOverlay)
             is PlaybackUiMode.PictureFormat -> listOf(PlaybackFocusRegion.PictureFormatOverlay)
             is PlaybackUiMode.Equalizer -> listOf(PlaybackFocusRegion.EqualizerOverlay)
             is PlaybackUiMode.DevicePicker -> listOf(PlaybackFocusRegion.DevicePickerOverlay)

@@ -24,6 +24,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -75,6 +76,11 @@ private const val EPG_MAX_PAGE_OFFSET = EPG_MAX_FORWARD_HOURS / EPG_WINDOW_HOURS
 private const val SLOTS = EPG_WINDOW_HOURS * 2 // 12 half-hour slots
 private val timeFormat = SimpleDateFormat("HH:mm", Locale.getDefault())
 
+private data class LiveGuideProgrammeActionTarget(
+    val channel: Channel,
+    val programme: EpgProgramme,
+)
+
 @Composable
 fun LiveEpgGuideOverlay(
     guideChannels: List<EnrichedChannel>,
@@ -82,6 +88,8 @@ fun LiveEpgGuideOverlay(
     playlistId: String? = null,
     currentChannelUrl: String,
     onTuneChannel: (Channel) -> Unit,
+    canReplayProgramme: (Channel, EpgProgramme) -> Boolean,
+    onReplayProgramme: (Channel, EpgProgramme) -> Unit,
     onShowChannelList: () -> Unit,
 ) {
     var nowMs by remember { mutableLongStateOf(System.currentTimeMillis()) }
@@ -111,6 +119,9 @@ fun LiveEpgGuideOverlay(
 
     val listState = rememberLazyListState()
     val firstChannelFocus = remember { FocusRequester() }
+    var actionTarget by remember { mutableStateOf<LiveGuideProgrammeActionTarget?>(null) }
+    var lastFocusedProgrammeKey by remember { mutableStateOf<String?>(null) }
+    var programmeFocusRestoreToken by remember { mutableIntStateOf(0) }
 
     // Compute "now" indicator offset from window start
     val nowOffsetFraction = ((nowMs - windowStart).toFloat() / (windowEnd - windowStart).toFloat()).coerceIn(0f, 1f)
@@ -223,6 +234,17 @@ fun LiveEpgGuideOverlay(
                             focusRequester = if (index == 0) firstChannelFocus else null,
                             onTune = { onTuneChannel(enrichedChannel.channel) },
                             onFocused = { },
+                            onProgrammeFocused = { programme ->
+                                lastFocusedProgrammeKey = liveGuideProgrammeKey(enrichedChannel.channel, programme)
+                            },
+                            onProgrammeActions = { programme ->
+                                actionTarget = LiveGuideProgrammeActionTarget(
+                                    channel = enrichedChannel.channel,
+                                    programme = programme,
+                                )
+                            },
+                            restoreProgrammeKey = lastFocusedProgrammeKey,
+                            programmeFocusRestoreToken = programmeFocusRestoreToken,
                             onTimeBackward = {
                                 val now = System.currentTimeMillis()
                                 if (windowPageOffset > 0 && now - lastPageChangeMs >= pageThrottleMs) {
@@ -252,6 +274,27 @@ fun LiveEpgGuideOverlay(
                 )
             }
         }
+
+        actionTarget?.let { target ->
+            TvGuideProgrammeActionOverlay(
+                channel = target.channel,
+                programme = target.programme,
+                canStartFromBeginning = canReplayProgramme(target.channel, target.programme),
+                onWatchLive = {
+                    actionTarget = null
+                    onTuneChannel(target.channel)
+                },
+                onStartFromBeginning = {
+                    actionTarget = null
+                    onReplayProgramme(target.channel, target.programme)
+                },
+                onRecord = null,
+                onDismiss = {
+                    actionTarget = null
+                    programmeFocusRestoreToken += 1
+                },
+            )
+        }
     }
 }
 
@@ -269,6 +312,10 @@ private fun EpgChannelRow(
     focusRequester: FocusRequester?,
     onTune: () -> Unit,
     onFocused: () -> Unit,
+    onProgrammeFocused: (EpgProgramme) -> Unit,
+    onProgrammeActions: (EpgProgramme) -> Unit,
+    restoreProgrammeKey: String?,
+    programmeFocusRestoreToken: Int,
     onTimeBackward: () -> Unit,
     onTimeForward: () -> Unit,
     onAtLeftEdge: () -> Unit,
@@ -378,6 +425,10 @@ private fun EpgChannelRow(
                         canPageBackward = canPageBackward,
                         canPageForward = canPageForward,
                         onTune = onTune,
+                        onFocused = { onProgrammeFocused(prog) },
+                        onOpenActions = { onProgrammeActions(prog) },
+                        restoreFocus = restoreProgrammeKey == liveGuideProgrammeKey(ch, prog),
+                        focusRestoreToken = programmeFocusRestoreToken,
                         onTimeBackward = onTimeBackward,
                         onTimeForward = onTimeForward,
                     )
@@ -398,14 +449,30 @@ private fun ProgrammeCell(
     canPageBackward: Boolean,
     canPageForward: Boolean,
     onTune: () -> Unit,
+    onFocused: () -> Unit,
+    onOpenActions: () -> Unit,
+    restoreFocus: Boolean,
+    focusRestoreToken: Int,
     onTimeBackward: () -> Unit,
     onTimeForward: () -> Unit,
 ) {
+    val focusRequester = remember(programme.channelId, programme.startTime, programme.endTime) {
+        FocusRequester()
+    }
+
+    LaunchedEffect(focusRestoreToken, restoreFocus) {
+        if (restoreFocus && focusRestoreToken > 0) {
+            runCatching { focusRequester.requestFocus() }
+        }
+    }
+
     Surface(
         onClick = onTune,
         modifier = Modifier
             .width(width)
             .height(height)
+            .focusRequester(focusRequester)
+            .onFocusChanged { if (it.isFocused) onFocused() }
             .onPreviewKeyEvent { event ->
                 if (event.type != KeyEventType.KeyDown) {
                     return@onPreviewKeyEvent false
@@ -431,6 +498,11 @@ private fun ProgrammeCell(
                         } else {
                             false
                         }
+                    }
+
+                    Key.Menu -> {
+                        onOpenActions()
+                        true
                     }
 
                     else -> false
@@ -464,4 +536,8 @@ private fun ProgrammeCell(
             )
         }
     }
+}
+
+private fun liveGuideProgrammeKey(channel: Channel, programme: EpgProgramme): String {
+    return "${channel.url}|${programme.channelId}|${programme.startTime}|${programme.endTime}"
 }

@@ -41,6 +41,14 @@ class PlaylistDuplicateRepairTest {
     }
 
     @Test
+    fun xtreamIdentityRepairsWhitespaceBetweenSchemeAndHost() {
+        assertEquals(
+            xtreamPlaylistIdentity("http:// panel.example.com/", "same-user"),
+            xtreamPlaylistIdentity("http://panel.example.com", "same-user"),
+        )
+    }
+
+    @Test
     fun existingDuplicateM3uPlaylistsAreMergedIntoOneStoredRow() = runTest {
         val db = freshDb()
         val user = "user-a"
@@ -66,6 +74,46 @@ class PlaylistDuplicateRepairTest {
         assertEquals(1, result.mergedGroups)
         assertEquals(setOf("x2"), result.removedPlaylistIds)
         assertEquals(listOf("x1"), db.torveQueries.getAllPlaylists(userId = user).executeAsList().map { it.id })
+    }
+
+    @Test
+    fun malformedAndNormalizedXtreamServersAreMerged() = runTest {
+        val db = freshDb()
+        val user = "user-a"
+        db.insertXtreamPlaylist(user, "x1", "Panel", "http://panel.example.com", "same-user", 12)
+        db.insertXtreamPlaylist(user, "x2", "Panel copy", "http:// panel.example.com", "same-user", 2)
+
+        val result = db.repair(user)
+
+        assertEquals(1, result.mergedGroups)
+        assertEquals(1, db.torveQueries.getAllPlaylists(userId = user).executeAsList().size)
+    }
+
+    @Test
+    fun accountPlaylistIdWinsWhileExistingCatalogIsMigrated() = runTest {
+        val db = freshDb()
+        val user = "user-a"
+        db.insertXtreamPlaylist(user, "local-id", "Panel", "http://panel.example.com", "same-user", 1)
+        db.insertXtreamPlaylist(user, "account-id", "Panel", "http:// panel.example.com", "same-user", 0)
+        db.torveQueries.setPreference(user_id = user, key = "channels_selected_playlist", value_ = "local-id")
+        db.torveQueries.setPreference(user_id = user, key = "iptv_channel_active_generation_local-id", value_ = "100")
+        db.insertChannel(user, "local-id", 100, "local-id::news")
+
+        val result = db.repair(user, preferredPlaylistIds = setOf("account-id"))
+
+        assertEquals(setOf("local-id"), result.removedPlaylistIds)
+        assertEquals(listOf("account-id"), db.torveQueries.getAllPlaylists(userId = user).executeAsList().map { it.id })
+        assertEquals("account-id", db.torveQueries.getPreference(userId = user, key = "channels_selected_playlist").executeAsOne())
+        val generation = db.torveQueries
+            .getPreference(userId = user, key = "iptv_channel_active_generation_account-id")
+            .executeAsOne()
+            .toLong()
+        assertEquals(
+            listOf("account-id::news"),
+            db.torveQueries.getChannelsForPlaylistGeneration(user, "account-id", generation)
+                .executeAsList()
+                .map { it.stable_id },
+        )
     }
 
     @Test
@@ -158,7 +206,10 @@ class PlaylistDuplicateRepairTest {
         assertEquals(0, db.torveQueries.getAllFavorites(userId = user).executeAsList().count { it.playlist_id == "p1" })
     }
 
-    private suspend fun TorveDatabase.repair(userId: String): DuplicatePlaylistRepairResult {
+    private suspend fun TorveDatabase.repair(
+        userId: String,
+        preferredPlaylistIds: Set<String> = emptySet(),
+    ): DuplicatePlaylistRepairResult {
         val passwords = mutableMapOf<String, String>()
         return repairDuplicatePlaylistsForUser(
             database = this,
@@ -166,6 +217,7 @@ class PlaylistDuplicateRepairTest {
             loadXtreamPassword = { passwords[it] },
             saveXtreamPassword = { playlistId, password -> passwords[playlistId] = password },
             removeXtreamPassword = { passwords.remove(it) },
+            preferredPlaylistIds = preferredPlaylistIds,
         )
     }
 

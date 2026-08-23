@@ -13,6 +13,7 @@
   var toast = document.getElementById('toast');
 
   var _editingType = null;
+  var _editingPlaylistId = null;
 
   function GROUPS() {
     return [
@@ -198,6 +199,7 @@
           h += '<p>' + esc('EPG: ' + shortUrl(epgUrl)) + '</p>';
         }
         h += '<div class="setup-card-actions">';
+        h += '<button class="btn-sm btn-edit" data-action="edit-playlist" data-playlist-id="' + escAttr(p.playlist_id) + '">' + t('common.edit') + '</button>';
         if (epgUrl) {
           h += '<button class="btn-sm btn-edit" data-action="check-epg" data-epg-url="' + escAttr(epgUrl) + '">' + t('setup.checkEpgBtn') + '</button>';
         }
@@ -442,6 +444,7 @@
         else if (action === 'test') doTest(type, this);
         else if (action === 'remove') doRemove(type, this);
         else if (action === 'remove-playlist') doRemovePlaylist(this);
+        else if (action === 'edit-playlist') openPlaylistEditor(this.getAttribute('data-playlist-id'));
         else if (action === 'check-epg') doCheckEpg(this.getAttribute('data-epg-url'), this);
       });
     });
@@ -495,6 +498,7 @@
     var def = TorveSetup.INTEGRATIONS[type];
     if (!def) return;
     _editingType = type;
+    _editingPlaylistId = null;
     modalTitle.textContent = integrationLabel(type);
     modalSubtitle.textContent = integrationDescription(type);
     modalAlert.className = 'modal-alert'; modalAlert.style.display = 'none';
@@ -559,11 +563,93 @@
     modal.classList.add('visible');
   }
 
-  function closeModal() { modal.classList.remove('visible'); _editingType = null; modalForm.querySelectorAll('input[type="password"]').forEach(function(el) { el.value = ''; }); modalForm.innerHTML = ''; }
+  function openPlaylistEditor(playlistId) {
+    var playlists = TorveSetup.getSavedPlaylists();
+    var playlist = null;
+    for (var i = 0; i < playlists.length; i++) {
+      if (playlists[i].playlist_id === playlistId) { playlist = playlists[i]; break; }
+    }
+    if (!playlist) return;
+
+    _editingType = null;
+    _editingPlaylistId = playlistId;
+    modalTitle.textContent = translated('setup.editPlaylistTitle', 'Edit channel source');
+    modalSubtitle.textContent = translated('setup.editPlaylistSubtitle', 'Changes sync to every signed-in Torve device.');
+    modalAlert.className = 'modal-alert';
+    modalAlert.style.display = 'none';
+    modalNote.style.display = 'none';
+
+    var html = '<div class="form-group"><label for="playlistEditName">' + t('setup.nameLabel') + '</label>';
+    html += '<input type="text" id="playlistEditName" maxlength="255" value="' + escAttr(playlist.name || '') + '" /></div>';
+    if (playlist.playlist_type === 'xtream') {
+      html += '<div class="form-group"><label for="playlistEditServer">' + t('setup.serverUrlLabel') + '</label>';
+      html += '<input type="text" id="playlistEditServer" maxlength="2000" value="' + escAttr(playlist.server || '') + '" /></div>';
+      html += '<div class="form-group"><label for="playlistEditUsername">' + t('setup.usernameLabel') + '</label>';
+      html += '<input type="text" id="playlistEditUsername" maxlength="255" value="' + escAttr(playlist.username || '') + '" /></div>';
+      html += '<div class="form-group"><label for="playlistEditPassword">' + t('setup.passwordLabel') + ' (' + translated('common.optional', 'optional') + ')</label>';
+      html += '<input type="password" id="playlistEditPassword" maxlength="255" autocomplete="off" placeholder="' + translated('setup.keepPasswordPlaceholder', 'Leave blank to keep the current password') + '" /></div>';
+    } else {
+      html += '<div class="form-group"><label for="playlistEditUrl">' + t('setup.m3uUrlLabel') + '</label>';
+      html += '<input type="text" id="playlistEditUrl" maxlength="2000" value="' + escAttr(playlist.url || '') + '" /></div>';
+    }
+    html += '<div class="form-group"><label for="playlistEditEpg">' + t('setup.epgLabel') + '</label>';
+    html += '<input type="text" id="playlistEditEpg" maxlength="2000" value="' + escAttr(playlist.epg_url || '') + '" /></div>';
+    modalForm.innerHTML = html;
+    modalSave.disabled = false;
+    modalSave.textContent = t('common.save');
+    modal.classList.add('visible');
+  }
+
+  function closeModal() { modal.classList.remove('visible'); _editingType = null; _editingPlaylistId = null; modalForm.querySelectorAll('input[type="password"]').forEach(function(el) { el.value = ''; }); modalForm.innerHTML = ''; }
   modalCancel.addEventListener('click', closeModal);
   modal.addEventListener('click', function(e) { if (e.target === modal) closeModal(); });
 
   modalSave.addEventListener('click', function() {
+    if (_editingPlaylistId) {
+      var playlistId = _editingPlaylistId;
+      var playlists = TorveSetup.getSavedPlaylists();
+      var playlist = null;
+      for (var p = 0; p < playlists.length; p++) {
+        if (playlists[p].playlist_id === playlistId) { playlist = playlists[p]; break; }
+      }
+      if (!playlist) return;
+      var name = document.getElementById('playlistEditName').value.trim();
+      var epg = document.getElementById('playlistEditEpg').value.trim();
+      var payload = {
+        playlist_id: playlistId,
+        name: name,
+        playlist_type: playlist.playlist_type,
+        epg_url: epg || null
+      };
+      if (playlist.playlist_type === 'xtream') {
+        payload.server = document.getElementById('playlistEditServer').value.trim();
+        payload.username = document.getElementById('playlistEditUsername').value.trim();
+        var password = document.getElementById('playlistEditPassword').value.trim();
+        if (password) payload.password = password;
+        if (!name || !payload.server || !payload.username) {
+          showModalAlert('error', t('setup.fillRequired'));
+          return;
+        }
+      } else {
+        payload.url = document.getElementById('playlistEditUrl').value.trim();
+        if (!name || !payload.url) {
+          showModalAlert('error', t('setup.fillRequired'));
+          return;
+        }
+      }
+      modalSave.disabled = true;
+      modalSave.textContent = t('setup.saving');
+      hideModalAlert();
+      TorveSetup.savePlaylist(playlistId, payload).then(function() {
+        closeModal();
+        showToast('success', translated('setup.playlistUpdated', 'Channel source updated.'));
+      }).catch(function(err) {
+        showModalAlert('error', err.message || t('setup.couldNotSave'));
+        modalSave.disabled = false;
+        modalSave.textContent = t('common.save');
+      });
+      return;
+    }
     if (!_editingType) return;
     var def = TorveSetup.INTEGRATIONS[_editingType];
 

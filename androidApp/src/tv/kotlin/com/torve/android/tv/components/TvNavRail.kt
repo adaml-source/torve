@@ -86,10 +86,11 @@ fun TvNavRail(
     navigateOnFocus: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
-    val itemRequesters = remember(destinations) {
-        destinations.associate { it.route to FocusRequester() }
-    }
-    val orderedRoutes = remember(destinations) { destinations.map { it.route } }
+    // Stable map: existing routes keep their FocusRequester so focus isn't lost
+    // when destinations grow (e.g. Jellyfin added after async settings load).
+    val itemRequesters = remember { mutableMapOf<String, FocusRequester>() }
+    destinations.forEach { dest -> itemRequesters.getOrPut(dest.route) { FocusRequester() } }
+    val orderedRoutes = destinations.map { it.route }
 
     fun neighborRoute(route: String, delta: Int): String? {
         val size = orderedRoutes.size

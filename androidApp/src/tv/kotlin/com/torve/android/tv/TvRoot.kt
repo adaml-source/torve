@@ -2837,6 +2837,26 @@ fun TvRoot(
                                                     }
                                                 }
                                             },
+                                            onProgrammePlayFromBeginning = { channel, programme, replayUrl ->
+                                                if (TvPremiumAccess.isPremiumLocked(TvEntitledFeature.STREAM_PLAYBACK, accessTier)) {
+                                                    requestLifetimeUnlock(TvEntitledFeature.STREAM_PLAYBACK)
+                                                } else {
+                                                    ActivePlaybackState.stopAndClear()
+                                                    navController.navigate(
+                                                        TvRoutes.livePlayer(
+                                                            channelUrl = channel.url,
+                                                            channelName = channel.name,
+                                                            groupName = channel.groupTitle.orEmpty(),
+                                                            replayUrl = replayUrl,
+                                                            replayStartMs = programme.startTime,
+                                                            replayEndMs = programme.endTime,
+                                                            replayTitle = programme.title,
+                                                        ),
+                                                    ) {
+                                                        launchSingleTop = true
+                                                    }
+                                                }
+                                            },
                                             onOpenEpgSettings = {
                                                 openSettingsToChannels = true
                                                 pendingSettingsAppLinkItemId = TvSettingsItemIds.LIBRARY_MANAGE_CHANNELS

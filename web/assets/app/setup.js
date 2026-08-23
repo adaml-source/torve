@@ -374,6 +374,20 @@ var TorveSetup = (function() {
     });
   }
 
+  function savePlaylist(playlistId, payload) {
+    return TorveAPI.put('/me/playlists/' + encodeURIComponent(playlistId), payload).then(function(result) {
+      var replaced = false;
+      _savedPlaylists = _savedPlaylists.map(function(existing) {
+        if (existing.playlist_id !== result.playlist_id && existing.playlist_id !== playlistId) return existing;
+        replaced = true;
+        return result;
+      });
+      if (!replaced) _savedPlaylists.push(result);
+      if (_onUpdate) _onUpdate();
+      return result;
+    });
+  }
+
   function validateEpgUrl(epgUrl) {
     return TorveAPI.post('/me/playlists/validate-epg', { epg_url: epgUrl });
   }
@@ -402,6 +416,7 @@ var TorveSetup = (function() {
     getStatusClass: getStatusClass,
     saveIntegration: saveIntegration,
     removeIntegration: removeIntegration,
+    savePlaylist: savePlaylist,
     removePlaylist: removePlaylist,
     validateEpgUrl: validateEpgUrl,
     testIntegration: testIntegration,

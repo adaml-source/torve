@@ -9,6 +9,7 @@ import com.torve.data.account.isXtreamPlaylist
 import com.torve.data.panda.readPandaDebridActivationSnapshot
 import com.torve.data.addon.AddonSyncService
 import com.torve.data.auth.AuthClient
+import com.torve.data.channels.playlistIdentityFor
 import com.torve.data.device.AccessStateDto
 import com.torve.data.device.DeviceApi
 import com.torve.data.device.DeviceListDto
@@ -47,6 +48,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.datetime.Clock
 
 data class AccountSessionState(
@@ -191,6 +194,10 @@ private fun legacyAutomationServiceType(
     else -> null
 }
 
+private const val KEY_PENDING_PLAYLIST_UPSERTS = "account_pending_playlist_upserts"
+private const val KEY_PENDING_PLAYLIST_DELETES = "account_pending_playlist_deletes"
+private const val KEY_LAST_REMOTE_PLAYLIST_IDS = "account_last_remote_playlist_ids"
+
 class AccountSessionCoordinator(
     private val authClient: AuthClient,
     private val deviceApi: DeviceApi,
@@ -216,6 +223,7 @@ class AccountSessionCoordinator(
     // must not compete with Compose rendering on the Default (CPU) pool.
     private val backgroundScope = CoroutineScope(SupervisorJob() + ioDispatcher)
     private var signInRestoreJob: Job? = null
+    private val playlistMutationMutex = Mutex()
 
     private val _state = MutableStateFlow(AccountSessionState())
     val state: StateFlow<AccountSessionState> = _state.asStateFlow()
@@ -605,10 +613,12 @@ class AccountSessionCoordinator(
         username: String? = null,
         password: String? = null,
     ): Boolean {
+        updateStoredPlaylistIdSet(KEY_PENDING_PLAYLIST_UPSERTS) { it + playlistId }
+        updateStoredPlaylistIdSet(KEY_PENDING_PLAYLIST_DELETES) { it - playlistId }
         val token = authClient.getValidAccessToken() ?: return false
         val normalizedType = playlistType.trim().lowercase().ifBlank { "m3u" }
         val normalizedEpgUrl = epgUrl?.trim()?.takeIf { it.isNotEmpty() }
-        return accountSettingsApi.savePlaylist(
+        val saved = accountSettingsApi.savePlaylist(
             accessToken = token,
             playlistId = playlistId,
             request = com.torve.data.account.SavePlaylistRequest(
@@ -622,6 +632,10 @@ class AccountSessionCoordinator(
                 password = password,
             ),
         )
+        if (saved) {
+            updateStoredPlaylistIdSet(KEY_PENDING_PLAYLIST_UPSERTS) { it - playlistId }
+        }
+        return saved
     }
 
     suspend fun validatePlaylistEpgUrl(epgUrl: String): com.torve.data.account.EpgValidationResponse {
@@ -643,8 +657,34 @@ class AccountSessionCoordinator(
     }
 
     suspend fun deletePlaylistFromBackend(playlistId: String): Boolean {
+        updateStoredPlaylistIdSet(KEY_PENDING_PLAYLIST_DELETES) { it + playlistId }
+        updateStoredPlaylistIdSet(KEY_PENDING_PLAYLIST_UPSERTS) { it - playlistId }
         val token = authClient.getValidAccessToken() ?: return false
-        return accountSettingsApi.deletePlaylist(token, playlistId)
+        val deleted = accountSettingsApi.deletePlaylist(token, playlistId)
+        if (deleted) {
+            updateStoredPlaylistIdSet(KEY_PENDING_PLAYLIST_DELETES) { it - playlistId }
+        }
+        return deleted
+    }
+
+    private suspend fun storedPlaylistIdSet(key: String): Set<String> =
+        prefsRepo.getString(key)
+            .orEmpty()
+            .lineSequence()
+            .map(String::trim)
+            .filter(String::isNotEmpty)
+            .toSet()
+
+    private suspend fun updateStoredPlaylistIdSet(
+        key: String,
+        transform: (Set<String>) -> Set<String>,
+    ) = playlistMutationMutex.withLock {
+        val updated = transform(storedPlaylistIdSet(key))
+        if (updated.isEmpty()) {
+            prefsRepo.remove(key)
+        } else {
+            prefsRepo.setString(key, updated.sorted().joinToString("\n"))
+        }
     }
 
     fun clearLastError() {
@@ -1666,6 +1706,7 @@ class AccountSessionCoordinator(
                         username = resolvedUsername,
                         password = password,
                         id = pid,
+                        epgUrl = remote.epgUrl,
                     )
                     torveVerboseLog { "[PlaylistRestore]   Xtream import OK" }
                 } else if (!remote.url.isNullOrBlank()) {
@@ -1700,15 +1741,23 @@ class AccountSessionCoordinator(
     }
 
     private suspend fun syncPlaylistsFromAccount(token: String): PlaylistSyncResult {
+        flushPendingPlaylistMutations(token)
         val remotePlaylists = withAccountApiAuthRetry(token) { freshToken ->
             accountSettingsApi.getPlaylists(freshToken)
         }
-        if (remotePlaylists.isEmpty()) {
-            torveVerboseLog { "[PlaylistSync] No remote playlists found — leaving local catalog unchanged" }
-            return PlaylistSyncResult()
-        }
-
-        val localById = channelRepo.getPlaylists().associateBy { it.id }
+        var localById = channelRepo.getPlaylists().associateBy { it.id }
+        val pendingUpserts = storedPlaylistIdSet(KEY_PENDING_PLAYLIST_UPSERTS)
+        val pendingDeletes = storedPlaylistIdSet(KEY_PENDING_PLAYLIST_DELETES)
+        val pendingUpsertIdentities = pendingUpserts.mapNotNull { playlistId ->
+            localById[playlistId]?.let { local ->
+                playlistIdentityFor(
+                    type = local.type.name,
+                    url = local.url,
+                    server = local.server,
+                    username = local.username,
+                )
+            }
+        }.toSet()
         var added = 0
         var updated = 0
         var failed = 0
@@ -1716,7 +1765,33 @@ class AccountSessionCoordinator(
         for (remote in remotePlaylists) {
             val playlistId = remote.playlistId.ifBlank { remote.id }.trim()
             if (playlistId.isBlank()) continue
-            val local = localById[playlistId]
+            val remoteIdentity = playlistIdentityFor(
+                type = remote.playlistType,
+                url = remote.url,
+                server = remote.server,
+                username = remote.username,
+            )
+            if (playlistId in pendingDeletes || playlistId in pendingUpserts || remoteIdentity in pendingUpsertIdentities) {
+                // A durable local mutation that has not reached the account yet
+                // is newer than this snapshot. Keep it authoritative locally
+                // and retry it on the next sync instead of reverting it.
+                continue
+            }
+            var local = localById[playlistId]
+            if (local == null && remoteIdentity != null) {
+                val equivalent = localById.values.firstOrNull { candidate ->
+                    playlistIdentityFor(
+                        type = candidate.type.name,
+                        url = candidate.url,
+                        server = candidate.server,
+                        username = candidate.username,
+                    ) == remoteIdentity
+                }
+                if (equivalent != null && channelRepo.adoptPlaylistId(equivalent.id, playlistId)) {
+                    localById = channelRepo.getPlaylists().associateBy { it.id }
+                    local = localById[playlistId]
+                }
+            }
             try {
                 val changed = syncPlaylistFromAccount(token, remote, local, playlistId)
                 if (changed) {
@@ -1740,11 +1815,88 @@ class AccountSessionCoordinator(
             }
         }
 
-        torveVerboseLog {
-            "[PlaylistSync] Completed: added=$added updated=$updated failed=$failed remote=${remotePlaylists.size}"
+        val currentRemoteIds = remotePlaylists
+            .map { it.playlistId.ifBlank { it.id }.trim() }
+            .filter(String::isNotEmpty)
+            .toSet()
+        val previousRemoteIds = storedPlaylistIdSet(KEY_LAST_REMOTE_PLAYLIST_IDS)
+        val remoteIdentities = remotePlaylists.mapNotNull { remote ->
+            playlistIdentityFor(
+                type = remote.playlistType,
+                url = remote.url,
+                server = remote.server,
+                username = remote.username,
+            )
+        }.toSet()
+        val localAfterMerge = channelRepo.getPlaylists().associateBy { it.id }
+        var removed = 0
+        (previousRemoteIds - currentRemoteIds).forEach { missingId ->
+            val local = localAfterMerge[missingId] ?: return@forEach
+            val identityStillExists = playlistIdentityFor(
+                type = local.type.name,
+                url = local.url,
+                server = local.server,
+                username = local.username,
+            ) in remoteIdentities
+            if (missingId !in pendingUpserts && !identityStillExists) {
+                channelRepo.removePlaylist(missingId)
+                removed++
+            }
         }
-        return PlaylistSyncResult(added = added, updated = updated, failed = failed)
+        if (currentRemoteIds.isEmpty()) {
+            prefsRepo.remove(KEY_LAST_REMOTE_PLAYLIST_IDS)
+        } else {
+            prefsRepo.setString(KEY_LAST_REMOTE_PLAYLIST_IDS, currentRemoteIds.sorted().joinToString("\n"))
+        }
+
+        torveVerboseLog {
+            "[PlaylistSync] Completed: added=$added updated=$updated removed=$removed failed=$failed remote=${remotePlaylists.size}"
+        }
+        return PlaylistSyncResult(added = added, updated = updated + removed, failed = failed)
     }
+
+    private suspend fun flushPendingPlaylistMutations(token: String) {
+        storedPlaylistIdSet(KEY_PENDING_PLAYLIST_DELETES).forEach { playlistId ->
+            val deleted = withAccountApiAuthRetry(token) { freshToken ->
+                accountSettingsApi.deletePlaylist(freshToken, playlistId)
+            }
+            if (deleted) {
+                updateStoredPlaylistIdSet(KEY_PENDING_PLAYLIST_DELETES) { it - playlistId }
+            }
+        }
+
+        val pendingUpserts = storedPlaylistIdSet(KEY_PENDING_PLAYLIST_UPSERTS)
+        if (pendingUpserts.isEmpty()) return
+        val localPlaylists = channelRepo.getPlaylists().associateBy { it.id }
+        pendingUpserts.forEach { playlistId ->
+            val local = localPlaylists[playlistId]
+            if (local == null) {
+                updateStoredPlaylistIdSet(KEY_PENDING_PLAYLIST_UPSERTS) { it - playlistId }
+                return@forEach
+            }
+            val saved = withAccountApiAuthRetry(token) { freshToken ->
+                accountSettingsApi.savePlaylist(
+                    accessToken = freshToken,
+                    playlistId = playlistId,
+                    request = local.toSavePlaylistRequest(),
+                )
+            }
+            if (saved) {
+                updateStoredPlaylistIdSet(KEY_PENDING_PLAYLIST_UPSERTS) { it - playlistId }
+            }
+        }
+    }
+
+    private fun ChannelPlaylist.toSavePlaylistRequest() = com.torve.data.account.SavePlaylistRequest(
+        playlistId = id,
+        name = name,
+        url = if (type == PlaylistType.M3U) url else null,
+        epgUrl = epgUrl?.trim()?.takeIf(String::isNotEmpty),
+        playlistType = type.name.lowercase(),
+        server = server,
+        username = username,
+        password = if (type == PlaylistType.XTREAM) password else null,
+    )
 
     private suspend fun syncPlaylistFromAccount(
         token: String,
@@ -1825,7 +1977,13 @@ class AccountSessionCoordinator(
             val sameServer = local.server.normalizedServerValue() == server
             val sameUsername = local.username.normalizedRemoteValue() == username
             val samePassword = local.password.normalizedRemoteValue() == password
-            if (sameType && sameServer && sameUsername && samePassword) return false
+            val remoteEpgUrl = remote.epgUrl.normalizedRemoteValue()
+            val sameEpgUrl = local.epgUrl.normalizedRemoteValue() == remoteEpgUrl
+            if (sameType && sameServer && sameUsername && samePassword && sameEpgUrl) return false
+            if (sameType && sameServer && sameUsername && samePassword) {
+                channelRepo.updatePlaylistEpgUrl(playlistId, remoteEpgUrl)
+                return true
+            }
             if (!sameType) {
                 channelRepo.removePlaylist(playlistId)
             }
@@ -1837,6 +1995,7 @@ class AccountSessionCoordinator(
             username = username,
             password = password,
             id = playlistId,
+            epgUrl = remote.epgUrl,
         )
         return true
     }

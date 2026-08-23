@@ -1802,6 +1802,13 @@
     <string name="app_update_opening_installer">Opening the system installer…</string>
     <string name="app_update_download_failed">The update could not be downloaded or verified. Please try again.</string>
     <string name="app_update_retry">Retry</string>
+    <string name="app_update_open_downloader">Opening Downloader…</string>
+    <string name="app_update_downloader_not_found">The Downloader app is required to install updates. Please install Downloader from the Amazon Appstore.</string>
+    <string name="tv_settings_check_for_updates">Check for updates</string>
+    <string name="tv_settings_check_for_updates_desc">Check if a new version of Torve is available</string>
+    <string name="tv_settings_check_for_updates_checking">Checking for updates…</string>
+    <string name="tv_settings_check_for_updates_up_to_date">Torve is up to date</string>
+    <string name="tv_settings_check_for_updates_available">Torve %1$s is available — select to open Downloader</string>
     <string name="notif_new_episodes">New Episodes Available</string>
     <string name="notif_episodes_and_more">%1$s and %2$d more</string>
 

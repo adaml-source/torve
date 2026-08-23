@@ -1,11 +1,13 @@
 # Torve Market and Release Readiness Assessment
 
-Last updated: 2026-08-15
+Last updated: 2026-08-15 (rerun after `39d0df8`)
 
-Assessment baseline: the source-tagged `1.1.6` release, its signed Android and
-Windows artifacts, the live production website/update feeds, current
-physical-device evidence, fresh host-runnable tests, and an August 2026 review
-of the current media-app market.
+Assessment baseline: the source-tagged and publicly distributed `1.1.6`
+release; the post-release Fire TV Search candidate at `39d0df8`; its locally
+signed Amazon TV APK installed on Raven; the live production website/update
+feeds; fresh host-runnable tests; and a refreshed August 2026 review of the
+current media-app market. Published evidence and candidate evidence are kept
+separate throughout this rerun.
 
 This supersedes the obsolete paid-product assessment. Torve is assessed here as
 free software. There are no subscriptions, paid tiers, premium features, or
@@ -39,7 +41,10 @@ The harsh conclusion is:
 
 > Torve now has a source-tagged, checksummed public release, automatic update
 > feeds, account recovery, and an outcome-first Connections surface. Its largest
-> remaining constraints are store/hardware proof, rights-safe store assets,
+> immediate constraint is release discipline: the Search/focus/rating candidate
+> is installed locally as `1.1.6`, but the public updater serves a different
+> `1.1.6` binary. After that is corrected with a monotonically newer release,
+> the largest constraints remain store/hardware proof, rights-safe store assets,
 > clean-machine signing reputation, discoverability, and community scale.
 
 ## Readiness ratings
@@ -48,14 +53,14 @@ Scores describe readiness for the named outcome, not code volume.
 
 | Target | Score | Verdict |
 | --- | ---: | --- |
-| Controlled existing-user beta | 8.4/10 | **GO.** Fire TV and Android paths have strong real-device evidence, active operator feedback, and automated release checks. |
-| Direct Fire TV staged release | 8.3/10 | **GO with monitoring.** Signed 1.1.6, automatic notification/install handoff, immutable provenance, and repeatable soak tooling exist. |
+| Controlled existing-user beta | 8.5/10 | **GO.** Fire TV and Android paths have strong real-device evidence; the new Search candidate is release-built, installed, and regression-tested on Raven. |
+| Direct Fire TV staged release | 8.0/10 | **CONDITIONAL GO.** The public 1.1.6 remains valid, but the newer candidate must receive a new version, tag, provenance, and updater entry before distribution. |
 | Android mobile beta | 7.2/10 | **GO for controlled testing.** Recovery and Connections are stronger; mobile remains less differentiated and still needs current store/device proof. |
-| Google TV internal testing | 7.1/10 | **GO.** Signed AAB, both ARM ABIs, 16 KB bundle/ELF verification, TV UX tests, and unit tests pass. A physical Google TV/16 KB runtime smoke remains manual. |
+| Google TV internal testing | 7.1/10 | **GO.** The 1.1.6 AAB has both ARM ABIs and passed 16 KB static verification; current candidate unit tests pass. A fresh candidate AAB and physical Google TV/16 KB runtime smoke remain. |
 | Windows direct beta | 7.0/10 | **CONDITIONAL GO.** Public MSI, automatic appcast, recovery, and checksum validation exist; signing reputation and a current clean-machine pass remain weak points. |
-| Public direct-download beta | 7.8/10 | **GO with monitoring.** Website, legal pages, recovery, tagged source, provenance, downloads, and update feeds are live and production-verified. |
+| Public direct-download beta | 7.7/10 | **GO with monitoring.** The published website/release is healthy, but the deployment gate contains a stale source-page assertion and the candidate is not yet public. |
 | Google Play / Google TV public release | 5.3/10 | **NO-GO today.** Store assets, rights review, review access, policy-form submission, and physical-device evidence remain incomplete. |
-| Public free-software project launch | 7.5/10 | **GO for a small beta.** Public source, tag/artifact correspondence, AGPL, issue templates, contribution/security guidance, self-hosting notes, and provenance are live. Discoverability and community proof remain weak. |
+| Public free-software project launch | 7.4/10 | **GO for a small beta.** Public release correspondence remains strong; the candidate branch is ahead of master and must not be represented as shipped until merged, tagged, and published. Discoverability and community proof remain weak. |
 | iOS / macOS release | 3.5/10 | **NO-GO.** The common-source compile regression is fixed locally, but Apple builds and devices are not operator-verified. |
 | Broad consumer stable release | 5.2/10 | **NO-GO.** Long-term reliability, support capacity, store proof, signing reputation, and distribution still lag behind the feature set. |
 
@@ -74,10 +79,14 @@ Scores describe readiness for the named outcome, not code volume.
   activity.
 - Password-reset web pages and Android/TV entry points exist; Desktop sign-in
   now invokes the same non-enumerating recovery API.
-- Fresh Amazon TV, Google TV, and Google mobile `1.1.6` release artifacts were
-  built on 2026-08-15. The Amazon APK verifies against the Torve release
-  certificate and the public APK/MSI hashes and byte lengths match provenance.
-- Fresh host-runnable test outputs on 2026-08-15 contain 2,327 passing tests and
+- Fire TV Search at `39d0df8` now keeps immutable result identities during
+  metadata hydration, preserves poster order and focus, exposes explicit IMDb,
+  Rotten Tomatoes, RT audience, TMDB, vote, popularity, and title sorts, and
+  retries missing IMDb/RT hero enrichment through configured account providers.
+- The public source-tagged `1.1.6` Amazon, Google TV, Google mobile, and Windows
+  artifacts remain provenance-verified. A fresh candidate Amazon release APK was
+  built and installed locally; it is not the public `1.1.6` APK.
+- Fresh host-runnable test outputs on 2026-08-15 contain 2,339 passing tests and
   zero test failures across shared desktop, desktop, Amazon TV, Google TV, and
   Google mobile suites.
 
@@ -88,6 +97,11 @@ Scores describe readiness for the named outcome, not code volume.
   `:shared:compileKotlinIosSimulatorArm64` and `:shared:allTests` now pass.
 - Release source is committed at `bef4824ab1e1e906fb31b53d5913bbbb91c03d21`,
   tagged `v1.1.6`, published, and separated from local ignored diagnostics.
+- Candidate source is committed at `39d0df8fabd3227f85e96b3b5d984e033e9cc336`
+  on `codex-publish-local-updates`, while `origin/master` remains at `a07d31e`.
+  The locally installed candidate APK and public APK both report `1.1.6` but
+  have different hashes (`b979bd6d...` versus `d349d788...`). Existing clients
+  cannot discover this candidate through a version comparison.
 - The complete backend gate passes 652/652 against an isolated PostgreSQL
   database migrated from revision 0001 through 0033. The run also
   exposed and fixed invalid FastAPI response-model inference on three Stripe
@@ -95,7 +109,13 @@ Scores describe readiness for the named outcome, not code volume.
 - The store positioning script passes its copy check but reports **0/6 required
   screenshots present**.
 - Corrected policy/legal, recovery, download, source, and Connections pages are
-  deployed and verified from the production VPS.
+  deployed. The tracked production gate incorrectly requires the obsolete text
+  `Build provenance`; the tracked and live page say `Release provenance`.
+  Re-running the gate with only that assertion corrected in memory verifies all
+  20 pages, recovery, downloads, checksums, appcast, provenance, and API health.
+- Production currently has neither a global OMDb nor MDBList API key. The client
+  now correctly uses account-configured fallback providers, but users without a
+  configured key or cached data cannot receive universal IMDb/RT enrichment.
 - Direct free competitors have moved closer to Torve's feature set.
 
 ## Current product wedge
@@ -136,28 +156,28 @@ A useful decision model is:
 
 | Rank | Investment | Impact | Effort | ROI | Current assessment |
 | ---: | --- | ---: | ---: | --- | --- |
-| 1 | Playback and source reliability | Very high | Medium-high | **Exceptional** | False no-source results, stalled playback, stuck overlays, and lost focus erase trust immediately. |
-| 2 | Outcome-first Connections setup | Very high | Medium | **Exceptional** | Every integration loses value if users cannot find or configure it. Preserve Panda internally but expose Debrid, Usenet, IPTV, libraries, and tracking directly. |
-| 3 | Account recovery and session resilience | Very high | Low-medium | **Exceptional** | Password reset and device recovery prevent otherwise permanent user loss. |
-| 4 | Release consistency and automatic updates | Very high | Medium | **Very high** | Fixes have no value until users receive a signed release safely and promptly. |
-| 5 | Provider diagnostics and repair actions | High | Medium | **Very high** | A defensible differentiator that also reduces operator support cost. |
-| 6 | Public source, documentation, and discoverability | High | Medium | **Very high** | Converts AGPL claims into trust, contributions, reproducibility, and adoption. |
-| 7 | TV navigation/focus reliability | High | Medium | **High** | Small focus failures are disproportionately destructive at couch distance. |
-| 8 | Google TV compliance and current-device proof | High | Medium | **High** | Unlocks distribution, but carries policy, store-asset, and review overhead. |
-| 9 | Permanent-library workflow | High | Medium-high | **High strategic ROI** | This is a stronger differentiator than generic addon playback. |
-| 10 | Measured IPTV/EPG first-use performance | Medium-high | Medium-high | **High when profiled** | Valuable to active IPTV households; optimize confirmed bottlenecks only. |
-| 11 | Windows control-center polish | Medium | Medium | **Moderate-high** | Useful for setup and acquisition, while TV remains the stronger usage surface. |
+| 1 | Publish the current candidate as a genuinely newer release | Very high | Low-medium | **Exceptional / immediate** | The fix exists and is installed on one device, but same-version public/local APKs make auto-update ineffective and weaken provenance. Cut a newer version; never overwrite 1.1.6. |
+| 2 | Playback and source reliability | Very high | Medium-high | **Exceptional** | False no-source results, stalled playback, stuck overlays, and mid-playback failures erase trust immediately. |
+| 3 | Outcome-first setup completion | Very high | Medium | **Exceptional** | Connections is visible, but first-run completion without operator guidance remains unmeasured. Every integration loses value if setup is abandoned. |
+| 4 | TV navigation, focus, and paging stability | Very high | Medium | **Exceptional** | The Search fix closes a confirmed regression, but repeated focus/paging failures show that route-level device tests have unusually high value. |
+| 5 | Provider diagnostics and repair actions | High | Medium | **Very high** | This reduces support cost and should explicitly distinguish missing operator/account rating providers from transport success. |
+| 6 | Store assets, policy evidence, and Google TV hardware proof | High | Medium | **Very high** | This is the shortest path to wider distribution, but 0/6 screenshot slots and rights review still block it. |
+| 7 | Public source, documentation, and discoverability | High | Medium | **Very high** | The public surface exists, but search/community proof remains far behind Nuvio and Stremio. |
+| 8 | Permanent-library workflow | High | Medium-high | **High strategic ROI** | This remains a stronger differentiator than generic addon playback and needs reliability/evidence work rather than more scope. |
+| 9 | Measured IPTV/EPG first-use performance | Medium-high | Medium-high | **High when profiled** | Preserve the measurement-first rule and optimize only confirmed stages. |
+| 10 | Account recovery and session resilience | High | Low | **High maintenance ROI** | The lifecycle is implemented across platforms; remaining work is regression monitoring rather than another feature project. |
+| 11 | Windows signing reputation and clean-machine proof | Medium-high | Medium | **Moderate-high** | The installer/update path exists, but a credential-managing app without trusted signing reputation loses cold users. |
 | 12 | Android companion expansion | Medium | Medium-high | **Moderate** | Highest value is pairing, setup, repair, account recovery, and text entry—not TV feature parity. |
-| 13 | More provider integrations | Low-medium | Medium | **Low now** | Breadth is already ahead of comprehension and reliability. |
+| 13 | Additional rating/provider integrations | Low-medium | Medium | **Low until configured providers are reliable** | Production configuration and honest diagnostics have higher ROI than adding another source. |
 | 14 | Additional AI features | Low-medium | High | **Low now** | Adds operating cost and policy surface before core workflows are dependable. |
 | 15 | iOS/macOS expansion | High potential | Very high | **Low near-term** | Strategically useful, but build, distribution, and maintenance costs are currently high. |
 
 Recommended next-phase allocation:
 
-- **45% reliability:** playback, sources, lifecycle, focus, and updates;
-- **25% onboarding:** Connections, account recovery, pairing, and setup guidance;
-- **15% release trust:** privacy, attribution, source tags, documentation, and support;
-- **10% platform compliance:** Google TV, store review, and physical verification;
+- **45% reliability:** playback, sources, lifecycle, focus, paging, and updates;
+- **20% onboarding:** Connections, pairing, and measured setup completion;
+- **20% release/distribution trust:** versioning, provenance, signing, documentation, and support;
+- **10% platform compliance:** Google TV, store review, assets, and physical verification;
 - **5% new features:** only additions that unblock an existing user outcome.
 
 
@@ -426,23 +446,23 @@ reason.
 | `tools/check-public-positioning.ps1` | Copy PASS; store screenshots **0/6**. |
 | `:shared:desktopTest` | 1,471 tests, 0 failures. |
 | `:desktopApp:test` | 289 tests, 0 failures. |
-| `:androidApp:testAmazonTvDebugUnitTest` | 209 tests, 0 failures. |
-| `:androidApp:testGoogleTvDebugUnitTest` | 208 tests, 0 failures. |
+| `:androidApp:testAmazonTvDebugUnitTest` | 215 tests, 0 failures. |
+| `:androidApp:testGoogleTvDebugUnitTest` | 214 tests, 0 failures. |
 | `:androidApp:testGoogleMobileDebugUnitTest` | 150 tests, 0 failures. |
 | `:shared:allTests` | PASS, including iOS simulator compilation on the Windows host. |
-| complete backend pytest/migration gate | 652 tests, 0 failures against isolated PostgreSQL at migration head 0033. |
-| Android release lint | PASS for Amazon TV, Google TV, and Google mobile; no lint baseline suppression added. |
-| Android release artifacts | PASS — fresh signed 1.1.6 Amazon TV APK plus Google TV/mobile AABs. |
+| complete backend pytest/migration gate | Prior 652-test pass remains applicable because the candidate contains no backend changes; it was not rerun in this delta. |
+| Android release lint | Fresh Amazon TV candidate PASS. The Google TV/mobile result is carried forward from source-tagged 1.1.6. |
+| Android release artifacts | Public source-tagged 1.1.6 artifacts remain verified. A fresh signed Amazon candidate APK exists locally; fresh candidate Google bundles were not produced in this rerun. |
 | Android 16 KB static delivery gate | PASS — Amazon ZIP alignment, Google AAB page-alignment metadata, and all 64-bit ELF load segments verified. Runtime smoke remains manual. |
-| Public deployment verification | PASS — recovery, Connections, legal/source/download pages, artifacts, sidecars, manifest, provenance, and appcast. |
+| Public deployment verification | Tracked gate FAILS on stale `Build provenance` copy. With only that assertion corrected to tracked/live `Release provenance`, PASS for 20 pages, recovery, Connections, artifacts, sidecars, manifest, provenance, appcast, and API health. |
 
 | GitHub client CI for the 1.1.6 provenance commit | PASS - version/provenance/website checks, all client tests, every Android release compile, signed delivery artifacts, and whitespace checks. |
-| Raven release-only installation gate | PASS - only `com.torve.app.amazon` 1.1.6 (versionCode 20099) is installed; no debug/test package or flag is present. |
-| Raven 1.1.6 foreground smoke | PASS - 31/31 foreground and memory samples, with zero process deaths, failures, or foreground losses. |
+| Raven release-only installation gate | PASS - only `com.torve.app.amazon` 1.1.6 (versionCode 20099) is installed; no debug/test package or flag is present. The installed APK is the local candidate, not the public APK. |
+| Raven candidate launch smoke | PASS - final activity is `TvMainActivity`, Torve owns focus, and no matching fatal startup exception was observed. The earlier 31/31 foreground smoke remains evidence for the published 1.1.6 build, not this candidate. |
 
-The 2,327 passing client tests and 652 passing backend tests are strong host
-evidence, but they do not replace physical-device, store-review, or long-duration
-playback testing.
+The 2,339 passing current client tests and prior 652-test backend result are
+strong host evidence, but they do not replace physical-device, store-review, or
+long-duration playback testing.
 
 ### Physical performance and release evidence
 
@@ -469,6 +489,15 @@ activity-launch method, and three iterations on release-only 1.1.5 and 1.1.6:
 
 ### 15 August implementation delta
 
+- Fire TV Search results now retain stable item identity through metadata/rating
+  hydration, preserve the user's explicit order, and reclaim a visible poster if
+  a focused item is actually removed. Eight focused Search policy tests pass.
+- Search sort choices now name their source: IMDb, Rotten Tomatoes critics, RT
+  audience, TMDB, IMDb votes, popularity, and title. Unknown provider scores are
+  placed after known values and enrichment does not silently reshuffle focus.
+- Search hero enrichment now continues when IMDb or Rotten Tomatoes is missing
+  and no longer treats a reachable empty/partial backend response as complete.
+  Local fan-out remains bounded to accounts with OMDb or MDBList configured.
 - Desktop onboarding now starts from user outcomes—streaming sources, personal
   library, or live TV—and hands each choice to the existing connection surface.
 - Settings and source-repair prompts use **Connections / Streaming sources** in
@@ -485,16 +514,17 @@ activity-launch method, and three iterations on release-only 1.1.5 and 1.1.6:
   release-only device checks, and production-deployment verification are now
   first-class gates.
 
-These changes close the automated portion of outcome-first setup, recovery,
-updater discovery, public deployment, and immutable source correspondence.
-Store artwork, store-console forms, current Google TV hardware, clean Windows
-VM/signing reputation, Apple signing hardware, and legal/brand review remain
-external manual gates.
+These changes largely close outcome-first setup, recovery, updater discovery,
+and immutable source correspondence. This rerun corrects the earlier conclusion
+that all automated release work was closed: the current Search candidate still
+needs a newer public version, and the production gate's source-page assertion is
+stale. Store artwork, store-console forms, current Google TV hardware, clean
+Windows VM/signing reputation, Apple signing hardware, and legal/brand review
+remain external manual gates.
 
 ## Automated ROI closure and remaining actions
 
-The high-ROI work that could be completed without store accounts, rights-holder
-decisions, additional hardware, or a clean external machine is implemented:
+The published high-ROI foundation is implemented:
 
 1. **Reproducible release:** 1.1.6 is built from an immutable public source tag,
    signed, checksummed, described by provenance, and served through atomic
@@ -516,8 +546,23 @@ decisions, additional hardware, or a clean external machine is implemented:
    and optionally requires Torve to retain foreground ownership.
 7. **Google delivery compatibility:** both AABs and the Amazon APK have automated
    16 KB packaging/ELF gates in addition to release lint and flavor tests.
+8. **Search candidate regression protection:** stable result keys, explicit
+   rating-source sorts, order-preserving enrichment, and primary IMDb/RT hero
+   fallback are covered by focused policy tests and the full client gate.
 
-The remaining highest-value actions require manual evidence or external state:
+The remaining highest-value actions that do not require store or hardware access
+are:
+
+1. Merge the candidate, bump the version above `1.1.6`, rebuild from the clean
+   public commit, tag it, generate provenance, and atomically publish the updater
+   entry. Do not replace the existing 1.1.6 artifact in place.
+2. Update `check-public-deployment.ps1` to assert `Release provenance`, then run
+   the tracked gate without an in-memory correction.
+3. Make IMDb/RT availability explicit in Connections/provider health. A global
+   OMDb or MDBList credential is an operator decision; without one, account keys
+   and cached data are the only legitimate enrichment sources.
+
+The remaining actions that require manual evidence or external state are:
 
 1. Capture and rights-review the six real store screenshots and any short TV
    demo; do not generate misleading provider-affiliation assets.
@@ -536,7 +581,7 @@ The remaining highest-value actions require manual evidence or external state:
 ### GO
 
 - Continue the controlled Fire TV/Android tester program.
-- Distribute signed Fire TV releases through the existing updater to known users.
+- Continue serving the immutable published 1.1.6 release while monitoring it.
 - Use Android mobile and Google TV internal testing tracks.
 - Operate the small public direct-download beta with monitoring and responsive
   issue handling.
@@ -544,6 +589,8 @@ The remaining highest-value actions require manual evidence or external state:
 
 ### CONDITIONAL GO
 
+- Distribute the Search candidate through the updater only after it becomes a
+  monotonically newer, source-tagged, provenance-backed release.
 - Windows direct beta after a fresh clean-VM install/update/playback smoke.
 
 ### NO-GO
@@ -570,6 +617,8 @@ one green release
 → measurable reliability gates
 ```
 
-That phase is now implemented. The next growth constraint is obtaining the
-manual store, hardware, rights, signing-reputation, and community evidence
-without restarting low-ROI feature accumulation.
+That phase is implemented for the public 1.1.6 baseline, but the current
+candidate has not completed the source-to-update chain. The immediate task is
+to ship it truthfully as a newer release and repair the stale deployment gate.
+After that, the growth constraint returns to manual store, hardware, rights,
+signing-reputation, and community evidence—not low-ROI feature accumulation.

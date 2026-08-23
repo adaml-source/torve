@@ -10,10 +10,7 @@ enum class LivePlayerOverlay {
     /** Channel info HUD: programme data, clock, quality badges, recent/favourite cards. */
     CHANNEL_INFO,
 
-    /** Bottom menu toolbar: stream info row + action buttons. */
-    MENU_BAR,
-
-    /** Layered playback utility menu opened by the remote Menu key. */
+    /** Compact bottom playback OSD opened by OK/Select or the remote Menu key. */
     PLAYBACK_MENU,
 
     /** Current-channel schedule with replay actions and a path to the full guide. */

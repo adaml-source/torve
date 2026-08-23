@@ -36,8 +36,11 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.datetime.Clock
+import kotlin.time.TimeSource
 
 private const val KEY_CHANNELS_AUDIO_PASSTHROUGH = "channels_audio_passthrough_enabled"
 private const val KEY_CHANNELS_PREFER_SURROUND = "channels_prefer_surround_codecs"
@@ -84,6 +87,9 @@ class ChannelsViewModel(
     private var epgRefreshJob: Job? = null
     private var catalogLoadJob: Job? = null
     private var startupPhase = "idle"
+    private val liveCategoryCountsMutex = Mutex()
+    private var cachedLiveCategoryCountsByPlaylist: Map<String, List<Pair<String, Long>>> = emptyMap()
+    private var rawLiveCategoryTitlesByPlaylist: Map<String, Map<String, List<String>>> = emptyMap()
 
     init {
         stateRelay?.attach(state)
@@ -581,8 +587,26 @@ class ChannelsViewModel(
     }
 
     private suspend fun liveCategoryCounts(playlistId: String): List<Pair<String, Long>> {
-        return channelRepo.getLiveCategoryCounts(playlistId)
-            .filterNot { (name, _) -> isVodCategoryName(name) }
+        return liveCategoryCountsMutex.withLock {
+            cachedLiveCategoryCountsByPlaylist[playlistId]?.let { return@withLock it }
+            channelRepo.getLiveCategoryCounts(playlistId)
+                .filterNot { (name, _) -> isVodCategoryName(name) }
+                .also { counts ->
+                    val rawTitlesByCleanedName = counts
+                        .map { (rawTitle, _) -> CategoryNameCleaner.clean(rawTitle).name.lowercase() to rawTitle }
+                        .groupBy(keySelector = { it.first }, valueTransform = { it.second })
+                    cachedLiveCategoryCountsByPlaylist = cachedLiveCategoryCountsByPlaylist + (playlistId to counts)
+                    rawLiveCategoryTitlesByPlaylist = rawLiveCategoryTitlesByPlaylist +
+                        (playlistId to rawTitlesByCleanedName)
+                }
+        }
+    }
+
+    private suspend fun invalidateLiveCategoryCounts(playlistId: String) {
+        liveCategoryCountsMutex.withLock {
+            cachedLiveCategoryCountsByPlaylist = cachedLiveCategoryCountsByPlaylist - playlistId
+            rawLiveCategoryTitlesByPlaylist = rawLiveCategoryTitlesByPlaylist - playlistId
+        }
     }
 
     private fun ChannelsUiState.hasGuideData(): Boolean {
@@ -1058,6 +1082,7 @@ class ChannelsViewModel(
         scope.launch {
             withContext(backgroundDispatcher) {
                 channelRepo.syncHiddenChannelsToDb(updated)
+                _state.value.selectedPlaylistId?.let { invalidateLiveCategoryCounts(it) }
                 prefsRepo.setString("channels_hidden_channels", updated.joinToString("|||"))
             }
             buildLiveCategories()
@@ -1208,6 +1233,7 @@ class ChannelsViewModel(
                     epgCheckSuccess = false,
                 )
             }
+            return
         }
         scope.launch {
             _state.update {
@@ -1369,6 +1395,7 @@ class ChannelsViewModel(
                         server = st.newXtreamServer,
                         username = st.newXtreamUsername,
                         password = st.newXtreamPassword,
+                        epgUrl = st.newPlaylistEpgUrl.trim().takeIf { it.isNotEmpty() },
                     )
                 }
                 // Backup to backend for cross-device restore
@@ -1378,6 +1405,7 @@ class ChannelsViewModel(
                         name = st.newPlaylistName,
                         playlistType = "xtream",
                         server = st.newXtreamServer,
+                        epgUrl = st.newPlaylistEpgUrl.trim().takeIf { it.isNotEmpty() },
                         username = st.newXtreamUsername,
                         password = st.newXtreamPassword,
                     ) ?: false
@@ -1499,7 +1527,10 @@ class ChannelsViewModel(
         scope.launch {
             _state.update { it.copy(isLoadingChannels = true) }
             try {
-                withContext(backgroundDispatcher) { channelRepo.refreshPlaylist(playlistId) }
+                withContext(backgroundDispatcher) {
+                    channelRepo.refreshPlaylist(playlistId)
+                    invalidateLiveCategoryCounts(playlistId)
+                }
                 val playlists = withContext(backgroundDispatcher) { channelRepo.getPlaylists() }
                 _state.update { it.copy(playlists = playlists) }
                 loadPlaylistCatalog(
@@ -1509,6 +1540,40 @@ class ChannelsViewModel(
                     showLoadingUntilRefresh = false,
                     forceReload = true,
                     rebuildGuideAfterLoad = true,
+                )
+            } catch (e: Exception) {
+                _state.update { current ->
+                    current.copy(
+                        isLoadingChannels = false,
+                        error = if (current.hasUsableCatalogFor(playlistId)) {
+                            null
+                        } else {
+                            com.torve.presentation.error.UserFacingError.CHANNEL_LOAD_FAILED.messageKey
+                        },
+                    )
+                }
+            }
+        }
+    }
+
+    fun refreshChannelsCatalog() {
+        val playlistId = _state.value.selectedPlaylistId ?: return
+        scope.launch {
+            _state.update { it.copy(isLoadingChannels = true) }
+            try {
+                withContext(backgroundDispatcher) {
+                    channelRepo.refreshPlaylistCatalog(playlistId)
+                    invalidateLiveCategoryCounts(playlistId)
+                }
+                val playlists = withContext(backgroundDispatcher) { channelRepo.getPlaylists() }
+                _state.update { it.copy(playlists = playlists) }
+                loadPlaylistCatalog(
+                    playlistId = playlistId,
+                    restoreSavedState = true,
+                    triggerBackgroundRefresh = false,
+                    showLoadingUntilRefresh = false,
+                    forceReload = true,
+                    rebuildGuideAfterLoad = false,
                 )
             } catch (e: Exception) {
                 _state.update { current ->
@@ -1761,6 +1826,7 @@ class ChannelsViewModel(
     ) {
         if (categories.isEmpty()) return
         scope.launch {
+            val hydrateStartedAt = TimeSource.Monotonic.markNow()
             val categoryNames = categories.map { it.name }.toSet()
             val categoryName = withContext(backgroundDispatcher) {
                 resolveRestoredGroup(
@@ -1774,6 +1840,7 @@ class ChannelsViewModel(
             val categoryChannels = withContext(backgroundDispatcher) {
                 getChannelsForCategoryDirect(playlistId, categoryName)
             }
+            val categoryChannelsMs = hydrateStartedAt.elapsedNow().inWholeMilliseconds
             val restoredChannel = withContext(backgroundDispatcher) {
                 resolveRestoredChannel(
                     playlistId = playlistId,
@@ -1808,6 +1875,11 @@ class ChannelsViewModel(
             if (_state.value.epgState is EpgState.Loaded) {
                 buildGuideChannels()
             }
+            println(
+                "CATALOG_LOAD: initial category hydrated playlist=$playlistId category=$categoryName " +
+                    "channels=${categoryChannels.size} categoryQueryMs=$categoryChannelsMs " +
+                    "totalMs=${hydrateStartedAt.elapsedNow().inWholeMilliseconds}",
+            )
         }
     }
 
@@ -1862,17 +1934,21 @@ class ChannelsViewModel(
                 } else {
                     // No cache — query DB for category counts (lightweight GROUP BY) then
                     // strip VOD groups in memory (XTREAM names them "VOD: …").
-                    val loadStart = Clock.System.now().toEpochMilliseconds()
+                    val loadStartedAt = TimeSource.Monotonic.markNow()
+                    val categoryQueryStartedAt = TimeSource.Monotonic.markNow()
                     val categoryCounts = withContext(backgroundDispatcher) {
                         liveCategoryCounts(playlistId)
                     }
+                    val categoryQueryMs = categoryQueryStartedAt.elapsedNow().inWholeMilliseconds
                     if (categoryCounts.isNotEmpty()) {
+                        val cleaningStartedAt = TimeSource.Monotonic.markNow()
                         val (lightweightCategories, allLightweightCategories) = withContext(backgroundDispatcher) {
                             val st = _state.value
                             val allCats = CategoryNameCleaner.processCategoryCountsOnly(categoryCounts)
                             val hiddenLower = st.hiddenCategories.map { it.lowercase() }.toSet()
                             allCats.filter { it.name.lowercase() !in hiddenLower } to allCats
                         }
+                        val cleaningMs = cleaningStartedAt.elapsedNow().inWholeMilliseconds
                         val selectedPlaylist = _state.value.playlists.firstOrNull { it.id == playlistId }
                         val epgSourceUrl = selectedPlaylist.resolveEpgSourceUrl().orEmpty()
                         _state.update { current ->
@@ -1890,14 +1966,20 @@ class ChannelsViewModel(
                                 },
                             )
                         }
+                        val cacheStartedAt = TimeSource.Monotonic.markNow()
                         withContext(backgroundDispatcher) { persistCachedCategoriesNow(allLightweightCategories) }
+                        val cacheMs = cacheStartedAt.elapsedNow().inWholeMilliseconds
                         hydrateInitialCategorySelection(
                             playlistId = playlistId,
                             previousPlaylistId = previousPlaylistId,
                             categories = lightweightCategories,
                             restoreSavedState = restoreSavedState,
                         )
-                        val loadMs = Clock.System.now().toEpochMilliseconds() - loadStart
+                        val loadMs = loadStartedAt.elapsedNow().inWholeMilliseconds
+                        println(
+                            "CATALOG_LOAD: category stages playlist=$playlistId queryMs=$categoryQueryMs " +
+                                "cleanMs=$cleaningMs cacheMs=$cacheMs totalMs=$loadMs",
+                        )
                         println("CATALOG_LOAD: DB categories loaded in ${loadMs}ms — ${lightweightCategories.size} categories")
                         if (rebuildGuideAfterLoad) {
                             buildGuideChannels()
@@ -1916,7 +1998,7 @@ class ChannelsViewModel(
                             guideErrorOverride = null,
                             epgStateOverride = null,
                         )
-                        val loadMs = Clock.System.now().toEpochMilliseconds() - loadStart
+                        val loadMs = loadStartedAt.elapsedNow().inWholeMilliseconds
                         println("CATALOG_LOAD: no live category counts in ${loadMs}ms playlist=$playlistId totalRows=$rowCount; skipping full channel load")
                         if (rebuildGuideAfterLoad) {
                             buildGuideChannels()
@@ -2038,22 +2120,24 @@ class ChannelsViewModel(
      * Must be called from a background dispatcher.
      */
     suspend fun getChannelsForCategoryDirect(playlistId: String, cleanedCategoryName: String): List<EnrichedChannel> {
-        // Get all raw group_title → count pairs from DB
-        val rawCounts = liveCategoryCounts(playlistId)
-        // Find which raw group_titles clean to the target category name
-        val matchingRawTitles = rawCounts
-            .map { it.first }
-            .filter { rawTitle ->
-                val cleaned = CategoryNameCleaner.clean(rawTitle)
-                cleaned.name.equals(cleanedCategoryName, ignoreCase = true)
-            }
+        // Reuse the raw-title mapping built by the category-count query. On a
+        // cache-first start, try the indexed direct title lookup before paying
+        // for a complete GROUP BY to rebuild that mapping.
+        val cleanedKey = cleanedCategoryName.lowercase()
+        var matchingRawTitles = rawLiveCategoryTitlesByPlaylist[playlistId]
+            ?.get(cleanedKey)
+            .orEmpty()
 
         if (matchingRawTitles.isEmpty()) {
             // Fallback: try direct match (category name might already be raw)
             val direct = channelRepo.getChannelsForCategory(playlistId, cleanedCategoryName)
                 .filter(::isLiveBrowseChannel)
             if (direct.isNotEmpty()) return direct.map { EnrichedChannel(channel = it) }
-            return emptyList()
+            liveCategoryCounts(playlistId)
+            matchingRawTitles = rawLiveCategoryTitlesByPlaylist[playlistId]
+                ?.get(cleanedKey)
+                .orEmpty()
+            if (matchingRawTitles.isEmpty()) return emptyList()
         }
 
         // Query channels for all matching raw group_titles
@@ -2447,6 +2531,7 @@ class ChannelsViewModel(
                     } else {
                         channelRepo.refreshPlaylistCatalog(playlistId)
                     }
+                    invalidateLiveCategoryCounts(playlistId)
                 }
                 if (_state.value.selectedPlaylistId != playlistId) {
                     _state.update { it.copy(isLoadingChannels = false) }

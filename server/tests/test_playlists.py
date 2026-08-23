@@ -95,6 +95,74 @@ def test_upsert_playlist(client, test_user, auth_header):
     assert len(matches) == 1
 
 
+def test_edit_xtream_epg_preserves_password(client, test_user, auth_header):
+    client.put("/me/playlists/edit-xt", headers=auth_header, json={
+        "playlist_id": "edit-xt",
+        "name": "Xtream",
+        "playlist_type": "xtream",
+        "server": "http://panel.example.com",
+        "username": "user",
+        "password": "keep-me",
+        "epg_url": "http://panel.example.com/xmltv.php",
+    })
+
+    updated = client.put("/me/playlists/edit-xt", headers=auth_header, json={
+        "playlist_id": "edit-xt",
+        "name": "Xtream edited",
+        "playlist_type": "xtream",
+        "server": "http://panel.example.com",
+        "username": "user",
+        "epg_url": "https://guide.example.com/custom.xml",
+    })
+
+    assert updated.status_code == 200
+    assert updated.json()["epg_url"] == "https://guide.example.com/custom.xml"
+    credentials = client.get("/me/playlists/edit-xt/credentials", headers=auth_header)
+    assert credentials.status_code == 200
+    assert credentials.json()["password"] == "keep-me"
+
+
+def test_xtream_url_whitespace_is_normalized(client, test_user, auth_header):
+    response = client.put("/me/playlists/normalized", headers=auth_header, json={
+        "playlist_id": "normalized",
+        "name": "Normalized",
+        "playlist_type": "xtream",
+        "server": "http:// panel.example.com/",
+        "username": "user",
+        "password": "secret",
+        "epg_url": "https:// guide.example.com/custom.xml",
+    })
+
+    assert response.status_code == 200
+    assert response.json()["server"] == "http://panel.example.com"
+    assert response.json()["epg_url"] == "https://guide.example.com/custom.xml"
+
+
+def test_same_xtream_identity_does_not_create_second_backend_row(client, test_user, auth_header):
+    client.put("/me/playlists/device-a", headers=auth_header, json={
+        "playlist_id": "device-a",
+        "name": "Xtream",
+        "playlist_type": "xtream",
+        "server": "http://panel.example.com",
+        "username": "same-user",
+        "password": "secret",
+    })
+    response = client.put("/me/playlists/device-b", headers=auth_header, json={
+        "playlist_id": "device-b",
+        "name": "Xtream edited elsewhere",
+        "playlist_type": "xtream",
+        "server": "HTTP:// panel.example.com/",
+        "username": "same-user",
+        "epg_url": "https://guide.example.com/custom.xml",
+    })
+
+    assert response.status_code == 200
+    rows = client.get("/me/playlists", headers=auth_header).json()
+    matching = [row for row in rows if row["username"] == "same-user"]
+    assert len(matching) == 1
+    assert matching[0]["epg_url"] == "https://guide.example.com/custom.xml"
+
+
 def test_delete_playlist(client, test_user, auth_header):
     client.put("/me/playlists/del-1", headers=auth_header, json={
         "playlist_id": "del-1",

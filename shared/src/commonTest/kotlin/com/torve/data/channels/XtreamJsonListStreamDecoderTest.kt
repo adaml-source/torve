@@ -5,6 +5,7 @@ import kotlinx.serialization.json.Json
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertTrue
 
 class XtreamJsonListStreamDecoderTest {
     private val json = Json { ignoreUnknownKeys = true }
@@ -46,6 +47,14 @@ class XtreamJsonListStreamDecoderTest {
         assertFailsWith<XtreamResponseTooLargeException> {
             decoder.consume("[{}]     ".encodeToByteArray())
         }
+    }
+
+    @Test
+    fun fullCatalogStreamingGuardExceedsLegacyBufferedLimit() {
+        assertTrue(
+            XTREAM_STREAMING_ALL_STREAM_MAX_JSON_BODY_BYTES > 16 * 1024 * 1024,
+            "Streaming catalogs must not fall back to per-category requests at the legacy 16 MiB buffered limit",
+        )
     }
 
     private fun decoder(maxBytes: Int) = XtreamJsonListStreamDecoder(

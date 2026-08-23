@@ -37,6 +37,8 @@ import io.ktor.http.isSuccess
 import io.ktor.utils.io.ByteReadChannel
 import io.ktor.utils.io.readAvailable
 import kotlinx.datetime.Clock
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.sync.Mutex
@@ -239,7 +241,7 @@ class ChannelRepositoryImpl(
     ): Iptv_playlist {
         saveXtreamPassword(existing.id, password)
         val normalizedEpg = epgUrl?.trim()?.takeIf { it.isNotEmpty() }
-        if (existing.epg_url.isNullOrBlank() && normalizedEpg != null) {
+        if (normalizedEpg != null && existing.epg_url?.trim() != normalizedEpg) {
             database.torveQueries.insertPlaylist(
                 user_id = uid(),
                 id = existing.id,
@@ -459,15 +461,16 @@ class ChannelRepositoryImpl(
         id: String?,
         epgUrl: String?,
     ): ChannelPlaylist {
-        val normalizedServer = server.trimEnd('/')
-        val xtreamEpgUrl = epgUrl?.trim()?.takeIf { it.isNotEmpty() }
+        val normalizedServer = normalizeXtreamServer(server) ?: server.normalizeHttpSchemeWhitespace().trimEnd('/')
+        val explicitEpgUrl = epgUrl?.trim()?.takeIf { it.isNotEmpty() }
+        val xtreamEpgUrl = explicitEpgUrl
             ?: buildXtreamEpgUrl(normalizedServer, username, password)
         findExistingXtreamPlaylist(
             server = normalizedServer,
             username = username,
             excludedId = id,
         )?.let { existing ->
-            val merged = mergeDuplicateXtreamMetadataIfUseful(existing, password, xtreamEpgUrl)
+            val merged = mergeDuplicateXtreamMetadataIfUseful(existing, password, explicitEpgUrl)
             return merged.toDomainPlaylist()
         }
 
@@ -477,25 +480,26 @@ class ChannelRepositoryImpl(
         // Authenticate first
         xtreamClient.authenticate(normalizedServer, username, password)
 
-        val liveCategories = xtreamClient.getLiveCategories(normalizedServer, username, password)
-        val vodCategories = try {
-            xtreamClient.getVodCategories(normalizedServer, username, password)
-        } catch (t: Exception) {
-            channelDebugLog("Xtream VOD category fetch failed for playlist $id: ${t.message}")
-            emptyList()
-        }
-        val seriesCategories = try {
-            xtreamClient.getSeriesCategories(normalizedServer, username, password)
-        } catch (t: Exception) {
-            channelDebugLog("Xtream series category fetch failed for playlist $id: ${t.message}")
-            emptyList()
+        val (liveCategories, vodCategories, seriesCategories) = coroutineScope {
+            val live = async { xtreamClient.getLiveCategories(normalizedServer, username, password) }
+            val vod = async {
+                runCatching { xtreamClient.getVodCategories(normalizedServer, username, password) }
+                    .onFailure { channelDebugLog("Xtream VOD category fetch failed for playlist $id: ${it.message}") }
+                    .getOrDefault(emptyList())
+            }
+            val series = async {
+                runCatching { xtreamClient.getSeriesCategories(normalizedServer, username, password) }
+                    .onFailure { channelDebugLog("Xtream series category fetch failed for playlist $id: ${it.message}") }
+                    .getOrDefault(emptyList())
+            }
+            Triple(live.await(), vod.await(), series.await())
         }
 
         // Store password in secure storage, never in SQLite
         saveXtreamPassword(id, password)
         // Fetch and persist each type sequentially so live/VOD objects are released before
         // the next group is fetched, keeping peak heap to max(live, VOD, series) not their sum.
-        val totalCount = persistXtreamChannelsStreaming(
+        val (liveCount, _) = persistXtreamChannelsStreaming(
             playlistId = id,
             playlistName = name,
             playlistUrl = "$normalizedServer/player_api.php",
@@ -515,7 +519,7 @@ class ChannelRepositoryImpl(
             name = name,
             url = "$normalizedServer/player_api.php",
             epgUrl = xtreamEpgUrl,
-            channelCount = totalCount,
+            channelCount = liveCount,
             lastUpdated = now,
             type = PlaylistType.XTREAM,
             server = normalizedServer,
@@ -532,15 +536,16 @@ class ChannelRepositoryImpl(
         id: String?,
         epgUrl: String?,
     ): ChannelPlaylist = withContext(ioDispatcher) {
-        val normalizedServer = server.trimEnd('/')
-        val normalizedEpgUrl = epgUrl?.trim()?.takeIf { it.isNotEmpty() }
+        val normalizedServer = normalizeXtreamServer(server) ?: server.normalizeHttpSchemeWhitespace().trimEnd('/')
+        val explicitEpgUrl = epgUrl?.trim()?.takeIf { it.isNotEmpty() }
+        val normalizedEpgUrl = explicitEpgUrl
             ?: buildXtreamEpgUrl(normalizedServer, username, password)
         findExistingXtreamPlaylist(
             server = normalizedServer,
             username = username,
             excludedId = id,
         )?.let { existing ->
-            return@withContext mergeDuplicateXtreamMetadataIfUseful(existing, password, normalizedEpgUrl).toDomainPlaylist()
+            return@withContext mergeDuplicateXtreamMetadataIfUseful(existing, password, explicitEpgUrl).toDomainPlaylist()
         }
 
         val playlistId = id ?: "xtream_${Clock.System.now().toEpochMilliseconds()}"
@@ -895,27 +900,32 @@ class ChannelRepositoryImpl(
             // Xtream playlist refresh — categories fetched first (fast), then channels are
             // fetched and persisted sequentially inside persistXtreamChannelsStreaming so
             // each type's Channel objects are released before the next type is fetched.
-            val liveCategoryStartedAt = TimeSource.Monotonic.markNow()
-            val categories = xtreamClient.getLiveCategories(playlist.server, playlist.username, xtreamPassword)
-            val liveCategoryMs = liveCategoryStartedAt.elapsedNow().inWholeMilliseconds
-
-            val vodCategoryStartedAt = TimeSource.Monotonic.markNow()
-            val vodCategories = try {
-                xtreamClient.getVodCategories(playlist.server, playlist.username, xtreamPassword)
-            } catch (t: Exception) {
-                channelDebugLog("Xtream VOD category refresh failed for playlist $playlistId: ${t.message}")
-                emptyList()
+            val categoriesStartedAt = TimeSource.Monotonic.markNow()
+            val (categories, vodCategories, seriesCategories) = coroutineScope {
+                val liveDeferred = async {
+                    xtreamClient.getLiveCategories(playlist.server, playlist.username, xtreamPassword)
+                }
+                val vodDeferred = async {
+                    try {
+                        xtreamClient.getVodCategories(playlist.server, playlist.username, xtreamPassword)
+                    } catch (t: Exception) {
+                        channelDebugLog("Xtream VOD category refresh failed for playlist $playlistId: ${t.message}")
+                        emptyList()
+                    }
+                }
+                val seriesDeferred = async {
+                    try {
+                        xtreamClient.getSeriesCategories(playlist.server, playlist.username, xtreamPassword)
+                    } catch (t: Exception) {
+                        channelDebugLog("Xtream series category refresh failed for playlist $playlistId: ${t.message}")
+                        emptyList()
+                    }
+                }
+                Triple(liveDeferred.await(), vodDeferred.await(), seriesDeferred.await())
             }
-            val vodCategoryMs = vodCategoryStartedAt.elapsedNow().inWholeMilliseconds
-
-            val seriesCategoryStartedAt = TimeSource.Monotonic.markNow()
-            val seriesCategories = try {
-                xtreamClient.getSeriesCategories(playlist.server, playlist.username, xtreamPassword)
-            } catch (t: Exception) {
-                channelDebugLog("Xtream series category refresh failed for playlist $playlistId: ${t.message}")
-                emptyList()
-            }
-            val seriesCategoryMs = seriesCategoryStartedAt.elapsedNow().inWholeMilliseconds
+            val liveCategoryMs = categoriesStartedAt.elapsedNow().inWholeMilliseconds
+            val vodCategoryMs = 0L
+            val seriesCategoryMs = 0L
 
             val xtreamEpgUrl = playlist.epg_url ?: buildXtreamEpgUrl(
                 server = playlist.server,
@@ -924,7 +934,7 @@ class ChannelRepositoryImpl(
             )
 
             val persistenceStartedAt = TimeSource.Monotonic.markNow()
-            val totalCount = persistXtreamChannelsStreaming(
+            val (liveCount, totalCount) = persistXtreamChannelsStreaming(
                 playlistId = playlist.id,
                 playlistName = playlist.name,
                 playlistUrl = playlist.url,
@@ -941,7 +951,7 @@ class ChannelRepositoryImpl(
             println(
                 "TorvePerf: iptv stages playlistId=$playlistId type=xtream " +
                     "liveCategoryMs=$liveCategoryMs vodCategoryMs=$vodCategoryMs seriesCategoryMs=$seriesCategoryMs " +
-                    "streamingPersistenceMs=$persistenceMs itemCount=$totalCount " +
+                    "streamingPersistenceMs=$persistenceMs liveCount=$liveCount catalogItemCount=$totalCount " +
                     "catalogCompleteMs=${refreshStartedAt.elapsedNow().inWholeMilliseconds}",
             )
             if (includeEpg) {
@@ -1078,34 +1088,97 @@ class ChannelRepositoryImpl(
     override suspend fun getLiveCategoryCounts(playlistId: String): List<Pair<String, Long>> {
         repairChannelCatalogIfNeeded(playlistId)
         val generationId = getActiveChannelGeneration(playlistId) ?: return emptyList()
-        return database.torveQueries
-            .getLiveCategoryCountsForPlaylist(userId = uid(), playlistId = playlistId, generationId = generationId)
-            .executeAsList()
-            .map { row -> (row.group_title ?: "Ungrouped") to row.channel_count }
+        return if (database.torveQueries.countHiddenChannelIds().executeAsOne() == 0L) {
+            database.torveQueries
+                .getLiveCategoryCountsForPlaylistUnfiltered(userId = uid(), playlistId = playlistId, generationId = generationId)
+                .executeAsList()
+                .map { row -> (row.group_title ?: "Ungrouped") to row.channel_count }
+        } else {
+            database.torveQueries
+                .getLiveCategoryCountsForPlaylist(userId = uid(), playlistId = playlistId, generationId = generationId)
+                .executeAsList()
+                .map { row -> (row.group_title ?: "Ungrouped") to row.channel_count }
+        }
+    }
+
+    override suspend fun adoptPlaylistId(existingId: String, accountId: String): Boolean {
+        if (existingId == accountId) return true
+        val ownerId = uid()
+        val existing = database.torveQueries
+            .getPlaylist(userId = ownerId, playlistId = existingId)
+            .executeAsOneOrNull()
+            ?: return false
+        if (database.torveQueries.getPlaylist(userId = ownerId, playlistId = accountId).executeAsOneOrNull() == null) {
+            database.torveQueries.insertPlaylist(
+                user_id = ownerId,
+                id = accountId,
+                name = existing.name,
+                url = existing.url,
+                epg_url = existing.epg_url,
+                channel_count = 0,
+                last_updated = existing.last_updated,
+                type = existing.type,
+                server = existing.server,
+                username = existing.username,
+                password = null,
+            )
+            if (existing.type.equals("xtream", ignoreCase = true)) {
+                loadXtreamPassword(existingId)?.takeIf(String::isNotBlank)?.let { password ->
+                    saveXtreamPassword(accountId, password)
+                }
+            }
+        }
+        val repaired = repairDuplicatePlaylistsForUser(
+            database = database,
+            userId = ownerId,
+            loadXtreamPassword = ::loadXtreamPassword,
+            saveXtreamPassword = ::saveXtreamPassword,
+            removeXtreamPassword = ::removeXtreamPassword,
+            preferredPlaylistIds = setOf(accountId),
+        )
+        playlistCache.remove(existingId)
+        playlistCache.remove(accountId)
+        return accountId in repaired.touchedPlaylistIds &&
+            database.torveQueries.getPlaylist(userId = ownerId, playlistId = accountId).executeAsOneOrNull() != null
     }
 
     override suspend fun getVodCategoryCounts(playlistId: String): List<Pair<String, Long>> {
         repairChannelCatalogIfNeeded(playlistId)
         val generationId = getActiveChannelGeneration(playlistId) ?: return emptyList()
-        return database.torveQueries
-            .getVodCategoryCountsForPlaylist(userId = uid(), playlistId = playlistId, generationId = generationId)
-            .executeAsList()
-            .map { row -> (row.group_title ?: "VOD") to row.channel_count }
+        return if (database.torveQueries.countHiddenChannelIds().executeAsOne() == 0L) {
+            database.torveQueries
+                .getVodCategoryCountsForPlaylistUnfiltered(userId = uid(), playlistId = playlistId, generationId = generationId)
+                .executeAsList()
+                .map { row -> (row.group_title ?: "VOD") to row.channel_count }
+        } else {
+            database.torveQueries
+                .getVodCategoryCountsForPlaylist(userId = uid(), playlistId = playlistId, generationId = generationId)
+                .executeAsList()
+                .map { row -> (row.group_title ?: "VOD") to row.channel_count }
+        }
     }
 
     override suspend fun getVodCategoryTypeCounts(playlistId: String): List<VodCategoryTypeCount> {
         repairChannelCatalogIfNeeded(playlistId)
         val generationId = getActiveChannelGeneration(playlistId) ?: return emptyList()
-        return database.torveQueries
-            .getVodCategoryTypeCountsForPlaylist(userId = uid(), playlistId = playlistId, generationId = generationId)
-            .executeAsList()
-            .map { row ->
-                VodCategoryTypeCount(
-                    groupTitle = row.group_title ?: "VOD",
-                    contentType = parseContentType(row.content_type),
-                    count = row.channel_count,
-                )
-            }
+        val rows = if (database.torveQueries.countHiddenChannelIds().executeAsOne() == 0L) {
+            database.torveQueries
+                .getVodCategoryTypeCountsForPlaylistUnfiltered(userId = uid(), playlistId = playlistId, generationId = generationId)
+                .executeAsList()
+                .map { Triple(it.group_title, it.content_type, it.channel_count) }
+        } else {
+            database.torveQueries
+                .getVodCategoryTypeCountsForPlaylist(userId = uid(), playlistId = playlistId, generationId = generationId)
+                .executeAsList()
+                .map { Triple(it.group_title, it.content_type, it.channel_count) }
+        }
+        return rows.map { (groupTitle, contentType, count) ->
+            VodCategoryTypeCount(
+                groupTitle = groupTitle ?: "VOD",
+                contentType = parseContentType(contentType),
+                count = count,
+            )
+        }
     }
 
     /**
@@ -1834,7 +1907,7 @@ class ChannelRepositoryImpl(
         vodCategories: List<XtreamCategory>,
         seriesCategories: List<XtreamCategory>,
         updatedAt: Long,
-    ): Int {
+    ): Pair<Int, Int> {
         val ownerId = uid()
         val existingGeneration = getActiveChannelGeneration(playlistId)
         val existingChannelCount = if (existingGeneration != null) {
@@ -1884,7 +1957,13 @@ class ChannelRepositoryImpl(
             clearStagedChannelGeneration(playlistId)
             // Prune the just-staged generation (has no channel rows, but clean up preferences).
             runCatching { pruneOlderChannelGenerations(playlistId, existingGeneration ?: newGeneration) }
-            return existingChannelCount
+            val existingLiveCount = database.torveQueries
+                .getPlaylist(userId = ownerId, playlistId = playlistId)
+                .executeAsOneOrNull()
+                ?.channel_count
+                ?.toInt()
+                ?: 0
+            return existingLiveCount to existingChannelCount
         }
 
         // Finalize: insert series + activate generation in one transaction.
@@ -1991,7 +2070,10 @@ class ChannelRepositoryImpl(
                 name = playlistName,
                 url = playlistUrl,
                 epg_url = epgUrl,
-                channel_count = totalCount.toLong(),
+                // This column is presented to users as a channel count. VOD
+                // movies and series remain in the same catalog snapshot but
+                // must not inflate the number of live channels.
+                channel_count = liveCount.toLong(),
                 last_updated = updatedAt,
                 type = "xtream",
                 server = server,
@@ -2016,7 +2098,7 @@ class ChannelRepositoryImpl(
             "TorvePerf: iptv streaming persistence playlistId=$playlistId " +
                 "live=$liveCount vod=$vodCount series=$seriesCount total=$totalCount",
         )
-        return totalCount
+        return liveCount to totalCount
     }
 
     private fun insertChannelSnapshotBatched(

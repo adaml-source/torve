@@ -152,7 +152,7 @@ if ($sitemap.IndexOf($publicUrl, [StringComparison]::OrdinalIgnoreCase) -lt 0) {
 
 
 $setupHtml = Get-Content -Raw -Encoding utf8 -LiteralPath (Join-Path $resolvedWebRoot 'app/setup.html')
-if ($setupHtml -notmatch '<title>Connections - Torve</title>' -or $setupHtml -notmatch '20260815-connections') {
+if ($setupHtml -notmatch '<title>Connections - Torve</title>' -or $setupHtml -notmatch '20260823-playlist-edit') {
     throw "Connections portal shell must expose the outcome-first title and current localized assets."
 }
 $setupRegistry = Get-Content -Raw -Encoding utf8 -LiteralPath (Join-Path $resolvedWebRoot 'assets/app/setup.js')

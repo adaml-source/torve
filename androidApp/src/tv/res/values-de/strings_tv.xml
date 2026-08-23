@@ -357,6 +357,10 @@
     <string name="tv_settings_channels_visible">%1$d / %2$d sichtbar</string>
     <string name="tv_settings_no_categories">Keine Kanalgruppen geladen \u2014 zuerst eine Playlist ausw\u00e4hlen</string>
 
+    <string name="tv_settings_refresh_channels_title">Kanäle aktualisieren</string>
+    <string name="tv_settings_refresh_channels_subtitle">Kanalliste erneut herunterladen ohne den Programmguide zu laden</string>
+    <string name="tv_settings_refresh_channels_started">Kanal-Aktualisierung gestartet</string>
+
     <string name="tv_settings_refresh_epg_title">EPG aktualisieren</string>
     <string name="tv_settings_refresh_epg_subtitle">L\u00e4dt frische Programmdaten f\u00fcr die ausgew\u00e4hlte Playlist</string>
     <string name="tv_settings_refresh_epg_subtitle_loaded">Guide bereit: %1$d Sendungen zwischengespeichert</string>

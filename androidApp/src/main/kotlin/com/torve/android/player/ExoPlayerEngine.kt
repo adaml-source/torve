@@ -377,9 +377,13 @@ class ExoPlayerEngine(
         override fun onCues(cueGroup: CueGroup) {
             val sv = builtInSubtitleView ?: return
             val delay = subtitleDelayMs.toLong()
-            if (delay <= 0L) return
-            sv.visibility = View.INVISIBLE
             pendingSubtitleRunnable?.let { mainHandler.removeCallbacks(it) }
+            if (delay <= 0L) {
+                sv.setCues(cueGroup.cues)
+                sv.visibility = View.VISIBLE
+                return
+            }
+            sv.visibility = View.INVISIBLE
             val cues = cueGroup.cues
             pendingSubtitleRunnable = Runnable {
                 sv.setCues(cues)
@@ -484,13 +488,23 @@ class ExoPlayerEngine(
     }
 
     private fun createPlayer(preferSoftwareAudioDecoding: Boolean) {
-        // TiviMate-aligned: no custom audio processors for live TV — they add
-        // variable latency that causes A/V sync drift and microstutter.
         val renderersFactory = object : DefaultRenderersFactory(context) {
             override fun buildImageRenderers(out: java.util.ArrayList<Renderer>) {
                 // Torve playback does not use Media3 image tracks. Leaving the
                 // renderer out avoids a Media3 duplicate ImageOutputBuffer
                 // release crash seen during rapid TV focus/navigation churn.
+            }
+
+            override fun buildAudioSink(
+                context: Context,
+                enableFloatOutput: Boolean,
+                enableAudioTrackPlaybackParams: Boolean,
+            ): DefaultAudioSink {
+                return DefaultAudioSink.Builder(context)
+                    .setAudioProcessorChain(
+                        DefaultAudioSink.DefaultAudioProcessorChain(delayProcessor, equalizerProcessor),
+                    )
+                    .build()
             }
         }
             .setEnableDecoderFallback(true)

@@ -297,6 +297,17 @@ WHERE user_id = :userId AND playlist_id = :playlistId AND generation_id = :gener
 GROUP BY group_title
 ORDER BY group_title ASC;
 
+-- Fast path used when the hidden-channel table is empty. Avoids one correlated
+-- primary-key lookup per catalog row on large Xtream libraries.
+getLiveCategoryCountsForPlaylistUnfiltered:
+SELECT group_title, COUNT(*) AS channel_count
+FROM iptv_channel
+WHERE user_id = :userId AND playlist_id = :playlistId AND generation_id = :generationId
+  AND (group_title NOT LIKE 'VOD:%' OR group_title IS NULL)
+  AND content_type != 'VOD_MOVIE' AND content_type != 'VOD_SERIES'
+GROUP BY group_title
+ORDER BY group_title ASC;
+
 getVodCategoryCountsForPlaylist:
 SELECT group_title, COUNT(*) AS channel_count
 FROM iptv_channel
@@ -306,12 +317,28 @@ WHERE user_id = :userId AND playlist_id = :playlistId AND generation_id = :gener
 GROUP BY group_title
 ORDER BY group_title ASC;
 
+getVodCategoryCountsForPlaylistUnfiltered:
+SELECT group_title, COUNT(*) AS channel_count
+FROM iptv_channel
+WHERE user_id = :userId AND playlist_id = :playlistId AND generation_id = :generationId
+  AND (group_title LIKE 'VOD:%' OR content_type = 'VOD_MOVIE' OR content_type = 'VOD_SERIES')
+GROUP BY group_title
+ORDER BY group_title ASC;
+
 getVodCategoryTypeCountsForPlaylist:
 SELECT group_title, content_type, COUNT(*) AS channel_count
 FROM iptv_channel
 WHERE user_id = :userId AND playlist_id = :playlistId AND generation_id = :generationId
   AND (group_title LIKE 'VOD:%' OR content_type = 'VOD_MOVIE' OR content_type = 'VOD_SERIES')
   AND NOT EXISTS (SELECT 1 FROM iptv_hidden_channel WHERE hidden_id = stable_id)
+GROUP BY group_title, content_type
+ORDER BY group_title ASC, content_type ASC;
+
+getVodCategoryTypeCountsForPlaylistUnfiltered:
+SELECT group_title, content_type, COUNT(*) AS channel_count
+FROM iptv_channel
+WHERE user_id = :userId AND playlist_id = :playlistId AND generation_id = :generationId
+  AND (group_title LIKE 'VOD:%' OR content_type = 'VOD_MOVIE' OR content_type = 'VOD_SERIES')
 GROUP BY group_title, content_type
 ORDER BY group_title ASC, content_type ASC;
 
@@ -573,6 +600,9 @@ DELETE FROM iptv_hidden_channel;
 
 getAllHiddenChannelIds:
 SELECT hidden_id FROM iptv_hidden_channel;
+
+countHiddenChannelIds:
+SELECT COUNT(*) FROM iptv_hidden_channel;
 
 -- IPTV EPG channels (persisted source metadata, user-scoped)
 CREATE TABLE iptv_epg_channel (

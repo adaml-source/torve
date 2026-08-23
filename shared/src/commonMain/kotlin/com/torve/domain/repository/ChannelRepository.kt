@@ -78,6 +78,11 @@ interface ChannelRepository {
         epgUrl = epgUrl,
     )
     suspend fun removePlaylist(id: String)
+    /**
+     * Adopt the account-synchronized ID for an equivalent local playlist while
+     * preserving its catalog, EPG, favorites, selection and credentials.
+     */
+    suspend fun adoptPlaylistId(existingId: String, accountId: String): Boolean = false
     suspend fun updatePlaylistEpgUrl(playlistId: String, epgUrl: String?)
     suspend fun getPlaylists(): List<ChannelPlaylist>
     suspend fun getPlaylistSummaries(): List<ChannelPlaylistSummary> = getPlaylists().map {

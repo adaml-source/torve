@@ -2558,7 +2558,29 @@ fun PlayerScreen(
                 if (keyEvent.type != KeyEventType.KeyDown) {
                     return@onPreviewKeyEvent false
                 }
-                if ((errorMessage != null || showTrackDialog || showAudioDelayDialog || showSubtitleDelayDialog || showPictureFormatPicker || showEqualizerSheet || showDevicePicker || showResumePrompt || showNextEpisodeOverlay || showSubtitleSearch) && keyEvent.key != Key.Back) {
+                val playerModalVisible = errorMessage != null ||
+                    showTrackDialog ||
+                    showAudioDelayDialog ||
+                    showSubtitleDelayDialog ||
+                    showPictureFormatPicker ||
+                    showEqualizerSheet ||
+                    showDevicePicker ||
+                    showResumePrompt ||
+                    showNextEpisodeOverlay ||
+                    showSubtitleSearch
+
+                // The remote Menu key must always expose the full, focusable playback
+                // controls for movies and episodes. Keep modal ownership intact so Menu
+                // cannot steal focus from a dialog that is already on screen.
+                if (isTv && keyEvent.key == Key.Menu && !playerModalVisible) {
+                    resetSeekAcceleration()
+                    showControls = true
+                    controlsInteractionTick++
+                    topMenuFocusTick++
+                    return@onPreviewKeyEvent true
+                }
+
+                if (playerModalVisible && keyEvent.key != Key.Back) {
                     return@onPreviewKeyEvent false
                 }
 

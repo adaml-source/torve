@@ -31,6 +31,13 @@ data class Channel(
     val contentType: ChannelContentType = ChannelContentType.UNKNOWN,
 )
 
+/**
+ * Canonical provider-declared archive capability used by channel UIs and
+ * catch-up playback. Do not infer this capability from EPG data or names.
+ */
+val Channel.supportsCatchupArchive: Boolean
+    get() = !catchupType.isNullOrBlank() && (catchupDays ?: 0) > 0
+
 enum class PlaylistType {
     M3U, XTREAM;
 

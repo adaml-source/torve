@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.FavoriteBorder
 import androidx.compose.material3.Icon
@@ -38,6 +39,7 @@ import com.torve.android.ui.theme.Amber
 import com.torve.android.ui.theme.Coral
 import com.torve.android.ui.theme.Torve
 import com.torve.domain.model.EnrichedChannel
+import com.torve.domain.model.supportsCatchupArchive
 
 @Composable
 fun ChannelRow(
@@ -106,8 +108,15 @@ fun ChannelRow(
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f, fill = false),
                 )
-                // Live indicator
-                if (hasProgramme) {
+                if (channel.supportsCatchupArchive) {
+                    Spacer(Modifier.width(6.dp))
+                    Icon(
+                        imageVector = Icons.Filled.History,
+                        contentDescription = "Timeshift available",
+                        tint = Amber,
+                        modifier = Modifier.size(20.dp),
+                    )
+                } else if (hasProgramme) {
                     Spacer(Modifier.width(6.dp))
                     LiveDot()
                 }

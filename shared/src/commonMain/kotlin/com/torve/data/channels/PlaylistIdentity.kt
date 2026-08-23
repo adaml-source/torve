@@ -38,19 +38,32 @@ internal fun playlistIdentityFor(
 }
 
 private fun normalizeM3uPlaylistUrl(url: String?): String? {
-    val trimmed = url?.trim()?.takeIf { it.isNotEmpty() } ?: return null
+    val trimmed = url?.normalizeHttpSchemeWhitespace()?.takeIf { it.isNotEmpty() } ?: return null
     return normalizeUrlSchemeAndHost(trimmed, stripXtreamPlayerApi = false)
 }
 
-private fun normalizeXtreamServer(server: String?): String? {
+internal fun normalizeXtreamServer(server: String?): String? {
     val trimmed = server
-        ?.trim()
+        ?.normalizeHttpSchemeWhitespace()
         ?.takeIf { it.isNotEmpty() }
         ?: return null
     return normalizeUrlSchemeAndHost(
         value = trimmed,
         stripXtreamPlayerApi = true,
     ).trimEnd('/')
+}
+
+/**
+ * Repairs a common copy/paste error such as `http:// provider.example.com`.
+ * Only whitespace between an HTTP(S) scheme and its host is removed; path and
+ * query data are otherwise left untouched.
+ */
+internal fun String.normalizeHttpSchemeWhitespace(): String {
+    val trimmed = trim()
+    return trimmed.replace(
+        Regex("^(https?://)\\s+", RegexOption.IGNORE_CASE),
+        "$1",
+    )
 }
 
 private fun normalizeUrlSchemeAndHost(

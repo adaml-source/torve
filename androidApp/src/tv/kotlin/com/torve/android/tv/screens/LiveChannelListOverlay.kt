@@ -23,6 +23,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
+import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
@@ -71,6 +72,7 @@ import com.torve.android.ui.theme.Snow
 import com.torve.domain.model.Channel
 import com.torve.domain.model.ChannelCategory
 import com.torve.domain.model.EnrichedChannel
+import com.torve.domain.model.supportsCatchupArchive
 
 private const val GROUP_PANEL_WIDTH_DP = 236
 private const val DETAIL_PANEL_WIDTH_DP = 340
@@ -631,6 +633,18 @@ private fun ChannelListItem(
                         overflow = TextOverflow.Ellipsis,
                     )
                 }
+            }
+
+            if (ch.supportsCatchupArchive) {
+                Icon(
+                    // The solid History glyph remains legible at TV distance: a
+                    // counter-clockwise circular arrow around visible clock hands.
+                    imageVector = Icons.Filled.History,
+                    contentDescription = "Timeshift available",
+                    tint = Amber,
+                    modifier = Modifier.size(20.dp),
+                )
+                Spacer(Modifier.width(7.dp))
             }
 
             Icon(

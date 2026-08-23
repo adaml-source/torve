@@ -1,6 +1,8 @@
 package com.torve.android.tv.screens
 
 import android.content.Context
+import android.content.Intent
+import android.net.Uri
 import android.util.Log
 import androidx.activity.compose.BackHandler
 import androidx.appcompat.app.AppCompatDelegate
@@ -75,6 +77,9 @@ import com.torve.android.tv.TV_PAGE_END_GUTTER
 import com.torve.android.tv.TV_PAGE_TOP_GUTTER
 import com.torve.android.catalog.CatalogWarmupWorker
 import com.torve.android.epg.EpgWarmupWorker
+import com.torve.android.update.AppUpdateChecker
+import com.torve.android.update.AvailableAppUpdate
+import com.torve.android.update.usesVpsReleaseUpdates
 import com.torve.android.session.PostSignInRefresh
 import com.torve.android.sync.SyncCoordinator
 import com.torve.android.sync.TraktSyncWorker
@@ -187,6 +192,13 @@ private data class PendingInstalledAddonUninstallRestore(
     val removedIndex: Int,
     val installedUrlsBeforeRemove: List<String>,
 )
+
+private sealed interface UpdateCheckState {
+    data object Idle : UpdateCheckState
+    data object Checking : UpdateCheckState
+    data object UpToDate : UpdateCheckState
+    data class UpdateAvailable(val version: String, val downloadUrl: String) : UpdateCheckState
+}
 
 private sealed interface TvAboutOverlayState {
     val originItemId: String
@@ -1254,6 +1266,14 @@ internal fun TvSettingsScreen(
             focusTargetType = "navigation",
         )
     }
+    val libraryRefreshChannelsTarget = remember {
+        TvSettingsFocusTarget(
+            itemId = TvSettingsItemIds.LIBRARY_REFRESH_CHANNELS,
+            category = TvSettingsCategory.LIBRARY,
+            listIndex = 33,
+            focusTargetType = "action",
+        )
+    }
     val libraryRefreshEpgTarget = remember {
         TvSettingsFocusTarget(
             itemId = TvSettingsItemIds.LIBRARY_REFRESH_EPG,
@@ -1510,11 +1530,19 @@ internal fun TvSettingsScreen(
             focusTargetType = "action",
         )
     }
+    val aboutCheckForUpdatesTarget = remember {
+        TvSettingsFocusTarget(
+            itemId = TvSettingsItemIds.ABOUT_CHECK_FOR_UPDATES,
+            category = TvSettingsCategory.ABOUT,
+            listIndex = 2,
+            focusTargetType = "action",
+        )
+    }
     val aboutSupportTarget = remember {
         TvSettingsFocusTarget(
             itemId = TvSettingsItemIds.ABOUT_SUPPORT,
             category = TvSettingsCategory.ABOUT,
-            listIndex = 2,
+            listIndex = 3,
             focusTargetType = "navigation",
         )
     }
@@ -1522,7 +1550,7 @@ internal fun TvSettingsScreen(
         TvSettingsFocusTarget(
             itemId = TvSettingsItemIds.ABOUT_REPORT_ISSUE,
             category = TvSettingsCategory.ABOUT,
-            listIndex = 3,
+            listIndex = 4,
             focusTargetType = "navigation",
         )
     }
@@ -1530,7 +1558,7 @@ internal fun TvSettingsScreen(
         TvSettingsFocusTarget(
             itemId = TvSettingsItemIds.ABOUT_TERMS,
             category = TvSettingsCategory.ABOUT,
-            listIndex = 4,
+            listIndex = 5,
             focusTargetType = "navigation",
         )
     }
@@ -1538,7 +1566,7 @@ internal fun TvSettingsScreen(
         TvSettingsFocusTarget(
             itemId = TvSettingsItemIds.ABOUT_LEGAL,
             category = TvSettingsCategory.ABOUT,
-            listIndex = 5,
+            listIndex = 6,
             focusTargetType = "navigation",
         )
     }
@@ -1546,7 +1574,7 @@ internal fun TvSettingsScreen(
         TvSettingsFocusTarget(
             itemId = TvSettingsItemIds.ABOUT_STATS,
             category = TvSettingsCategory.ABOUT,
-            listIndex = 6,
+            listIndex = 7,
             focusTargetType = "action",
         )
     }
@@ -5484,6 +5512,28 @@ internal fun TvSettingsScreen(
         }
 
         if (channelsState.playlists.isNotEmpty()) {
+            item(key = "refresh_channels_now") {
+                val requester = rememberSettingsRowRequester(
+                    target = libraryRefreshChannelsTarget,
+                    externalRequester = remember("refresh_channels_now") { FocusRequester() },
+                )
+                TvSettingCard(
+                    title = stringResource(R.string.tv_settings_refresh_channels_title),
+                    subtitle = stringResource(R.string.tv_settings_refresh_channels_subtitle),
+                    modifier = Modifier.fillMaxWidth().focusProperties { left = railFocusRequester },
+                    focusRequester = requester,
+                    onFocused = { onSettingsRowFocused(libraryRefreshChannelsTarget, requester) },
+                    onClick = {
+                        channelsViewModel.refreshChannelsCatalog()
+                        TvNotificationQueue.post(
+                            context.getString(R.string.tv_settings_refresh_channels_started),
+                            NotificationType.INFO,
+                        )
+                    },
+                    rowType = TvSettingRowType.ACTION,
+                )
+            }
+
             item(key = "refresh_epg_now") {
                 val requester = rememberSettingsRowRequester(
                     target = libraryRefreshEpgTarget,
@@ -6559,6 +6609,58 @@ internal fun TvSettingsScreen(
                 onClick = {},
                 emphasis = TvSettingEmphasis.SECONDARY,
             )
+        }
+
+        if (usesVpsReleaseUpdates(com.torve.android.BuildConfig.FLAVOR)) {
+            item(key = "about_check_for_updates") {
+                val checkScope = rememberCoroutineScope()
+                var checkState by remember { mutableStateOf<UpdateCheckState>(UpdateCheckState.Idle) }
+                val requester = rememberSettingsRowRequester(
+                    target = aboutCheckForUpdatesTarget,
+                    externalRequester = remember("about_check_for_updates") { FocusRequester() },
+                )
+                TvSettingCard(
+                    title = stringResource(R.string.tv_settings_check_for_updates),
+                    subtitle = when (val s = checkState) {
+                        UpdateCheckState.Idle -> stringResource(R.string.tv_settings_check_for_updates_desc)
+                        UpdateCheckState.Checking -> stringResource(R.string.tv_settings_check_for_updates_checking)
+                        UpdateCheckState.UpToDate -> stringResource(R.string.tv_settings_check_for_updates_up_to_date)
+                        is UpdateCheckState.UpdateAvailable ->
+                            stringResource(R.string.tv_settings_check_for_updates_available, s.version)
+                    },
+                    modifier = Modifier.fillMaxWidth().focusProperties { left = railFocusRequester },
+                    focusRequester = requester,
+                    onFocused = { onSettingsRowFocused(aboutCheckForUpdatesTarget, requester) },
+                    onClick = {
+                        when (val s = checkState) {
+                            is UpdateCheckState.UpdateAvailable -> {
+                                val downloaderIntent = Intent(Intent.ACTION_VIEW, Uri.parse(s.downloadUrl)).apply {
+                                    setPackage("com.squaune.downloader")
+                                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                }
+                                runCatching { context.startActivity(downloaderIntent) }
+                            }
+                            UpdateCheckState.Checking -> Unit
+                            else -> {
+                                checkState = UpdateCheckState.Checking
+                                checkScope.launch {
+                                    val update = AppUpdateChecker.checkForUpdate()
+                                    checkState = if (update != null) {
+                                        UpdateCheckState.UpdateAvailable(update.version, update.downloadUrl)
+                                    } else {
+                                        UpdateCheckState.UpToDate
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    rowType = if (checkState is UpdateCheckState.UpdateAvailable) {
+                        TvSettingRowType.NAVIGATION
+                    } else {
+                        TvSettingRowType.ACTION
+                    },
+                )
+            }
         }
 
         item(key = "section_about_support") {

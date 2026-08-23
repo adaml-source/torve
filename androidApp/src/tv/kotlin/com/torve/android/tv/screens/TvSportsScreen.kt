@@ -376,6 +376,7 @@ fun TvSportsScreen(
     }
 
     val firstChipRequester = remember { FocusRequester() }
+    val refreshFocusRequester = remember { FocusRequester() }
     LaunchedEffect(Unit) { onFirstContentRequester(firstChipRequester) }
 
     Column(
@@ -428,34 +429,59 @@ fun TvSportsScreen(
         BackHandler(enabled = searchFieldFocused || searchExpanded) {
             collapseSearchToFilters()
         }
-        if (searchExpanded) {
-            com.torve.android.ui.components.TorveSearchField(
-            value = query,
-            onValueChange = { newValue ->
-                val clearing = query.isNotBlank() && newValue.isBlank()
-                query = newValue
-                if (clearing) startFetch()
-            },
-            placeholder = if (pageState.loading) "Searching…" else "Search sport releases",
-            onSubmit = { startFetch() },
-            showFocusRing = true,
-            editOnClick = true,
-                startEditingSignal = searchStartEditingSignal,
-                onMoveDownFromEdit = { collapseSearchToFilters() },
-                modifier = Modifier
-                    .width(300.dp)
-                    .height(38.dp)
-                    .focusProperties { left = firstChipRequester }
-                    .onFocusChanged { searchFieldFocused = it.hasFocus },
-            )
-        } else {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
             TvSportsSearchChip(
-                label = if (query.isBlank()) "Search" else "Search: $query",
+                label = if (pageState.loading || NzbBrowseStateHolder.isFetching(pageKey)) "Refreshing…" else "Refresh",
+                modifier = Modifier
+                    .focusRequester(refreshFocusRequester)
+                    .focusProperties {
+                        left = railFocusRequester
+                        down = firstChipRequester
+                    },
                 onClick = {
-                    searchExpanded = true
-                    searchStartEditingSignal += 1
+                    if (!pageState.loading && !NzbBrowseStateHolder.isFetching(pageKey)) startFetch()
                 },
             )
+            if (searchExpanded) {
+                com.torve.android.ui.components.TorveSearchField(
+                    value = query,
+                    onValueChange = { newValue ->
+                        val clearing = query.isNotBlank() && newValue.isBlank()
+                        query = newValue
+                        if (clearing) startFetch()
+                    },
+                    placeholder = if (pageState.loading) "Searching…" else "Search sport releases",
+                    onSubmit = { startFetch() },
+                    showFocusRing = true,
+                    editOnClick = true,
+                    startEditingSignal = searchStartEditingSignal,
+                    onMoveDownFromEdit = { collapseSearchToFilters() },
+                    modifier = Modifier
+                        .width(300.dp)
+                        .height(38.dp)
+                        .focusProperties {
+                            left = refreshFocusRequester
+                            down = firstChipRequester
+                        }
+                        .onFocusChanged { searchFieldFocused = it.hasFocus },
+                )
+            } else {
+                TvSportsSearchChip(
+                    label = if (query.isBlank()) "Search" else "Search: $query",
+                    modifier = Modifier.focusProperties {
+                        left = refreshFocusRequester
+                        down = firstChipRequester
+                    },
+                    onClick = {
+                        searchExpanded = true
+                        searchStartEditingSignal += 1
+                    },
+                )
+            }
         }
 
         // Bucket filter pills — first focusable row; LEFT off the
@@ -598,13 +624,14 @@ fun TvSportsScreen(
 @Composable
 private fun TvSportsSearchChip(
     label: String,
+    modifier: Modifier = Modifier,
     onClick: () -> Unit,
 ) {
     var focused by remember { mutableStateOf(false) }
     Surface(
         color = if (focused) Color(0xFF20283A) else Color(0xB0141824),
         shape = RoundedCornerShape(50),
-        modifier = Modifier
+        modifier = modifier
             .widthIn(min = 104.dp, max = 230.dp)
             .border(
                 width = 1.dp,

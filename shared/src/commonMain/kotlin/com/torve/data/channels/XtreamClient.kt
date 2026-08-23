@@ -4,8 +4,8 @@ import com.torve.data.network.HttpClientFactory
 import com.torve.domain.model.Channel
 import com.torve.domain.model.ChannelContentType
 import io.ktor.client.HttpClient
-import io.ktor.client.request.get
 import io.ktor.client.request.parameter
+import io.ktor.client.request.prepareGet
 import io.ktor.client.statement.HttpResponse
 import io.ktor.client.statement.bodyAsChannel
 import io.ktor.http.HttpHeaders
@@ -34,6 +34,10 @@ import kotlinx.datetime.Clock
 
 private const val XTREAM_MAX_JSON_BODY_BYTES = 4 * 1024 * 1024
 private const val XTREAM_ALL_STREAM_MAX_JSON_BODY_BYTES = 16 * 1024 * 1024
+// Streaming list requests retain only the current JSON item in the decoder.
+// Keep this separate from the buffered-list limit above so a large valid
+// catalog is not downloaded, discarded, and fetched again category by category.
+internal const val XTREAM_STREAMING_ALL_STREAM_MAX_JSON_BODY_BYTES = 128 * 1024 * 1024
 private const val XTREAM_SERIES_INFO_MAX_JSON_BODY_BYTES = 4 * 1024 * 1024
 private const val XTREAM_READ_CHUNK_BYTES = 32 * 1024
 private const val XTREAM_INITIAL_BODY_BUFFER_BYTES = 64 * 1024
@@ -181,13 +185,13 @@ class XtreamClient(
         password: String,
         seriesId: String,
     ): XtreamSeriesInfo {
-        val raw = xtreamHttpClient.get("${server.trimEnd('/')}/player_api.php") {
+        val raw = xtreamHttpClient.prepareGet("${server.trimEnd('/')}/player_api.php") {
             parameter("username", username)
             parameter("password", password)
             parameter("action", "get_series_info")
             parameter("series_id", seriesId)
             parameter("_t", Clock.System.now().toEpochMilliseconds().toString())
-        }.safeXtreamBodyAsText(maxBytes = XTREAM_SERIES_INFO_MAX_JSON_BODY_BYTES)
+        }.execute { it.safeXtreamBodyAsText(maxBytes = XTREAM_SERIES_INFO_MAX_JSON_BODY_BYTES) }
         val root = json.parseToJsonElement(raw) as? JsonObject
             ?: return XtreamSeriesInfo(seriesId = seriesId)
         val info = (root["info"] as? JsonObject)?.toXtreamSeries()?.copy(seriesId = seriesId)
@@ -205,13 +209,14 @@ class XtreamClient(
         action: String? = null,
         extraParams: Map<String, String> = emptyMap(),
     ): T {
-        val raw = xtreamHttpClient.get("${server.trimEnd('/')}/player_api.php") {
+        val deserializer = serializer<T>()
+        val raw = xtreamHttpClient.prepareGet("${server.trimEnd('/')}/player_api.php") {
             parameter("username", username)
             parameter("password", password)
             action?.let { parameter("action", it) }
             extraParams.forEach { (key, value) -> parameter(key, value) }
-        }.safeXtreamBodyAsText()
-        return json.decodeFromString(raw)
+        }.execute { it.safeXtreamBodyAsText() }
+        return json.decodeFromString(deserializer, raw)
     }
 
     private suspend inline fun <reified T> getJsonList(
@@ -222,18 +227,20 @@ class XtreamClient(
         extraParams: Map<String, String> = emptyMap(),
         maxBytes: Int = XTREAM_MAX_JSON_BODY_BYTES,
     ): List<T> {
-        val response = xtreamHttpClient.get("${server.trimEnd('/')}/player_api.php") {
+        val deserializer = serializer<T>()
+        return xtreamHttpClient.prepareGet("${server.trimEnd('/')}/player_api.php") {
             parameter("username", username)
             parameter("password", password)
             parameter("action", action)
             parameter("_t", Clock.System.now().toEpochMilliseconds().toString())
             extraParams.forEach { (key, value) -> parameter(key, value) }
+        }.execute { response ->
+            response.decodeXtreamJsonList(
+                json = json,
+                deserializer = deserializer,
+                maxBytes = maxBytes,
+            )
         }
-        return response.decodeXtreamJsonList(
-            json = json,
-            deserializer = serializer<T>(),
-            maxBytes = maxBytes,
-        )
     }
 
     private suspend fun HttpResponse.safeXtreamBodyAsText(
@@ -299,6 +306,211 @@ class XtreamClient(
             decoder.consume(chunk, 0, read)
         }
         return decoder.finish()
+    }
+
+    private suspend fun <T> HttpResponse.streamXtreamJsonList(
+        json: Json,
+        deserializer: DeserializationStrategy<T>,
+        maxBytes: Int,
+        onItem: (T) -> Unit,
+    ) {
+        val declaredLength = headers[HttpHeaders.ContentLength]?.toLongOrNull()
+        if (declaredLength != null && declaredLength > maxBytes) {
+            throw XtreamResponseTooLargeException(maxBytes, declaredLength)
+        }
+        val decoder = XtreamJsonListStreamDecoder(
+            json = json,
+            deserializer = deserializer,
+            maxBytes = maxBytes,
+            onItemDecoded = onItem,
+        )
+        val channel = bodyAsChannel()
+        val chunk = ByteArray(minOf(XTREAM_READ_CHUNK_BYTES, maxBytes + 1))
+        while (true) {
+            val read = channel.readAvailable(chunk, 0, chunk.size)
+            if (read < 0) break
+            if (read == 0) continue
+            decoder.consume(chunk, 0, read)
+        }
+        decoder.finish()
+    }
+
+    private suspend fun <T> streamJsonList(
+        server: String,
+        username: String,
+        password: String,
+        action: String,
+        extraParams: Map<String, String> = emptyMap(),
+        maxBytes: Int = XTREAM_MAX_JSON_BODY_BYTES,
+        deserializer: DeserializationStrategy<T>,
+        onItem: (T) -> Unit,
+    ) {
+        xtreamHttpClient.prepareGet("${server.trimEnd('/')}/player_api.php") {
+            parameter("username", username)
+            parameter("password", password)
+            parameter("action", action)
+            parameter("_t", Clock.System.now().toEpochMilliseconds().toString())
+            extraParams.forEach { (key, value) -> parameter(key, value) }
+        }.execute { response ->
+            response.streamXtreamJsonList(
+                json = json,
+                deserializer = deserializer,
+                maxBytes = maxBytes,
+                onItem = onItem,
+            )
+        }
+    }
+
+    suspend fun streamLiveStreams(
+        server: String,
+        username: String,
+        password: String,
+        categoryId: String? = null,
+        onStream: (XtreamLiveStream) -> Unit,
+    ) = streamJsonList(
+        server = server,
+        username = username,
+        password = password,
+        action = "get_live_streams",
+        extraParams = categoryId?.let { mapOf("category_id" to it) }.orEmpty(),
+        maxBytes = if (categoryId == null) {
+            XTREAM_STREAMING_ALL_STREAM_MAX_JSON_BODY_BYTES
+        } else {
+            XTREAM_MAX_JSON_BODY_BYTES
+        },
+        deserializer = XtreamLiveStream.serializer(),
+        onItem = onStream,
+    )
+
+    suspend fun streamVodStreams(
+        server: String,
+        username: String,
+        password: String,
+        categoryId: String? = null,
+        onStream: (XtreamVodStream) -> Unit,
+    ) = streamJsonList(
+        server = server,
+        username = username,
+        password = password,
+        action = "get_vod_streams",
+        extraParams = categoryId?.let { mapOf("category_id" to it) }.orEmpty(),
+        maxBytes = if (categoryId == null) {
+            XTREAM_STREAMING_ALL_STREAM_MAX_JSON_BODY_BYTES
+        } else {
+            XTREAM_MAX_JSON_BODY_BYTES
+        },
+        deserializer = XtreamVodStream.serializer(),
+        onItem = onStream,
+    )
+
+    suspend fun streamSeries(
+        server: String,
+        username: String,
+        password: String,
+        onSeries: (XtreamSeries) -> Unit,
+    ) = streamJsonList(
+        server = server,
+        username = username,
+        password = password,
+        action = "get_series",
+        maxBytes = XTREAM_STREAMING_ALL_STREAM_MAX_JSON_BODY_BYTES,
+        deserializer = XtreamSeries.serializer(),
+        onItem = onSeries,
+    )
+
+    fun mapLiveStreamToChannel(
+        stream: XtreamLiveStream,
+        categoryMap: Map<String, XtreamCategory>,
+        server: String,
+        username: String,
+        password: String,
+        playlistId: String,
+    ): Channel {
+        val categoryName = categoryMap[stream.categoryId]?.categoryName
+        val streamUrl = "${server.trimEnd('/')}/live/$username/$password/${stream.streamId}.ts"
+        val hasArchive = (stream.tvArchive ?: 0) > 0
+        return Channel(
+            name = stream.name ?: "Unknown",
+            url = streamUrl,
+            tvgId = stream.epgChannelId,
+            tvgName = stream.name,
+            tvgLogo = stream.streamIcon,
+            groupTitle = categoryName,
+            channelNumber = stream.num,
+            catchupType = if (hasArchive) "xc" else null,
+            catchupDays = if (hasArchive) stream.tvArchiveDuration?.takeIf { it > 0 } ?: 1 else null,
+            playlistId = playlistId,
+            contentType = ChannelContentType.LIVE,
+        )
+    }
+
+    fun mapVodStreamToChannel(
+        stream: XtreamVodStream,
+        categoryMap: Map<String, XtreamCategory>,
+        server: String,
+        username: String,
+        password: String,
+        playlistId: String,
+    ): Channel {
+        val categoryName = categoryMap[stream.categoryId]?.categoryName
+        val ext = stream.containerExtension ?: "mp4"
+        val streamUrl = "${server.trimEnd('/')}/movie/$username/$password/${stream.streamId}.$ext"
+        return Channel(
+            name = stream.name ?: "Unknown",
+            url = streamUrl,
+            tvgName = stream.name,
+            tvgLogo = stream.streamIcon,
+            groupTitle = categoryName?.let { "VOD: $it" } ?: "VOD",
+            channelNumber = stream.num,
+            kodiProps = buildMap {
+                put("vod_stream_id", stream.streamId)
+                stream.categoryId?.takeIf { it.isNotBlank() }?.let { put("vod_category_id", it) }
+                stream.containerExtension?.takeIf { it.isNotBlank() }?.let { put("vod_container_extension", it) }
+                stream.rating?.takeIf { it.isNotBlank() }?.let { put("vod_rating", it) }
+                stream.rating5Based?.takeIf { it > 0.0 }?.let { put("vod_rating_5based", it.toString()) }
+                stream.youtubeTrailer?.takeIf { it.isNotBlank() }?.let { put("vod_youtube_trailer", it) }
+                stream.genre?.takeIf { it.isNotBlank() }?.let { put("vod_genre", it) }
+            },
+            playlistId = playlistId,
+            contentType = ChannelContentType.VOD_MOVIE,
+        )
+    }
+
+    fun mapSeriesStreamToChannel(
+        series: XtreamSeries,
+        categoryMap: Map<String, XtreamCategory>,
+        server: String,
+        username: String,
+        password: String,
+        playlistId: String,
+    ): Channel {
+        val categoryName = categoryMap[series.categoryId]?.categoryName
+        val seriesUrl = "${server.trimEnd('/')}/series/$username/$password/${series.seriesId}.mp4"
+        return Channel(
+            name = series.name ?: "Unknown",
+            url = seriesUrl,
+            tvgName = series.name,
+            tvgLogo = series.cover,
+            groupTitle = categoryName?.let { "VOD: $it" } ?: "VOD",
+            channelNumber = series.num,
+            kodiProps = buildMap {
+                put("vod_series_id", series.seriesId)
+                series.categoryId?.takeIf { it.isNotBlank() }?.let { put("vod_category_id", it) }
+                series.rating?.takeIf { it.isNotBlank() }?.let { put("vod_rating", it) }
+                series.rating5Based?.takeIf { it > 0.0 }?.let { put("vod_rating_5based", it.toString()) }
+                series.lastModified?.takeIf { it.isNotBlank() }?.let { put("vod_last_modified", it) }
+                series.plot?.takeIf { it.isNotBlank() }?.let { put("vod_plot", it) }
+                series.cast?.takeIf { it.isNotBlank() }?.let { put("vod_cast", it) }
+                series.director?.takeIf { it.isNotBlank() }?.let { put("vod_director", it) }
+                series.genre?.takeIf { it.isNotBlank() }?.let { put("vod_genre", it) }
+                series.releaseDate?.takeIf { it.isNotBlank() }?.let { put("vod_release_date", it) }
+                series.backdropPath.firstOrNull()?.takeIf { it.isNotBlank() }?.let { put("vod_backdrop", it) }
+                series.youtubeTrailer?.takeIf { it.isNotBlank() }?.let { put("vod_youtube_trailer", it) }
+                series.episodeRunTime?.takeIf { it.isNotBlank() }?.let { put("vod_episode_run_time", it) }
+            },
+            playlistId = playlistId,
+            contentType = ChannelContentType.VOD_SERIES,
+        )
     }
 
     /**
@@ -429,11 +641,16 @@ class XtreamClient(
  * time. This intentionally avoids holding the complete response as both a
  * ByteArray and a UTF-16 String, which can exhaust the 192 MB Fire TV heap.
  * Small non-standard object-wrapped responses retain the compatibility path.
+ *
+ * When [onItemDecoded] is supplied, each decoded item is dispatched immediately
+ * via the callback instead of being accumulated in [decoded]. This prevents the
+ * large intermediate list that caused OOM on Fire TV with 95K-channel playlists.
  */
 internal class XtreamJsonListStreamDecoder<T>(
     private val json: Json,
     private val deserializer: DeserializationStrategy<T>,
     private val maxBytes: Int,
+    private val onItemDecoded: ((T) -> Unit)? = null,
 ) {
     private enum class Mode {
         BEFORE_ROOT,
@@ -473,13 +690,18 @@ internal class XtreamJsonListStreamDecoder<T>(
             Mode.WRAPPED_OBJECT -> {
                 val raw = wrappedBuffer.decodeToString()
                 val rows = json.parseToJsonElement(raw).flexRows()
-                return rows.mapNotNull { row ->
+                val items = rows.mapNotNull { row ->
                     runCatching { json.decodeFromJsonElement(deserializer, row) }.getOrNull()
                 }
+                if (onItemDecoded != null) {
+                    items.forEach { onItemDecoded.invoke(it) }
+                    return emptyList()
+                }
+                return items
             }
             Mode.DONE -> Unit
         }
-        if (seenItems > 0 && decoded.isEmpty() && failedItems > 0) {
+        if (seenItems > 0 && decoded.isEmpty() && failedItems > 0 && onItemDecoded == null) {
             error("Xtream JSON response contained no decodable rows.")
         }
         return decoded
@@ -583,6 +805,8 @@ internal class XtreamJsonListStreamDecoder<T>(
         }.getOrNull()
         if (row == null) {
             failedItems++
+        } else if (onItemDecoded != null) {
+            onItemDecoded.invoke(row)
         } else {
             decoded += row
         }

@@ -470,6 +470,10 @@ internal fun TvNavHost(
                 navArgument("channelUrl") { type = NavType.StringType; defaultValue = "" },
                 navArgument("channelName") { type = NavType.StringType; defaultValue = "" },
                 navArgument("groupName") { type = NavType.StringType; defaultValue = "" },
+                navArgument("replayUrl") { type = NavType.StringType; defaultValue = "" },
+                navArgument("replayStartMs") { type = NavType.LongType; defaultValue = -1L },
+                navArgument("replayEndMs") { type = NavType.LongType; defaultValue = -1L },
+                navArgument("replayTitle") { type = NavType.StringType; defaultValue = "" },
             ),
         ) { backStackEntry ->
             LaunchedEffect(backStackEntry.id) {
@@ -486,6 +490,10 @@ internal fun TvNavHost(
                     channelUrl = backStackEntry.arguments?.getString("channelUrl") ?: "",
                     channelName = backStackEntry.arguments?.getString("channelName") ?: "",
                     groupName = backStackEntry.arguments?.getString("groupName") ?: "",
+                    initialReplayUrl = backStackEntry.arguments?.getString("replayUrl").orEmpty(),
+                    initialReplayStartMs = backStackEntry.arguments?.getLong("replayStartMs") ?: -1L,
+                    initialReplayEndMs = backStackEntry.arguments?.getLong("replayEndMs") ?: -1L,
+                    initialReplayTitle = backStackEntry.arguments?.getString("replayTitle").orEmpty(),
                     // Focus state cleanup handled in TvRoot via isSubRouteActive LaunchedEffect
                     onBack = { navController.popBackStack() },
                 )

@@ -94,6 +94,7 @@ import com.torve.domain.model.stableChannelId
 import com.torve.domain.repository.DeviceLocalSettingsRepository
 import com.torve.presentation.channels.EpgState
 import com.torve.presentation.channels.ChannelsViewModel
+import com.torve.android.ui.player.ActivePlaybackState
 import com.torve.presentation.tvhome.TvHomeOutcomeViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -130,6 +131,12 @@ private enum class LeftFocusTarget {
     MANAGE,
     CATEGORY,
 }
+
+private data class GuideProgrammeActionTarget(
+    val channel: Channel,
+    val programme: EpgProgramme?,
+    val replayUrl: String?,
+)
 
 private data class TvIptvScreenCacheState(
     val focusedChannelId: String? = null,
@@ -242,6 +249,7 @@ fun TvIptvScreen(
     railFocusRequester: FocusRequester,
     heroOverlay: (@Composable () -> Unit)? = null,
     onChannelPlay: (Channel) -> Unit,
+    onProgrammePlayFromBeginning: (Channel, EpgProgramme, String) -> Unit,
     onOpenEpgSettings: () -> Unit = {},
     onOpenAccountSettings: () -> Unit = {},
     isSignedIn: Boolean = true,
@@ -290,6 +298,7 @@ fun TvIptvScreen(
     var lastGridRowIndex by rememberSaveable { mutableIntStateOf(cachedScreenState.lastGridRowIndex) }
     var lastGridColIndex by rememberSaveable { mutableIntStateOf(cachedScreenState.lastGridColIndex) }
     var gridFocusRequestToken by rememberSaveable { mutableIntStateOf(0) }
+    var guideProgrammeActionTarget by remember { mutableStateOf<GuideProgrammeActionTarget?>(null) }
     var lastPageChangeMs by remember { mutableLongStateOf(0L) }
     var wasActive by remember { mutableStateOf(false) }
 
@@ -1133,6 +1142,25 @@ fun TvIptvScreen(
         wasSubRouteActive = isSubRouteActive
     }
 
+    // When the PersistentPlaybackBar is dismissed via Stop, it clears the session
+    // but TvRoot's generic focus restore is suppressed while a sub-route is active.
+    // Watch the session directly so we can reclaim focus ourselves.
+    val activePlaybackSession = ActivePlaybackState.session
+    var prevSessionNonNull by remember { mutableStateOf(activePlaybackSession != null) }
+    LaunchedEffect(activePlaybackSession) {
+        val hasSession = activePlaybackSession != null
+        if (prevSessionNonNull && !hasSession && isActive && !isRailFocused) {
+            delay(80)
+            Log.d("TvIptv", "Playback session stopped: restoring focus to zone=$focusedZone")
+            if (focusedZone == FocusZone.EPG_GRID && channelsInGroup.isNotEmpty()) {
+                gridFocusRequestToken += 1
+            } else {
+                requestLeftPanelFocus("session_stopped")
+            }
+        }
+        prevSessionNonNull = hasSession
+    }
+
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -1432,6 +1460,23 @@ fun TvIptvScreen(
                             viewModel.recordChannelViewed(channel)
                             onChannelPlay(channel)
                         },
+                        onProgrammeActions = { channel, programme ->
+                            val resolvedReplayUrl = programme?.let {
+                                viewModel.resolveCatchupUrl(channel, it)
+                            }
+                            val replayUrl = resolvedReplayUrl.takeIf {
+                                TvLivePlaybackPolicy.canOfferReplay(
+                                    programme = programme,
+                                    replayUrl = resolvedReplayUrl,
+                                    nowMs = System.currentTimeMillis(),
+                                )
+                            }
+                            guideProgrammeActionTarget = GuideProgrammeActionTarget(
+                                channel = channel,
+                                programme = programme,
+                                replayUrl = replayUrl,
+                            )
+                        },
                         onTimeForward = {
                             val now = System.currentTimeMillis()
                             if (windowPageOffset < MAX_PAGE_OFFSET && now - lastPageChangeMs >= 250L) {
@@ -1543,6 +1588,37 @@ fun TvIptvScreen(
         }
 
         heroOverlay?.invoke()
+
+        guideProgrammeActionTarget?.let { target ->
+            TvGuideProgrammeActionOverlay(
+                channel = target.channel,
+                programme = target.programme,
+                canStartFromBeginning = !target.replayUrl.isNullOrBlank(),
+                onWatchLive = {
+                    guideProgrammeActionTarget = null
+                    viewModel.recordChannelViewed(target.channel)
+                    onChannelPlay(target.channel)
+                },
+                onStartFromBeginning = {
+                    val programme = target.programme
+                    val replayUrl = target.replayUrl
+                    guideProgrammeActionTarget = null
+                    if (programme != null && !replayUrl.isNullOrBlank()) {
+                        viewModel.recordChannelViewed(target.channel)
+                        onProgrammePlayFromBeginning(target.channel, programme, replayUrl)
+                    } else {
+                        gridFocusRequestToken += 1
+                    }
+                },
+                // Android TV recording is exposed only when a platform recording
+                // service is configured. No such service is bound in this build.
+                onRecord = null,
+                onDismiss = {
+                    guideProgrammeActionTarget = null
+                    gridFocusRequestToken += 1
+                },
+            )
+        }
     }
 }
 

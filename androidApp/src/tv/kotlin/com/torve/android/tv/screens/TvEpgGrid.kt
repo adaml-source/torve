@@ -107,6 +107,7 @@ internal fun TvEpgGrid(
     onGridCellFocused: (rowIndex: Int, colIndex: Int) -> Unit,
     onMoveVertical: (delta: Int) -> Unit,
     onChannelPlay: (Channel) -> Unit,
+    onProgrammeActions: (Channel, EpgProgramme?) -> Unit,
     onTimeForward: () -> Unit,
     modifier: Modifier = Modifier,
     channelColumnWidth: Dp = EPG_CHANNEL_COL_WIDTH_DP.dp,
@@ -270,6 +271,7 @@ internal fun TvEpgGrid(
                             onFocused = { onChannelFocused(enriched, currentProgramme) },
                             onGridCellFocused = { onGridCellFocused(rowIndex, 0) },
                             onPlay = { onChannelPlay(enriched.channel) },
+                            onOpenActions = { onProgrammeActions(enriched.channel, currentProgramme) },
                         )
                     } else {
                         val cells = remember(programmes, windowStartMs, windowEndMs) {
@@ -301,6 +303,9 @@ internal fun TvEpgGrid(
                                 onGridCellFocused(rowIndex, colIndex)
                             },
                             onChannelPlay = { onChannelPlay(enriched.channel) },
+                            onProgrammeActions = { programme ->
+                                onProgrammeActions(enriched.channel, programme)
+                            },
                             onTimeForward = onTimeForward,
                         )
                     }
@@ -357,6 +362,7 @@ private fun CompactChannelRow(
     onFocused: () -> Unit,
     onGridCellFocused: () -> Unit,
     onPlay: () -> Unit,
+    onOpenActions: () -> Unit,
 ) {
     val focusRequester = remember { FocusRequester() }
     var isFocused by remember { mutableStateOf(false) }
@@ -383,13 +389,17 @@ private fun CompactChannelRow(
                 }
             }
             .onPreviewKeyEvent { event ->
-                if (event.type == KeyEventType.KeyDown &&
-                    event.key in listOf(Key.DirectionCenter, Key.Enter, Key.NumPadEnter)
-                ) {
-                    onPlay()
-                    true
-                } else {
-                    false
+                if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+                when (event.key) {
+                    Key.DirectionCenter, Key.Enter, Key.NumPadEnter -> {
+                        onPlay()
+                        true
+                    }
+                    Key.Menu -> {
+                        onOpenActions()
+                        true
+                    }
+                    else -> false
                 }
             },
         shape = ClickableSurfaceDefaults.shape(RoundedCornerShape(14.dp)),
@@ -530,6 +540,7 @@ private fun EpgChannelRow(
     onChannelFocused: (EpgProgramme?) -> Unit,
     onGridCellFocused: (colIndex: Int) -> Unit,
     onChannelPlay: () -> Unit,
+    onProgrammeActions: (EpgProgramme?) -> Unit,
     onTimeForward: () -> Unit,
 ) {
     Row(
@@ -614,6 +625,7 @@ private fun EpgChannelRow(
                     onFocused = { onChannelFocused(cell.programme) },
                     onCellFocused = { onGridCellFocused(index) },
                     onPlay = onChannelPlay,
+                    onOpenActions = { onProgrammeActions(cell.programme) },
                     onTimeForward = onTimeForward,
                 )
             }
@@ -635,6 +647,7 @@ private fun EpgProgrammeCell(
     onFocused: () -> Unit,
     onCellFocused: () -> Unit,
     onPlay: () -> Unit,
+    onOpenActions: () -> Unit,
     onTimeForward: () -> Unit,
 ) {
     val cellFocusRequester = remember { FocusRequester() }
@@ -669,6 +682,11 @@ private fun EpgProgrammeCell(
                 when (event.key) {
                     Key.DirectionCenter, Key.Enter, Key.NumPadEnter -> {
                         onPlay()
+                        true
+                    }
+
+                    Key.Menu -> {
+                        onOpenActions()
                         true
                     }
 

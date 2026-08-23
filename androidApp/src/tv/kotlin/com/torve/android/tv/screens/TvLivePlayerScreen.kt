@@ -12,8 +12,6 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInVertically
-import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.border
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.background
@@ -88,7 +86,6 @@ import com.torve.android.tv.TvScreenCache
 import com.torve.android.tv.screens.LiveChannelInfoOverlay
 import com.torve.android.tv.screens.LiveChannelListOverlay
 import com.torve.android.tv.screens.LiveEpgGuideOverlay
-import com.torve.android.tv.screens.LiveMenuBarOverlay
 import com.torve.android.tv.screens.LivePictureFormatOption
 import com.torve.android.tv.screens.LivePlaybackMenuOverlay
 import com.torve.android.tv.screens.LiveSettingsOverlay
@@ -125,6 +122,19 @@ import java.util.Locale
 
 private const val AUTO_HIDE_DELAY_MS = 5_000L
 private const val LONG_PRESS_THRESHOLD_MS = 800L
+
+private fun mediaSeekDeltaMs(keyCode: Int): Long? = when (keyCode) {
+    android.view.KeyEvent.KEYCODE_MEDIA_REWIND,
+    android.view.KeyEvent.KEYCODE_MEDIA_SKIP_BACKWARD,
+    android.view.KeyEvent.KEYCODE_MEDIA_STEP_BACKWARD -> -TvLivePlaybackPolicy.REPLAY_SEEK_STEP_MS
+
+    android.view.KeyEvent.KEYCODE_MEDIA_FAST_FORWARD,
+    android.view.KeyEvent.KEYCODE_MEDIA_SKIP_FORWARD,
+    android.view.KeyEvent.KEYCODE_MEDIA_STEP_FORWARD -> TvLivePlaybackPolicy.REPLAY_SEEK_STEP_MS
+
+    else -> null
+}
+
 private const val ZAP_COALESCE_DELAY_MS = 180L
 private const val ERROR_BANNER_DURATION_MS = 4_000L
 private const val SILENT_AUDIO_PROBE_DELAY_MS = 5_500L
@@ -145,25 +155,6 @@ private const val LIVE_WATCHDOG_MIN_ENDED_POSITION_MS = 5_000L
 private const val LIVE_WATCHDOG_AUDIO_SINK_ERROR_THRESHOLD = 3
 private const val LIVE_WATCHDOG_AUDIO_SINK_ERROR_RECENT_MS = 15_000L
 private const val LIVE_PLAYER_EPG_CHANNEL_LIMIT = 260
-
-private enum class LivePictureFormat(
-    val key: String,
-    val label: String,
-    val frameAspectRatio: Float?,
-    val exoResizeMode: Int,
-) {
-    SOURCE("source", "Source", null, AspectRatioFrameLayout.RESIZE_MODE_FIT),
-    ORIGINAL("original", "Original", null, AspectRatioFrameLayout.RESIZE_MODE_FIT),
-    FULLSCREEN("fullscreen", "Full screen", null, AspectRatioFrameLayout.RESIZE_MODE_FILL),
-    RATIO_16_9("16_9", "16:9", 16f / 9f, AspectRatioFrameLayout.RESIZE_MODE_FIT),
-    RATIO_4_3("4_3", "4:3", 4f / 3f, AspectRatioFrameLayout.RESIZE_MODE_FIT),
-    RATIO_21_9("21_9", "21:9", 21f / 9f, AspectRatioFrameLayout.RESIZE_MODE_FIT),
-    ;
-
-    companion object {
-        fun fromKey(key: String): LivePictureFormat = entries.firstOrNull { it.key == key } ?: SOURCE
-    }
-}
 
 private data class LivePlayerEngineSession(
     val id: LivePlayerEngineId,
@@ -208,6 +199,10 @@ fun TvLivePlayerScreen(
     channelUrl: String,
     channelName: String,
     groupName: String,
+    initialReplayUrl: String = "",
+    initialReplayStartMs: Long = -1L,
+    initialReplayEndMs: Long = -1L,
+    initialReplayTitle: String = "",
     onBack: () -> Unit,
     viewModel: ChannelsViewModel = koinInject(),
     localSettingsRepo: DeviceLocalSettingsRepository = koinInject(),
@@ -298,8 +293,49 @@ fun TvLivePlayerScreen(
     var channelNumber by remember { mutableIntStateOf(1) }
     var playbackGroupChannels by remember { mutableStateOf<List<EnrichedChannel>>(emptyList()) }
     var playbackGuideProgrammes by remember { mutableStateOf<Map<String, List<EpgProgramme>>>(emptyMap()) }
-    var activeReplayProgramme by remember { mutableStateOf<EpgProgramme?>(null) }
-    var playbackUrlOverride by remember { mutableStateOf<String?>(null) }
+    var activeReplayProgramme by remember(
+        channelUrl,
+        initialReplayUrl,
+        initialReplayStartMs,
+        initialReplayEndMs,
+        initialReplayTitle,
+    ) {
+        mutableStateOf(
+            TvLivePlaybackPolicy.initialReplayProgramme(
+                replayUrl = initialReplayUrl,
+                startMs = initialReplayStartMs,
+                endMs = initialReplayEndMs,
+                title = initialReplayTitle,
+            ),
+        )
+    }
+    var playbackUrlOverride by remember(channelUrl, initialReplayUrl) {
+        mutableStateOf(initialReplayUrl.takeIf { it.isNotBlank() })
+    }
+    var replayWindowStartOffsetMs by remember(channelUrl, initialReplayUrl) { mutableLongStateOf(0L) }
+    var replayTimelinePositionMs by remember(channelUrl, initialReplayUrl) { mutableLongStateOf(0L) }
+    var pendingReplaySeekUrl by remember(channelUrl, initialReplayUrl) { mutableStateOf<String?>(null) }
+    var pendingReplaySeekSawBuffering by remember(channelUrl, initialReplayUrl) { mutableStateOf(false) }
+    val replayTimeshiftActive = activeReplayProgramme != null
+    val replayTimelineDurationMs = TvLivePlaybackPolicy.replayAvailableDurationMs(
+        programme = activeReplayProgramme,
+        nowMs = System.currentTimeMillis(),
+    )
+    val timeshiftTransportAvailable = TvLivePlaybackPolicy.hasTimeshiftTransport(
+        isLive = playerState.isLive,
+        isSeekable = playerState.isSeekable,
+        replayActive = replayTimeshiftActive,
+    )
+    val timeshiftTimeline = TvLivePlaybackPolicy.timeshiftTimeline(
+        replayActive = replayTimeshiftActive,
+        replayPositionMs = replayTimelinePositionMs,
+        replayDurationMs = replayTimelineDurationMs,
+        playerPositionMs = playerState.positionMs,
+        playerDurationMs = playerState.durationMs,
+    )
+    val currentChannelIsFavorite = currentChannel?.let { channel ->
+        TvLivePlaybackPolicy.isChannelFavorite(channel, state.favorites)
+    } == true
     var reloadNonce by remember { mutableIntStateOf(0) }
     var playbackLaunchGeneration by remember { mutableIntStateOf(0) }
     var pendingPlaybackUrl by remember { mutableStateOf<String?>(null) }
@@ -307,7 +343,6 @@ fun TvLivePlayerScreen(
     var mpvSurfaceBindingToken by remember { mutableIntStateOf(-1) }
     var sleepTimerTargetElapsedMs by remember { mutableLongStateOf(0L) }
     var sleepTimerMinutes by remember { mutableStateOf<Int?>(null) }
-    var playbackInfoRefreshTick by remember { mutableIntStateOf(0) }
     var stoppedForBackground by remember { mutableStateOf(false) }
 
     DisposableEffect(engineSession?.engine) {
@@ -346,13 +381,26 @@ fun TvLivePlayerScreen(
     // ── Long-press detection ──
     var centerKeyDownTime by remember { mutableLongStateOf(0L) }
     val playerRootFocusRequester = remember { FocusRequester() }
+    val fullScreenPlaybackMenuOwner = remember { Any() }
+    val fullScreenPlaybackMenuRequestId = ActivePlaybackState.fullScreenPlaybackMenuRequestId
+    var handledPlaybackMenuRequestId by remember {
+        mutableLongStateOf(fullScreenPlaybackMenuRequestId)
+    }
     var selectedPictureFormatKey by rememberSaveable { mutableStateOf(LivePictureFormat.SOURCE.key) }
     val selectedPictureFormat = LivePictureFormat.fromKey(selectedPictureFormatKey)
     var selectedBufferPreset by rememberSaveable { mutableStateOf(LiveBufferPreset.HIGH) }
     val bufferPrefs = remember { context.getSharedPreferences("live_buffer_prefs", Context.MODE_PRIVATE) }
     var audioDelayMs by rememberSaveable { mutableStateOf(0) }
+    var subtitleDelayMs by rememberSaveable { mutableStateOf(0) }
     var exoPlayerView by remember { mutableStateOf<TorvePlayerView?>(null) }
     var exoSurfaceGeneration by remember { mutableIntStateOf(0) }
+
+    DisposableEffect(fullScreenPlaybackMenuOwner) {
+        ActivePlaybackState.registerFullScreenPlaybackMenuOwner(fullScreenPlaybackMenuOwner)
+        onDispose {
+            ActivePlaybackState.unregisterFullScreenPlaybackMenuOwner(fullScreenPlaybackMenuOwner)
+        }
+    }
 
     fun applyPlaybackVolumeToEngine(
         session: LivePlayerEngineSession? = engineSession,
@@ -412,8 +460,8 @@ fun TvLivePlayerScreen(
                 )
                 activeEngine.setAudioDelay(audioDelayMs)
                 activeEngine.setPictureFormat(
-                    aspectRatio = selectedPictureFormat.frameAspectRatio,
-                    fill = selectedPictureFormat == LivePictureFormat.FULLSCREEN,
+                    aspectRatioOverride = selectedPictureFormat.renderConfiguration.mpvAspectRatioOverride,
+                    panscan = selectedPictureFormat.renderConfiguration.mpvPanscan,
                 )
             }
             is ExoPlayerEngine -> {
@@ -647,6 +695,12 @@ fun TvLivePlayerScreen(
         com.torve.android.debug.AnrDebugLogger.logOverlayChange(target.name)
     }
 
+    LaunchedEffect(fullScreenPlaybackMenuRequestId) {
+        if (fullScreenPlaybackMenuRequestId == handledPlaybackMenuRequestId) return@LaunchedEffect
+        handledPlaybackMenuRequestId = fullScreenPlaybackMenuRequestId
+        openOverlay(LivePlayerOverlay.PLAYBACK_MENU)
+    }
+
     fun closeOverlayOrReturnToPrevious(): Boolean {
         if (activeOverlay == LivePlayerOverlay.NONE) return false
         val previous = overlayBackStack.lastOrNull()
@@ -670,6 +724,10 @@ fun TvLivePlayerScreen(
     ) {
         playbackUrlOverride = null
         activeReplayProgramme = null
+        replayWindowStartOffsetMs = 0L
+        replayTimelinePositionMs = 0L
+        pendingReplaySeekUrl = null
+        pendingReplaySeekSawBuffering = false
         currentChannel = channel
         currentGroupName = group
         channelNumber = index + 1
@@ -681,8 +739,11 @@ fun TvLivePlayerScreen(
 
     fun canReplayProgramme(channel: Channel, programme: EpgProgramme): Boolean {
         if (!viewModel.canCatchup(channel)) return false
-        if (programme.endTime > System.currentTimeMillis()) return false
-        return viewModel.resolveCatchupUrl(channel, programme) != null
+        return TvLivePlaybackPolicy.canOfferReplay(
+            programme = programme,
+            replayUrl = viewModel.resolveCatchupUrl(channel, programme),
+            nowMs = System.currentTimeMillis(),
+        )
     }
 
     fun replayProgramme(channel: Channel, programme: EpgProgramme) {
@@ -693,6 +754,10 @@ fun TvLivePlayerScreen(
         }
         playbackUrlOverride = replayUrl
         activeReplayProgramme = programme
+        replayWindowStartOffsetMs = 0L
+        replayTimelinePositionMs = 0L
+        pendingReplaySeekUrl = null
+        pendingReplaySeekSawBuffering = false
         pendingEngineRecovery = null
         pendingTrackRecovery = null
         pendingFirstPassFailureReason = null
@@ -706,6 +771,10 @@ fun TvLivePlayerScreen(
         if (playbackUrlOverride == null && activeReplayProgramme == null) return
         playbackUrlOverride = null
         activeReplayProgramme = null
+        replayWindowStartOffsetMs = 0L
+        replayTimelinePositionMs = 0L
+        pendingReplaySeekUrl = null
+        pendingReplaySeekSawBuffering = false
         pendingEngineRecovery = null
         pendingTrackRecovery = null
         pendingFirstPassFailureReason = null
@@ -908,8 +977,8 @@ fun TvLivePlayerScreen(
     LaunchedEffect(selectedPictureFormat, useMpv) {
         if (useMpv) {
             (engine as? MPVPlayerEngine)?.setPictureFormat(
-                aspectRatio = selectedPictureFormat.frameAspectRatio,
-                fill = selectedPictureFormat == LivePictureFormat.FULLSCREEN,
+                aspectRatioOverride = selectedPictureFormat.renderConfiguration.mpvAspectRatioOverride,
+                panscan = selectedPictureFormat.renderConfiguration.mpvPanscan,
             )
         }
     }
@@ -917,6 +986,10 @@ fun TvLivePlayerScreen(
     // ── Apply audio delay to engine ──
     LaunchedEffect(audioDelayMs, engineSession?.id) {
         engine?.setAudioDelay(audioDelayMs)
+    }
+
+    LaunchedEffect(subtitleDelayMs, engineSession?.id) {
+        engine?.setSubtitleDelay(subtitleDelayMs)
     }
 
     // ── Update stream info from ExoPlayer format (poll every 2s) ──
@@ -1279,24 +1352,13 @@ fun TvLivePlayerScreen(
         }
     }
 
-    // ── Auto-hide timer for CHANNEL_INFO and MENU_BAR ──
+    // ── Auto-hide timer for the channel-zap information HUD ──
     LaunchedEffect(activeOverlay, overlayTimestamp) {
-        if (activeOverlay == LivePlayerOverlay.CHANNEL_INFO || activeOverlay == LivePlayerOverlay.MENU_BAR) {
+        if (activeOverlay == LivePlayerOverlay.CHANNEL_INFO) {
             delay(AUTO_HIDE_DELAY_MS)
-            if (activeOverlay == LivePlayerOverlay.CHANNEL_INFO || activeOverlay == LivePlayerOverlay.MENU_BAR) {
+            if (activeOverlay == LivePlayerOverlay.CHANNEL_INFO) {
                 closeAllOverlays()
             }
-        }
-    }
-
-    LaunchedEffect(activeOverlay, engineSession?.id) {
-        if (activeOverlay != LivePlayerOverlay.PLAYBACK_MENU) {
-            playbackInfoRefreshTick = 0
-            return@LaunchedEffect
-        }
-        while (activeOverlay == LivePlayerOverlay.PLAYBACK_MENU) {
-            delay(1_000L)
-            playbackInfoRefreshTick += 1
         }
     }
 
@@ -1821,7 +1883,7 @@ fun TvLivePlayerScreen(
         }
     }
 
-    val sleepTimerRemainingLabel = remember(sleepTimerTargetElapsedMs, playbackInfoRefreshTick) {
+    val sleepTimerRemainingLabel = remember(sleepTimerTargetElapsedMs) {
         if (sleepTimerTargetElapsedMs <= 0L) {
             null
         } else {
@@ -1845,7 +1907,6 @@ fun TvLivePlayerScreen(
         state.audioPassthroughEnabled,
         state.preferSurroundCodecs,
         state.liveAudioOutputMode,
-        playbackInfoRefreshTick,
     ) {
         when (val activeEngine = engine) {
             is ExoPlayerEngine -> activeEngine.getPlaybackRuntimeInfo()
@@ -1952,6 +2013,146 @@ fun TvLivePlayerScreen(
             )
         }
             .sortedBy(EpgProgramme::startTime)
+    }
+
+    val canStartFromBeginning = remember(currentChannel, activeReplayProgramme) {
+        if (activeReplayProgramme != null) return@remember false
+        val ch = currentChannel ?: return@remember false
+        viewModel.canCatchup(ch)
+    }
+
+    fun startCurrentProgrammeFromBeginning() {
+        val ch = currentChannel ?: return
+        val nowMs = System.currentTimeMillis()
+        // Use real programme when EPG is available; otherwise synthesize a 1-hour lookback
+        // so that channels with catchup but no EPG still get a usable timeshift URL.
+        val prog = enrichedCurrentChannel?.currentProgramme ?: EpgProgramme(
+            channelId = ch.tvgId ?: "",
+            startTime = nowMs - 3_600_000L,
+            endTime = nowMs + 3_600_000L,
+            title = "",
+        )
+        val url = viewModel.resolveCatchupUrl(ch, prog)
+        if (url.isNullOrBlank()) {
+            errorBannerMessage = "Catchup is unavailable for this channel."
+            return
+        }
+        playbackUrlOverride = url
+        activeReplayProgramme = prog
+        replayWindowStartOffsetMs = 0L
+        replayTimelinePositionMs = 0L
+        pendingReplaySeekUrl = null
+        pendingReplaySeekSawBuffering = false
+        pendingEngineRecovery = null
+        pendingTrackRecovery = null
+        pendingFirstPassFailureReason = null
+        engineFallbackAttemptedForChannel = false
+        silentSessionRecoveryAttempted = false
+        mobileReferenceRetryAttempted = false
+        closeAllOverlays()
+    }
+
+    fun seekTimeshiftPlayback(deltaMs: Long) {
+        val activeEngine = engine ?: return
+        val replayProgramme = activeReplayProgramme
+        if (replayProgramme == null) {
+            if (playerState.isLive && playerState.isSeekable) {
+                activeEngine.seekRelative(deltaMs)
+            }
+            return
+        }
+
+        val nowMs = System.currentTimeMillis()
+        val durationMs = TvLivePlaybackPolicy.replayAvailableDurationMs(replayProgramme, nowMs)
+        if (durationMs <= 0L) return
+        val exo = (activeEngine as? ExoPlayerEngine)?.getExoPlayer()
+        val currentPositionMs = if (pendingReplaySeekUrl != null) {
+            replayTimelinePositionMs
+        } else {
+            TvLivePlaybackPolicy.replayTimelinePositionMs(
+                windowStartOffsetMs = replayWindowStartOffsetMs,
+                playerPositionMs = exo?.currentPosition ?: activeEngine.state.positionMs,
+                durationMs = durationMs,
+            )
+        }
+        val targetPositionMs = TvLivePlaybackPolicy.replaySeekTargetMs(
+            currentPositionMs = currentPositionMs,
+            deltaMs = deltaMs,
+            durationMs = durationMs,
+        )
+        if (targetPositionMs == currentPositionMs) return
+        if (
+            deltaMs > 0L &&
+            targetPositionMs >= durationMs &&
+            replayProgramme.endTime > nowMs
+        ) {
+            resumeLiveProgramme()
+            errorBannerMessage = "Returned to the live edge."
+            return
+        }
+
+        val localTargetMs = targetPositionMs - replayWindowStartOffsetMs
+        if (exo?.isCurrentMediaItemSeekable == true && localTargetMs >= 0L) {
+            exo.seekTo(localTargetMs)
+            replayTimelinePositionMs = targetPositionMs
+        } else {
+            // Many Xtream/M3U archive transports expose an unseekable MPEG-TS
+            // stream. Re-resolving at the target programme timestamp is the
+            // provider-supported seek operation for those sources.
+            val channel = currentChannel ?: return
+            val shiftedProgramme = replayProgramme.copy(
+                startTime = replayProgramme.startTime + targetPositionMs,
+            )
+            val shiftedUrl = viewModel.resolveCatchupUrl(channel, shiftedProgramme)
+            if (shiftedUrl.isNullOrBlank()) {
+                errorBannerMessage = "This provider could not seek in the replay."
+                return
+            }
+            replayWindowStartOffsetMs = targetPositionMs
+            replayTimelinePositionMs = targetPositionMs
+            pendingReplaySeekUrl = shiftedUrl
+            pendingReplaySeekSawBuffering = false
+            playbackUrlOverride = shiftedUrl
+        }
+        errorBannerMessage = if (deltaMs < 0L) {
+            "Rewound 1 minute."
+        } else {
+            "Fast-forwarded 1 minute."
+        }
+    }
+
+    LaunchedEffect(
+        engineSession?.engine,
+        replayTimeshiftActive,
+        replayWindowStartOffsetMs,
+        pendingReplaySeekUrl,
+    ) {
+        while (replayTimeshiftActive) {
+            if (pendingReplaySeekUrl == null) {
+                val activeEngine = engine
+                val positionMs = (activeEngine as? ExoPlayerEngine)
+                    ?.getExoPlayer()
+                    ?.currentPosition
+                    ?: activeEngine?.state?.positionMs
+                    ?: 0L
+                replayTimelinePositionMs = TvLivePlaybackPolicy.replayTimelinePositionMs(
+                    windowStartOffsetMs = replayWindowStartOffsetMs,
+                    playerPositionMs = positionMs,
+                    durationMs = replayTimelineDurationMs,
+                )
+            }
+            delay(500L)
+        }
+    }
+
+    LaunchedEffect(playbackUrlOverride, playerState.isBuffering, playerState.isPlaying) {
+        val pendingUrl = pendingReplaySeekUrl ?: return@LaunchedEffect
+        if (playbackUrlOverride != pendingUrl) return@LaunchedEffect
+        if (playerState.isBuffering) pendingReplaySeekSawBuffering = true
+        if (pendingReplaySeekSawBuffering && playerState.isPlaying && !playerState.isBuffering) {
+            pendingReplaySeekUrl = null
+            pendingReplaySeekSawBuffering = false
+        }
     }
 
     // ── UI ──
@@ -2061,11 +2262,11 @@ fun TvLivePlayerScreen(
                                 }
                                 val held = System.currentTimeMillis() - downTime
                                 if (held >= LONG_PRESS_THRESHOLD_MS) {
-                                    // Long press opens playback/video options.
-                                    openOverlay(LivePlayerOverlay.PLAYBACK_MENU)
-                                } else {
-                                    // Short press on fullscreen playback → channel switch list
+                                    // Keep the channel browser available without making it the primary OSD.
                                     openOverlay(LivePlayerOverlay.CHANNEL_LIST)
+                                } else {
+                                    // Short OK/Select opens the lightweight playback OSD.
+                                    openOverlay(LivePlayerOverlay.PLAYBACK_MENU)
                                 }
                                 true
                             }
@@ -2098,6 +2299,22 @@ fun TvLivePlayerScreen(
                         true
                     }
 
+                    // Dedicated transport buttons seek replay/timeshift. D-pad
+                    // left/right remains volume, matching television remotes.
+                    mediaSeekDeltaMs(event.nativeKeyEvent.keyCode) != null &&
+                        event.type == KeyEventType.KeyDown &&
+                        TvLivePlaybackPolicy.shouldSeekTimeshift(
+                            isLive = playerState.isLive,
+                            isSeekable = playerState.isSeekable,
+                            replayActive = replayTimeshiftActive,
+                            overlayOpen = activeOverlay != LivePlayerOverlay.NONE &&
+                                activeOverlay != LivePlayerOverlay.PLAYBACK_MENU,
+                            multiviewActive = multiviewChannel != null,
+                        ) -> {
+                        seekTimeshiftPlayback(mediaSeekDeltaMs(event.nativeKeyEvent.keyCode)!!)
+                        true
+                    }
+
                     // D-pad left/right controls volume while fullscreen playback owns focus.
                     (event.key == Key.DirectionLeft || event.key == Key.DirectionRight) &&
                         event.type == KeyEventType.KeyDown &&
@@ -2116,6 +2333,10 @@ fun TvLivePlayerScreen(
 
                     // ── Back key during CHANNEL_INFO → dismiss overlay ──
                     event.key == Key.Back && event.type == KeyEventType.KeyDown -> {
+                        if (activeOverlay == LivePlayerOverlay.PLAYBACK_MENU) {
+                            // The OSD handles panel-first Back navigation and focus restoration.
+                            return@onPreviewKeyEvent false
+                        }
                         if (activeOverlay == LivePlayerOverlay.NONE && multiviewChannel != null) {
                             multiviewChannel = null
                             errorBannerMessage = "Multiview closed."
@@ -2170,7 +2391,8 @@ fun TvLivePlayerScreen(
             },
     ) {
         // ── Video surface ──
-        val fullScreenVideoSurfaceModifier = selectedPictureFormat.frameAspectRatio?.let { ratio ->
+        val pictureRenderConfiguration = selectedPictureFormat.renderConfiguration
+        val fullScreenVideoSurfaceModifier = pictureRenderConfiguration.containerAspectRatio?.let { ratio ->
             Modifier
                 .fillMaxWidth()
                 .aspectRatio(ratio)
@@ -2223,7 +2445,7 @@ fun TvLivePlayerScreen(
                     factory = {
                         TorvePlayerView(context).apply {
                             useController = false
-                            resizeMode = selectedPictureFormat.exoResizeMode
+                            resizeMode = pictureRenderConfiguration.exoResizeMode
                             layoutParams = FrameLayout.LayoutParams(
                                 ViewGroup.LayoutParams.MATCH_PARENT,
                                 ViewGroup.LayoutParams.MATCH_PARENT,
@@ -2235,7 +2457,7 @@ fun TvLivePlayerScreen(
                     update = { view ->
                         exoPlayerView = view
                         view.useController = false
-                        view.resizeMode = selectedPictureFormat.exoResizeMode
+                        view.resizeMode = pictureRenderConfiguration.exoResizeMode
                         view.setPlayerSafely((engine as? ExoPlayerEngine)?.getExoPlayer(), "tv_live_player_update")
                     },
                     onRelease = { view ->
@@ -2377,40 +2599,11 @@ fun TvLivePlayerScreen(
             }
         }
 
-        // ── Menu Bar Overlay ──
         val iptvPipEnabled = false
         fun enterPipMode(): Boolean = false
 
         val pipSupported = remember(iptvPipEnabled) {
             iptvPipEnabled
-        }
-
-        AnimatedVisibility(
-            visible = activeOverlay == LivePlayerOverlay.MENU_BAR,
-            enter = fadeIn() + slideInVertically(initialOffsetY = { it / 3 }),
-            exit = fadeOut() + slideOutVertically(targetOffsetY = { it / 3 }),
-        ) {
-            LiveMenuBarOverlay(
-                videoResolution = videoResolution,
-                audioCodec = audioCodec,
-                onSearch = {
-                    openOverlay(LivePlayerOverlay.CHANNEL_LIST)
-                },
-                onChannelList = {
-                    openOverlay(LivePlayerOverlay.CHANNEL_LIST)
-                },
-                onGuide = {
-                    openOverlay(LivePlayerOverlay.CURRENT_CHANNEL_GUIDE)
-                },
-                onPlaybackOptions = {
-                    openOverlay(LivePlayerOverlay.PLAYBACK_MENU)
-                },
-                onPip = {
-                    if (enterPipMode()) {
-                        closeAllOverlays()
-                    }
-                },
-            )
         }
 
         AnimatedVisibility(
@@ -2420,7 +2613,11 @@ fun TvLivePlayerScreen(
         ) {
             LivePlaybackMenuOverlay(
                 currentChannel = currentChannel,
-                isFavorite = currentChannel?.let { channel -> state.favorites.any { it.url == channel.url } } == true,
+                channelNumber = channelNumber,
+                currentProgramme = displayCurrentChannel?.currentProgramme,
+                videoResolution = videoResolution,
+                audioCodec = audioCodec,
+                isFavorite = currentChannelIsFavorite,
                 pictureFormats = LivePictureFormat.entries.map {
                     LivePictureFormatOption(
                         key = it.key,
@@ -2435,10 +2632,17 @@ fun TvLivePlayerScreen(
                 sleepTimerRemainingLabel = sleepTimerRemainingLabel,
                 pipSupported = pipSupported,
                 multiviewAvailable = multiviewAvailable,
-                timeshiftAvailable = playerState.isLive && playerState.isSeekable,
-                timeshiftPaused = playerState.isLive && playerState.isSeekable && !playerState.isPlaying,
+                timeshiftAvailable = timeshiftTransportAvailable,
+                replayTimeshiftActive = replayTimeshiftActive,
+                timeshiftPaused = timeshiftTransportAvailable && !playerState.isPlaying,
                 liveOffsetMs = playerState.liveOffsetMs,
+                timeshiftPositionMs = timeshiftTimeline.positionMs,
+                timeshiftDurationMs = timeshiftTimeline.durationMs,
                 selectedBufferPreset = selectedBufferPreset,
+                canStartFromBeginning = canStartFromBeginning,
+                isPlaying = playerState.isPlaying,
+                subtitleDelayMs = subtitleDelayMs,
+                externalInteractionId = fullScreenPlaybackMenuRequestId,
                 onDismiss = { closeOverlayOrReturnToPrevious() },
                 onOpenChannelList = { openOverlay(LivePlayerOverlay.CHANNEL_LIST) },
                 onOpenGuide = { openOverlay(LivePlayerOverlay.CURRENT_CHANNEL_GUIDE) },
@@ -2454,19 +2658,39 @@ fun TvLivePlayerScreen(
                 onToggleTimeshiftPause = {
                     if (playerState.isPlaying) {
                         engine?.pause()
-                        errorBannerMessage = "Live TV paused. Choose Resume live TV to continue."
+                        errorBannerMessage = if (replayTimeshiftActive) {
+                            "Replay paused."
+                        } else {
+                            "Live TV paused. Choose Resume live TV to continue."
+                        }
                     } else {
                         engine?.resume()
-                        errorBannerMessage = "Live TV resumed from the paused position."
+                        errorBannerMessage = if (replayTimeshiftActive) {
+                            "Replay resumed."
+                        } else {
+                            "Live TV resumed from the paused position."
+                        }
                     }
                 },
                 onGoLive = {
-                    (engine as? ExoPlayerEngine)?.getExoPlayer()?.let { player ->
-                        player.seekToDefaultPosition()
-                        player.playWhenReady = true
-                        errorBannerMessage = "Returned to the live edge."
+                    if (replayTimeshiftActive) {
+                        resumeLiveProgramme()
+                    } else {
+                        (engine as? ExoPlayerEngine)?.getExoPlayer()?.let { player ->
+                            player.seekToDefaultPosition()
+                            player.playWhenReady = true
+                            errorBannerMessage = "Returned to the live edge."
+                        }
                     }
                 },
+                onSeekTimeshift = { deltaMs ->
+                    seekTimeshiftPlayback(deltaMs)
+                },
+                onStartFromBeginning = { startCurrentProgrammeFromBeginning() },
+                onTogglePlayPause = {
+                    if (playerState.isPlaying) engine?.pause() else engine?.resume()
+                },
+                onSetSubtitleDelay = { delayMs -> subtitleDelayMs = delayMs },
                 onSelectPictureFormat = { formatKey ->
                     selectedPictureFormatKey = formatKey
                 },
@@ -2531,6 +2755,8 @@ fun TvLivePlayerScreen(
                 onTuneChannel = { ch ->
                     tuneToPlaybackChannel(ch)
                 },
+                canReplayProgramme = ::canReplayProgramme,
+                onReplayProgramme = ::replayProgramme,
                 onShowChannelList = {
                     openOverlay(LivePlayerOverlay.CHANNEL_LIST)
                 },

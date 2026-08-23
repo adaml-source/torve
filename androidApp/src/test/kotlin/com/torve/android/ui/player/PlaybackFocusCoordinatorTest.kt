@@ -62,4 +62,26 @@ class PlaybackFocusCoordinatorTest {
         assertTrue(restored)
         assertEquals("BACK", requestedKey)
     }
+
+    @Test
+    fun subtitleDelayMode_restoresFocusOnlyInsideSubtitleDelayOverlay() {
+        val coordinator = PlaybackFocusCoordinator()
+        var subtitleDelayFocusRequested = false
+        coordinator.registerRegion(
+            FocusRegionHandle(PlaybackFocusRegion.SubtitleDelayOverlay) {
+                subtitleDelayFocusRequested = true
+                true
+            },
+        )
+        coordinator.registerRegion(
+            FocusRegionHandle(PlaybackFocusRegion.TopActions) {
+                throw AssertionError("Playback controls must not receive subtitle-delay focus")
+            },
+        )
+        coordinator.uiMode = PlaybackUiMode.SubtitleDelay
+
+        assertTrue(coordinator.restoreFocusForCurrentMode())
+        assertTrue(subtitleDelayFocusRequested)
+        assertNull(coordinator.resolveDirectionalMove(FocusDirection.Down))
+    }
 }

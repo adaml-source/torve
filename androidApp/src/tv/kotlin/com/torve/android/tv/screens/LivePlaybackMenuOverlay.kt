@@ -1,76 +1,106 @@
 package com.torve.android.tv.screens
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
-import androidx.compose.foundation.focusable
+import androidx.compose.foundation.gestures.animateScrollBy
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AspectRatio
+import androidx.compose.material.icons.filled.Audiotrack
+import androidx.compose.material.icons.filled.CalendarMonth
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.FastForward
+import androidx.compose.material.icons.filled.FastRewind
+import androidx.compose.material.icons.filled.GridView
+import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.List
+import androidx.compose.material.icons.filled.LiveTv
+import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.PictureInPicture
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.StarBorder
+import androidx.compose.material.icons.filled.Subtitles
+import androidx.compose.material.icons.filled.Sync
+import androidx.compose.material.icons.filled.Timer
+import androidx.compose.material3.Icon
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.sp
 import androidx.tv.material3.ClickableSurfaceDefaults
 import androidx.tv.material3.Surface
-import com.torve.android.R
+import coil3.compose.AsyncImage
 import com.torve.android.player.DecoderKind
 import com.torve.android.player.PlaybackRuntimeInfo
 import com.torve.android.ui.theme.Amber
 import com.torve.android.ui.theme.Graphite
-import com.torve.android.ui.theme.Obsidian
 import com.torve.android.ui.theme.Silver
 import com.torve.android.ui.theme.Snow
 import com.torve.domain.model.Channel
+import com.torve.domain.model.EpgProgramme
 import com.torve.domain.player.LiveAudioOutputMode
 import com.torve.domain.player.TrackDescription
-
-private enum class PlaybackMenuRoute {
-    MAIN,
-    PLAYBACK_OPTIONS,
-    AUDIO_TRACKS,
-    SUBTITLE_TRACKS,
-    DISPLAY_MODE,
-    AUDIO_OUTPUT_MODE,
-    BUFFER_SIZE,
-    DECODER_INFO,
-    CHANNEL_OPTIONS,
-    SLEEP_TIMER,
-    PLAYBACK_INFO,
-}
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.filter
+import kotlinx.coroutines.flow.first
 
 enum class LiveBufferPreset(
     val key: String,
@@ -78,22 +108,50 @@ enum class LiveBufferPreset(
     val durationMs: Int,
     val description: String,
 ) {
-    MINIMUM("minimum", "Minimum (2 s)", 2_500, "Smallest viable buffer — lowest latency, best for channels that repeat/glitch"),
-    LOW("low", "Low (5 s)", 5_000, "Small buffer — low latency, slight jitter absorption"),
-    MEDIUM("medium", "Medium (20 s)", 20_000, "Balanced buffer for most channels"),
-    HIGH("high", "High (50 s)", 50_000, "Deep buffer — absorbs network jitter, may drift on some channels"),
+    MINIMUM("minimum", "Minimum (2 s)", 2_500, "Lowest latency"),
+    LOW("low", "Low (5 s)", 5_000, "Low latency with light jitter protection"),
+    MEDIUM("medium", "Medium (20 s)", 20_000, "Balanced for most channels"),
+    HIGH("high", "High (50 s)", 50_000, "Maximum jitter protection"),
 }
 
-private data class PlaybackMenuItem(
+private enum class LiveOsdPanel(val ownerControlId: String, val title: String) {
+    AUDIO("audio", "Audio track"),
+    SUBTITLES("subtitles", "Subtitles"),
+    SUBTITLE_DELAY("sync", "Subtitle sync"),
+    ASPECT_RATIO("aspect", "Aspect ratio"),
+    SLEEP_TIMER("timer", "Sleep timer"),
+    STREAM("stream", "Stream options"),
+    INFO("info", "Playback information"),
+}
+
+private data class LiveOsdControl(
     val id: String,
-    val title: String,
-    val subtitle: String? = null,
+    val label: String,
+    val value: String,
+    val icon: ImageVector,
     val enabled: Boolean = true,
+    val onClick: () -> Unit,
 )
 
+private data class LiveOsdOption(
+    val id: String,
+    val label: String,
+    val value: String? = null,
+    val selected: Boolean = false,
+    val enabled: Boolean = true,
+    val onClick: () -> Unit,
+)
+
+/**
+ * Video-first live-TV OSD. It owns UI focus only and never recreates or reloads the player.
+ */
 @Composable
 internal fun LivePlaybackMenuOverlay(
     currentChannel: Channel?,
+    channelNumber: Int,
+    currentProgramme: EpgProgramme?,
+    videoResolution: String,
+    audioCodec: String,
     isFavorite: Boolean,
     pictureFormats: List<LivePictureFormatOption>,
     selectedPictureFormatKey: String,
@@ -105,9 +163,16 @@ internal fun LivePlaybackMenuOverlay(
     pipSupported: Boolean,
     multiviewAvailable: Boolean,
     timeshiftAvailable: Boolean,
+    replayTimeshiftActive: Boolean,
     timeshiftPaused: Boolean,
     liveOffsetMs: Long,
+    timeshiftPositionMs: Long,
+    timeshiftDurationMs: Long,
     selectedBufferPreset: LiveBufferPreset,
+    canStartFromBeginning: Boolean,
+    isPlaying: Boolean,
+    subtitleDelayMs: Int,
+    externalInteractionId: Long,
     onDismiss: () -> Unit,
     onOpenChannelList: () -> Unit,
     onOpenGuide: () -> Unit,
@@ -118,6 +183,10 @@ internal fun LivePlaybackMenuOverlay(
     onToggleMultiview: () -> Unit,
     onToggleTimeshiftPause: () -> Unit,
     onGoLive: () -> Unit,
+    onSeekTimeshift: (Long) -> Unit,
+    onStartFromBeginning: () -> Unit,
+    onTogglePlayPause: () -> Unit,
+    onSetSubtitleDelay: (Int) -> Unit,
     onSelectPictureFormat: (String) -> Unit,
     onSelectAudioTrack: (Int) -> Unit,
     onSelectSubtitleTrack: (Int) -> Unit,
@@ -126,745 +195,897 @@ internal fun LivePlaybackMenuOverlay(
     onSelectBufferSize: (LiveBufferPreset) -> Unit,
     onSelectSleepTimer: (Int?) -> Unit,
 ) {
-    var route by rememberSaveable { mutableStateOf(PlaybackMenuRoute.MAIN) }
-    var focusedItemId by rememberSaveable(route) { mutableStateOf("") }
-    val firstFocus = remember(route) { FocusRequester() }
+    var openPanel by remember { mutableStateOf<LiveOsdPanel?>(null) }
+    var focusedControlId by remember { mutableStateOf(LivePlaybackOsdPolicy.DEFAULT_CONTROL_ID) }
+    var pendingRailFocusId by remember {
+        mutableStateOf<String?>(LivePlaybackOsdPolicy.DEFAULT_CONTROL_ID)
+    }
+    var interactionTick by remember { mutableLongStateOf(0L) }
+    val railFocusRequesters = remember { mutableMapOf<String, FocusRequester>() }
+    val panelFocusRequesters = remember { mutableMapOf<String, FocusRequester>() }
+    val railState = rememberLazyListState()
+    val panelState = rememberLazyListState()
 
-    fun closeCurrentLayer() {
-        route = when (route) {
-            PlaybackMenuRoute.MAIN -> {
-                onDismiss()
-                PlaybackMenuRoute.MAIN
-            }
-            PlaybackMenuRoute.PLAYBACK_INFO,
-            PlaybackMenuRoute.PLAYBACK_OPTIONS,
-            PlaybackMenuRoute.CHANNEL_OPTIONS,
-            PlaybackMenuRoute.SLEEP_TIMER -> PlaybackMenuRoute.MAIN
-            PlaybackMenuRoute.AUDIO_TRACKS,
-            PlaybackMenuRoute.SUBTITLE_TRACKS,
-            PlaybackMenuRoute.DISPLAY_MODE,
-            PlaybackMenuRoute.AUDIO_OUTPUT_MODE,
-            PlaybackMenuRoute.BUFFER_SIZE,
-            PlaybackMenuRoute.DECODER_INFO -> PlaybackMenuRoute.PLAYBACK_OPTIONS
+    fun registerInteraction() {
+        interactionTick += 1L
+    }
+
+    fun closePanelOrOsd() {
+        val panel = openPanel
+        if (panel == null) {
+            onDismiss()
+        } else {
+            focusedControlId = panel.ownerControlId
+            pendingRailFocusId = panel.ownerControlId
+            openPanel = null
+            registerInteraction()
         }
     }
 
-    BackHandler { closeCurrentLayer() }
+    BackHandler { closePanelOrOsd() }
 
-    LaunchedEffect(route) {
-        runCatching { firstFocus.requestFocus() }
+    LaunchedEffect(externalInteractionId) {
+        registerInteraction()
     }
 
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(
-                Brush.horizontalGradient(
-                    0f to Color.Black.copy(alpha = 0.82f),
-                    0.55f to Color.Black.copy(alpha = 0.6f),
-                    1f to Color.Transparent,
+    LaunchedEffect(interactionTick, openPanel) {
+        if (openPanel != null) return@LaunchedEffect
+        delay(LivePlaybackOsdPolicy.AUTO_HIDE_DELAY_MS)
+        onDismiss()
+    }
+
+    val selectedAudio = audioTracks.firstOrNull { it.isSelected }
+    val selectedSubtitle = subtitleTracks.firstOrNull { it.isSelected }
+    val selectedAspect = pictureFormats.firstOrNull { it.key == selectedPictureFormatKey }?.label ?: "Auto"
+    val resolutionLabel = videoResolution.ifBlank { playbackRuntimeInfo.resolutionLabel.orEmpty() }
+    val audioLabel = audioCodec.ifBlank { playbackRuntimeInfo.audioCodec.orEmpty() }
+
+    fun showPanel(panel: LiveOsdPanel) {
+        focusedControlId = panel.ownerControlId
+        openPanel = panel
+        registerInteraction()
+    }
+
+    val controls = buildList {
+        add(
+            LiveOsdControl(
+                id = "play_pause",
+                label = if (isPlaying) "Pause" else "Play",
+                value = if (timeshiftPaused) "Timeshift paused" else if (isPlaying) "Playing" else "Paused",
+                icon = if (isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
+                onClick = {
+                    if (timeshiftAvailable) onToggleTimeshiftPause() else onTogglePlayPause()
+                },
+            ),
+        )
+        add(
+            LiveOsdControl("channels", "Channels", currentChannel?.name.orEmpty(), Icons.Filled.List) {
+                onDismiss()
+                onOpenChannelList()
+            },
+        )
+        add(
+            LiveOsdControl("guide", "Guide", currentProgramme?.title.orEmpty(), Icons.Filled.CalendarMonth) {
+                onDismiss()
+                onOpenGuide()
+            },
+        )
+        if (canStartFromBeginning) {
+            add(
+                LiveOsdControl(
+                    "start_over",
+                    "Start over",
+                    "From beginning",
+                    Icons.Filled.History,
+                    onClick = onStartFromBeginning,
                 ),
             )
-            .focusable()
+        }
+        if (timeshiftAvailable) {
+            add(
+                LiveOsdControl(
+                    "rewind",
+                    "Fast rewind",
+                    "1 minute",
+                    Icons.Filled.FastRewind,
+                    onClick = { onSeekTimeshift(-TvLivePlaybackPolicy.REPLAY_SEEK_STEP_MS) },
+                ),
+            )
+            add(
+                LiveOsdControl(
+                    "forward",
+                    "Fast forward",
+                    "1 minute",
+                    Icons.Filled.FastForward,
+                    onClick = { onSeekTimeshift(TvLivePlaybackPolicy.REPLAY_SEEK_STEP_MS) },
+                ),
+            )
+            add(
+                LiveOsdControl(
+                    "go_live",
+                    "Live",
+                    when {
+                        replayTimeshiftActive -> "Return to channel"
+                        liveOffsetMs >= 2_000L -> "${liveOffsetMs / 1_000L}s behind"
+                        else -> "At live edge"
+                    },
+                    Icons.Filled.LiveTv,
+                    onClick = onGoLive,
+                ),
+            )
+        }
+        add(LiveOsdControl("audio", "Audio", selectedAudio?.language ?: selectedAudio?.label ?: "Auto", Icons.Filled.Audiotrack, onClick = { showPanel(LiveOsdPanel.AUDIO) }))
+        add(LiveOsdControl("subtitles", "Subtitles", selectedSubtitle?.language ?: selectedSubtitle?.label ?: "Off", Icons.Filled.Subtitles, onClick = { showPanel(LiveOsdPanel.SUBTITLES) }))
+        add(LiveOsdControl("sync", "Sync", formatDelayMs(subtitleDelayMs), Icons.Filled.Sync, onClick = { showPanel(LiveOsdPanel.SUBTITLE_DELAY) }))
+        add(LiveOsdControl("aspect", "Aspect", selectedAspect, Icons.Filled.AspectRatio, onClick = { showPanel(LiveOsdPanel.ASPECT_RATIO) }))
+        add(LiveOsdControl("timer", "Timer", sleepTimerRemainingLabel ?: "Off", Icons.Filled.Timer, onClick = { showPanel(LiveOsdPanel.SLEEP_TIMER) }))
+        add(
+            LiveOsdControl(
+                "favorite",
+                "Favorite",
+                if (isFavorite) "On" else "Off",
+                if (isFavorite) Icons.Filled.Star else Icons.Filled.StarBorder,
+                onClick = onToggleFavorite,
+            ),
+        )
+        add(
+            LiveOsdControl(
+                "stream",
+                "Stream",
+                resolutionLabel.ifBlank { selectedBufferPreset.label },
+                Icons.Filled.Settings,
+                onClick = { showPanel(LiveOsdPanel.STREAM) },
+            ),
+        )
+        add(
+            LiveOsdControl(
+                "info",
+                "Info",
+                listOf(resolutionLabel, audioLabel).filter { it.isNotBlank() }.joinToString(" • ").ifBlank { "Details" },
+                Icons.Filled.Info,
+                onClick = { showPanel(LiveOsdPanel.INFO) },
+            ),
+        )
+        if (pipSupported) {
+            add(
+                LiveOsdControl("pip", "Picture in picture", "Open", Icons.Filled.PictureInPicture) {
+                    onDismiss()
+                    onEnterPip()
+                },
+            )
+        }
+        add(
+            LiveOsdControl(
+                "multiview",
+                "Multiview",
+                if (multiviewAvailable) "Available" else "Unavailable",
+                Icons.Filled.GridView,
+                enabled = multiviewAvailable,
+                onClick = {
+                    onDismiss()
+                    onToggleMultiview()
+                },
+            ),
+        )
+    }
+    val controlIds = controls.map(LiveOsdControl::id)
+    val density = LocalDensity.current
+    LaunchedEffect(controlIds) {
+        val retained = LivePlaybackOsdPolicy.retainedControlId(focusedControlId, controlIds)
+        if (retained != focusedControlId) focusedControlId = retained
+        if (openPanel == null) pendingRailFocusId = retained
+    }
+
+    LaunchedEffect(openPanel, pendingRailFocusId, controlIds) {
+        if (openPanel != null) return@LaunchedEffect
+        val requestedTarget = pendingRailFocusId ?: return@LaunchedEffect
+        val target = LivePlaybackOsdPolicy.retainedControlId(requestedTarget, controlIds)
+        val targetIndex = controlIds.indexOf(target).takeIf { it >= 0 } ?: return@LaunchedEffect
+
+        val initialLayout = snapshotFlow { railState.layoutInfo }
+            .filter { it.totalItemsCount > 0 && it.visibleItemsInfo.isNotEmpty() }
+            .first()
+        val visibleTarget = initialLayout.visibleItemsInfo.firstOrNull { it.key == target }
+
+        // A composed target can own focus immediately. Scrolling, when needed, only
+        // reveals the clipped edge instead of reanchoring the item at the row start.
+        if (visibleTarget != null) {
+            runCatching { railFocusRequesters[target]?.requestFocus() }
+        }
+
+        val itemSpacingPx = with(density) { 8.dp.roundToPx() }
+        val targetBounds = visibleTarget?.let { it.offset to (it.offset + it.size) } ?: run {
+            val anchor = if (targetIndex < initialLayout.visibleItemsInfo.first().index) {
+                initialLayout.visibleItemsInfo.first()
+            } else {
+                initialLayout.visibleItemsInfo.last()
+            }
+            val itemStridePx = anchor.size + itemSpacingPx
+            val estimatedStart = anchor.offset + ((targetIndex - anchor.index) * itemStridePx)
+            estimatedStart to (estimatedStart + anchor.size)
+        }
+        val scrollDeltaPx = LivePlaybackOsdPolicy.revealScrollDeltaPx(
+            itemStartPx = targetBounds.first,
+            itemEndPx = targetBounds.second,
+            viewportStartPx = initialLayout.viewportStartOffset,
+            viewportEndPx = initialLayout.viewportEndOffset,
+        )
+        if (scrollDeltaPx != 0) {
+            railState.animateScrollBy(
+                value = scrollDeltaPx.toFloat(),
+                animationSpec = tween(
+                    durationMillis = LivePlaybackOsdPolicy.RAIL_SCROLL_ANIMATION_MS,
+                    easing = FastOutSlowInEasing,
+                ),
+            )
+        }
+
+        if (visibleTarget == null) {
+            snapshotFlow {
+                railState.layoutInfo.visibleItemsInfo.any { it.key == target }
+            }.filter { it }.first()
+            androidx.compose.runtime.withFrameNanos { }
+            runCatching { railFocusRequesters[target]?.requestFocus() }
+        }
+        pendingRailFocusId = null
+    }
+
+    val panelOptions = when (openPanel) {
+        LiveOsdPanel.AUDIO -> buildList {
+            if (audioTracks.isEmpty()) {
+                add(LiveOsdOption("audio_none", "No audio tracks detected", enabled = false, onClick = {}))
+            } else {
+                audioTracks.forEach { track ->
+                    add(
+                        LiveOsdOption(
+                            id = "audio_${track.id}",
+                            label = track.label,
+                            value = buildTrackSubtitle(track),
+                            selected = track.isSelected,
+                            onClick = { onSelectAudioTrack(track.id) },
+                        ),
+                    )
+                }
+            }
+            add(backOption(::closePanelOrOsd))
+        }
+
+        LiveOsdPanel.SUBTITLES -> buildList {
+            add(LiveOsdOption("subtitles_off", "Off", selected = selectedSubtitle == null, onClick = onDisableSubtitles))
+            subtitleTracks.forEach { track ->
+                add(
+                    LiveOsdOption(
+                        id = "subtitle_${track.id}",
+                        label = track.label,
+                        value = buildTrackSubtitle(track),
+                        selected = track.isSelected,
+                        onClick = { onSelectSubtitleTrack(track.id) },
+                    ),
+                )
+            }
+            add(backOption(::closePanelOrOsd))
+        }
+
+        LiveOsdPanel.SUBTITLE_DELAY -> listOf(
+            LiveOsdOption("delay_earlier_500", "Earlier", "−500 ms", onClick = { onSetSubtitleDelay((subtitleDelayMs - 500).coerceAtLeast(-10_000)) }),
+            LiveOsdOption("delay_earlier_100", "Earlier", "−100 ms", onClick = { onSetSubtitleDelay((subtitleDelayMs - 100).coerceAtLeast(-10_000)) }),
+            LiveOsdOption("delay_reset", "Reset", "0 ms", selected = subtitleDelayMs == 0, onClick = { onSetSubtitleDelay(0) }),
+            LiveOsdOption("delay_later_100", "Later", "+100 ms", onClick = { onSetSubtitleDelay((subtitleDelayMs + 100).coerceAtMost(10_000)) }),
+            LiveOsdOption("delay_later_500", "Later", "+500 ms", onClick = { onSetSubtitleDelay((subtitleDelayMs + 500).coerceAtMost(10_000)) }),
+            backOption(::closePanelOrOsd),
+        )
+
+        LiveOsdPanel.ASPECT_RATIO -> buildList {
+            pictureFormats.forEach { format ->
+                add(
+                    LiveOsdOption(
+                        id = "aspect_${format.key}",
+                        label = format.label,
+                        selected = format.key == selectedPictureFormatKey,
+                        onClick = { onSelectPictureFormat(format.key) },
+                    ),
+                )
+            }
+            add(backOption(::closePanelOrOsd))
+        }
+
+        LiveOsdPanel.SLEEP_TIMER -> buildList {
+            listOf<Int?>(null, 15, 30, 60, 90, 120).forEach { minutes ->
+                add(
+                    LiveOsdOption(
+                        id = minutes?.let { "timer_$it" } ?: "timer_off",
+                        label = minutes?.let { "$it minutes" } ?: "Off",
+                        selected = sleepTimerMinutes == minutes,
+                        onClick = { onSelectSleepTimer(minutes) },
+                    ),
+                )
+            }
+            add(backOption(::closePanelOrOsd))
+        }
+
+        LiveOsdPanel.STREAM -> buildList {
+            add(
+                LiveOsdOption(
+                    "reload",
+                    "Reload stream",
+                    "Reconnect current channel",
+                    onClick = {
+                        onDismiss()
+                        onReloadStream()
+                    },
+                ),
+            )
+            LiveBufferPreset.entries.forEach { preset ->
+                add(
+                    LiveOsdOption(
+                        id = "buffer_${preset.key}",
+                        label = "Buffer • ${preset.label}",
+                        value = preset.description,
+                        selected = preset == selectedBufferPreset,
+                        onClick = { onSelectBufferSize(preset) },
+                    ),
+                )
+            }
+            LiveAudioOutputMode.entries.forEach { mode ->
+                add(
+                    LiveOsdOption(
+                        id = "output_${mode.storageValue}",
+                        label = "Audio output • ${audioOutputLabel(mode)}",
+                        selected = mode == playbackRuntimeInfo.outputMode,
+                        onClick = { onSelectAudioOutputMode(mode) },
+                    ),
+                )
+            }
+            add(backOption(::closePanelOrOsd))
+        }
+
+        LiveOsdPanel.INFO -> buildList {
+            add(
+                LiveOsdOption("channel_info", "Open channel information", currentChannel?.name) {
+                    onDismiss()
+                    onOpenChannelInfo()
+                },
+            )
+            add(infoOption("engine", "Player", playbackRuntimeInfo.engineId.storageValue))
+            add(infoOption("resolution", "Resolution", resolutionLabel.ifBlank { "Unknown" }))
+            add(infoOption("video_codec", "Video", playbackRuntimeInfo.videoCodec ?: "Unknown"))
+            add(infoOption("audio_codec", "Audio", playbackRuntimeInfo.audioCodec ?: audioLabel.ifBlank { "Unknown" }))
+            add(infoOption("video_decoder", "Video decoder", decoderLabel(playbackRuntimeInfo.videoDecoderKind, playbackRuntimeInfo.videoDecoderName)))
+            add(infoOption("audio_decoder", "Audio decoder", decoderLabel(playbackRuntimeInfo.audioDecoderKind, playbackRuntimeInfo.audioDecoderName)))
+            add(infoOption("selected_audio", "Audio track", selectedAudio?.let(::buildTrackSubtitle) ?: "None"))
+            add(infoOption("selected_subtitle", "Subtitles", selectedSubtitle?.let(::buildTrackSubtitle) ?: "Off"))
+            add(backOption(::closePanelOrOsd))
+        }
+
+        null -> emptyList()
+    }
+
+    val preferredPanelOptionId = when (openPanel) {
+        LiveOsdPanel.AUDIO -> selectedAudio?.let { "audio_${it.id}" }
+        LiveOsdPanel.SUBTITLES -> selectedSubtitle?.let { "subtitle_${it.id}" } ?: "subtitles_off"
+        LiveOsdPanel.SUBTITLE_DELAY -> "delay_reset"
+        LiveOsdPanel.ASPECT_RATIO -> "aspect_$selectedPictureFormatKey"
+        LiveOsdPanel.SLEEP_TIMER -> sleepTimerMinutes?.let { "timer_$it" } ?: "timer_off"
+        LiveOsdPanel.STREAM -> "buffer_${selectedBufferPreset.key}"
+        LiveOsdPanel.INFO -> "channel_info"
+        null -> null
+    }
+
+    LaunchedEffect(openPanel, panelOptions.map(LiveOsdOption::id)) {
+        val panel = openPanel ?: return@LaunchedEffect
+        val target = preferredPanelOptionId
+            ?.takeIf { id -> panelOptions.any { it.id == id && it.enabled } }
+            ?: panelOptions.firstOrNull { it.enabled }?.id
+            ?: return@LaunchedEffect
+        val index = panelOptions.indexOfFirst { it.id == target }
+        panelState.scrollToItem(index.coerceAtLeast(0))
+        snapshotFlow {
+            panelState.layoutInfo.visibleItemsInfo.any { it.key == target }
+        }.filter { it }.first()
+        androidx.compose.runtime.withFrameNanos { }
+        runCatching { panelFocusRequesters["${panel.name}:$target"]?.requestFocus() }
+    }
+
+    BoxWithConstraints(
+        modifier = Modifier
+            .fillMaxSize()
+            .testTag("live-playback-osd")
             .onPreviewKeyEvent { event ->
-                when {
-                    event.key == Key.Menu && event.type == KeyEventType.KeyDown -> {
-                        if (route == PlaybackMenuRoute.MAIN) onDismiss() else closeCurrentLayer()
-                        true
-                    }
-                    event.key == Key.Back && event.type == KeyEventType.KeyDown -> {
-                        closeCurrentLayer()
-                        true
-                    }
-                    else -> false
+                if (event.type == KeyEventType.KeyDown) registerInteraction()
+                if (event.key == Key.Back && event.type == KeyEventType.KeyDown) {
+                    closePanelOrOsd()
+                    true
+                } else {
+                    false
                 }
             },
     ) {
-        when (route) {
-                PlaybackMenuRoute.PLAYBACK_INFO,
-                PlaybackMenuRoute.DECODER_INFO -> {
-                    PlaybackInfoPane(
+        val railHeight = LivePlaybackOsdPolicy.railHeightDp(maxHeight.value).dp
+        val controlWidth = LivePlaybackOsdPolicy.controlWidthDp(maxWidth.value).dp
+        val panelWidth = if (maxWidth < 900.dp) 270.dp else 310.dp
+        val anchorCenterPx = railState.layoutInfo.visibleItemsInfo
+            .firstOrNull { it.key == focusedControlId }
+            ?.let { it.offset + (it.size / 2) }
+            ?: 0
+        val rawPanelX = with(density) { anchorCenterPx.toDp() } - (panelWidth / 2)
+        val panelX = rawPanelX.coerceIn(24.dp, (maxWidth - panelWidth - 24.dp).coerceAtLeast(24.dp))
+
+        Box(
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .fillMaxWidth()
+                .heightIn(min = 82.dp, max = 126.dp)
+                .background(
+                    Brush.verticalGradient(
+                        0f to Color.Black.copy(alpha = 0.44f),
+                        1f to Color.Transparent,
+                    ),
+                ),
+        ) {
+            LiveOsdChannelHeader(
+                currentChannel = currentChannel,
+                channelNumber = channelNumber,
+                programme = currentProgramme,
+                resolution = resolutionLabel,
+                audio = audioLabel,
+            )
+        }
+
+        openPanel?.let { panel ->
+            LiveOsdContextPanel(
+                title = panel.title,
+                options = panelOptions,
+                listState = panelState,
+                focusRequesters = panelFocusRequesters,
+                focusKeyPrefix = panel.name,
+                modifier = Modifier
+                    .align(Alignment.BottomStart)
+                    .padding(bottom = railHeight + 10.dp)
+                    .offset(x = panelX)
+                    .width(panelWidth)
+                    .heightIn(max = if (maxHeight < 600.dp) 260.dp else 330.dp),
+                onInteraction = ::registerInteraction,
+            )
+        }
+
+        Box(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth()
+                .height(railHeight)
+                .background(
+                    Brush.verticalGradient(
+                        0f to Color.Black.copy(alpha = 0.22f),
+                        0.25f to Color.Black.copy(alpha = 0.58f),
+                        1f to Color.Black.copy(alpha = 0.82f),
+                    ),
+                )
+                .padding(
+                    top = LivePlaybackOsdPolicy.RAIL_TOP_PADDING_DP.dp,
+                    bottom = LivePlaybackOsdPolicy.RAIL_BOTTOM_PADDING_DP.dp,
+                ),
+        ) {
+            val showTimeshiftTimeline = timeshiftAvailable && timeshiftDurationMs > 0L
+            Column(modifier = Modifier.fillMaxSize()) {
+                if (showTimeshiftTimeline) {
+                    Column(
                         modifier = Modifier
-                            .align(Alignment.CenterStart)
-                            .padding(start = 40.dp)
-                            .fillMaxHeight(0.86f)
-                            .width(920.dp),
-                        title = if (route == PlaybackMenuRoute.PLAYBACK_INFO) stringResource(R.string.tv_menu_playback_info) else stringResource(R.string.tv_menu_decoder_info),
-                        playbackRuntimeInfo = playbackRuntimeInfo,
-                        currentChannel = currentChannel,
-                        sleepTimerRemainingLabel = sleepTimerRemainingLabel,
-                    )
-                }
-
-                else -> {
-                    val items = when (route) {
-                        PlaybackMenuRoute.MAIN -> buildList {
-                            add(PlaybackMenuItem("channel_list", stringResource(R.string.tv_menu_channel_list), stringResource(R.string.tv_menu_channel_list_desc)))
-                            add(PlaybackMenuItem("guide", stringResource(R.string.tv_menu_tv_guide), stringResource(R.string.tv_menu_tv_guide_desc)))
-                            add(PlaybackMenuItem("playback_options", stringResource(R.string.tv_menu_playback_options), stringResource(R.string.tv_menu_playback_options_desc)))
-                            add(PlaybackMenuItem("channel_options", stringResource(R.string.tv_menu_channel_options), stringResource(R.string.tv_menu_channel_options_desc)))
-                            add(PlaybackMenuItem("sleep_timer", stringResource(R.string.tv_menu_sleep_timer), sleepTimerRemainingLabel ?: stringResource(R.string.tv_menu_sleep_timer_desc)))
-                            add(PlaybackMenuItem("playback_info", stringResource(R.string.tv_menu_playback_info), stringResource(R.string.tv_menu_playback_info_desc)))
-                            if (pipSupported) add(PlaybackMenuItem("pip", "Picture in Picture", "Keep playing while browsing"))
-                            add(
-                                PlaybackMenuItem(
-                                    "multiview",
-                                    "Multiview",
-                                    if (multiviewAvailable) "Open two-channel view" else "Requires two channels and a supported TV",
-                                    enabled = multiviewAvailable,
-                                ),
+                            .fillMaxWidth()
+                            .height(LivePlaybackOsdPolicy.TIMELINE_REGION_HEIGHT_DP.dp)
+                            .padding(horizontal = 30.dp)
+                            .testTag("live-playback-osd-timeline"),
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                        ) {
+                            Text(
+                                text = formatPlaybackTime(timeshiftPositionMs),
+                                color = Snow,
+                                fontSize = 9.sp,
+                            )
+                            Text(
+                                text = formatPlaybackTime(timeshiftDurationMs),
+                                color = Silver,
+                                fontSize = 9.sp,
                             )
                         }
-
-                        PlaybackMenuRoute.PLAYBACK_OPTIONS -> buildList {
-                            if (timeshiftAvailable) {
-                                add(
-                                    PlaybackMenuItem(
-                                        "timeshift_pause",
-                                        if (timeshiftPaused) "Resume live TV" else "Pause live TV",
-                                        if (timeshiftPaused) "Continue from the paused position" else "This channel provides a seekable live window",
-                                    ),
-                                )
-                                add(
-                                    PlaybackMenuItem(
-                                        "go_live",
-                                        "Go to live",
-                                        if (liveOffsetMs >= 1_000L) "${liveOffsetMs / 1_000L}s behind live" else "At the live edge",
-                                    ),
-                                )
-                            }
-                            add(PlaybackMenuItem("audio_tracks", "Audio Track", selectedAudioSummary(audioTracks)))
-                            add(PlaybackMenuItem("subtitle_tracks", "Subtitle Track", selectedSubtitleSummary(subtitleTracks)))
-                            add(PlaybackMenuItem("display_mode", "Aspect Ratio / Display Mode", selectedPictureFormatLabel(pictureFormats, selectedPictureFormatKey)))
-                            add(PlaybackMenuItem("audio_output", "Audio Output Mode", playbackRuntimeInfo.outputMode?.storageValue?.replace('_', ' ') ?: "Unknown"))
-                            add(PlaybackMenuItem("buffer_size", "Buffer Size", selectedBufferPreset.label))
-                            add(PlaybackMenuItem("decoder_info", stringResource(R.string.tv_menu_decoder_info), decoderSummary(playbackRuntimeInfo)))
-                        }
-
-                        PlaybackMenuRoute.CHANNEL_OPTIONS -> listOf(
-                            PlaybackMenuItem("favorite", if (isFavorite) "Remove from Favorites" else "Add to Favorites", currentChannel?.name),
-                            PlaybackMenuItem("channel_info", "Channel Info", currentChannel?.groupTitle ?: currentChannel?.name),
-                            PlaybackMenuItem("reload", "Reload Stream", "Restart the current channel"),
+                        Spacer(Modifier.height(3.dp))
+                        LinearProgressIndicator(
+                            progress = {
+                                (timeshiftPositionMs.toFloat() / timeshiftDurationMs.toFloat())
+                                    .coerceIn(0f, 1f)
+                            },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(3.dp)
+                                .clip(RoundedCornerShape(3.dp)),
+                            color = Amber,
+                            trackColor = Color.White.copy(alpha = 0.16f),
                         )
-
-                        PlaybackMenuRoute.SLEEP_TIMER -> listOf(
-                            PlaybackMenuItem("sleep_off", "Off", "Disable the timer"),
-                            PlaybackMenuItem("sleep_15", "15 min"),
-                            PlaybackMenuItem("sleep_30", "30 min"),
-                            PlaybackMenuItem("sleep_60", "60 min"),
-                            PlaybackMenuItem("sleep_90", "90 min"),
-                            PlaybackMenuItem("sleep_120", "120 min"),
-                        )
-
-                        PlaybackMenuRoute.AUDIO_TRACKS -> {
-                            if (audioTracks.isEmpty()) {
-                                listOf(PlaybackMenuItem("audio_none", "No audio tracks detected", enabled = false))
-                            } else {
-                                audioTracks.map { track ->
-                                    PlaybackMenuItem(
-                                        id = "audio_${track.id}",
-                                        title = track.label,
-                                        subtitle = buildTrackSubtitle(track),
-                                    )
-                                }
-                            }
-                        }
-
-                        PlaybackMenuRoute.SUBTITLE_TRACKS -> buildList {
-                            add(PlaybackMenuItem("subtitles_off", "Off", "Disable subtitles"))
-                            if (subtitleTracks.isEmpty()) {
-                                add(PlaybackMenuItem("subtitle_none", "No subtitle tracks detected", enabled = false))
-                            } else {
-                                subtitleTracks.forEach { track ->
-                                    add(
-                                        PlaybackMenuItem(
-                                            id = "subtitle_${track.id}",
-                                            title = track.label,
-                                            subtitle = buildTrackSubtitle(track),
-                                        ),
-                                    )
-                                }
-                            }
-                        }
-
-                        PlaybackMenuRoute.DISPLAY_MODE -> pictureFormats.map { format ->
-                            PlaybackMenuItem(
-                                id = "display_${format.key}",
-                                title = format.label,
-                                subtitle = if (format.key == selectedPictureFormatKey) "Selected" else null,
-                            )
-                        }
-
-                        PlaybackMenuRoute.AUDIO_OUTPUT_MODE -> LiveAudioOutputMode.entries.map { mode ->
-                            PlaybackMenuItem(
-                                id = "output_${mode.storageValue}",
-                                title = when (mode) {
-                                    LiveAudioOutputMode.AUTO -> "Auto"
-                                    LiveAudioOutputMode.PREFER_COMPATIBLE -> "Prefer Compatible"
-                                    LiveAudioOutputMode.FORCE_STEREO_PCM -> "Force Stereo PCM"
-                                },
-                                subtitle = if (mode == playbackRuntimeInfo.outputMode) "Selected" else null,
-                            )
-                        }
-
-                        PlaybackMenuRoute.BUFFER_SIZE -> LiveBufferPreset.entries.map { preset ->
-                            PlaybackMenuItem(
-                                id = "buffer_${preset.key}",
-                                title = preset.label,
-                                subtitle = if (preset == selectedBufferPreset) "Selected" else null,
-                            )
-                        }
-
-                        PlaybackMenuRoute.PLAYBACK_INFO,
-                        PlaybackMenuRoute.DECODER_INFO -> emptyList()
                     }
-
-                    PlaybackMenuShell(
-                        route = route,
-                        items = items,
-                        focusedItemId = focusedItemId,
-                        firstFocus = firstFocus,
-                        currentChannel = currentChannel,
-                        isFavorite = isFavorite,
-                        pictureFormats = pictureFormats,
-                        selectedPictureFormatKey = selectedPictureFormatKey,
-                        audioTracks = audioTracks,
-                        subtitleTracks = subtitleTracks,
-                        playbackRuntimeInfo = playbackRuntimeInfo,
-                        sleepTimerMinutes = sleepTimerMinutes,
-                        sleepTimerRemainingLabel = sleepTimerRemainingLabel,
-                        selectedBufferPreset = selectedBufferPreset,
-                        multiviewAvailable = multiviewAvailable,
-                        onFocusItem = { focusedItemId = it },
-                        onSelectItem = { item ->
-                            when (route) {
-                                PlaybackMenuRoute.MAIN -> when (item.id) {
-                                    "channel_list" -> {
-                                        onDismiss()
-                                        onOpenChannelList()
-                                    }
-                                    "guide" -> {
-                                        onDismiss()
-                                        onOpenGuide()
-                                    }
-                                    "playback_options" -> route = PlaybackMenuRoute.PLAYBACK_OPTIONS
-                                    "channel_options" -> route = PlaybackMenuRoute.CHANNEL_OPTIONS
-                                    "sleep_timer" -> route = PlaybackMenuRoute.SLEEP_TIMER
-                                    "playback_info" -> route = PlaybackMenuRoute.PLAYBACK_INFO
-                                    "pip" -> {
-                                        onDismiss()
-                                        onEnterPip()
-                                    }
-                                    "multiview" -> {
-                                        onDismiss()
-                                        onToggleMultiview()
-                                    }
-                                    else -> Unit
-                                }
-
-                                PlaybackMenuRoute.PLAYBACK_OPTIONS -> when (item.id) {
-                                    "timeshift_pause" -> onToggleTimeshiftPause()
-                                    "go_live" -> onGoLive()
-                                    "audio_tracks" -> route = PlaybackMenuRoute.AUDIO_TRACKS
-                                    "subtitle_tracks" -> route = PlaybackMenuRoute.SUBTITLE_TRACKS
-                                    "display_mode" -> route = PlaybackMenuRoute.DISPLAY_MODE
-                                    "audio_output" -> route = PlaybackMenuRoute.AUDIO_OUTPUT_MODE
-                                    "buffer_size" -> route = PlaybackMenuRoute.BUFFER_SIZE
-                                    "decoder_info" -> route = PlaybackMenuRoute.DECODER_INFO
-                                    else -> Unit
-                                }
-
-                                PlaybackMenuRoute.CHANNEL_OPTIONS -> when (item.id) {
-                                    "favorite" -> onToggleFavorite()
-                                    "channel_info" -> {
-                                        onDismiss()
-                                        onOpenChannelInfo()
-                                    }
-                                    "reload" -> {
-                                        onDismiss()
-                                        onReloadStream()
-                                    }
-                                    else -> Unit
-                                }
-
-                                PlaybackMenuRoute.SLEEP_TIMER -> onSelectSleepTimer(
-                                    when (item.id) {
-                                        "sleep_15" -> 15
-                                        "sleep_30" -> 30
-                                        "sleep_60" -> 60
-                                        "sleep_90" -> 90
-                                        "sleep_120" -> 120
-                                        else -> null
-                                    },
-                                )
-
-                                PlaybackMenuRoute.AUDIO_TRACKS -> {
-                                    audioTracks.firstOrNull { "audio_${it.id}" == item.id }?.let { track ->
-                                        onSelectAudioTrack(track.id)
-                                    }
-                                }
-
-                                PlaybackMenuRoute.SUBTITLE_TRACKS -> {
-                                    if (item.id == "subtitles_off") {
-                                        onDisableSubtitles()
-                                    } else {
-                                        subtitleTracks.firstOrNull { "subtitle_${it.id}" == item.id }?.let { track ->
-                                            onSelectSubtitleTrack(track.id)
-                                        }
-                                    }
-                                }
-
-                                PlaybackMenuRoute.DISPLAY_MODE -> {
-                                    pictureFormats.firstOrNull { "display_${it.key}" == item.id }?.let { format ->
-                                        onSelectPictureFormat(format.key)
-                                    }
-                                }
-
-                                PlaybackMenuRoute.AUDIO_OUTPUT_MODE -> {
-                                    LiveAudioOutputMode.entries.firstOrNull { "output_${it.storageValue}" == item.id }?.let { mode ->
-                                        onSelectAudioOutputMode(mode)
-                                    }
-                                }
-
-                                PlaybackMenuRoute.BUFFER_SIZE -> {
-                                    LiveBufferPreset.entries.firstOrNull { "buffer_${it.key}" == item.id }?.let { preset ->
-                                        onSelectBufferSize(preset)
-                                    }
-                                }
-
-                                PlaybackMenuRoute.PLAYBACK_INFO,
-                                PlaybackMenuRoute.DECODER_INFO -> Unit
+                    Spacer(Modifier.height(LivePlaybackOsdPolicy.TIMELINE_CONTROL_GAP_DP.dp))
+                }
+                LazyRow(
+                    state = railState,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f)
+                        .testTag("live-playback-osd-rail"),
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 30.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                items(controls, key = LiveOsdControl::id) { control ->
+                    val requester = railFocusRequesters.getOrPut(control.id) { FocusRequester() }
+                    LiveOsdControlButton(
+                        control = control,
+                        width = controlWidth,
+                        focusRequester = requester,
+                        onFocused = {
+                            focusedControlId = control.id
+                            registerInteraction()
+                        },
+                        onMove = { direction ->
+                            val target = LivePlaybackOsdPolicy.nextControlId(
+                                controlIds = controlIds,
+                                // Use the latest logical target so repeated key presses can
+                                // supersede an in-flight reveal animation without queuing it.
+                                currentControlId = focusedControlId,
+                                direction = direction,
+                            )
+                            if (target != focusedControlId) {
+                                focusedControlId = target
+                                pendingRailFocusId = target
                             }
+                        },
+                        onClick = {
+                            focusedControlId = control.id
+                            registerInteraction()
+                            control.onClick()
                         },
                     )
                 }
+                }
             }
+        }
     }
 }
 
 @Composable
-private fun PlaybackMenuShell(
-    route: PlaybackMenuRoute,
-    items: List<PlaybackMenuItem>,
-    focusedItemId: String,
-    firstFocus: FocusRequester,
+private fun LiveOsdChannelHeader(
     currentChannel: Channel?,
-    isFavorite: Boolean,
-    pictureFormats: List<LivePictureFormatOption>,
-    selectedPictureFormatKey: String,
-    audioTracks: List<TrackDescription>,
-    subtitleTracks: List<TrackDescription>,
-    playbackRuntimeInfo: PlaybackRuntimeInfo,
-    sleepTimerMinutes: Int?,
-    sleepTimerRemainingLabel: String?,
-    selectedBufferPreset: LiveBufferPreset = LiveBufferPreset.HIGH,
-    multiviewAvailable: Boolean,
-    onFocusItem: (String) -> Unit,
-    onSelectItem: (PlaybackMenuItem) -> Unit,
+    channelNumber: Int,
+    programme: EpgProgramme?,
+    resolution: String,
+    audio: String,
 ) {
+    val nowMs by produceState(initialValue = System.currentTimeMillis()) {
+        while (true) {
+            delay(30_000L)
+            value = System.currentTimeMillis()
+        }
+    }
+    val timeFormat = remember { SimpleDateFormat("HH:mm", Locale.getDefault()) }
+    val progress = programme?.let {
+        if (it.endTime <= it.startTime) 0f
+        else ((nowMs - it.startTime).toFloat() / (it.endTime - it.startTime).toFloat()).coerceIn(0f, 1f)
+    } ?: 0f
+
     Row(
         modifier = Modifier
-            .padding(start = 36.dp, top = 28.dp, bottom = 28.dp)
-            .fillMaxHeight(0.9f),
-        horizontalArrangement = Arrangement.spacedBy(22.dp),
+            .fillMaxWidth()
+            .padding(horizontal = 34.dp, vertical = 18.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.Top,
     ) {
-        Column(
-            modifier = Modifier
-                .width(360.dp)
-                .fillMaxHeight()
-                .background(Obsidian.copy(alpha = 0.94f), RoundedCornerShape(20.dp))
-                .border(1.dp, Amber.copy(alpha = 0.24f), RoundedCornerShape(20.dp))
-                .padding(horizontal = 18.dp, vertical = 20.dp),
+        Row(
+            modifier = Modifier.widthIn(max = 720.dp),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text(
-                text = menuTitle(route),
-                color = Snow,
-                fontSize = 24.sp,
-                fontWeight = FontWeight.Bold,
-            )
-            Spacer(Modifier.height(10.dp))
-            Text(
-                text = menuSubtitle(route),
-                color = Silver,
-                fontSize = 13.sp,
-            )
-            Spacer(Modifier.height(18.dp))
-            LazyColumn(
-                contentPadding = PaddingValues(top = 6.dp, bottom = 6.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                items(items, key = { it.id }) { item ->
-                    PlaybackMenuButton(
-                        item = item,
-                        isSelected = focusedItemId == item.id,
-                        focusRequester = if (items.firstOrNull()?.id == item.id) firstFocus else null,
-                        onFocus = { onFocusItem(item.id) },
-                        onClick = { onSelectItem(item) },
+            currentChannel?.tvgLogo?.takeIf { it.isNotBlank() }?.let { logo ->
+                AsyncImage(
+                    model = logo,
+                    contentDescription = null,
+                    modifier = Modifier
+                        .size(38.dp)
+                        .clip(RoundedCornerShape(6.dp)),
+                    contentScale = ContentScale.Fit,
+                )
+                Spacer(Modifier.width(10.dp))
+            }
+            Column {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (channelNumber > 0) {
+                        Text("$channelNumber", color = Amber, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                        Spacer(Modifier.width(8.dp))
+                    }
+                    Text(
+                        text = currentChannel?.name ?: "Live TV",
+                        color = Snow,
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                programme?.let {
+                    Spacer(Modifier.height(3.dp))
+                    Text(
+                        text = it.title,
+                        color = Silver,
+                        fontSize = 12.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    LinearProgressIndicator(
+                        progress = { progress },
+                        modifier = Modifier
+                            .width(240.dp)
+                            .height(2.dp)
+                            .clip(RoundedCornerShape(2.dp)),
+                        color = Amber,
+                        trackColor = Color.White.copy(alpha = 0.14f),
                     )
                 }
             }
         }
-
-        PlaybackMenuDetailPane(
-            modifier = Modifier
-                .width(540.dp)
-                .fillMaxHeight()
-                .background(Color(0xE8181E29), RoundedCornerShape(20.dp))
-                .border(1.dp, Amber.copy(alpha = 0.18f), RoundedCornerShape(20.dp))
-                .padding(horizontal = 22.dp, vertical = 22.dp),
-            route = route,
-            focusedItemId = focusedItemId,
-            currentChannel = currentChannel,
-            isFavorite = isFavorite,
-            pictureFormats = pictureFormats,
-            selectedPictureFormatKey = selectedPictureFormatKey,
-            audioTracks = audioTracks,
-            subtitleTracks = subtitleTracks,
-            playbackRuntimeInfo = playbackRuntimeInfo,
-            sleepTimerRemainingLabel = sleepTimerRemainingLabel,
-            sleepTimerMinutes = sleepTimerMinutes,
-            selectedBufferPreset = selectedBufferPreset,
-            multiviewAvailable = multiviewAvailable,
-        )
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            resolution.takeIf { it.isNotBlank() }?.let { LiveOsdInfoLabel(it) }
+            audio.takeIf { it.isNotBlank() }?.let { LiveOsdInfoLabel(it) }
+            LiveOsdInfoLabel(timeFormat.format(Date(nowMs)))
+        }
     }
 }
 
 @Composable
-private fun PlaybackMenuButton(
-    item: PlaybackMenuItem,
-    isSelected: Boolean,
-    focusRequester: FocusRequester?,
-    onFocus: () -> Unit,
+private fun LiveOsdInfoLabel(label: String) {
+    Text(
+        text = label,
+        color = Snow.copy(alpha = 0.9f),
+        fontSize = 10.sp,
+        fontWeight = FontWeight.Medium,
+        modifier = Modifier
+            .background(Color.Black.copy(alpha = 0.42f), RoundedCornerShape(6.dp))
+            .padding(horizontal = 7.dp, vertical = 4.dp),
+    )
+}
+
+@Composable
+private fun LiveOsdControlButton(
+    control: LiveOsdControl,
+    width: Dp,
+    focusRequester: FocusRequester,
+    onFocused: () -> Unit,
+    onMove: (LivePlaybackOsdDirection) -> Unit,
     onClick: () -> Unit,
 ) {
     Surface(
         onClick = onClick,
-        enabled = item.enabled,
+        enabled = control.enabled,
         modifier = Modifier
-            .fillMaxWidth()
-            .then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier)
-            .onFocusChanged {
-                if (it.isFocused) onFocus()
+            .width(width)
+            .fillMaxHeight()
+            .focusRequester(focusRequester)
+            .onFocusChanged { if (it.isFocused) onFocused() }
+            .onPreviewKeyEvent { event ->
+                val direction = when (event.key) {
+                    Key.DirectionLeft -> LivePlaybackOsdDirection.PREVIOUS
+                    Key.DirectionRight -> LivePlaybackOsdDirection.NEXT
+                    else -> null
+                }
+                if (direction != null) {
+                    if (event.type == KeyEventType.KeyDown) onMove(direction)
+                    true
+                } else {
+                    false
+                }
             }
-            .height(64.dp),
-        shape = ClickableSurfaceDefaults.shape(RoundedCornerShape(14.dp)),
+            .testTag("live-osd-control-${control.id}"),
+        shape = ClickableSurfaceDefaults.shape(RoundedCornerShape(12.dp)),
+        // Surface scale and border are draw-time treatments. The fixed width/height
+        // above never change when focus moves, so neighbouring controls do not shift.
+        scale = ClickableSurfaceDefaults.scale(focusedScale = 1.02f),
         colors = ClickableSurfaceDefaults.colors(
-            containerColor = if (isSelected) Amber.copy(alpha = 0.18f) else Graphite.copy(alpha = 0.88f),
-            focusedContainerColor = Amber.copy(alpha = 0.26f),
-            disabledContainerColor = Graphite.copy(alpha = 0.45f),
+            containerColor = Color.Transparent,
+            focusedContainerColor = Amber.copy(alpha = 0.17f),
+            disabledContainerColor = Color.Transparent,
         ),
         border = ClickableSurfaceDefaults.border(
             focusedBorder = androidx.tv.material3.Border(
                 border = BorderStroke(2.dp, Amber),
-                shape = RoundedCornerShape(14.dp),
+                shape = RoundedCornerShape(12.dp),
             ),
         ),
     ) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(horizontal = 16.dp, vertical = 10.dp),
+                .padding(horizontal = 5.dp, vertical = 7.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center,
         ) {
+            Icon(
+                imageVector = control.icon,
+                contentDescription = control.label,
+                tint = if (control.enabled) Snow else Silver.copy(alpha = 0.45f),
+                modifier = Modifier.size(25.dp),
+            )
+            Spacer(Modifier.height(5.dp))
             Text(
-                text = item.title,
-                color = if (item.enabled) Snow else Silver.copy(alpha = 0.6f),
-                fontSize = 15.sp,
+                text = control.label,
+                color = if (control.enabled) Snow else Silver.copy(alpha = 0.45f),
+                fontSize = 11.sp,
                 fontWeight = FontWeight.SemiBold,
                 maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
-            item.subtitle?.takeIf { it.isNotBlank() }?.let { subtitle ->
-                Spacer(Modifier.height(2.dp))
-                Text(
-                    text = subtitle,
-                    color = Silver,
-                    fontSize = 12.sp,
-                    maxLines = 2,
-                )
-            }
+            Text(
+                text = control.value,
+                color = Silver,
+                fontSize = 9.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
         }
     }
 }
 
 @Composable
-private fun PlaybackMenuDetailPane(
-    modifier: Modifier,
-    route: PlaybackMenuRoute,
-    focusedItemId: String,
-    currentChannel: Channel?,
-    isFavorite: Boolean,
-    pictureFormats: List<LivePictureFormatOption>,
-    selectedPictureFormatKey: String,
-    audioTracks: List<TrackDescription>,
-    subtitleTracks: List<TrackDescription>,
-    playbackRuntimeInfo: PlaybackRuntimeInfo,
-    sleepTimerRemainingLabel: String?,
-    sleepTimerMinutes: Int?,
-    selectedBufferPreset: LiveBufferPreset = LiveBufferPreset.HIGH,
-    multiviewAvailable: Boolean,
-) {
-    Column(modifier = modifier) {
-        Text(
-            text = detailTitle(route, focusedItemId),
-            color = Snow,
-            fontSize = 22.sp,
-            fontWeight = FontWeight.Bold,
-        )
-        Spacer(Modifier.height(14.dp))
-
-        when (route) {
-            PlaybackMenuRoute.MAIN -> {
-                DetailParagraph(
-                    text = when (focusedItemId) {
-                        "channel_list" -> "Browse all channels and retune without interrupting playback."
-                        "guide" -> "Open the current channel schedule first, then jump into the full live guide."
-                        "playback_options" -> "Change audio track, subtitles, display mode, and view decoder details."
-                        "channel_options" -> "Manage favorites, inspect the current channel, or reload the stream."
-                        "sleep_timer" -> "Stop playback automatically after a selected delay."
-                        "playback_info" -> "Inspect engine, codecs, decoder mode, output mode, and selected tracks."
-                        "pip" -> "Enter picture-in-picture if the device supports it."
-                        "multiview" -> if (multiviewAvailable) {
-                            "Open a two-channel view. Left or right swaps which channel has audio."
-                        } else {
-                            "Multiview requires two channels and a TV with enough memory and decoder capacity."
-                        }
-                        else -> "Use the Menu button for quick live-TV controls."
-                    },
-                )
-                Spacer(Modifier.height(16.dp))
-                DetailKv("Channel", currentChannel?.name ?: "Unknown")
-                DetailKv("Engine", playbackRuntimeInfo.engineId.storageValue)
-                DetailKv("Video Decoder", decoderLabel(playbackRuntimeInfo.videoDecoderKind, playbackRuntimeInfo.videoDecoderName))
-                DetailKv("Audio Decoder", decoderLabel(playbackRuntimeInfo.audioDecoderKind, playbackRuntimeInfo.audioDecoderName))
-                DetailKv("Selected Audio", playbackRuntimeInfo.selectedAudioTrack?.label ?: "None")
-                DetailKv("Sleep Timer", sleepTimerRemainingLabel ?: "Off")
-            }
-
-            PlaybackMenuRoute.PLAYBACK_OPTIONS -> {
-                DetailParagraph(text = "Playback options stay focused on live playback: track selection, display mode, audio output mode, and decoder visibility.")
-                Spacer(Modifier.height(14.dp))
-                DetailKv("Audio Track", playbackRuntimeInfo.selectedAudioTrack?.label ?: "None")
-                DetailKv("Subtitle", playbackRuntimeInfo.selectedSubtitleTrack?.label ?: "Off")
-                DetailKv("Display", selectedPictureFormatLabel(pictureFormats, selectedPictureFormatKey))
-                DetailKv("Audio Output", playbackRuntimeInfo.outputMode?.storageValue?.replace('_', ' ') ?: "Unknown")
-            }
-
-            PlaybackMenuRoute.CHANNEL_OPTIONS -> {
-                DetailParagraph(text = "These actions apply to the current channel only.")
-                Spacer(Modifier.height(14.dp))
-                DetailKv("Channel", currentChannel?.name ?: "Unknown")
-                DetailKv("Group", currentChannel?.groupTitle ?: "Unknown")
-                DetailKv("Favorite", if (isFavorite) "Yes" else "No")
-                DetailKv("Stream", if (currentChannel?.url.isNullOrBlank()) "Unavailable" else "Available")
-            }
-
-            PlaybackMenuRoute.SLEEP_TIMER -> {
-                DetailParagraph(text = "Choose when live playback should stop automatically.")
-                Spacer(Modifier.height(14.dp))
-                DetailKv("Current Timer", sleepTimerRemainingLabel ?: "Off")
-                DetailKv("Selection", sleepTimerMinutes?.let { "$it min" } ?: "Off")
-            }
-
-            PlaybackMenuRoute.AUDIO_TRACKS -> {
-                val track = audioTracks.firstOrNull { "audio_${it.id}" == focusedItemId } ?: playbackRuntimeInfo.selectedAudioTrack
-                DetailTrackCard(track = track, emptyLabel = "No audio track selected")
-            }
-
-            PlaybackMenuRoute.SUBTITLE_TRACKS -> {
-                val track = subtitleTracks.firstOrNull { "subtitle_${it.id}" == focusedItemId } ?: playbackRuntimeInfo.selectedSubtitleTrack
-                DetailTrackCard(track = track, emptyLabel = "Subtitles off")
-            }
-
-            PlaybackMenuRoute.DISPLAY_MODE -> {
-                DetailParagraph(text = "Change how the video surface fits the screen without interrupting live playback.")
-                Spacer(Modifier.height(14.dp))
-                DetailKv("Current Mode", selectedPictureFormatLabel(pictureFormats, selectedPictureFormatKey))
-            }
-
-            PlaybackMenuRoute.AUDIO_OUTPUT_MODE -> {
-                DetailParagraph(text = "Hardware decoding remains the default first choice. Audio output mode only changes how Torve handles compatibility and output routing.")
-                Spacer(Modifier.height(14.dp))
-                DetailKv("Output Mode", playbackRuntimeInfo.outputMode?.storageValue?.replace('_', ' ') ?: "Unknown")
-                DetailKv("Passthrough", if (playbackRuntimeInfo.passthroughEnabled) "On" else "Off")
-                DetailKv("Prefer Surround", if (playbackRuntimeInfo.preferSurround) "On" else "Off")
-            }
-
-            PlaybackMenuRoute.BUFFER_SIZE -> {
-                val focused = LiveBufferPreset.entries.firstOrNull { "buffer_${it.key}" == focusedItemId }
-                DetailParagraph(text = focused?.description ?: "Choose how much content to buffer ahead of playback. Lower values reduce repeat-glitches on some channels.")
-                Spacer(Modifier.height(14.dp))
-                DetailKv("Current Buffer", selectedBufferPreset.label)
-            }
-
-            PlaybackMenuRoute.PLAYBACK_INFO,
-            PlaybackMenuRoute.DECODER_INFO -> Unit
-        }
-    }
-}
-
-@Composable
-private fun PlaybackInfoPane(
-    modifier: Modifier,
+private fun LiveOsdContextPanel(
     title: String,
-    playbackRuntimeInfo: PlaybackRuntimeInfo,
-    currentChannel: Channel?,
-    sleepTimerRemainingLabel: String?,
+    options: List<LiveOsdOption>,
+    listState: androidx.compose.foundation.lazy.LazyListState,
+    focusRequesters: MutableMap<String, FocusRequester>,
+    focusKeyPrefix: String,
+    modifier: Modifier,
+    onInteraction: () -> Unit,
 ) {
     Column(
         modifier = modifier
-            .background(Color(0xE8181E29), RoundedCornerShape(22.dp))
-            .border(1.dp, Amber.copy(alpha = 0.2f), RoundedCornerShape(22.dp))
-            .padding(horizontal = 24.dp, vertical = 22.dp),
+            .background(Color(0xE6171B24), RoundedCornerShape(14.dp))
+            .padding(horizontal = 10.dp, vertical = 10.dp)
+            .testTag("live-osd-context-panel"),
     ) {
         Text(
             text = title,
             color = Snow,
-            fontSize = 24.sp,
-            fontWeight = FontWeight.Bold,
+            fontSize = 15.sp,
+            fontWeight = FontWeight.SemiBold,
+            modifier = Modifier.padding(horizontal = 7.dp, vertical = 5.dp),
         )
-        Spacer(Modifier.height(18.dp))
-        LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            item("channel") { DetailKv("Channel", currentChannel?.name ?: "Unknown") }
-            item("engine") { DetailKv("Player Engine", playbackRuntimeInfo.engineId.storageValue) }
-            item("video_codec") { DetailKv("Video Codec", playbackRuntimeInfo.videoCodec ?: "Unknown") }
-            item("audio_codec") { DetailKv("Audio Codec", playbackRuntimeInfo.audioCodec ?: "Unknown") }
-            item("video_decoder") {
-                DetailKv("Video Decoder", decoderLabel(playbackRuntimeInfo.videoDecoderKind, playbackRuntimeInfo.videoDecoderName))
+        LazyColumn(
+            state = listState,
+            contentPadding = androidx.compose.foundation.layout.PaddingValues(
+                horizontal = 4.dp,
+                vertical = 4.dp,
+            ),
+            verticalArrangement = Arrangement.spacedBy(5.dp),
+        ) {
+            items(options, key = LiveOsdOption::id) { option ->
+                val requesterKey = "$focusKeyPrefix:${option.id}"
+                val requester = focusRequesters.getOrPut(requesterKey) { FocusRequester() }
+                Surface(
+                    onClick = {
+                        onInteraction()
+                        option.onClick()
+                    },
+                    enabled = option.enabled,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 43.dp)
+                        .focusRequester(requester)
+                        .onPreviewKeyEvent { event ->
+                            event.key == Key.DirectionLeft || event.key == Key.DirectionRight
+                        }
+                        .onFocusChanged { if (it.isFocused) onInteraction() }
+                        .testTag("live-osd-option-${option.id}"),
+                    shape = ClickableSurfaceDefaults.shape(RoundedCornerShape(9.dp)),
+                    // Context options stay within the popup's padded viewport. The
+                    // default TV Surface focus scale otherwise grows past every edge.
+                    scale = ClickableSurfaceDefaults.scale(
+                        focusedScale = LivePlaybackOsdPolicy.CONTEXT_OPTION_FOCUSED_SCALE,
+                    ),
+                    colors = ClickableSurfaceDefaults.colors(
+                        containerColor = if (option.selected) Amber.copy(alpha = 0.12f) else Graphite.copy(alpha = 0.42f),
+                        focusedContainerColor = Amber.copy(alpha = 0.2f),
+                        disabledContainerColor = Color.Transparent,
+                    ),
+                    border = ClickableSurfaceDefaults.border(
+                        focusedBorder = androidx.tv.material3.Border(
+                            border = BorderStroke(2.dp, Amber),
+                            shape = RoundedCornerShape(9.dp),
+                        ),
+                    ),
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 11.dp, vertical = 7.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = option.label,
+                                color = if (option.enabled) Snow else Silver,
+                                fontSize = 12.sp,
+                                fontWeight = if (option.selected) FontWeight.SemiBold else FontWeight.Normal,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                            option.value?.takeIf { it.isNotBlank() }?.let { value ->
+                                Text(
+                                    text = value,
+                                    color = Silver,
+                                    fontSize = 9.sp,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
+                        }
+                        if (option.selected) {
+                            Icon(
+                                imageVector = Icons.Filled.Check,
+                                contentDescription = "Selected",
+                                tint = Amber,
+                                modifier = Modifier.size(14.dp),
+                            )
+                        }
+                    }
+                }
             }
-            item("audio_decoder") {
-                DetailKv("Audio Decoder", decoderLabel(playbackRuntimeInfo.audioDecoderKind, playbackRuntimeInfo.audioDecoderName))
-            }
-            item("resolution") { DetailKv("Resolution", playbackRuntimeInfo.resolutionLabel ?: "Unknown") }
-            item("fps") { DetailKv("FPS", playbackRuntimeInfo.frameRate?.let { String.format("%.2f", it) } ?: "Unknown") }
-            item("audio_track") { DetailKv("Audio Track", playbackRuntimeInfo.selectedAudioTrack?.let(::buildTrackSubtitle) ?: "None") }
-            item("subtitle_track") { DetailKv("Subtitle Track", playbackRuntimeInfo.selectedSubtitleTrack?.let(::buildTrackSubtitle) ?: "Off") }
-            item("output_mode") { DetailKv("Audio Output Mode", playbackRuntimeInfo.outputMode?.storageValue?.replace('_', ' ') ?: "Unknown") }
-            item("passthrough") { DetailKv("Passthrough", if (playbackRuntimeInfo.passthroughEnabled) "On" else "Off") }
-            item("fallback") { DetailKv("Fallback From Hardware Default", if (playbackRuntimeInfo.fallbackFromHardwareDefault) "Yes" else "No") }
-            item("sleep") { DetailKv("Sleep Timer", sleepTimerRemainingLabel ?: "Off") }
         }
     }
 }
 
-@Composable
-private fun DetailParagraph(text: String) {
-    Text(
-        text = text,
-        color = Silver,
-        fontSize = 14.sp,
-        lineHeight = 20.sp,
-    )
+private fun backOption(onClick: () -> Unit) = LiveOsdOption(
+    id = "back_to_controls",
+    label = "Back to controls",
+    onClick = onClick,
+)
+
+private fun infoOption(id: String, label: String, value: String) = LiveOsdOption(
+    id = id,
+    label = label,
+    value = value,
+    enabled = false,
+    onClick = {},
+)
+
+private fun formatDelayMs(delayMs: Int): String {
+    if (delayMs == 0) return "No delay"
+    return "${if (delayMs > 0) "+" else ""}$delayMs ms"
 }
 
-@Composable
-private fun DetailKv(label: String, value: String) {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(Graphite.copy(alpha = 0.6f), RoundedCornerShape(12.dp))
-            .padding(horizontal = 14.dp, vertical = 10.dp),
-    ) {
-        Text(text = label, color = Silver, fontSize = 12.sp)
-        Spacer(Modifier.height(2.dp))
-        Text(text = value, color = Snow, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+private fun formatPlaybackTime(positionMs: Long): String {
+    val totalSeconds = positionMs.coerceAtLeast(0L) / 1_000L
+    val hours = totalSeconds / 3_600L
+    val minutes = (totalSeconds % 3_600L) / 60L
+    val seconds = totalSeconds % 60L
+    return if (hours > 0L) {
+        "%d:%02d:%02d".format(Locale.US, hours, minutes, seconds)
+    } else {
+        "%02d:%02d".format(Locale.US, minutes, seconds)
     }
 }
 
-@Composable
-private fun DetailTrackCard(track: TrackDescription?, emptyLabel: String) {
-    if (track == null) {
-        DetailParagraph(text = emptyLabel)
-        return
-    }
-    DetailKv("Label", track.label)
-    Spacer(Modifier.height(10.dp))
-    DetailKv("Language", track.language ?: "Unknown")
-    Spacer(Modifier.height(10.dp))
-    DetailKv("Codec", track.formatHint ?: "Unknown")
-    Spacer(Modifier.height(10.dp))
-    DetailKv("Channels", track.channelCount?.toString() ?: "Unknown")
-    Spacer(Modifier.height(10.dp))
-    DetailKv("Selected", if (track.isSelected) "Yes" else "No")
-}
+private fun buildTrackSubtitle(track: TrackDescription): String = listOfNotNull(
+    track.language?.takeIf { it.isNotBlank() },
+    track.formatHint?.takeIf { it.isNotBlank() },
+    track.channelCount?.let { "${it}ch" },
+).joinToString(" • ").ifBlank { track.label }
 
-private fun menuTitle(route: PlaybackMenuRoute): String = when (route) {
-    PlaybackMenuRoute.MAIN -> "Playback Menu"
-    PlaybackMenuRoute.PLAYBACK_OPTIONS -> "Playback Options"
-    PlaybackMenuRoute.AUDIO_TRACKS -> "Audio Track"
-    PlaybackMenuRoute.SUBTITLE_TRACKS -> "Subtitle Track"
-    PlaybackMenuRoute.DISPLAY_MODE -> "Aspect Ratio / Display"
-    PlaybackMenuRoute.AUDIO_OUTPUT_MODE -> "Audio Output Mode"
-    PlaybackMenuRoute.BUFFER_SIZE -> "Buffer Size"
-    PlaybackMenuRoute.DECODER_INFO -> "Decoder Info"
-    PlaybackMenuRoute.CHANNEL_OPTIONS -> "Channel Options"
-    PlaybackMenuRoute.SLEEP_TIMER -> "Sleep Timer"
-    PlaybackMenuRoute.PLAYBACK_INFO -> "Playback Info"
-}
-
-private fun menuSubtitle(route: PlaybackMenuRoute): String = when (route) {
-    PlaybackMenuRoute.MAIN -> "Live playback hub"
-    PlaybackMenuRoute.PLAYBACK_OPTIONS -> "Tracks, display, output, decoder info"
-    PlaybackMenuRoute.AUDIO_TRACKS -> "Select a live audio track manually"
-    PlaybackMenuRoute.SUBTITLE_TRACKS -> "Select subtitles or turn them off"
-    PlaybackMenuRoute.DISPLAY_MODE -> "Choose how video fits the screen"
-    PlaybackMenuRoute.AUDIO_OUTPUT_MODE -> "Change live audio compatibility mode"
-    PlaybackMenuRoute.BUFFER_SIZE -> "Adjust live stream buffering"
-    PlaybackMenuRoute.DECODER_INFO -> "Inspect hardware vs software decode"
-    PlaybackMenuRoute.CHANNEL_OPTIONS -> "Actions for the current channel"
-    PlaybackMenuRoute.SLEEP_TIMER -> "Stop playback later"
-    PlaybackMenuRoute.PLAYBACK_INFO -> "Current runtime playback details"
-}
-
-private fun detailTitle(route: PlaybackMenuRoute, focusedItemId: String): String {
-    return when (route) {
-        PlaybackMenuRoute.MAIN -> "Live TV Controls"
-        PlaybackMenuRoute.PLAYBACK_OPTIONS -> "Playback Controls"
-        PlaybackMenuRoute.CHANNEL_OPTIONS -> "Channel Actions"
-        PlaybackMenuRoute.SLEEP_TIMER -> "Sleep Timer"
-        PlaybackMenuRoute.AUDIO_TRACKS -> if (focusedItemId.isBlank()) "Audio Tracks" else "Track Details"
-        PlaybackMenuRoute.SUBTITLE_TRACKS -> if (focusedItemId == "subtitles_off") "Subtitles Off" else "Subtitle Details"
-        PlaybackMenuRoute.DISPLAY_MODE -> "Display Mode"
-        PlaybackMenuRoute.AUDIO_OUTPUT_MODE -> "Audio Output"
-        PlaybackMenuRoute.BUFFER_SIZE -> "Buffer Size"
-        PlaybackMenuRoute.DECODER_INFO -> "Decoder Info"
-        PlaybackMenuRoute.PLAYBACK_INFO -> "Playback Info"
-    }
-}
-
-private fun selectedPictureFormatLabel(
-    pictureFormats: List<LivePictureFormatOption>,
-    selectedKey: String,
-): String {
-    return pictureFormats.firstOrNull { it.key == selectedKey }?.label ?: "Auto"
-}
-
-private fun selectedAudioSummary(audioTracks: List<TrackDescription>): String {
-    return audioTracks.firstOrNull { it.isSelected }?.let(::buildTrackSubtitle)
-        ?: if (audioTracks.isEmpty()) "No audio tracks" else "Choose track"
-}
-
-private fun selectedSubtitleSummary(subtitleTracks: List<TrackDescription>): String {
-    return subtitleTracks.firstOrNull { it.isSelected }?.let(::buildTrackSubtitle)
-        ?: if (subtitleTracks.isEmpty()) "Off" else "Choose subtitle"
-}
-
-private fun buildTrackSubtitle(track: TrackDescription): String {
-    return listOfNotNull(
-        track.language?.takeIf { it.isNotBlank() },
-        track.formatHint?.takeIf { it.isNotBlank() },
-        track.channelCount?.let { "${it}ch" },
-    ).joinToString(separator = " • ").ifBlank { track.label }
-}
-
-private fun decoderSummary(info: PlaybackRuntimeInfo): String {
-    return "${decoderLabel(info.videoDecoderKind, info.videoDecoderName)} / ${decoderLabel(info.audioDecoderKind, info.audioDecoderName)}"
+private fun audioOutputLabel(mode: LiveAudioOutputMode): String = when (mode) {
+    LiveAudioOutputMode.AUTO -> "Auto"
+    LiveAudioOutputMode.PREFER_COMPATIBLE -> "Prefer compatible"
+    LiveAudioOutputMode.FORCE_STEREO_PCM -> "Stereo PCM"
 }
 
 private fun decoderLabel(kind: DecoderKind, decoderName: String?): String {
-    val prefix = when (kind) {
+    val type = when (kind) {
         DecoderKind.HARDWARE -> "Hardware"
         DecoderKind.SOFTWARE -> "Software"
         DecoderKind.UNKNOWN -> "Unknown"
     }
-    return decoderName?.takeIf { it.isNotBlank() }?.let { "$prefix ($it)" } ?: prefix
+    return decoderName?.takeIf { it.isNotBlank() }?.let { "$type • $it" } ?: type
 }

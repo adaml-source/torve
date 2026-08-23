@@ -66,6 +66,15 @@ object ActivePlaybackState {
     var focusPlaybackBarRequestId by mutableStateOf(0L)
         private set
 
+    /** Raw remote Menu requests forwarded by the TV Activity to the active player. */
+    var fullScreenPlaybackMenuRequestId by mutableStateOf(0L)
+        private set
+
+    private val fullScreenPlaybackMenuOwners = mutableSetOf<Any>()
+
+    @Volatile
+    private var hasFullScreenPlaybackMenuOwner: Boolean = false
+
     var isLiveSession by mutableStateOf(false)
         private set
 
@@ -196,6 +205,27 @@ object ActivePlaybackState {
     fun requestPlaybackBarFocus() {
         if (session == null || isFullScreenPlayerVisible) return
         focusPlaybackBarRequestId += 1L
+    }
+
+    fun registerFullScreenPlaybackMenuOwner(owner: Any) {
+        synchronized(fullScreenPlaybackMenuOwners) {
+            fullScreenPlaybackMenuOwners += owner
+            hasFullScreenPlaybackMenuOwner = fullScreenPlaybackMenuOwners.isNotEmpty()
+        }
+    }
+
+    fun unregisterFullScreenPlaybackMenuOwner(owner: Any) {
+        synchronized(fullScreenPlaybackMenuOwners) {
+            fullScreenPlaybackMenuOwners -= owner
+            hasFullScreenPlaybackMenuOwner = fullScreenPlaybackMenuOwners.isNotEmpty()
+        }
+    }
+
+    fun hasFullScreenPlaybackMenuOwner(): Boolean = hasFullScreenPlaybackMenuOwner
+
+    fun requestFullScreenPlaybackMenu() {
+        if (!hasFullScreenPlaybackMenuOwner) return
+        fullScreenPlaybackMenuRequestId += 1L
     }
 
     fun stopAndClear() {

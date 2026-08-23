@@ -7,8 +7,10 @@ encrypted at rest. Passwords are never returned in list/metadata responses.
 """
 
 import logging
+import re
 import uuid
 from datetime import datetime, timezone
+from urllib.parse import urlsplit
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
@@ -21,6 +23,51 @@ from app.schemas import PlaylistOut, PlaylistSaveRequest
 _log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/me/playlists", tags=["playlists"])
+
+
+def _normalize_http_url(value: str | None, field_name: str) -> str | None:
+    if value is None:
+        return None
+    normalized = re.sub(r"^(https?://)\s+", r"\1", value.strip(), flags=re.IGNORECASE)
+    if not normalized:
+        return None
+    parsed = urlsplit(normalized)
+    if parsed.scheme.lower() not in {"http", "https"} or not parsed.hostname:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"{field_name} must be a valid http:// or https:// URL.")
+    if any(ch.isspace() for ch in parsed.netloc):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"{field_name} host must not contain whitespace.")
+    if len(normalized) > 2048:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"{field_name} exceeds maximum length of 2048 characters.")
+    return normalized
+
+
+def _playlist_identity(
+    playlist_type: str,
+    *,
+    url: str | None,
+    server: str | None,
+    username: str | None,
+) -> tuple[str, ...] | None:
+    try:
+        if playlist_type == "xtream":
+            if not server or not username:
+                return None
+            normalized = re.sub(r"^(https?://)\s+", r"\1", server.strip(), flags=re.IGNORECASE)
+            parsed = urlsplit(normalized.rstrip("/"))
+            port = f":{parsed.port}" if parsed.port else ""
+            path = parsed.path.rstrip("/")
+            return ("xtream", f"{parsed.scheme.lower()}://{(parsed.hostname or '').lower()}{port}{path}", username.strip())
+        if not url:
+            return None
+        normalized = re.sub(r"^(https?://)\s+", r"\1", url.strip(), flags=re.IGNORECASE)
+        parsed = urlsplit(normalized)
+        port = f":{parsed.port}" if parsed.port else ""
+        identity_url = f"{parsed.scheme.lower()}://{(parsed.hostname or '').lower()}{port}{parsed.path}"
+        if parsed.query:
+            identity_url += f"?{parsed.query}"
+        return ("m3u", identity_url)
+    except ValueError:
+        return None
 
 
 def _to_out(row: UserPlaylist) -> PlaylistOut:
@@ -72,6 +119,11 @@ def save_playlist(
     The response never includes the raw password.
     """
     uid = uuid.UUID(user_id)
+    normalized_url = _normalize_http_url(body.url, "url")
+    normalized_epg_url = _normalize_http_url(body.epg_url, "epg_url")
+    normalized_server = _normalize_http_url(body.server, "server")
+    if normalized_server:
+        normalized_server = normalized_server.rstrip("/")
 
     if body.playlist_id != playlist_id:
         raise HTTPException(
@@ -80,32 +132,19 @@ def save_playlist(
         )
 
     # Validate required fields per type
-    if body.playlist_type == "m3u" and not body.url:
+    if body.playlist_type == "m3u" and not normalized_url:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="url is required for m3u playlists.",
         )
     if body.playlist_type == "xtream":
-        if not body.server or not body.username:
+        if not normalized_server or not body.username:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="server and username are required for xtream playlists.",
             )
 
     # Validate URL schemes (defense-in-depth — backend stores but does not fetch)
-    for field_name, field_val in [("url", body.url), ("epg_url", body.epg_url), ("server", body.server)]:
-        if field_val:
-            if not field_val.startswith(("http://", "https://")):
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"{field_name} must use http:// or https:// scheme.",
-                )
-            if len(field_val) > 2048:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"{field_name} exceeds maximum length of 2048 characters.",
-                )
-
     # Encrypt password if provided
     enc_password = None
     if body.password:
@@ -121,12 +160,34 @@ def save_playlist(
         .first()
     )
 
+    if existing is None:
+        incoming_identity = _playlist_identity(
+            body.playlist_type,
+            url=normalized_url,
+            server=normalized_server,
+            username=body.username,
+        )
+        if incoming_identity is not None:
+            candidates = db.query(UserPlaylist).filter(UserPlaylist.user_id == uid).all()
+            existing = next(
+                (
+                    row for row in candidates
+                    if _playlist_identity(
+                        row.playlist_type,
+                        url=row.url,
+                        server=row.server,
+                        username=row.username,
+                    ) == incoming_identity
+                ),
+                None,
+            )
+
     if existing:
         existing.name = body.name
         existing.playlist_type = body.playlist_type
-        existing.url = body.url
-        existing.epg_url = body.epg_url
-        existing.server = body.server
+        existing.url = normalized_url
+        existing.epg_url = normalized_epg_url
+        existing.server = normalized_server
         existing.username = body.username
         if enc_password is not None:
             existing.encrypted_password = enc_password
@@ -142,9 +203,9 @@ def save_playlist(
         playlist_id=playlist_id,
         name=body.name,
         playlist_type=body.playlist_type,
-        url=body.url,
-        epg_url=body.epg_url,
-        server=body.server,
+        url=normalized_url,
+        epg_url=normalized_epg_url,
+        server=normalized_server,
         username=body.username,
         encrypted_password=enc_password,
     )

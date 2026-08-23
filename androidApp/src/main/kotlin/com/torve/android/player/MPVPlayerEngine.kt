@@ -12,6 +12,19 @@ import com.torve.domain.player.PlayerState
 import com.torve.domain.player.TrackDescription
 import java.util.Locale
 
+internal data class MpvPictureFormatProperties(
+    val aspectOverride: String,
+    val panscan: String,
+)
+
+internal fun mpvPictureFormatProperties(
+    aspectRatioOverride: Float?,
+    panscan: Float,
+): MpvPictureFormatProperties = MpvPictureFormatProperties(
+    aspectOverride = aspectRatioOverride?.toString() ?: "-1",
+    panscan = panscan.coerceIn(0f, 1f).toString(),
+)
+
 /**
  * PlayerEngine backed by libmpv via JNI.
  * Falls back gracefully if native .so files aren't present.
@@ -279,9 +292,7 @@ class MPVPlayerEngine(
 
     override fun setAudioDelay(delayMs: Int) {
         if (!initialized) return
-        val seconds = delayMs / 1000.0
-        if (delayMs == 0) return
-        MPVLib.setPropertyString("audio-delay", seconds.toString())
+        MPVLib.setPropertyDouble("audio-delay", delayMs / 1000.0)
     }
 
     override fun getAudioDelay(): Int {
@@ -327,19 +338,19 @@ class MPVPlayerEngine(
         )
     }
 
-    fun setPictureFormat(aspectRatio: Float?, fill: Boolean) {
+    fun setPictureFormat(aspectRatioOverride: Float?, panscan: Float) {
         if (!initialized) return
-        if (fill) {
-            MPVLib.setPropertyString("video-aspect-override", "-1")
-            MPVLib.setPropertyString("panscan", "1.0")
-        } else if (aspectRatio != null) {
-            MPVLib.setPropertyString("video-aspect-override", aspectRatio.toString())
-            MPVLib.setPropertyString("panscan", "0.0")
-        } else {
-            // Leave the default mpv output geometry alone on first startup.
-            MPVLib.setPropertyString("video-aspect-override", "-1")
-            MPVLib.setPropertyString("panscan", "0.0")
-        }
+        val properties = mpvPictureFormatProperties(aspectRatioOverride, panscan)
+        MPVLib.setPropertyString("video-aspect-override", properties.aspectOverride)
+        MPVLib.setPropertyString("panscan", properties.panscan)
+    }
+
+    /** Compatibility overload for the non-live player picture-format model. */
+    fun setPictureFormat(aspectRatio: Float?, fill: Boolean) {
+        setPictureFormat(
+            aspectRatioOverride = aspectRatio,
+            panscan = if (fill) 1f else 0f,
+        )
     }
 
     fun setPlaybackVolume(volume: Float) {

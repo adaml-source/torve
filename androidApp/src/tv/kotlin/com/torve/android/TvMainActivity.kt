@@ -60,6 +60,7 @@ class TvMainActivity : AppCompatActivity() {
     }
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        if (handleFullScreenPlaybackMenu(event)) return true
         if (handleBackgroundPlaybackMenu(event)) return true
         if (handleBackgroundPlaybackBack(event)) return true
         if (shouldThrottleDirectionalRepeat(event)) return true
@@ -72,6 +73,21 @@ class TvMainActivity : AppCompatActivity() {
             android.util.Log.w("TvMainActivity", "Focus dispatch error swallowed", e)
             true
         }
+    }
+
+    private fun handleFullScreenPlaybackMenu(event: KeyEvent): Boolean {
+        if (
+            event.keyCode != KeyEvent.KEYCODE_MENU ||
+            !ActivePlaybackState.hasFullScreenPlaybackMenuOwner()
+        ) {
+            return false
+        }
+        if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) {
+            ActivePlaybackState.requestFullScreenPlaybackMenu()
+        }
+        // Activity-level ownership makes Menu reliable even when the Android video
+        // surface, rather than a Compose node, currently owns input focus.
+        return true
     }
 
     private fun handleBackgroundPlaybackMenu(event: KeyEvent): Boolean {

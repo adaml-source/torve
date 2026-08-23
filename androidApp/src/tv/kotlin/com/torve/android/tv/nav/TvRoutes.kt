@@ -62,11 +62,25 @@ object TvRoutes {
         return "tv_details/$type/$id?autoPlay=$autoPlay&handoffPositionMs=$handoffPositionMs&focusEpisodes=$focusEpisodes"
     }
 
-    const val LIVE_PLAYER = "tv_live_player?channelUrl={channelUrl}&channelName={channelName}&groupName={groupName}"
-    fun livePlayer(channelUrl: String, channelName: String, groupName: String): String {
+    const val LIVE_PLAYER =
+        "tv_live_player?channelUrl={channelUrl}&channelName={channelName}&groupName={groupName}" +
+            "&replayUrl={replayUrl}&replayStartMs={replayStartMs}&replayEndMs={replayEndMs}&replayTitle={replayTitle}"
+    fun livePlayer(
+        channelUrl: String,
+        channelName: String,
+        groupName: String,
+        replayUrl: String = "",
+        replayStartMs: Long = -1L,
+        replayEndMs: Long = -1L,
+        replayTitle: String = "",
+    ): String {
         return "tv_live_player?channelUrl=${Uri.encode(channelUrl)}" +
             "&channelName=${Uri.encode(channelName)}" +
-            "&groupName=${Uri.encode(groupName)}"
+            "&groupName=${Uri.encode(groupName)}" +
+            "&replayUrl=${Uri.encode(replayUrl)}" +
+            "&replayStartMs=$replayStartMs" +
+            "&replayEndMs=$replayEndMs" +
+            "&replayTitle=${Uri.encode(replayTitle)}"
     }
 
     const val PLAYER =

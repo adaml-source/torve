@@ -21,6 +21,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.rounded.LiveTv
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
@@ -53,6 +54,7 @@ import com.torve.domain.model.canonicalEpgChannelKey
 import com.torve.domain.model.EnrichedChannel
 import com.torve.domain.model.EpgProgramme
 import com.torve.domain.model.Channel
+import com.torve.domain.model.supportsCatchupArchive
 
 private val CHANNEL_COL_WIDTH = 100.dp
 private val ROW_HEIGHT = 64.dp
@@ -328,14 +330,24 @@ private fun ChannelCell(
 
         Spacer(Modifier.width(4.dp))
 
-        Text(
-            text = channel.name,
-            style = MaterialTheme.typography.labelSmall,
-            color = Torve.colors.textPrimary,
-            maxLines = 2,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.weight(1f),
-        )
+        val hasCatchup = channel.supportsCatchupArchive
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = channel.name,
+                style = MaterialTheme.typography.labelSmall,
+                color = Torve.colors.textPrimary,
+                maxLines = if (hasCatchup) 1 else 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+            if (hasCatchup) {
+                Icon(
+                    imageVector = Icons.Filled.History,
+                    contentDescription = "Timeshift available",
+                    tint = Amber,
+                    modifier = Modifier.size(18.dp),
+                )
+            }
+        }
     }
 }
 
