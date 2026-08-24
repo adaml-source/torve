@@ -1,0 +1,42 @@
+{
+  "schema_version": 1,
+  "version": "1.2.0",
+  "released_at_utc": "2026-08-24T14:25:07Z",
+  "source": {
+    "repository": "https://github.com/adaml-source/torve",
+    "commit": "38dc4f313edf69e07725479265cdac2aa1fab4d5",
+    "tag": "v1.2.0",
+    "tag_url": "https://github.com/adaml-source/torve/tree/v1.2.0"
+  },
+  "artifacts": [
+    {
+      "id": "amazon_tv_apk",
+      "local_path": "androidApp/build/outputs/apk/amazonTv/release/androidApp-amazon-tv-release.apk",
+      "public_url": "https://torve.app/downloads/android/torve-android-tv-1.2.0-20260824.apk",
+      "bytes": 92381725,
+      "sha256": "71ac04d47e07d9f1b97e9f841b5db85a6942442ad96816216ac171b277b6573e",
+      "signer_certificate_sha256": "cc4e51f3d775e199059f58b0c80444e7b9e8c86e23e3ed29d2332b485c73e2fa"
+    },
+    {
+      "id": "windows_msi",
+      "local_path": "desktopApp/build/compose/binaries/main-closeapp/msi/Torve-1.2.0.msi",
+      "public_url": "https://torve.app/downloads/windows/torve-windows-1.2.0-20260824.msi",
+      "bytes": 207648145,
+      "sha256": "869c32e06b48ad841c7cd2927166d399bd87427dba55e1d01770f37a7cec4a68"
+    },
+    {
+      "id": "google_tv_aab",
+      "local_path": "androidApp/build/outputs/bundle/googleTvRelease/androidApp-google-tv-release.aab",
+      "public_url": null,
+      "bytes": 61434823,
+      "sha256": "cdbe0a8c7679b69e72f02472223ef170482b317b61bc21239684fc0260fd42fa"
+    },
+    {
+      "id": "google_mobile_aab",
+      "local_path": "androidApp/build/outputs/bundle/googleMobileRelease/androidApp-google-mobile-release.aab",
+      "public_url": null,
+      "bytes": 57742850,
+      "sha256": "ffa2064665fdf0c87314e584b981d6c87d38a5ff3d1fb1bedc34e9c626d487a6"
+    }
+  ]
+}
