@@ -1,6 +1,6 @@
 param(
     [string]$ManifestPath = ".codex-deploy\releases.json",
-    [string]$ProvenancePath = "release\provenance\1.1.6.json",
+    [string]$ProvenancePath = "release\provenance\1.2.0.json",
     [switch]$AllowDirty,
     [switch]$SkipTests,
     [switch]$SkipArtifacts,

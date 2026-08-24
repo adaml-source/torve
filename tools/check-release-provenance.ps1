@@ -1,5 +1,5 @@
 param(
-    [string]$ProvenancePath = "release\provenance\1.1.6.json",
+    [string]$ProvenancePath = "release\provenance\1.2.0.json",
     [switch]$RequireArtifacts,
     [switch]$RequireTag
 )

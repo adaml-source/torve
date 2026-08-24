@@ -1,7 +1,7 @@
 param(
     [string]$SiteBaseUrl = "https://torve.app",
     [string]$ApiBaseUrl = "https://api.torve.app",
-    [string]$ProvenancePath = "release\provenance\1.1.6.json",
+    [string]$ProvenancePath = "release\provenance\1.2.0.json",
     [string]$SshHost = ""
 )
 
@@ -48,7 +48,7 @@ function Get-PublicResponse {
 $pageChecks = @(
     @{ Path = '/'; Required = 'Torve' },
     @{ Path = '/download.html'; Required = 'Download Fire TV APK' },
-    @{ Path = '/source.html'; Required = 'Build provenance' },
+    @{ Path = '/source.html'; Required = 'Release provenance' },
     @{ Path = '/privacy.html'; Required = 'Torve accounts and synchronization' },
     @{ Path = '/terms.html'; Required = 'free software' },
     @{ Path = '/reset-password'; Required = 'Forgot your password' },
