@@ -22,6 +22,11 @@ import com.torve.android.BuildConfig
 import com.torve.android.R
 import com.torve.android.ui.theme.TorveTheme
 
+internal const val FIRE_TV_DOWNLOADER_PACKAGE = "com.esaba.downloader"
+
+internal fun fireTvDownloaderDeepLink(downloadUrl: String): String =
+    "downloader://$downloadUrl"
+
 /**
  * Amazon-TV-only update handoff. Immediately opens the Downloader app with the APK URL
  * so Fire TV handles the download and installation natively.
@@ -83,15 +88,14 @@ class AppUpdateActivity : AppCompatActivity() {
     }
 
     private fun openInDownloaderApp(url: String): Boolean {
-        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply {
-            setPackage(DOWNLOADER_APP_PACKAGE)
+        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(fireTvDownloaderDeepLink(url))).apply {
+            setPackage(FIRE_TV_DOWNLOADER_PACKAGE)
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         }
         return runCatching { startActivity(intent) }.isSuccess
     }
 
     companion object {
-        private const val DOWNLOADER_APP_PACKAGE = "com.squaune.downloader"
         private const val EXTRA_VERSION = "update_version"
         private const val EXTRA_URL = "update_url"
         private const val EXTRA_SHA256 = "update_sha256"

@@ -78,6 +78,7 @@ import com.torve.android.tv.TV_PAGE_TOP_GUTTER
 import com.torve.android.catalog.CatalogWarmupWorker
 import com.torve.android.epg.EpgWarmupWorker
 import com.torve.android.update.AppUpdateChecker
+import com.torve.android.update.AppUpdateActivity
 import com.torve.android.update.AvailableAppUpdate
 import com.torve.android.update.usesVpsReleaseUpdates
 import com.torve.android.session.PostSignInRefresh
@@ -198,7 +199,7 @@ private sealed interface UpdateCheckState {
     data object Idle : UpdateCheckState
     data object Checking : UpdateCheckState
     data object UpToDate : UpdateCheckState
-    data class UpdateAvailable(val version: String, val downloadUrl: String) : UpdateCheckState
+    data class UpdateAvailable(val update: AvailableAppUpdate) : UpdateCheckState
 }
 
 private sealed interface TvAboutOverlayState {
@@ -6629,7 +6630,7 @@ internal fun TvSettingsScreen(
                         UpdateCheckState.Checking -> stringResource(R.string.tv_settings_check_for_updates_checking)
                         UpdateCheckState.UpToDate -> stringResource(R.string.tv_settings_check_for_updates_up_to_date)
                         is UpdateCheckState.UpdateAvailable ->
-                            stringResource(R.string.tv_settings_check_for_updates_available, s.version)
+                            stringResource(R.string.tv_settings_check_for_updates_available, s.update.version)
                     },
                     modifier = Modifier.fillMaxWidth().focusProperties { left = railFocusRequester },
                     focusRequester = requester,
@@ -6637,11 +6638,7 @@ internal fun TvSettingsScreen(
                     onClick = {
                         when (val s = checkState) {
                             is UpdateCheckState.UpdateAvailable -> {
-                                val downloaderIntent = Intent(Intent.ACTION_VIEW, Uri.parse(s.downloadUrl)).apply {
-                                    setPackage("com.squaune.downloader")
-                                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                                }
-                                runCatching { context.startActivity(downloaderIntent) }
+                                context.startActivity(AppUpdateActivity.createIntent(context, s.update))
                             }
                             UpdateCheckState.Checking -> Unit
                             else -> {
@@ -6649,7 +6646,7 @@ internal fun TvSettingsScreen(
                                 checkScope.launch {
                                     val update = AppUpdateChecker.checkForUpdate()
                                     checkState = if (update != null) {
-                                        UpdateCheckState.UpdateAvailable(update.version, update.downloadUrl)
+                                        UpdateCheckState.UpdateAvailable(update)
                                     } else {
                                         UpdateCheckState.UpToDate
                                     }

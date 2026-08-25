@@ -17,6 +17,15 @@ class AppUpdateWorkerTest {
     }
 
     @Test
+    fun fireTvUpdateUsesTheInstalledDownloaderPackageAndDeepLinkProtocol() {
+        assertEquals("com.esaba.downloader", FIRE_TV_DOWNLOADER_PACKAGE)
+        assertEquals(
+            "downloader://https://torve.app/downloads/android/torve.apk",
+            fireTvDownloaderDeepLink("https://torve.app/downloads/android/torve.apk"),
+        )
+    }
+
+    @Test
     fun semanticVersionComparisonDoesNotUseLexicalOrdering() {
         assertTrue(isNewerRelease("1.1.10", "1.1.9"))
         assertTrue(isNewerRelease("1.2.0", "1.1.99"))
