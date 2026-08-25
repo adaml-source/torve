@@ -24,6 +24,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
@@ -152,41 +153,43 @@ fun TvNavRail(
             TorveEllipseMark(modifier = Modifier.padding(top = 2.dp, bottom = 4.dp))
 
             destinations.forEach { destination ->
-                val currentRequester = itemRequesters.getValue(destination.route)
-                val upRequester = neighborRoute(destination.route, -1)
-                    ?.let { itemRequesters[it] }
-                    ?: currentRequester
-                val downRequester = neighborRoute(destination.route, 1)
-                    ?.let { itemRequesters[it] }
-                    ?: currentRequester
-                val isCurrentRoute = selectedRoute == destination.route
-                TvNavRailItem(
-                    destination = destination,
-                    selected = isCurrentRoute,
-                    modifier = Modifier
-                        .focusRequester(currentRequester)
-                        .focusProperties {
-                            up = upRequester
-                            down = downRequester
-                            left = currentRequester
-                        },
-                    onMoveRight = { onMoveToContent(destination.route) },
-                    onClick = { onMoveToContent(destination.route) },
-                    onItemFocused = {
-                        val preferredRoute = currentPreferredEntryRoute
-                        if (preferredRoute != null) {
-                            if (destination.route == preferredRoute) {
-                                onPreferredEntryRouteConsumed()
-                            } else if (railHasFocus) {
-                                return@TvNavRailItem
+                key(destination.route) {
+                    val currentRequester = itemRequesters.getValue(destination.route)
+                    val upRequester = neighborRoute(destination.route, -1)
+                        ?.let { itemRequesters[it] }
+                        ?: currentRequester
+                    val downRequester = neighborRoute(destination.route, 1)
+                        ?.let { itemRequesters[it] }
+                        ?: currentRequester
+                    val isCurrentRoute = selectedRoute == destination.route
+                    TvNavRailItem(
+                        destination = destination,
+                        selected = isCurrentRoute,
+                        modifier = Modifier
+                            .focusRequester(currentRequester)
+                            .focusProperties {
+                                up = upRequester
+                                down = downRequester
+                                left = currentRequester
+                            },
+                        onMoveRight = { onMoveToContent(destination.route) },
+                        onClick = { onMoveToContent(destination.route) },
+                        onItemFocused = {
+                            val preferredRoute = currentPreferredEntryRoute
+                            if (preferredRoute != null) {
+                                if (destination.route == preferredRoute) {
+                                    onPreferredEntryRouteConsumed()
+                                } else if (railHasFocus) {
+                                    return@TvNavRailItem
+                                }
                             }
-                        }
-                        onHighlight(destination.route)
-                        if (navigateOnFocus) {
-                            onNavigate(destination.route)
-                        }
-                    },
-                )
+                            onHighlight(destination.route)
+                            if (navigateOnFocus) {
+                                onNavigate(destination.route)
+                            }
+                        },
+                    )
+                }
             }
 
             Spacer(modifier = Modifier.weight(1f))

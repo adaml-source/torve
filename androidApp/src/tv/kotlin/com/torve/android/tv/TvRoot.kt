@@ -102,6 +102,10 @@ import com.torve.android.tv.focus.TvFocusOrigin
 import com.torve.android.tv.focus.TvScreenFocusHandle
 import com.torve.android.tv.focus.TvSettingsItemIds
 import com.torve.android.tv.focus.TvSettingsEntryRestoreInputs
+import com.torve.android.tv.focus.canPlaybackReturnFallbackToRail
+import com.torve.android.tv.focus.deferredOptionalDestinationVisibility
+import com.torve.android.tv.focus.didPlaybackReturnFocusReachContent
+import com.torve.android.tv.focus.playbackReturnFocusRoute
 import com.torve.android.tv.focus.rememberTvSettingsFocusStateMachine
 import com.torve.android.tv.focus.resolveContentEntryRoute
 import com.torve.android.tv.focus.shouldRunRootContentFocusRestore
@@ -346,13 +350,6 @@ fun TvRoot(
     val jellyfinConfigured =
         settingsState.jellyfinServerUrl.isNotBlank() &&
             settingsState.jellyfinApiKey.isNotBlank()
-    val visibleTopDestinations = remember(jellyfinConfigured) {
-        if (jellyfinConfigured) {
-            tvTopDestinations
-        } else {
-            tvTopDestinations.filterNot { it.route == TvRoutes.JELLYFIN }
-        }
-    }
     val subscriptionViewModel = deps!!.subscriptionViewModel
     val subscriptionRepository = deps!!.subscriptionRepository
     val authClient = deps!!.authClient
@@ -523,9 +520,6 @@ fun TvRoot(
     val focusReturnStack = remember { mutableStateListOf<TvFocusBackStackEntry>() }
     var pendingFocusBackRestore by remember { mutableStateOf<TvFocusBackStackEntry?>(null) }
     var pendingContentEntryRoute by remember { mutableStateOf<String?>(null) }
-    val topLevelRoutes = remember(visibleTopDestinations) {
-        visibleTopDestinations.map { it.route }.toSet()
-    }
 
     // Clear stale focus requesters and account-scoped in-memory data when auth changes.
     // Home is always composed, so its requesters survive across auth transitions
@@ -571,6 +565,28 @@ fun TvRoot(
 
     var isRailExpanded by rememberSaveable { mutableStateOf(false) }
     var isRailFocused by rememberSaveable { mutableStateOf(false) }
+    // Account settings can finish hydrating while the user is already deep in
+    // a content rail. Defer insertion of optional destinations until the user
+    // returns to the navigation rail so the focus graph cannot mutate under
+    // the currently focused poster/action.
+    var jellyfinDestinationVisible by remember { mutableStateOf(jellyfinConfigured) }
+    LaunchedEffect(jellyfinConfigured, isRailFocused) {
+        jellyfinDestinationVisible = deferredOptionalDestinationVisibility(
+            configured = jellyfinConfigured,
+            currentlyVisible = jellyfinDestinationVisible,
+            railOwnsFocus = isRailFocused,
+        )
+    }
+    val visibleTopDestinations = remember(jellyfinDestinationVisible) {
+        if (jellyfinDestinationVisible) {
+            tvTopDestinations
+        } else {
+            tvTopDestinations.filterNot { it.route == TvRoutes.JELLYFIN }
+        }
+    }
+    val topLevelRoutes = remember(visibleTopDestinations) {
+        visibleTopDestinations.map { it.route }.toSet()
+    }
     // TV navigation is now a permanent slim rail. Keep the legacy state false
     // for callers that still accept it, but never expand the rail on focus.
     LaunchedEffect(isRailFocused) {
@@ -818,6 +834,8 @@ fun TvRoot(
     var subRouteFocusEpoch by remember { mutableIntStateOf(0) }
     var railInteractionEpoch by remember { mutableStateOf(0) }
     var contentEntryRequestNonce by remember { mutableIntStateOf(0) }
+    var pendingPlaybackFocusRestoreRoute by remember { mutableStateOf<String?>(null) }
+    var playbackFocusRestoreRequestNonce by remember { mutableIntStateOf(0) }
     var pendingRailEntryRoute by remember { mutableStateOf<String?>(null) }
     var pendingRailEntryRequestNonce by remember { mutableIntStateOf(0) }
     var pendingSettingsSubpageEntryRoute by remember { mutableStateOf<String?>(null) }
@@ -838,6 +856,69 @@ fun TvRoot(
     var backgroundWorkWasBlocking by remember { mutableStateOf(false) }
     var backgroundWorkWasVisible by remember { mutableStateOf(false) }
     var suppressNextSeeAllReturnFocusRestore by remember { mutableStateOf(false) }
+
+    val pendingPlaybackLastRequester = pendingPlaybackFocusRestoreRoute?.let(lastFocusedContentByRoute::get)
+    val pendingPlaybackFirstRequester = pendingPlaybackFocusRestoreRoute?.let(firstContentFocusByRoute::get)
+
+    // The background-playback card is a conditional focus owner. Once it is
+    // stopped or exited, verify that the destination surface actually reports
+    // focus before completing restoration. requestFocus() merely being accepted
+    // is not proof: the requester may point to a detached lazy item.
+    LaunchedEffect(
+        playbackFocusRestoreRequestNonce,
+        pendingPlaybackFocusRestoreRoute,
+        pendingPlaybackLastRequester,
+        pendingPlaybackFirstRequester,
+        currentSubRoute,
+        isSubRouteActive,
+    ) {
+        if (playbackFocusRestoreRequestNonce == 0) return@LaunchedEffect
+        val focusRoute = pendingPlaybackFocusRestoreRoute ?: return@LaunchedEffect
+
+        repeat(60) {
+            withFrameNanos { }
+            if (pendingPlaybackFocusRestoreRoute != focusRoute) return@LaunchedEffect
+
+            val candidates = listOfNotNull(
+                lastFocusedContentByRoute[focusRoute],
+                firstContentFocusByRoute[focusRoute],
+            ).distinct()
+            for (requester in candidates) {
+                val contentEpochBefore = contentFocusEpoch
+                val subRouteEpochBefore = subRouteFocusEpoch
+                runCatching { requester.requestFocus() }
+                kotlinx.coroutines.yield()
+                withFrameNanos { }
+                if (
+                    didPlaybackReturnFocusReachContent(
+                        focusRoute = focusRoute,
+                        contentFocusEpochBefore = contentEpochBefore,
+                        contentFocusEpochAfter = contentFocusEpoch,
+                        focusedContentRoute = focusedContentRoute,
+                        subRouteFocusEpochBefore = subRouteEpochBefore,
+                        subRouteFocusEpochAfter = subRouteFocusEpoch,
+                    )
+                ) {
+                    pendingPlaybackFocusRestoreRoute = null
+                    pendingContentEntryRoute = null
+                    return@LaunchedEffect
+                }
+            }
+        }
+
+        if (pendingPlaybackFocusRestoreRoute != focusRoute) return@LaunchedEffect
+        if (canPlaybackReturnFallbackToRail(focusRoute, isSubRouteActive)) {
+            pendingPlaybackFocusRestoreRoute = null
+            pendingContentEntryRoute = focusRoute
+            contentEntryRequestNonce += 1
+            focusRestoreTrigger++
+        } else {
+            // Details owns the whole screen and the rail is deliberately not
+            // focusable. Keep the pending route so a newly registered details
+            // requester restarts this effect instead of dropping focus.
+            Log.w("TvFocusRestore", "playback_return_waiting route=$focusRoute")
+        }
+    }
 
     // External TV apps (for example YouTube trailer playback) take window focus
     // without changing our navigation route. Compose can keep its internal focus
@@ -3297,34 +3378,17 @@ fun TvRoot(
                             accessTier,
                         ),
                         onPlaybackFocusRestoreRequest = {
-                            rootScope.launch {
-                                listOf(60L, 140L, 300L, 600L).forEach { waitMs ->
-                                    delay(waitMs)
-                                    val destinationRoute = navController.currentDestination?.route
-                                    val focusRoute = if (
-                                        destinationRoute?.startsWith("tv_details/") == true
-                                    ) {
-                                        TvRoutes.DETAILS
-                                    } else {
-                                        selectedTopRoute
-                                    }
-                                    val focusCandidates = listOfNotNull(
-                                        lastFocusedContentByRoute[focusRoute],
-                                        firstContentFocusByRoute[focusRoute],
-                                    ).distinct()
-                                    for (requester in focusCandidates) {
-                                        val restored = runCatching {
-                                            requester.requestFocus()
-                                            true
-                                        }.getOrDefault(false)
-                                        if (restored) return@launch
-                                    }
-                                }
-                                runCatching { railFocusRequester.requestFocus() }
-                            }
+                            pendingPlaybackFocusRestoreRoute = playbackReturnFocusRoute(
+                                currentDestinationRoute = navController.currentDestination?.route,
+                                selectedTopRoute = selectedTopRoute,
+                            )
+                            playbackFocusRestoreRequestNonce += 1
                         },
                         onFirstContentRequester = { req ->
                             firstContentFocusByRoute[TvRoutes.DETAILS] = req
+                            if (pendingPlaybackFocusRestoreRoute == TvRoutes.DETAILS) {
+                                playbackFocusRestoreRequestNonce += 1
+                            }
                         },
                         onContentFocused = { req ->
                             lastFocusedContentByRoute[TvRoutes.DETAILS] = req
