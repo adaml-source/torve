@@ -4,6 +4,7 @@ import com.torve.domain.model.MediaType
 import com.torve.domain.model.WatchProgress
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertNotNull
 import org.junit.Test
 
 class TvMediaMappersTest {
@@ -26,5 +27,21 @@ class TvMediaMappersTest {
     @Test
     fun blankArtworkNormalizesToMissing() {
         assertNull(preferredTvPosterUrl(" ", ""))
+    }
+
+    @Test
+    fun imdbOnlySeriesProgressStillBuildsAContinueWatchingCard() {
+        val item = WatchProgress(
+            mediaId = "tt0369179",
+            mediaType = MediaType.SERIES,
+            title = "S01E01 - Pilot",
+            showTitle = "Two and a Half Men",
+            positionMs = 600_000L,
+            durationMs = 1_200_000L,
+        ).toMediaItemOrNull()
+
+        assertNotNull(item)
+        assertEquals("tt0369179", item?.imdbId)
+        assertEquals("Two and a Half Men", item?.title)
     }
 }

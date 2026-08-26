@@ -25,6 +25,7 @@ class TvPlaybackFocusRestorePolicyTest {
         assertFalse(
             didPlaybackReturnFocusReachContent(
                 focusRoute = TvRoutes.SHOWS,
+                destinationHasFocus = false,
                 contentFocusEpochBefore = 7,
                 contentFocusEpochAfter = 7,
                 focusedContentRoute = TvRoutes.SHOWS,
@@ -35,6 +36,7 @@ class TvPlaybackFocusRestorePolicyTest {
         assertTrue(
             didPlaybackReturnFocusReachContent(
                 focusRoute = TvRoutes.SHOWS,
+                destinationHasFocus = false,
                 contentFocusEpochBefore = 7,
                 contentFocusEpochAfter = 8,
                 focusedContentRoute = TvRoutes.SHOWS,
@@ -45,6 +47,7 @@ class TvPlaybackFocusRestorePolicyTest {
         assertTrue(
             didPlaybackReturnFocusReachContent(
                 focusRoute = TvRoutes.DETAILS,
+                destinationHasFocus = false,
                 contentFocusEpochBefore = 0,
                 contentFocusEpochAfter = 0,
                 focusedContentRoute = null,
@@ -55,9 +58,34 @@ class TvPlaybackFocusRestorePolicyTest {
     }
 
     @Test
+    fun alreadyFocusedPlaybackDestinationCompletesRestoreWithoutAnotherFocusEvent() {
+        assertTrue(
+            didPlaybackReturnFocusReachContent(
+                focusRoute = TvRoutes.DETAILS,
+                destinationHasFocus = true,
+                contentFocusEpochBefore = 3,
+                contentFocusEpochAfter = 3,
+                focusedContentRoute = null,
+                subRouteFocusEpochBefore = 9,
+                subRouteFocusEpochAfter = 9,
+            ),
+        )
+        assertFalse(
+            didPlaybackReturnFocusReachContent(
+                focusRoute = TvRoutes.DETAILS,
+                destinationHasFocus = false,
+                contentFocusEpochBefore = 3,
+                contentFocusEpochAfter = 3,
+                focusedContentRoute = null,
+                subRouteFocusEpochBefore = 9,
+                subRouteFocusEpochAfter = 9,
+            ),
+        )
+    }
+
+    @Test
     fun detailsNeverFallsBackToTheHiddenRail() {
         assertFalse(canPlaybackReturnFallbackToRail(TvRoutes.DETAILS, isSubRouteActive = true))
         assertTrue(canPlaybackReturnFallbackToRail(TvRoutes.SHOWS, isSubRouteActive = false))
     }
 }
-

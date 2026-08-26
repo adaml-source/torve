@@ -7,7 +7,6 @@ import android.os.Looper
 import android.os.SystemClock
 import android.util.Log
 import android.net.Uri
-import android.view.View
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MimeTypes
@@ -15,15 +14,15 @@ import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.TrackSelectionOverride
 import androidx.media3.common.Tracks
-import androidx.media3.common.text.CueGroup
 import androidx.media3.common.util.UnstableApi
-import androidx.media3.ui.SubtitleView
 import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.Renderer
 import androidx.media3.exoplayer.analytics.AnalyticsListener
 import androidx.media3.exoplayer.audio.DefaultAudioSink
+import androidx.media3.exoplayer.text.TextOutput
+import androidx.media3.exoplayer.text.TextRenderer
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.datasource.HttpDataSource
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
@@ -142,8 +141,7 @@ class ExoPlayerEngine(
     private val liveTuneStateMachine = LiveTuneStateMachine(AUDIO_READINESS_TIMEOUT_MS)
     private val mainHandler = Handler(Looper.getMainLooper())
     private var subtitleDelayMs = 0
-    private var builtInSubtitleView: SubtitleView? = null
-    private var pendingSubtitleRunnable: Runnable? = null
+    private val subtitleDelayState = SubtitleDelayState()
     private val audioReadinessTimeoutRunnable = Runnable {
         handleAudioReadinessTimeout("bounded_readiness_timeout")
     }
@@ -374,22 +372,6 @@ class ExoPlayerEngine(
             listeners.forEach { it.onTracksChanged(audios, subs) }
         }
 
-        override fun onCues(cueGroup: CueGroup) {
-            val sv = builtInSubtitleView ?: return
-            val delay = subtitleDelayMs.toLong()
-            pendingSubtitleRunnable?.let { mainHandler.removeCallbacks(it) }
-            if (delay <= 0L) {
-                sv.setCues(cueGroup.cues)
-                sv.visibility = View.VISIBLE
-                return
-            }
-            sv.visibility = View.INVISIBLE
-            val cues = cueGroup.cues
-            pendingSubtitleRunnable = Runnable {
-                sv.setCues(cues)
-                sv.visibility = View.VISIBLE
-            }.also { mainHandler.postDelayed(it, delay) }
-        }
     }
 
     private val analyticsListener = object : AnalyticsListener {
@@ -505,6 +487,21 @@ class ExoPlayerEngine(
                         DefaultAudioSink.DefaultAudioProcessorChain(delayProcessor, equalizerProcessor),
                     )
                     .build()
+            }
+
+            override fun buildTextRenderers(
+                context: Context,
+                output: TextOutput,
+                outputLooper: Looper,
+                extensionRendererMode: Int,
+                out: java.util.ArrayList<Renderer>,
+            ) {
+                out.add(
+                    SubtitleDelayRenderer(
+                        delegate = TextRenderer(output, outputLooper),
+                        delayState = subtitleDelayState,
+                    ),
+                )
             }
         }
             .setEnableDecoderFallback(true)
@@ -1814,24 +1811,25 @@ class ExoPlayerEngine(
     }
 
     override fun setSubtitleDelay(delayMs: Int) {
-        subtitleDelayMs = delayMs
-        val sv = builtInSubtitleView ?: return
-        if (delayMs <= 0) {
-            pendingSubtitleRunnable?.let { mainHandler.removeCallbacks(it) }
-            pendingSubtitleRunnable = null
-            sv.setCues(emptyList())
-            sv.visibility = View.VISIBLE
-        } else {
-            sv.visibility = View.INVISIBLE
+        val boundedDelayMs = delayMs.coerceIn(-10_000, 10_000)
+        if (subtitleDelayMs == boundedDelayMs) return
+        subtitleDelayMs = boundedDelayMs
+        subtitleDelayState.delayMs = boundedDelayMs
+
+        // Reposition only the current seekable timeline so Media3 rebuilds its
+        // active cue window immediately. This does not replace the MediaItem,
+        // re-prepare the source, or restart playback.
+        exoPlayer?.let { player ->
+            if (
+                player.currentMediaItem != null &&
+                (!player.isCurrentMediaItemLive || player.isCurrentMediaItemSeekable)
+            ) {
+                player.seekTo(player.currentPosition.coerceAtLeast(0L))
+            }
         }
     }
 
     override fun getSubtitleDelay(): Int = subtitleDelayMs
-
-    fun setBuiltInSubtitleView(sv: SubtitleView?) {
-        builtInSubtitleView = sv
-        if (sv != null && subtitleDelayMs > 0) sv.visibility = View.INVISIBLE
-    }
 
     override fun setAudioDelay(delayMs: Int) {
         delayProcessor.setDelayMs(delayMs)

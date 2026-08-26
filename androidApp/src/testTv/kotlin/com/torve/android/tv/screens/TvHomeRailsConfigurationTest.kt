@@ -111,6 +111,52 @@ class TvHomeRailsConfigurationTest {
         assertTrue(services.items.any { it.title == "HBO Max" })
     }
 
+    @Test
+    fun becauseYouWatchedUsesWatchedTitlesAsRecommendationSeeds() {
+        val watchedMovie = media("watched-movie").copy(tmdbId = 101)
+        val watchedSeries = media("watched-series", MediaType.SERIES).copy(tmdbId = 202)
+        val oldSuggestion = media("old-suggestion").copy(tmdbId = 303)
+        val rails = buildTvHomeRails(
+            state = HomeUiState(
+                recentlyWatched = listOf(watchedMovie, watchedSeries),
+                becauseYouWatched = listOf(
+                    CatalogShelf("because_101", "Old suggestions", listOf(oldSuggestion)),
+                ),
+            ),
+            sectionConfigs = listOf(
+                HomeSectionConfig(HomeSection.BECAUSE_YOU_WATCHED, enabled = true, order = 0),
+            ),
+            customSections = emptyList(),
+            homeLayoutOrder = listOf("section:BECAUSE_YOU_WATCHED"),
+        )
+
+        val rail = rails.single()
+        assertEquals(TV_HOME_BECAUSE_YOU_WATCHED_SEEDS_KEY, rail.key)
+        assertEquals(listOf(watchedMovie, watchedSeries), rail.items)
+        assertFalse(rail.showSeeAllCard)
+        assertTrue(rail.allowCrossRailDuplicates)
+        assertFalse(rail.items.contains(oldSuggestion))
+        assertEquals("more_like_movie_101", watchedMovie.tvMoreLikeRailKey())
+        assertEquals("more_like_tv_202", watchedSeries.tvMoreLikeRailKey())
+    }
+
+    @Test
+    fun becauseYouWatchedSeedsRemainVisibleBesideRecentlyWatched() {
+        val watched = media("watched").copy(tmdbId = 101)
+        val rails = buildTvHomeRails(
+            state = HomeUiState(recentlyWatched = listOf(watched)),
+            sectionConfigs = listOf(
+                HomeSectionConfig(HomeSection.RECENTLY_WATCHED, enabled = true, order = 0),
+                HomeSectionConfig(HomeSection.BECAUSE_YOU_WATCHED, enabled = true, order = 1),
+            ),
+            customSections = emptyList(),
+            homeLayoutOrder = listOf("section:RECENTLY_WATCHED", "section:BECAUSE_YOU_WATCHED"),
+        )
+
+        assertEquals(listOf("recently_watched", TV_HOME_BECAUSE_YOU_WATCHED_SEEDS_KEY), rails.map { it.key })
+        assertEquals(watched, rails.last().items.single())
+    }
+
     private fun media(id: String, type: MediaType = MediaType.MOVIE) = MediaItem(
         id = id,
         type = type,

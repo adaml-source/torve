@@ -142,6 +142,9 @@ internal object AppUpdateNotifier {
 
     @Synchronized
     fun showSystemNotificationIfNew(context: Context, update: AvailableAppUpdate): Boolean {
+        // Persist before creating or launching cross-application intents. This also makes the
+        // validated URL recoverable if Torve is killed while Downloader owns the foreground.
+        AppUpdateHandoffStore(context).save(update)
         if (!hasNotificationPermission(context)) return false
         val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         if (prefs.getString(LAST_NOTIFIED_VERSION, null) == update.version) return false

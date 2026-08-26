@@ -517,6 +517,7 @@ fun TvRoot(
     val focusHandlesByRoute = remember { mutableStateMapOf<String, TvScreenFocusHandle>() }
     var contentFocusEpoch by remember { mutableIntStateOf(0) }
     var focusedContentRoute by remember { mutableStateOf<String?>(null) }
+    var detailsContentHasFocus by remember { mutableStateOf(false) }
     val focusReturnStack = remember { mutableStateListOf<TvFocusBackStackEntry>() }
     var pendingFocusBackRestore by remember { mutableStateOf<TvFocusBackStackEntry?>(null) }
     var pendingContentEntryRoute by remember { mutableStateOf<String?>(null) }
@@ -860,6 +861,12 @@ fun TvRoot(
     val pendingPlaybackLastRequester = pendingPlaybackFocusRestoreRoute?.let(lastFocusedContentByRoute::get)
     val pendingPlaybackFirstRequester = pendingPlaybackFocusRestoreRoute?.let(firstContentFocusByRoute::get)
 
+    LaunchedEffect(currentSubRoute) {
+        if (currentSubRoute?.startsWith("tv_details/") != true) {
+            detailsContentHasFocus = false
+        }
+    }
+
     // The background-playback card is a conditional focus owner. Once it is
     // stopped or exited, verify that the destination surface actually reports
     // focus before completing restoration. requestFocus() merely being accepted
@@ -892,6 +899,11 @@ fun TvRoot(
                 if (
                     didPlaybackReturnFocusReachContent(
                         focusRoute = focusRoute,
+                        destinationHasFocus = if (focusRoute == TvRoutes.DETAILS) {
+                            detailsContentHasFocus
+                        } else {
+                            rootHasFocus && !isRailFocused && focusedContentRoute == focusRoute
+                        },
                         contentFocusEpochBefore = contentEpochBefore,
                         contentFocusEpochAfter = contentFocusEpoch,
                         focusedContentRoute = focusedContentRoute,
@@ -964,15 +976,16 @@ fun TvRoot(
                 firstContentFocusByRoute[focusRoute],
             ).distinct()
             for (requester in candidates) {
-                val beforeEpoch = contentFocusEpoch
                 val beforeSubRouteEpoch = subRouteFocusEpoch
                 runCatching { requester.requestFocus() }
                 kotlinx.coroutines.yield()
                 withFrameNanos { }
                 val restored = if (focusRoute == TvRoutes.DETAILS) {
-                    subRouteFocusEpoch != beforeSubRouteEpoch
+                    detailsContentHasFocus || subRouteFocusEpoch != beforeSubRouteEpoch
                 } else {
-                    contentFocusEpoch != beforeEpoch && focusedContentRoute == focusRoute
+                    rootHasFocus &&
+                        !isRailFocused &&
+                        focusedContentRoute == focusRoute
                 }
                 if (restored) {
                     return@LaunchedEffect
@@ -3393,6 +3406,9 @@ fun TvRoot(
                         onContentFocused = { req ->
                             lastFocusedContentByRoute[TvRoutes.DETAILS] = req
                             subRouteFocusEpoch += 1
+                        },
+                        onDetailsContentFocusStateChanged = { hasFocus ->
+                            detailsContentHasFocus = hasFocus
                         },
                         registerSeeAllFocusHandle = { handle ->
                             if (handle == null) {

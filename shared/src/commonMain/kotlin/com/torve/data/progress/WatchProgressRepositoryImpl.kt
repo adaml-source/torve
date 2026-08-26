@@ -23,6 +23,9 @@ import com.torve.domain.model.extractImdbIdOrNull
 import com.torve.domain.model.extractTmdbIdOrNull
 import com.torve.domain.repository.WatchProgressRepository
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.launch
 import com.torve.util.ioDispatcher
 import kotlinx.datetime.Clock
@@ -37,6 +40,9 @@ class WatchProgressRepositoryImpl(
     private val integrationSecretStore: IntegrationSecretStore,
     private val userIdProvider: UserIdProvider,
 ) : WatchProgressRepository {
+
+    private val _progressChanges = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
+    override val progressChanges: Flow<Unit> = _progressChanges.asSharedFlow()
 
     override suspend fun getInProgress(limit: Long): List<WatchProgress> {
         val userId = userIdProvider.currentUserId()
@@ -122,6 +128,7 @@ class WatchProgressRepositoryImpl(
         val existing = runCatching { database.torveQueries.getProgress(userId = userId, mediaId = progress.mediaId).executeAsOneOrNull() }.getOrNull()
         val posterUrl = progress.posterUrl ?: existing?.poster_url
         val backdropUrl = progress.backdropUrl ?: existing?.backdrop_url
+        val showTitle = progress.showTitle ?: existing?.show_title
         database.torveQueries.upsertProgress(
             user_id = userId,
             media_id = progress.mediaId,
@@ -136,9 +143,10 @@ class WatchProgressRepositoryImpl(
             duration_ms = progress.durationMs,
             season_number = progress.seasonNumber?.toLong(),
             episode_number = progress.episodeNumber?.toLong(),
-            show_title = progress.showTitle,
+            show_title = showTitle,
             updated_at = Clock.System.now().toEpochMilliseconds(),
         )
+        _progressChanges.tryEmit(Unit)
 
         // Treat near-complete playback as watched; enqueue for eventual Trakt sync.
         // Threshold matches Trakt's "scrobble stop" behavior at 80%+ — we use 85%
@@ -238,10 +246,12 @@ class WatchProgressRepositoryImpl(
             userId = userIdProvider.currentUserId(),
             mediaId = mediaId,
         )
+        _progressChanges.tryEmit(Unit)
     }
 
     override suspend fun clearAllProgress() {
         database.torveQueries.clearAllProgress(userId = userIdProvider.currentUserId())
+        _progressChanges.tryEmit(Unit)
     }
 
     override suspend fun syncFromTrakt() {
@@ -305,6 +315,7 @@ class WatchProgressRepositoryImpl(
                     updated_at = updatedAt,
                 )
             }
+            _progressChanges.tryEmit(Unit)
         } catch (_: Exception) {
             // Non-critical — don't block UI
         }

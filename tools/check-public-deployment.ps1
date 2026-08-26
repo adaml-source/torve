@@ -45,6 +45,45 @@ function Get-PublicResponse {
     return $response
 }
 
+$trackedProvenanceByVersion = @{}
+$publicProvenanceByVersion = @{}
+
+function Get-TrackedProvenance {
+    param([Parameter(Mandatory = $true)][string]$Version)
+    if ($trackedProvenanceByVersion.ContainsKey($Version)) {
+        return $trackedProvenanceByVersion[$Version]
+    }
+    if ($Version -notmatch '^\d+\.\d+\.\d+$') {
+        throw "Published channel has an invalid semantic version: '$Version'."
+    }
+    $path = Join-Path $repoRoot "release\provenance\$Version.json"
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+        throw "Published channel $Version has no tracked release provenance at '$path'."
+    }
+    $record = Get-Content -Raw -Encoding utf8 -LiteralPath $path | ConvertFrom-Json
+    if ([string]$record.version -ne $Version) {
+        throw "Tracked release provenance '$path' declares version '$($record.version)', expected '$Version'."
+    }
+    $trackedProvenanceByVersion[$Version] = $record
+    return $record
+}
+
+function Get-PublicProvenance {
+    param([Parameter(Mandatory = $true)][string]$Version)
+    if ($publicProvenanceByVersion.ContainsKey($Version)) {
+        return $publicProvenanceByVersion[$Version]
+    }
+    $tracked = Get-TrackedProvenance $Version
+    $published = (Get-PublicResponse "$siteBase/downloads/provenance/torve-$Version.json").Content | ConvertFrom-Json
+    if ([string]$published.version -ne $Version -or
+        [string]$published.source.commit -ne [string]$tracked.source.commit -or
+        [string]$published.source.tag -ne [string]$tracked.source.tag) {
+        throw "Published provenance for $Version does not match the tracked source identity."
+    }
+    $publicProvenanceByVersion[$Version] = $published
+    return $published
+}
+
 $pageChecks = @(
     @{ Path = '/'; Required = 'Torve' },
     @{ Path = '/download.html'; Required = 'Download Fire TV APK' },
@@ -83,8 +122,7 @@ if ($resetScript.IndexOf('/auth/password-reset/request', [StringComparison]::Ord
 
 $manifestResponse = Get-PublicResponse "$siteBase/downloads/releases.json"
 $manifest = $manifestResponse.Content | ConvertFrom-Json
-$provenanceResponse = Get-PublicResponse "$siteBase/downloads/provenance/torve-$($expected.version).json"
-$publicProvenance = $provenanceResponse.Content | ConvertFrom-Json
+$publicProvenance = Get-PublicProvenance ([string]$expected.version)
 
 if ([string]$manifest.source.version -ne [string]$expected.version -or
     [string]$manifest.source.tag -ne [string]$expected.source.tag -or
@@ -98,11 +136,24 @@ if ([string]$publicProvenance.source.commit -ne [string]$expected.source.commit 
 
 $publishedArtifacts = @(
     @{ Channel = $manifest.channels.stable.fire_tv; Id = 'amazon_tv_apk' },
+    @{ Channel = $manifest.channels.stable.android_tv; Id = 'amazon_tv_apk' },
     @{ Channel = $manifest.channels.stable.windows; Id = 'windows_msi' }
 )
 foreach ($published in $publishedArtifacts) {
-    $artifact = @($expected.artifacts | Where-Object { $_.id -eq $published.Id })[0]
-    if ([string]$published.Channel.version -ne [string]$expected.version -or
+    $channelVersion = [string]$published.Channel.version
+    $artifactProvenance = Get-TrackedProvenance $channelVersion
+    $publicArtifactProvenance = Get-PublicProvenance $channelVersion
+    $artifact = @($artifactProvenance.artifacts | Where-Object { $_.id -eq $published.Id })[0]
+    $publicArtifact = @($publicArtifactProvenance.artifacts | Where-Object { $_.id -eq $published.Id })[0]
+    if ($null -eq $artifact -or $null -eq $publicArtifact) {
+        throw "Published release channel '$($published.Id)' is missing from $channelVersion provenance."
+    }
+    if ([string]$publicArtifact.sha256 -ne [string]$artifact.sha256 -or
+        [long]$publicArtifact.bytes -ne [long]$artifact.bytes -or
+        [string]$publicArtifact.public_url -ne [string]$artifact.public_url) {
+        throw "Published provenance for '$($published.Id)' does not match its tracked $channelVersion artifact."
+    }
+    if ([string]$published.Channel.version -ne [string]$artifactProvenance.version -or
         [string]$published.Channel.sha256 -ne [string]$artifact.sha256 -or
         [long]$published.Channel.size_bytes -ne [long]$artifact.bytes -or
         [string]$published.Channel.url -ne [string]$artifact.public_url) {

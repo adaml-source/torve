@@ -28,6 +28,49 @@ internal fun fireTvDownloaderDeepLink(downloadUrl: String): String =
     "downloader://$downloadUrl"
 
 /**
+ * Keeps the validated release handoff available across process death and the switch to
+ * Downloader. The entry intentionally remains until the installed version catches up so a
+ * recreated update activity never falls back to opening Downloader without its APK URL.
+ */
+internal class AppUpdateHandoffStore(context: Context) {
+    private val prefs = context.applicationContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+
+    fun save(update: AvailableAppUpdate): Boolean = prefs.edit()
+        .putString(KEY_VERSION, update.version)
+        .putString(KEY_URL, update.downloadUrl)
+        .putString(KEY_SHA256, update.sha256)
+        .putLong(KEY_SIZE_BYTES, update.sizeBytes)
+        // This must reach disk before Torve hands control to another application.
+        .commit()
+
+    fun load(): AvailableAppUpdate? {
+        val version = prefs.getString(KEY_VERSION, null)?.trim().orEmpty()
+        val url = prefs.getString(KEY_URL, null)?.trim().orEmpty()
+        val sha256 = prefs.getString(KEY_SHA256, null)?.trim()?.lowercase().orEmpty()
+        val sizeBytes = prefs.getLong(KEY_SIZE_BYTES, 0L)
+        if (
+            version.isBlank() ||
+            !isTrustedUpdateUrl(url) ||
+            !sha256.matches(Regex("^[0-9a-f]{64}$")) ||
+            sizeBytes <= 0L
+        ) return null
+        return AvailableAppUpdate(version, url, sha256, sizeBytes)
+    }
+
+    fun clear() {
+        prefs.edit().clear().apply()
+    }
+
+    private companion object {
+        const val PREFS_NAME = "app_update_handoff"
+        const val KEY_VERSION = "version"
+        const val KEY_URL = "url"
+        const val KEY_SHA256 = "sha256"
+        const val KEY_SIZE_BYTES = "size_bytes"
+    }
+}
+
+/**
  * Amazon-TV-only update handoff. Immediately opens the Downloader app with the APK URL
  * so Fire TV handles the download and installation natively.
  *
@@ -40,8 +83,12 @@ class AppUpdateActivity : AppCompatActivity() {
             finish()
             return
         }
+        val handoffStore = AppUpdateHandoffStore(applicationContext)
         val update = intent.toAvailableAppUpdate()
-        if (update == null) {
+            ?.also { handoffStore.save(it) }
+            ?: handoffStore.load()
+        if (update == null || !isNewerRelease(update.version, BuildConfig.VERSION_NAME)) {
+            handoffStore.clear()
             finish()
             return
         }
@@ -90,7 +137,11 @@ class AppUpdateActivity : AppCompatActivity() {
     private fun openInDownloaderApp(url: String): Boolean {
         val intent = Intent(Intent.ACTION_VIEW, Uri.parse(fireTvDownloaderDeepLink(url))).apply {
             setPackage(FIRE_TV_DOWNLOADER_PACKAGE)
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            addFlags(
+                Intent.FLAG_ACTIVITY_NEW_TASK or
+                    Intent.FLAG_ACTIVITY_CLEAR_TOP or
+                    Intent.FLAG_ACTIVITY_SINGLE_TOP,
+            )
         }
         return runCatching { startActivity(intent) }.isSuccess
     }

@@ -59,6 +59,7 @@ import com.torve.presentation.contentpolicy.ContentPolicyFilter
 import com.torve.presentation.settings.SettingsViewModel
 import com.torve.presentation.settings.SettingsRefreshNotifier
 import com.torve.presentation.util.hydrateUpcomingScheduleArtwork
+import com.torve.util.ioDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -67,6 +68,7 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.supervisorScope
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -188,6 +190,7 @@ class HomeViewModel(
     // Search
     private val searchQueryFlow = MutableStateFlow("")
     private var homeLoadJob: Job? = null
+    private var continueWatchingRefreshJob: Job? = null
     private var homeAutoRetryCount = 0
     private var upcomingScheduleRefreshJob: Job? = null
     private var lastTraktScheduleRefreshAtMs = 0L
@@ -203,6 +206,13 @@ class HomeViewModel(
             _homeLayoutOrder.value = ensureAllSectionsInLayoutOrder(loadHomeLayoutOrder())
             loadHomeScreen()
             scheduleUpcomingScheduleRefresh("startup")
+        }
+        scope.launch {
+            watchProgressRepo.progressChanges
+                .debounce(250L)
+                .collectLatest {
+                    refreshContinueWatching()
+                }
         }
         scope.launch {
             // Debounce: on app start the settings-refresh notifier fires
@@ -1467,6 +1477,40 @@ class HomeViewModel(
     fun refresh() {
         loadHomeScreen()
         scheduleUpcomingScheduleRefresh("manual_refresh", force = true)
+    }
+
+    /**
+     * Refresh only the progress-derived rail after playback writes. A full Home
+     * reload would restart unrelated network-backed shelves every ten seconds.
+     */
+    fun refreshContinueWatching() {
+        continueWatchingRefreshJob?.cancel()
+        continueWatchingRefreshJob = scope.launch {
+            val (local, overlay) = withContext(ioDispatcher) {
+                val localItems = runCatching { watchProgressRepo.getInProgress(20) }.getOrDefault(emptyList())
+                val overlayItems = runCatching { libraryOverlayService.getContinueWatching(20) }.getOrDefault(emptyList())
+                localItems to overlayItems
+            }
+            val merged = (local + overlay)
+                .filterNot { it.mediaId.startsWith("direct:") }
+                .groupBy { "${it.mediaType.name}:${it.mediaId}" }
+                .mapNotNull { (_, entries) -> entries.maxByOrNull { it.updatedAt } }
+                .sortedByDescending { it.updatedAt }
+                .take(20)
+            val filtered = contentPolicyFilter.filterWatchProgress(
+                policy = currentPolicy(),
+                context = ContentAccessContext.HISTORY_DERIVED,
+                items = merged,
+            ).items
+            val hydrated = hydrateContinueWatchingFromCache(filtered)
+            val ratings = buildRatingsLookup(hydrated)
+            _state.update { current ->
+                current.copy(
+                    continueWatching = filtered,
+                    continueWatchingRatings = current.continueWatchingRatings + ratings,
+                )
+            }
+        }
     }
 
     fun refreshUpcomingSchedule() {

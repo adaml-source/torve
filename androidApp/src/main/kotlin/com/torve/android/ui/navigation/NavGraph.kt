@@ -2476,7 +2476,11 @@ private fun TvPersistentPlaybackBar(
             withFrameNanos { }
             if (attempt > 0) delay(120L)
             runCatching { returnFocusRequester.requestFocus() }
-            if (attempt >= 2 && focusedAction == "return") return@LaunchedEffect
+            // Stop claiming focus as soon as the playback card owns it. The
+            // old minimum-three-attempt loop could pull focus back after the
+            // user had already pressed Up to return to the content surface.
+            withFrameNanos { }
+            if (focusedAction == "return") return@LaunchedEffect
         }
     }
 

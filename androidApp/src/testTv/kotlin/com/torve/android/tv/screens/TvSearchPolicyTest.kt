@@ -132,6 +132,28 @@ class TvSearchPolicyTest {
     }
 
     @Test
+    fun recentSearchesAreNewestFirstCaseInsensitiveAndBounded() {
+        var recent = emptyList<String>()
+        listOf("The Bear", "Severance", "the bear", "Slow Horses").forEach { query ->
+            recent = addTvRecentSearch(recent, query, limit = 3)
+        }
+
+        assertEquals(listOf("Slow Horses", "the bear", "Severance"), recent)
+    }
+
+    @Test
+    fun recentSearchSerializationPreservesOrderAndSpecialCharacters() {
+        val searches = listOf("Two and a Half Men", "Star Trek: Picard", "Tom & Jerry")
+
+        assertEquals(searches, decodeTvRecentSearches(encodeTvRecentSearches(searches)))
+    }
+
+    @Test
+    fun malformedRecentSearchHistoryFailsClosed() {
+        assertEquals(emptyList<String>(), decodeTvRecentSearches("not-json"))
+    }
+
+    @Test
     fun topRatedUsesAvailableScoreAndBoundedVoteFloor() {
         assertTrue(
             item(rating = 8.1, voteCount = 800)

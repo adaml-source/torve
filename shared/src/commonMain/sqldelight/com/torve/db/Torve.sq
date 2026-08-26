@@ -36,7 +36,16 @@ CREATE TABLE watch_progress (
 );
 
 getInProgress:
-SELECT * FROM watch_progress WHERE user_id = :userId AND position_ms > 0 AND (CAST(position_ms AS REAL) / duration_ms) < 0.85 ORDER BY updated_at DESC LIMIT :limit;
+SELECT * FROM watch_progress
+WHERE user_id = :userId
+  AND position_ms > 0
+  AND duration_ms > 0
+  AND (
+    media_type = 'series'
+    OR (CAST(position_ms AS REAL) / duration_ms) < 0.85
+  )
+ORDER BY updated_at DESC
+LIMIT :limit;
 
 getAllProgress:
 SELECT * FROM watch_progress WHERE user_id = :userId ORDER BY updated_at DESC;

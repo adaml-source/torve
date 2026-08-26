@@ -957,16 +957,28 @@ internal fun TvSeeAllScreen(
                         loading = false
                         return
                     }
-                    val recommendations = metadataRepo.getRecommendations(relatedType, relatedId, page)
-                    val relatedItems = if (recommendations.isNotEmpty()) {
-                        recommendations
-                    } else {
-                        metadataRepo.getSimilar(relatedType, relatedId, page)
-                    }.filterNot { it.tmdbId == relatedId }
+                    val (recommendations, similar) = coroutineScope {
+                        val recommendationsDeferred = async {
+                            runCatching {
+                                metadataRepo.getRecommendations(relatedType, relatedId, page)
+                            }.getOrDefault(emptyList())
+                        }
+                        val similarDeferred = async {
+                            runCatching {
+                                metadataRepo.getSimilar(relatedType, relatedId, page)
+                            }.getOrDefault(emptyList())
+                        }
+                        recommendationsDeferred.await() to similarDeferred.await()
+                    }
+                    val relatedItems = mergeMoreLikeCandidates(
+                        seedTmdbId = relatedId,
+                        recommendations = recommendations,
+                        similar = similar,
+                    )
                     val existingKeys = items.mapTo(mutableSetOf()) { it.seeAllStableKey() }
                     items.addAll(relatedItems.filter { existingKeys.add(it.seeAllStableKey()) })
                     currentPage = page
-                    totalPages = if (relatedItems.size < 20) page else Int.MAX_VALUE
+                    totalPages = if (recommendations.size < 20 && similar.size < 20) page else Int.MAX_VALUE
                     loading = false
                     initialLoad = false
                     persistSeeAllCache()
@@ -2131,7 +2143,11 @@ internal fun buildTmdbGenreQuery(
 }
 
 private fun sortOptionsForRail(railKey: String): List<TvSeeAllSortOption> {
-    val firstLabel = if (railKey.startsWith("continue_watching")) "Recent Viewed" else "Default"
+    val firstLabel = when {
+        railKey.startsWith("continue_watching") -> "Recent Viewed"
+        railKey.startsWith("more_like_") -> "Recommended"
+        else -> "Default"
+    }
     return listOf(
         TvSeeAllSortOption(TvSeeAllSortKey.DEFAULT, firstLabel),
         TvSeeAllSortOption(TvSeeAllSortKey.RATING_DESC, "IMDb Rating"),
@@ -2140,6 +2156,17 @@ private fun sortOptionsForRail(railKey: String): List<TvSeeAllSortOption> {
         TvSeeAllSortOption(TvSeeAllSortKey.NEWEST_RELEASE, "Newest Release"),
         TvSeeAllSortOption(TvSeeAllSortKey.OLDEST_RELEASE, "Oldest Release"),
     )
+}
+
+internal fun mergeMoreLikeCandidates(
+    seedTmdbId: Int,
+    recommendations: List<MediaItem>,
+    similar: List<MediaItem>,
+): List<MediaItem> {
+    val seen = mutableSetOf<String>()
+    return (recommendations + similar).filter { item ->
+        item.tmdbId != seedTmdbId && seen.add(item.seeAllStableKey())
+    }
 }
 
 private fun defaultSortKeyForRail(

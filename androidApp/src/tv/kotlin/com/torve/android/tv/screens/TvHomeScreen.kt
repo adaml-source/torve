@@ -130,6 +130,7 @@ internal fun TvHomeScreen(
     val availableNowTitle = stringResource(R.string.tv_home_available_now)
     val downloadsOnDesktopTitle = stringResource(R.string.tv_home_downloads_on_desktop)
     val recentlyAddedTitle = stringResource(R.string.tv_home_recently_added_sources)
+    val moreLikeThisTitle = stringResource(R.string.tv_detail_more_like_this)
 
     val rails = remember(
         state,
@@ -280,6 +281,19 @@ internal fun TvHomeScreen(
         onMediaFocused = { item ->
             if (!item.id.startsWith(TV_HOME_PROVIDER_ID_PREFIX)) {
                 onMediaFocused?.invoke(item)
+            }
+        },
+        onRailMediaClick = { railKey, item ->
+            if (railKey != TV_HOME_BECAUSE_YOU_WATCHED_SEEDS_KEY) {
+                false
+            } else {
+                val destination = item.tvMoreLikeRailKey()
+                if (destination != null && onSeeAll != null) {
+                    onSeeAll(destination, "$moreLikeThisTitle: ${item.title}")
+                    true
+                } else {
+                    false
+                }
             }
         },
         onSeeAll = onSeeAll,
@@ -574,16 +588,30 @@ private fun buildBuiltInRails(
         }
 
         HomeSection.BECAUSE_YOU_WATCHED -> {
-            state.becauseYouWatched.mapNotNull { shelf ->
-                shelf.items.tvHomeCardItems()
-                    .takeIf { it.isNotEmpty() }
-                    ?.let { items ->
-                        TvContentRail(
-                            key = shelf.id,
-                            title = shelf.title,
-                            items = items,
-                        )
-                    }
+            val watchedSeeds = state.recentlyWatched
+                .asSequence()
+                .filter { item -> item.tmdbId?.let { it > 0 } == true }
+                .distinctBy { "${it.type}:${it.tmdbId}" }
+                .toList()
+                .tvHomeCardItems()
+            if (watchedSeeds.isEmpty()) {
+                emptyList()
+            } else {
+                listOf(
+                    TvContentRail(
+                        key = TV_HOME_BECAUSE_YOU_WATCHED_SEEDS_KEY,
+                        title = title,
+                        items = watchedSeeds,
+                        // Each watched poster is the entry point to its own
+                        // recommendations page; a rail-level See All would
+                        // incorrectly show the watch-history seeds themselves.
+                        showSeeAllCard = false,
+                        // Recently Watched is a separate, detail-oriented rail.
+                        // Preserve these intentional duplicates because this rail
+                        // has a different action and destination.
+                        allowCrossRailDuplicates = true,
+                    ),
+                )
             }
         }
 
@@ -616,6 +644,13 @@ private fun MediaItem.isTvHomeDisplayable(): Boolean =
 
 private const val TV_HOME_PERSON_ID_PREFIX = "person:"
 private const val TV_HOME_PROVIDER_ID_PREFIX = "provider:"
+internal const val TV_HOME_BECAUSE_YOU_WATCHED_SEEDS_KEY = "because_you_watched_seeds"
+
+internal fun MediaItem.tvMoreLikeRailKey(): String? {
+    val id = tmdbId?.takeIf { it > 0 } ?: return null
+    val mediaType = if (type == MediaType.SERIES) "tv" else "movie"
+    return "more_like_${mediaType}_$id"
+}
 
 private fun PersonSummary.toTvHomePersonItem(): MediaItem = MediaItem(
     id = "$TV_HOME_PERSON_ID_PREFIX$id",

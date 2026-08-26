@@ -671,7 +671,6 @@ internal fun TvCatalogRailsScreen(
             .filter { it.mediaType == targetMediaType }
             .sortedByDescending { it.updatedAt }
             .mapNotNull { it.toMediaItemOrNull() }
-            .filter { it.tmdbId != null }
             .take(20)
             .withEnrichedRatingsFrom(homeState.continueWatchingRatings)
         if (items.isEmpty()) null

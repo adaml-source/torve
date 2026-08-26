@@ -125,6 +125,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.decodeFromString
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
 import org.koin.compose.koinInject
 import java.util.Calendar
 
@@ -178,6 +181,9 @@ private const val TV_SEARCH_MAX_RESULTS = 300
 private const val TV_SEARCH_PREFETCH_RESULT_COUNT = 96
 private const val TV_SEARCH_RATING_CACHE_COUNT = 180
 private const val TV_SEARCH_RATING_ENRICH_COUNT = 12
+private const val TV_SEARCH_RECENT_PREF_KEY = "tv_recent_searches_v1"
+private const val TV_SEARCH_RECENT_LIMIT = 8
+private const val TV_SEARCH_RECENT_COMMIT_DELAY_MS = 1_200L
 private const val TV_SEARCH_DETAIL_HYDRATE_COUNT = 12
 private const val TV_SEARCH_LOAD_AHEAD_ROWS = 2
 private const val TV_SEARCH_TOP_RATED_LOAD_AHEAD_ROWS = 4
@@ -279,6 +285,7 @@ internal fun TvSearchScreen(
     var focusFirstFilterAfterShow by remember { mutableStateOf(false) }
     var restoreAiFocusAfterToggle by remember { mutableStateOf(false) }
     var focusInputAfterClear by remember { mutableStateOf(false) }
+    var recentSearches by remember { mutableStateOf(emptyList<String>()) }
     var selectedResultKey by remember { mutableStateOf(restoredContentCache?.selectedMediaKey) }
     var selectedResult by remember {
         mutableStateOf(
@@ -311,6 +318,8 @@ internal fun TvSearchScreen(
     val sortRequester = remember { FocusRequester() }
     val firstFilterRequester = remember { FocusRequester() }
     val firstResultRequester = remember { FocusRequester() }
+    val firstExploreRequester = remember { FocusRequester() }
+    val firstRecentRequester = remember { FocusRequester() }
     val resultRequesters = remember { mutableMapOf<String, FocusRequester>() }
     val resultsGridState = rememberLazyGridState()
     val lastVisibleResultIndex by remember {
@@ -323,6 +332,7 @@ internal fun TvSearchScreen(
     }
     val activeDensityRequester = densityRequesters.getValue(density)
     var lastVisibleFilterRequester by remember { mutableStateOf<FocusRequester?>(null) }
+    val showRecentSearchRow = query.isBlank() && recentSearches.isNotEmpty()
 
     DisposableEffect(registerFocusHandle, focusRestoreController, screenId) {
         registerFocusHandle?.invoke(
@@ -353,7 +363,7 @@ internal fun TvSearchScreen(
                 add(firstFilterRequester)
             } else if (filtersVisible) {
                 selectedResultKey?.let { key -> resultRequesters[key]?.let(::add) }
-                if (results.isNotEmpty()) add(firstResultRequester)
+                if (results.isNotEmpty()) add(firstResultRequester) else add(firstExploreRequester)
                 lastVisibleFilterRequester?.let(::add)
                 add(advancedFiltersRequester)
                 add(allTypeRequester)
@@ -361,7 +371,7 @@ internal fun TvSearchScreen(
                 add(activeDensityRequester)
             } else {
                 selectedResultKey?.let { key -> resultRequesters[key]?.let(::add) }
-                if (results.isNotEmpty()) add(firstResultRequester)
+                if (results.isNotEmpty()) add(firstResultRequester) else add(firstExploreRequester)
                 add(filterToggleRequester)
                 add(activeDensityRequester)
             }
@@ -755,6 +765,30 @@ internal fun TvSearchScreen(
             stableTvSearchProjection(results, filtered, visibleLimit)
         } else {
             stableTvSearchProjection(results, filtered, TV_SEARCH_MAX_RESULTS)
+        }
+    }
+
+    LaunchedEffect(prefsRepo) {
+        recentSearches = withContext(Dispatchers.IO) {
+            decodeTvRecentSearches(
+                runCatching { prefsRepo.getString(TV_SEARCH_RECENT_PREF_KEY) }.getOrNull(),
+            )
+        }
+    }
+
+    // TV text entry often pauses briefly between characters. Commit only after
+    // the query has remained stable so partial terms do not pollute history.
+    LaunchedEffect(query) {
+        val candidate = query.trim()
+        if (candidate.length < 2) return@LaunchedEffect
+        delay(TV_SEARCH_RECENT_COMMIT_DELAY_MS)
+        val updated = addTvRecentSearch(recentSearches, candidate)
+        if (updated == recentSearches) return@LaunchedEffect
+        recentSearches = updated
+        withContext(Dispatchers.IO) {
+            runCatching {
+                prefsRepo.setString(TV_SEARCH_RECENT_PREF_KEY, encodeTvRecentSearches(updated))
+            }
         }
     }
 
@@ -1591,10 +1625,17 @@ internal fun TvSearchScreen(
                 filterToggleRequester = filterToggleRequester,
                 advancedFiltersRequester = advancedFiltersRequester,
                 inputFocusRequester = inputFocusRequester,
-                bodyTopRequester = activeDensityRequester,
+                bodyTopRequester = if (showRecentSearchRow) firstRecentRequester else activeDensityRequester,
                 railFocusRequester = railFocusRequester,
-                onMoveDown = if (results.isNotEmpty()) {
-                    { requestSearchBodyFocus() }
+                onMoveDown = if (showRecentSearchRow || results.isNotEmpty()) {
+                    {
+                        if (showRecentSearchRow) {
+                            runCatching { firstRecentRequester.requestFocus() }
+                            onContentFocused(firstRecentRequester)
+                        } else {
+                            requestSearchBodyFocus()
+                        }
+                    }
                 } else {
                     null
                 },
@@ -1604,6 +1645,17 @@ internal fun TvSearchScreen(
                 },
                 onContentFocused = onContentFocused,
             )
+
+            if (showRecentSearchRow) {
+                TvSearchRecentRow(
+                    searches = recentSearches,
+                    firstFocusRequester = firstRecentRequester,
+                    upRequester = if (filtersVisible) advancedFiltersRequester else filterToggleRequester,
+                    downRequester = activeDensityRequester,
+                    onSearchSelected = { query = it },
+                    onContentFocused = onContentFocused,
+                )
+            }
 
             Row(
                 modifier = Modifier
@@ -1667,7 +1719,7 @@ internal fun TvSearchScreen(
                             densityRequesters = densityRequesters,
                             upRequester = if (filtersVisible) advancedFiltersRequester else filterToggleRequester,
                             downRequester = firstResultRequester.takeIf { results.isNotEmpty() }
-                                ?: activeDensityRequester,
+                                ?: firstExploreRequester,
                             onMoveDown = { requestSearchBodyFocus() },
                             onContentFocused = onContentFocused,
                         )
@@ -1682,7 +1734,11 @@ internal fun TvSearchScreen(
                         )
                         results.isEmpty() -> TvSearchExploreState(
                             title = if (activeFilterCount > 0) "No matches for these filters" else "Start typing to search",
-                            subtitle = if (activeFilterCount > 0) "Clear a filter or switch back to All." else "Or pick a quick filter.",
+                            subtitle = if (activeFilterCount > 0) "Clear a filter or switch back to All." else "Choose a recent search or explore a suggestion.",
+                            recentSearches = if (showRecentSearchRow) emptyList() else recentSearches,
+                            firstFocusRequester = firstExploreRequester,
+                            upRequester = activeDensityRequester,
+                            onContentFocused = onContentFocused,
                             onQuickTerm = { term -> query = term },
                         )
                         else -> LazyVerticalGrid(
@@ -4050,11 +4106,65 @@ private fun TvSearchEmptyState(
 }
 
 @Composable
+private fun TvSearchRecentRow(
+    searches: List<String>,
+    firstFocusRequester: FocusRequester,
+    upRequester: FocusRequester,
+    downRequester: FocusRequester,
+    onSearchSelected: (String) -> Unit,
+    onContentFocused: (FocusRequester) -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = 42.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = "Recent",
+            style = MaterialTheme.typography.labelLarge,
+            color = Silver.copy(alpha = 0.86f),
+            fontWeight = FontWeight.SemiBold,
+        )
+        LazyRow(
+            modifier = Modifier.weight(1f),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            contentPadding = PaddingValues(start = 2.dp, end = 16.dp, top = 2.dp, bottom = 2.dp),
+        ) {
+            items(searches, key = { "recent-row:$it" }) { term ->
+                val requester = if (term == searches.first()) {
+                    firstFocusRequester
+                } else {
+                    remember(term) { FocusRequester() }
+                }
+                TvSearchChip(
+                    text = term,
+                    modifier = Modifier
+                        .focusRequester(requester)
+                        .focusProperties {
+                            up = upRequester
+                            down = downRequester
+                        },
+                    onFocused = { onContentFocused(requester) },
+                    onClick = { onSearchSelected(term) },
+                )
+            }
+        }
+    }
+}
+
+@Composable
 private fun TvSearchExploreState(
     title: String,
     subtitle: String,
+    recentSearches: List<String>,
+    firstFocusRequester: FocusRequester,
+    upRequester: FocusRequester,
+    onContentFocused: (FocusRequester) -> Unit,
     onQuickTerm: (String) -> Unit,
 ) {
+    val suggestions = listOf("Trending movies", "New series", "Family night", "Sci-fi worlds", "Feel-good comedy")
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -4083,16 +4193,56 @@ private fun TvSearchExploreState(
             style = MaterialTheme.typography.bodyLarge,
             color = Silver,
         )
+        if (recentSearches.isNotEmpty()) {
+            Text(
+                text = "Recent searches",
+                style = MaterialTheme.typography.labelLarge,
+                color = Silver.copy(alpha = 0.86f),
+                fontWeight = FontWeight.SemiBold,
+            )
+            LazyRow(
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                contentPadding = PaddingValues(top = 2.dp, end = 16.dp),
+            ) {
+                items(recentSearches, key = { "recent:$it" }) { term ->
+                    val requester = if (term == recentSearches.first()) {
+                        firstFocusRequester
+                    } else {
+                        remember(term) { FocusRequester() }
+                    }
+                    TvSearchChip(
+                        text = term,
+                        modifier = Modifier
+                            .focusRequester(requester)
+                            .focusProperties { up = upRequester },
+                        onFocused = { onContentFocused(requester) },
+                        onClick = { onQuickTerm(term) },
+                    )
+                }
+            }
+            Text(
+                text = "Explore",
+                style = MaterialTheme.typography.labelLarge,
+                color = Silver.copy(alpha = 0.86f),
+                fontWeight = FontWeight.SemiBold,
+            )
+        }
         LazyRow(
             horizontalArrangement = Arrangement.spacedBy(10.dp),
             contentPadding = PaddingValues(top = 4.dp, end = 16.dp),
         ) {
-            items(listOf("Trending movies", "New series", "Family night", "Sci-fi worlds", "Feel-good comedy")) { term ->
-                val requester = remember(term) { FocusRequester() }
+            items(suggestions, key = { "suggestion:$it" }) { term ->
+                val requester = if (recentSearches.isEmpty() && term == suggestions.first()) {
+                    firstFocusRequester
+                } else {
+                    remember(term) { FocusRequester() }
+                }
                 TvSearchChip(
                     text = term,
-                    modifier = Modifier.focusRequester(requester),
-                    onFocused = {},
+                    modifier = Modifier
+                        .focusRequester(requester)
+                        .focusProperties { up = upRequester },
+                    onFocused = { onContentFocused(requester) },
                     onClick = { onQuickTerm(term) },
                 )
             }
@@ -4350,6 +4500,35 @@ private fun TvSearchResultCard(
                 )
             }
         }
+    }
+}
+
+internal fun addTvRecentSearch(
+    existing: List<String>,
+    query: String,
+    limit: Int = TV_SEARCH_RECENT_LIMIT,
+): List<String> {
+    val normalized = query.trim().replace(Regex("\\s+"), " ")
+    if (normalized.length < 2 || limit <= 0) return existing.take(limit.coerceAtLeast(0))
+    return buildList {
+        add(normalized)
+        existing.forEach { item ->
+            val cleaned = item.trim().replace(Regex("\\s+"), " ")
+            if (cleaned.length >= 2 && none { it.equals(cleaned, ignoreCase = true) }) {
+                add(cleaned)
+            }
+        }
+    }.take(limit)
+}
+
+internal fun encodeTvRecentSearches(searches: List<String>): String =
+    Json.encodeToString(searches)
+
+internal fun decodeTvRecentSearches(raw: String?): List<String> {
+    if (raw.isNullOrBlank()) return emptyList()
+    val decoded = runCatching { Json.decodeFromString<List<String>>(raw) }.getOrDefault(emptyList())
+    return decoded.asReversed().fold(emptyList()) { accumulated, item ->
+        addTvRecentSearch(accumulated, item, TV_SEARCH_RECENT_LIMIT)
     }
 }
 

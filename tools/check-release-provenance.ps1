@@ -96,6 +96,14 @@ foreach ($artifact in @($provenance.artifacts)) {
         continue
     }
 
+    # Gradle's release output paths are intentionally stable and are therefore
+    # overwritten by the next build. Historical records still need structural
+    # and source verification, but local byte verification is meaningful only
+    # for the release currently being assembled.
+    if (-not $RequireArtifacts) {
+        continue
+    }
+
     $actualFile = Get-Item -LiteralPath $localPath
     if ($actualFile.Length -ne [long]$artifact.bytes) {
         throw "Artifact $id byte length mismatch: expected $($artifact.bytes), found $($actualFile.Length)."
@@ -106,7 +114,20 @@ foreach ($artifact in @($provenance.artifacts)) {
     }
 }
 
-$requiredArtifacts = @('amazon_tv_apk', 'windows_msi', 'google_tv_aab', 'google_mobile_aab')
+$requiredArtifacts = if ($null -ne $provenance.required_artifacts) {
+    @($provenance.required_artifacts | ForEach-Object { [string]$_ })
+} else {
+    # Schema-v1 releases originally shipped every client together. Keep that
+    # behavior for existing records, while allowing a later hotfix provenance
+    # to explicitly scope itself to independently versioned client artifacts.
+    @('amazon_tv_apk', 'windows_msi', 'google_tv_aab', 'google_mobile_aab')
+}
+if ($requiredArtifacts.Count -eq 0 -or @($requiredArtifacts | Where-Object { [string]::IsNullOrWhiteSpace($_) }).Count -gt 0) {
+    throw 'Release provenance required_artifacts must contain at least one non-blank artifact ID.'
+}
+if (@($requiredArtifacts | Select-Object -Unique).Count -ne $requiredArtifacts.Count) {
+    throw 'Release provenance required_artifacts must be unique.'
+}
 $missingIds = @($requiredArtifacts | Where-Object { -not $artifactIds.ContainsKey($_) })
 if ($missingIds.Count -gt 0) {
     throw "Release provenance is missing required artifacts: $($missingIds -join ', ')"

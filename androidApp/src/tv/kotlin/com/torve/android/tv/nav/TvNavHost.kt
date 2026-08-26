@@ -124,6 +124,7 @@ internal fun TvNavHost(
     onPlaybackFocusRestoreRequest: () -> Unit = {},
     onFirstContentRequester: (FocusRequester) -> Unit = {},
     onContentFocused: (FocusRequester) -> Unit = {},
+    onDetailsContentFocusStateChanged: (Boolean) -> Unit = {},
     registerSeeAllFocusHandle: ((TvScreenFocusHandle?) -> Unit)? = null,
     homeLayoutEntryFocusRequester: FocusRequester,
     onHomeLayoutEntryReadyChanged: (Boolean) -> Unit = {},
@@ -409,6 +410,7 @@ internal fun TvNavHost(
                 onBack = onDetailsBack,
                 onFirstContentRequester = onFirstContentRequester,
                 onContentFocused = onContentFocused,
+                onContentFocusStateChanged = onDetailsContentFocusStateChanged,
                 onMediaClick = { item -> navController.navigateToTvDetails(item) },
                 onSettingsClick = {
                     // Focus state cleanup handled in TvRoot via isSubRouteActive LaunchedEffect
@@ -494,8 +496,13 @@ internal fun TvNavHost(
                     initialReplayStartMs = backStackEntry.arguments?.getLong("replayStartMs") ?: -1L,
                     initialReplayEndMs = backStackEntry.arguments?.getLong("replayEndMs") ?: -1L,
                     initialReplayTitle = backStackEntry.arguments?.getString("replayTitle").orEmpty(),
-                    // Focus state cleanup handled in TvRoot via isSubRouteActive LaunchedEffect
-                    onBack = { navController.popBackStack() },
+                    onBack = {
+                        navController.popBackStack()
+                        // Live playback has no persistent playback card to own
+                        // focus after exit. Restore the originating IPTV surface
+                        // explicitly as well as through the route transition.
+                        onPlaybackFocusRestoreRequest()
+                    },
                 )
             }
         }
@@ -547,8 +554,15 @@ internal fun TvNavHost(
                             onVoiceSearchQuery(normalized)
                         }
                     },
-                    // Focus state cleanup handled in TvRoot via isSubRouteActive LaunchedEffect
-                    onBack = { navController.popBackStack() },
+                    onBack = {
+                        navController.popBackStack()
+                        // Exo playback deliberately hands focus to the retained
+                        // playback card. MPV/non-retained exits have no such
+                        // owner, so restore the originating details control.
+                        if (ActivePlaybackState.session == null) {
+                            onPlaybackFocusRestoreRequest()
+                        }
+                    },
                     onStop = {
                         navController.popBackStack()
                         onPlaybackFocusRestoreRequest()

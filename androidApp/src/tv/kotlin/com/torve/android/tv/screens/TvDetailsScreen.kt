@@ -177,6 +177,7 @@ fun TvDetailsScreen(
     ) -> Unit,
     onFirstContentRequester: (FocusRequester) -> Unit,
     onContentFocused: (FocusRequester) -> Unit,
+    onContentFocusStateChanged: (Boolean) -> Unit = {},
     onMediaClick: (MediaItem) -> Unit = {},
     onCastClick: (castId: Int, castName: String) -> Unit = { _, _ -> },
     onSettingsClick: () -> Unit = {},
@@ -707,6 +708,7 @@ fun TvDetailsScreen(
         modifier = Modifier
             .fillMaxSize()
             .background(Obsidian)
+            .onFocusChanged { onContentFocusStateChanged(it.hasFocus) }
             .focusGroup(),
     ) {
     TvDetailsCinematicBackground(mediaItem)

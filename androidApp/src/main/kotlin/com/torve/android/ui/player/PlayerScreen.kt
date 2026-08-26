@@ -970,12 +970,6 @@ fun PlayerScreen(
         )
     }
 
-    LaunchedEffect(exoPlayerView, useMpv) {
-        if (!useMpv) {
-            (engine as? ExoPlayerEngine)?.setBuiltInSubtitleView(exoPlayerView?.subtitleView)
-        }
-    }
-
     LaunchedEffect(useMpv, pictureFormat) {
         if (useMpv) {
             (engine as? MPVPlayerEngine)?.setPictureFormat(

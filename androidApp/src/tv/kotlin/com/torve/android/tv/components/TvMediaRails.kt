@@ -138,6 +138,8 @@ data class TvContentRail(
     val cardStyle: TvCardStyle = TvCardStyle.POSTER,
     val progressByMediaId: Map<String, Float> = emptyMap(),
     val seeAllItems: List<MediaItem>? = null,
+    val showSeeAllCard: Boolean = true,
+    val allowCrossRailDuplicates: Boolean = false,
 )
 
 private fun TvContentRail.progressFor(item: MediaItem): Float? {
@@ -185,7 +187,7 @@ fun List<TvContentRail>.dedupeAcrossRails(minItemsPerRail: Int = 20): List<TvCon
         val localSeen = mutableSetOf<String>()
         val filtered = rail.items.filter { item ->
             val key = item.tmdbId?.let { "${item.type}:$it" } ?: "${item.type}:${item.id}"
-            key !in seen && localSeen.add(key)
+            (rail.allowCrossRailDuplicates || key !in seen) && localSeen.add(key)
         }
         val allowsSparse = rail.key.startsWith("continue_watching") ||
             rail.key.startsWith("watchlist") ||
@@ -264,6 +266,7 @@ internal fun TvMediaRails(
     loading: Boolean = false,
     emptyMessage: String = "",
     onMediaFocused: ((MediaItem) -> Unit)? = null,
+    onRailMediaClick: ((railKey: String, item: MediaItem) -> Boolean)? = null,
     onSeeAll: ((railKey: String, title: String) -> Unit)? = null,
     heroOverlay: (@Composable () -> Unit)? = null,
     heroOverlayFocusRequester: FocusRequester? = null,
@@ -522,7 +525,7 @@ internal fun TvMediaRails(
                         ),
                     )
                 }
-                if (showSeeAllCards && onSeeAll != null && canShowSeeAllForRail(rail.key)) {
+                if (showSeeAllCards && rail.showSeeAllCard && onSeeAll != null && canShowSeeAllForRail(rail.key)) {
                     add(
                         TvFocusTargetId(
                             screenId = screenId,
@@ -1006,6 +1009,11 @@ internal fun TvMediaRails(
                                     }
                                 }
 
+                                val onItemClick: () -> Unit = {
+                                    val consumed = onRailMediaClick?.invoke(row.key, item) == true
+                                    if (!consumed) onMediaClick(item)
+                                }
+
                                 when (row.cardStyle) {
                                     TvCardStyle.SERVICE -> {
                                         Box(
@@ -1017,7 +1025,7 @@ internal fun TvMediaRails(
                                                 modifier = cardModifier
                                                     .width(256.dp)
                                                     .height(144.dp),
-                                                onClick = { onMediaClick(item) },
+                                                onClick = onItemClick,
                                                 onFocused = onItemFocused,
                                             )
                                         }
@@ -1032,7 +1040,7 @@ internal fun TvMediaRails(
                                                 item = item,
                                                 modifier = cardModifier,
                                                 width = backdropCardWidth,
-                                                onClick = { onMediaClick(item) },
+                                                onClick = onItemClick,
                                                 onFocused = onItemFocused,
                                                 progress = progress,
                                                 showTitles = forcePosterTitles || showTitlesOnCards,
@@ -1051,7 +1059,7 @@ internal fun TvMediaRails(
                                                 item = item,
                                                 modifier = cardModifier
                                                     .width(posterCardWidth),
-                                                onClick = { onMediaClick(item) },
+                                                onClick = onItemClick,
                                                 onFocused = onItemFocused,
                                                 progress = progress,
                                                 showTitles = forcePosterTitles || showTitlesOnCards,
@@ -1074,7 +1082,7 @@ internal fun TvMediaRails(
                                 }
                             }
 
-                            if (showSeeAllCards && onSeeAll != null && canShowSeeAllForRail(row.key)) {
+                            if (showSeeAllCards && row.showSeeAllCard && onSeeAll != null && canShowSeeAllForRail(row.key)) {
                                 item(key = "${row.key}_see_all") {
                                     val seeAllTarget = remember(row.key, rowIndex) {
                                         TvFocusTargetId(
