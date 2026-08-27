@@ -15,4 +15,6 @@ data class CatalogShelf(
     val title: String,
     val items: List<MediaItem>,
     val type: ShelfType = ShelfType.POSTER,
+    /** Optional context item that owns this collection but is not one of its results. */
+    val sourceItem: MediaItem? = null,
 )

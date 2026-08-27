@@ -29,6 +29,7 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.longOrNull
 import java.net.HttpURLConnection
+import java.io.IOException
 import java.net.URI
 import java.net.URL
 import java.util.concurrent.TimeUnit
@@ -38,6 +39,7 @@ internal data class AvailableAppUpdate(
     val downloadUrl: String,
     val sha256: String,
     val sizeBytes: Long,
+    val versionCode: Long = 0L,
 )
 
 internal fun usesVpsReleaseUpdates(flavor: String): Boolean =
@@ -56,7 +58,15 @@ internal fun isTrustedUpdateUrl(value: String): Boolean = runCatching {
             uri.host?.endsWith(".torve.app", ignoreCase = true) == true)
 }.getOrDefault(false)
 
-internal fun isNewerRelease(candidate: String, installed: String): Boolean {
+internal fun isNewerRelease(
+    candidate: String,
+    installed: String,
+    candidateVersionCode: Long = 0L,
+    installedVersionCode: Long = 0L,
+): Boolean {
+    if (candidateVersionCode > 0L && installedVersionCode > 0L) {
+        return candidateVersionCode > installedVersionCode
+    }
     fun numericParts(version: String): List<Int> = version
         .substringBefore('-')
         .split('.')
@@ -77,33 +87,48 @@ internal fun parseAvailableUpdate(
     manifest: String,
     platform: String,
     installedVersion: String,
+    installedVersionCode: Long = 0L,
 ): AvailableAppUpdate? = runCatching {
+    parseAvailableUpdateStrict(manifest, platform, installedVersion, installedVersionCode)
+}.getOrNull()
+
+internal fun parseAvailableUpdateStrict(
+    manifest: String,
+    platform: String,
+    installedVersion: String,
+    installedVersionCode: Long = 0L,
+): AvailableAppUpdate? {
     val root = Json.parseToJsonElement(manifest).jsonObject
     val entry = root["channels"]?.jsonObject
         ?.get("stable")?.jsonObject
         ?.get(platform)?.jsonObject
-        ?: return null
-    if (entry["status"]?.jsonPrimitive?.contentOrNull != "available") return null
+        ?: throw IllegalArgumentException("Release manifest is missing the $platform channel")
+    val status = entry["status"]?.jsonPrimitive?.contentOrNull
+        ?: throw IllegalArgumentException("Release channel is missing status")
+    if (status != "available") return null
 
     val version = entry["version"]?.jsonPrimitive?.contentOrNull?.trim().orEmpty()
+    val versionCode = entry["version_code"]?.jsonPrimitive?.longOrNull ?: 0L
+    if (version.isBlank()) throw IllegalArgumentException("Release channel is missing version")
+    if (!isNewerRelease(version, installedVersion, versionCode, installedVersionCode)) return null
+
     val downloadUrl = entry["url"]?.jsonPrimitive?.contentOrNull?.trim().orEmpty()
     val sha256 = entry["sha256"]?.jsonPrimitive?.contentOrNull?.trim()?.lowercase().orEmpty()
     val sizeBytes = entry["size_bytes"]?.jsonPrimitive?.longOrNull ?: 0L
     if (
         !isTrustedUpdateUrl(downloadUrl) ||
-        version.isBlank() ||
-        !isNewerRelease(version, installedVersion) ||
         !sha256.matches(Regex("^[0-9a-f]{64}$")) ||
         sizeBytes <= 0L
-    ) return null
+    ) throw IllegalArgumentException("Release channel has no valid downloadable APK asset")
 
-    AvailableAppUpdate(
+    return AvailableAppUpdate(
         version = version,
         downloadUrl = downloadUrl,
         sha256 = sha256,
         sizeBytes = sizeBytes,
+        versionCode = versionCode,
     )
-}.getOrNull()
+}
 
 internal object AppUpdateChecker {
     private const val RELEASE_MANIFEST_URL = "https://torve.app/downloads/releases.json"
@@ -121,12 +146,15 @@ internal object AppUpdateChecker {
             useCaches = false
         }
         try {
-            if (connection.responseCode !in 200..299) return@withContext null
+            if (connection.responseCode !in 200..299) {
+                throw IOException("Release manifest returned HTTP ${connection.responseCode}")
+            }
             val manifest = connection.inputStream.bufferedReader().use { it.readText() }
-            parseAvailableUpdate(
+            parseAvailableUpdateStrict(
                 manifest = manifest,
                 platform = releasePlatformForFlavor(BuildConfig.FLAVOR),
                 installedVersion = BuildConfig.VERSION_NAME,
+                installedVersionCode = BuildConfig.VERSION_CODE.toLong(),
             )
         } finally {
             connection.disconnect()

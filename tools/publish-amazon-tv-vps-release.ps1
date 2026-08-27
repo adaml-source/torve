@@ -23,8 +23,12 @@ if ($null -eq $artifactMetadata -or [string]::IsNullOrWhiteSpace([string]$artifa
 }
 
 $version = [string]$artifactMetadata.versionName
+$versionCode = [long]$artifactMetadata.versionCode
 if ($version.EndsWith("-debug", [StringComparison]::OrdinalIgnoreCase)) {
     throw "Refusing to publish a debug APK."
+}
+if ($versionCode -le 0) {
+    throw "Could not determine a positive signed APK versionCode from output-metadata.json."
 }
 
 function Compare-Version([string]$Candidate, [string]$Existing) {
@@ -46,11 +50,23 @@ if ($LASTEXITCODE -ne 0) {
 }
 $remoteManifest = ($remoteManifestJson -join [Environment]::NewLine) | ConvertFrom-Json
 $publishedVersion = [string]$remoteManifest.channels.stable.fire_tv.version
-if ((Compare-Version $version $publishedVersion) -le 0) {
-    throw "Refusing to replace published Fire TV $publishedVersion with non-newer version $version. Increment versionName first."
+$publishedVersionCode = if ($null -ne $remoteManifest.channels.stable.fire_tv.version_code) {
+    [long]$remoteManifest.channels.stable.fire_tv.version_code
+} else {
+    0L
+}
+$versionComparison = Compare-Version $version $publishedVersion
+if ($versionComparison -lt 0) {
+    throw "Refusing to replace published Fire TV $publishedVersion with older version $version."
+}
+if ($versionComparison -eq 0 -and $publishedVersionCode -gt 0L -and $versionCode -le $publishedVersionCode) {
+    throw "Refusing to replace published Fire TV $publishedVersion build $publishedVersionCode with non-newer build $versionCode."
+}
+if ($publishedVersionCode -gt 0L -and $versionCode -le $publishedVersionCode) {
+    throw "Refusing to publish Android versionCode $versionCode over installed channel versionCode $publishedVersionCode."
 }
 
-$publishedFile = "torve-android-tv-$version-$([DateTime]::UtcNow.ToString('yyyyMMdd')).apk"
+$publishedFile = "torve-android-tv-$version-$versionCode-$([DateTime]::UtcNow.ToString('yyyyMMdd')).apk"
 $publishedUrl = "https://torve.app/downloads/android/$publishedFile"
 $sha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $resolvedApk).Hash.ToLowerInvariant()
 $sizeBytes = (Get-Item -LiteralPath $resolvedApk).Length
@@ -73,6 +89,11 @@ try {
     foreach ($platform in @("android_tv", "fire_tv")) {
         $entry = $manifest.channels.stable.$platform
         $entry.version = $version
+        if ($entry.PSObject.Properties.Name -contains "version_code") {
+            $entry.version_code = $versionCode
+        } else {
+            $entry | Add-Member -NotePropertyName version_code -NotePropertyValue $versionCode
+        }
         $entry.file = $publishedFile
         $entry.url = $publishedUrl
         $entry.sha256 = $sha256
@@ -107,7 +128,7 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "Atomic VPS publish failed." }
 
     Copy-Item -LiteralPath $stagedManifest -Destination $resolvedManifest -Force
-    Write-Output "Published Fire TV/Android TV $version to $publishedUrl and updated releases.json atomically."
+    Write-Output "Published Fire TV/Android TV $version build $versionCode to $publishedUrl and updated releases.json atomically."
 }
 finally {
     if (Test-Path -LiteralPath $tempDirectory) {

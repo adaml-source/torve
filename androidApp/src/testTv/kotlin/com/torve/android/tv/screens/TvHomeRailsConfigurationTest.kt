@@ -112,15 +112,18 @@ class TvHomeRailsConfigurationTest {
     }
 
     @Test
-    fun becauseYouWatchedUsesWatchedTitlesAsRecommendationSeeds() {
+    fun becauseYouWatchedUsesExplicitSourceAsFirstPosterBeforeRecommendations() {
         val watchedMovie = media("watched-movie").copy(tmdbId = 101)
-        val watchedSeries = media("watched-series", MediaType.SERIES).copy(tmdbId = 202)
-        val oldSuggestion = media("old-suggestion").copy(tmdbId = 303)
+        val suggestion = media("suggestion").copy(tmdbId = 303)
         val rails = buildTvHomeRails(
             state = HomeUiState(
-                recentlyWatched = listOf(watchedMovie, watchedSeries),
                 becauseYouWatched = listOf(
-                    CatalogShelf("because_101", "Old suggestions", listOf(oldSuggestion)),
+                    CatalogShelf(
+                        id = "because_movie_101",
+                        title = "Because You Watched",
+                        items = listOf(watchedMovie, suggestion),
+                        sourceItem = watchedMovie,
+                    ),
                 ),
             ),
             sectionConfigs = listOf(
@@ -131,20 +134,38 @@ class TvHomeRailsConfigurationTest {
         )
 
         val rail = rails.single()
-        assertEquals(TV_HOME_BECAUSE_YOU_WATCHED_SEEDS_KEY, rail.key)
-        assertEquals(listOf(watchedMovie, watchedSeries), rail.items)
+        assertEquals("because_movie_101", rail.key)
+        assertEquals(TV_HOME_BECAUSE_YOU_WATCHED_TITLE, rail.title)
+        assertEquals(listOf(watchedMovie, suggestion), rail.items)
         assertFalse(rail.showSeeAllCard)
         assertTrue(rail.allowCrossRailDuplicates)
-        assertFalse(rail.items.contains(oldSuggestion))
         assertEquals("more_like_movie_101", watchedMovie.tvMoreLikeRailKey())
-        assertEquals("more_like_tv_202", watchedSeries.tvMoreLikeRailKey())
     }
 
     @Test
-    fun becauseYouWatchedSeedsRemainVisibleBesideRecentlyWatched() {
-        val watched = media("watched").copy(tmdbId = 101)
+    fun multipleBecauseYouWatchedSetsRemainIndependentBesideRecentlyWatched() {
+        val watchedMovie = media("watched-movie").copy(tmdbId = 101)
+        val watchedSeries = media("watched-series", MediaType.SERIES).copy(tmdbId = 202)
+        val movieSuggestion = media("movie-suggestion").copy(tmdbId = 301)
+        val seriesSuggestion = media("series-suggestion", MediaType.SERIES).copy(tmdbId = 302)
         val rails = buildTvHomeRails(
-            state = HomeUiState(recentlyWatched = listOf(watched)),
+            state = HomeUiState(
+                recentlyWatched = listOf(watchedMovie),
+                becauseYouWatched = listOf(
+                    CatalogShelf(
+                        "because_movie_101",
+                        "Wrong dynamic heading",
+                        listOf(movieSuggestion),
+                        sourceItem = watchedMovie,
+                    ),
+                    CatalogShelf(
+                        "because_tv_202",
+                        "Another dynamic heading",
+                        listOf(seriesSuggestion),
+                        sourceItem = watchedSeries,
+                    ),
+                ),
+            ),
             sectionConfigs = listOf(
                 HomeSectionConfig(HomeSection.RECENTLY_WATCHED, enabled = true, order = 0),
                 HomeSectionConfig(HomeSection.BECAUSE_YOU_WATCHED, enabled = true, order = 1),
@@ -153,8 +174,16 @@ class TvHomeRailsConfigurationTest {
             homeLayoutOrder = listOf("section:RECENTLY_WATCHED", "section:BECAUSE_YOU_WATCHED"),
         )
 
-        assertEquals(listOf("recently_watched", TV_HOME_BECAUSE_YOU_WATCHED_SEEDS_KEY), rails.map { it.key })
-        assertEquals(watched, rails.last().items.single())
+        assertEquals(
+            listOf("recently_watched", "because_movie_101", "because_tv_202"),
+            rails.map { it.key },
+        )
+        assertEquals(
+            listOf(TV_HOME_BECAUSE_YOU_WATCHED_TITLE, TV_HOME_BECAUSE_YOU_WATCHED_TITLE),
+            rails.drop(1).map { it.title },
+        )
+        assertEquals(watchedMovie, rails[1].items.first())
+        assertEquals(watchedSeries, rails[2].items.first())
     }
 
     private fun media(id: String, type: MediaType = MediaType.MOVIE) = MediaItem(

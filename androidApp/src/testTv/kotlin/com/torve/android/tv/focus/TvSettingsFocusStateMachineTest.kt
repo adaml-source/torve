@@ -9,6 +9,49 @@ import org.junit.Test
 
 class TvSettingsFocusStateMachineTest {
     @Test
+    fun leftAndRightSwitchAdjacentCategoriesFromOrdinaryContent() {
+        val order = listOf(
+            TvSettingsCategory.ACCOUNT,
+            TvSettingsCategory.PLAYBACK,
+            TvSettingsCategory.APPEARANCE,
+            TvSettingsCategory.ABOUT,
+        )
+
+        assertEquals(
+            TvSettingsCategory.APPEARANCE,
+            adjacentTvSettingsCategory(order, TvSettingsCategory.PLAYBACK, 1, "action"),
+        )
+        assertEquals(
+            TvSettingsCategory.ACCOUNT,
+            adjacentTvSettingsCategory(order, TvSettingsCategory.PLAYBACK, -1, "toggle"),
+        )
+        assertNull(adjacentTvSettingsCategory(order, TvSettingsCategory.ACCOUNT, -1, "action"))
+        assertNull(adjacentTvSettingsCategory(order, TvSettingsCategory.ABOUT, 1, "action"))
+    }
+
+    @Test
+    fun horizontalInputsKeepTheirOwnLeftAndRightBehavior() {
+        val order = listOf(TvSettingsCategory.PLAYBACK, TvSettingsCategory.APPEARANCE)
+
+        assertNull(adjacentTvSettingsCategory(order, TvSettingsCategory.PLAYBACK, 1, "selector"))
+        assertNull(adjacentTvSettingsCategory(order, TvSettingsCategory.PLAYBACK, 1, "input"))
+    }
+
+    @Test
+    fun categorySwitchClearsStaleFocusBeforeNewDefaultIsRequested() {
+        val controller = TvSettingsFocusStateMachine(TvSettingsCategory.ABOUT)
+        register(controller, "about-check", TvSettingsCategory.ABOUT, 3)
+        controller.markFocused("about-check")
+
+        controller.beginCategorySwitch(TvSettingsCategory.ACCOUNT)
+
+        assertEquals(TvSettingsCategory.ACCOUNT, controller.selectedCategory)
+        assertNull(controller.focusedItemId)
+        assertNull(controller.pendingFocusRepair)
+        assertNull(controller.pendingRestore)
+    }
+
+    @Test
     fun removingFocusedRowRepairsToNextThenPreviousVisibleRowInSameCategory() {
         val controller = TvSettingsFocusStateMachine(TvSettingsCategory.CONNECTIONS)
         register(controller, "connection-1", TvSettingsCategory.CONNECTIONS, 1)

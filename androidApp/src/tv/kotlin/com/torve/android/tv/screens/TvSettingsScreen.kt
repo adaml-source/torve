@@ -101,6 +101,7 @@ import com.torve.android.tv.components.rememberTvDocumentContentState
 import com.torve.android.tv.focus.TvSettingsFocusStateMachine
 import com.torve.android.tv.focus.TvSettingsFocusTarget
 import com.torve.android.tv.focus.TvSettingsItemIds
+import com.torve.android.tv.focus.adjacentTvSettingsCategory
 import com.torve.android.tv.focus.rememberRegisteredTvSettingsFocusRequester
 import com.torve.android.tv.premium.TvEntitledFeature
 import com.torve.android.tv.premium.TvPremiumAccess
@@ -139,6 +140,7 @@ import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.CancellationException
 import com.torve.android.premium.rememberEffectivePremiumAccessTier
 import com.torve.android.util.findActivity
 import org.koin.compose.koinInject
@@ -200,6 +202,7 @@ private sealed interface UpdateCheckState {
     data object Checking : UpdateCheckState
     data object UpToDate : UpdateCheckState
     data class UpdateAvailable(val update: AvailableAppUpdate) : UpdateCheckState
+    data object Error : UpdateCheckState
 }
 
 private sealed interface TvAboutOverlayState {
@@ -2249,6 +2252,27 @@ internal fun TvSettingsScreen(
                 if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
                 val totalItems = settingsListState.layoutInfo.totalItemsCount
                 if (totalItems == 0) return@onPreviewKeyEvent false
+                if (
+                    !categoryPaneHasFocus &&
+                    (event.key == Key.DirectionLeft || event.key == Key.DirectionRight)
+                ) {
+                    val targetCategory = adjacentTvSettingsCategory(
+                        categoryOrder = categoryOrder,
+                        currentCategory = selectedCategory,
+                        direction = if (event.key == Key.DirectionLeft) -1 else 1,
+                        focusedTargetType = settingsFocusController.focusedTarget()?.focusTargetType,
+                    )
+                    if (targetCategory != null) {
+                        settingsFocusController.beginCategorySwitch(targetCategory)
+                        focusMoveNonce += 1
+                        pendingFocusMove = TvSettingsFocusMoveRequest(
+                            nonce = focusMoveNonce,
+                            target = TvSettingsFocusMoveTarget.CATEGORY_DETAIL,
+                            category = targetCategory,
+                        )
+                        return@onPreviewKeyEvent true
+                    }
+                }
                 when (event.key) {
                     Key.DirectionUp -> {
                         // Registered focus targets only cover currently composed LazyColumn
@@ -6629,6 +6653,7 @@ internal fun TvSettingsScreen(
                         UpdateCheckState.Idle -> stringResource(R.string.tv_settings_check_for_updates_desc)
                         UpdateCheckState.Checking -> stringResource(R.string.tv_settings_check_for_updates_checking)
                         UpdateCheckState.UpToDate -> stringResource(R.string.tv_settings_check_for_updates_up_to_date)
+                        UpdateCheckState.Error -> stringResource(R.string.tv_settings_check_for_updates_failed)
                         is UpdateCheckState.UpdateAvailable ->
                             stringResource(R.string.tv_settings_check_for_updates_available, s.update.version)
                     },
@@ -6644,11 +6669,18 @@ internal fun TvSettingsScreen(
                             else -> {
                                 checkState = UpdateCheckState.Checking
                                 checkScope.launch {
-                                    val update = AppUpdateChecker.checkForUpdate()
-                                    checkState = if (update != null) {
-                                        UpdateCheckState.UpdateAvailable(update)
-                                    } else {
-                                        UpdateCheckState.UpToDate
+                                    checkState = try {
+                                        val update = AppUpdateChecker.checkForUpdate()
+                                        if (update != null) {
+                                            UpdateCheckState.UpdateAvailable(update)
+                                        } else {
+                                            UpdateCheckState.UpToDate
+                                        }
+                                    } catch (error: CancellationException) {
+                                        throw error
+                                    } catch (error: Exception) {
+                                        Log.w("TorveUpdate", "Manual update check failed", error)
+                                        UpdateCheckState.Error
                                     }
                                 }
                             }

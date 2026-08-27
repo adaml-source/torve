@@ -73,7 +73,7 @@ android {
         }
     }
 
-    val baseVersionCode = 117
+    val baseVersionCode = 118
 
     defaultConfig {
         applicationId = "com.torve.app"

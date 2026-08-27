@@ -30,8 +30,13 @@ $sourceCommit = ([string]$provenance.source.commit).ToLowerInvariant()
 if ($sourceCommit -notmatch '^[0-9a-f]{40}$') {
     throw "Release provenance source commit must be a full 40-character SHA."
 }
-if ([string]$provenance.source.tag -ne "v$version") {
-    throw "Release provenance tag must be v$version."
+$buildNumber = if ($null -ne $provenance.build_number) { [long]$provenance.build_number } else { 0L }
+if ($buildNumber -lt 0L) {
+    throw "Release provenance build_number cannot be negative."
+}
+$expectedTag = if ($buildNumber -gt 0L) { "v$version-build.$buildNumber" } else { "v$version" }
+if ([string]$provenance.source.tag -ne $expectedTag) {
+    throw "Release provenance tag must be $expectedTag."
 }
 
 foreach ($url in @([string]$provenance.source.repository, [string]$provenance.source.tag_url)) {

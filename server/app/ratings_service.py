@@ -9,6 +9,8 @@ from typing import Any
 
 import httpx
 from sqlalchemy import or_, select
+from sqlalchemy.dialects.postgresql import insert as postgresql_insert
+from sqlalchemy.sql.dml import Insert
 from sqlalchemy.orm import Session
 
 from app.config import settings
@@ -145,37 +147,58 @@ async def _fetch_one(
     return None
 
 
-def _upsert_rating(db: Session, data: dict[str, Any], now: datetime) -> GlobalMediaRating:
-    row = db.scalar(
-        select(GlobalMediaRating).where(
-            GlobalMediaRating.media_type == data["media_type"],
-            GlobalMediaRating.tmdb_id == data["tmdb_id"],
-        )
-    )
-    if row is None:
-        row = GlobalMediaRating(
-            media_type=data["media_type"],
-            tmdb_id=data["tmdb_id"],
-        )
-        db.add(row)
-    for field in (
-        "imdb_id",
-        "imdb_score",
-        "imdb_votes",
-        "tmdb_score",
-        "rotten_tomatoes_score",
-        "rt_audience_score",
-        "metacritic_score",
-        "letterboxd_score",
-        "trakt_score",
-        "mdblist_score",
-        "mal_score",
-    ):
+RATING_VALUE_FIELDS = (
+    "imdb_id",
+    "imdb_score",
+    "imdb_votes",
+    "tmdb_score",
+    "rotten_tomatoes_score",
+    "rt_audience_score",
+    "metacritic_score",
+    "letterboxd_score",
+    "trakt_score",
+    "mdblist_score",
+    "mal_score",
+)
+
+
+def _rating_upsert_statement(data: dict[str, Any], now: datetime) -> Insert:
+    """Build one atomic PostgreSQL upsert for the canonical rating identity.
+
+    The previous select-then-add flow allowed concurrent batch requests to both
+    observe a missing row and race on the unique (media_type, tmdb_id) index.
+    Keeping the conflict decision in PostgreSQL makes that path deterministic
+    without discarding non-null scores already cached by another request.
+    """
+    values: dict[str, Any] = {
+        "media_type": data["media_type"],
+        "tmdb_id": data["tmdb_id"],
+        "fetched_at": now,
+        "updated_at": now,
+    }
+    for field in RATING_VALUE_FIELDS:
         value = data.get(field)
         if value is not None:
-            setattr(row, field, value)
-    row.fetched_at = now
-    row.updated_at = now
+            values[field] = value
+
+    insert = postgresql_insert(GlobalMediaRating).values(**values)
+    updates = {
+        field: getattr(insert.excluded, field)
+        for field in RATING_VALUE_FIELDS
+        if field in values
+    }
+    updates["fetched_at"] = insert.excluded.fetched_at
+    updates["updated_at"] = insert.excluded.updated_at
+    return insert.on_conflict_do_update(
+        index_elements=[GlobalMediaRating.media_type, GlobalMediaRating.tmdb_id],
+        set_=updates,
+    ).returning(GlobalMediaRating)
+
+
+def _upsert_rating(db: Session, data: dict[str, Any], now: datetime) -> GlobalMediaRating:
+    row = db.scalar(_rating_upsert_statement(data, now))
+    if row is None:
+        raise RuntimeError("Rating upsert did not return the persisted row")
     return row
 
 

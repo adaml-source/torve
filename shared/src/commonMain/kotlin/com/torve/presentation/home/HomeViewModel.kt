@@ -1047,44 +1047,45 @@ class HomeViewModel(
                     )
                 } else null
 
-                // Build a single "Because You Watched" shelf from the most
-                // recently watched show/movie. Deduping by show means binging
-                // three episodes of one series no longer stacks three near-
-                // identical rails — we pick the first distinct title and stop.
-                // For series, the display name and TMDB lookup both target the
-                // show (not the individual episode), matching the recently-
-                // watched card policy a few blocks above.
-                val becauseYouWatched = run {
-                    val seenShowKeys = mutableSetOf<String>()
-                    for (entry in recentHistory) {
-                        val mt = entry.mediaType.lowercase()
-                        val isSeries = mt == "series" || mt == "tv" ||
-                            entry.seasonNumber != null || entry.episodeNumber != null
-                        val tmdbId = entry.mediaId.extractTmdbIdOrNull() ?: continue
-                        val showKey = tmdbId.toString()
-                        if (!seenShowKeys.add(showKey)) continue
-                        val displayTitle = if (isSeries) {
-                            entry.showTitle?.takeIf { it.isNotBlank() } ?: entry.title
-                        } else {
-                            entry.title
+                // Build independent recommendation sets for the most recent
+                // distinct watched titles. Each source remains explicit so the
+                // UI can give its poster a See-All action without treating it
+                // as one of its own recommendation results.
+                val becauseYouWatched = recentlyWatched
+                    .asSequence()
+                    .filter { it.tmdbId?.let { id -> id > 0 } == true }
+                    .distinctBy { "${it.type}:${it.tmdbId}" }
+                    .take(MAX_BECAUSE_YOU_WATCHED_RAILS)
+                    .map { source ->
+                        async {
+                            val tmdbId = requireNotNull(source.tmdbId)
+                            val type = if (source.type == MediaType.SERIES) "tv" else "movie"
+                            val similar = try {
+                                metadataRepo.getSimilar(type, tmdbId)
+                            } catch (_: Exception) {
+                                emptyList()
+                            }
+                                .asSequence()
+                                .filterNot { candidate ->
+                                    candidate.tmdbId == tmdbId && candidate.type == source.type
+                                }
+                                .distinctBy { it.stableKey() }
+                                .take(20)
+                                .toList()
+                            if (similar.isEmpty()) {
+                                null
+                            } else {
+                                CatalogShelf(
+                                    id = "because_${type}_$tmdbId",
+                                    title = "Because You Watched",
+                                    items = similar,
+                                    sourceItem = source,
+                                )
+                            }
                         }
-                        val type = if (isSeries) "tv" else "movie"
-                        val similar = try {
-                            metadataRepo.getSimilar(type, tmdbId).take(20)
-                        } catch (_: Exception) {
-                            continue
-                        }
-                        if (similar.isEmpty()) continue
-                        return@run listOf(
-                            CatalogShelf(
-                                id = "because_$showKey",
-                                title = "Because You Watched $displayTitle",
-                                items = similar,
-                            ),
-                        )
                     }
-                    emptyList<CatalogShelf>()
-                }
+                    .toList()
+                    .mapNotNull { it.await() }
 
                 // Build hidden gems shelf
                 val hiddenGemsShelf = if (hiddenGems.isNotEmpty()) {
@@ -1150,9 +1151,33 @@ class HomeViewModel(
                 val policyFilteredByw = filterShelves(
                     policy = policy,
                     context = ContentAccessContext.HISTORY_DERIVED,
-                    shelves = becauseYouWatched,
+                    shelves = becauseYouWatched.mapNotNull { shelf ->
+                        val source = shelf.sourceItem
+                        val visibleSource = source?.let {
+                            ParentalFilter.filter(listOf(it), maxRating).firstOrNull()
+                        }
+                        if (source != null && visibleSource == null) {
+                            null
+                        } else {
+                            shelf.copy(
+                                sourceItem = visibleSource,
+                                items = ParentalFilter.filter(shelf.items, maxRating),
+                            )
+                        }
+                    },
                     sourceType = ContentSourceType.TMDB,
-                )
+                ).mapNotNull { shelf ->
+                    val source = shelf.sourceItem
+                    val visibleSource = source?.let {
+                        contentPolicyFilter.filterItems(
+                            policy = policy,
+                            context = ContentAccessContext.HISTORY_DERIVED,
+                            items = listOf(it),
+                            sourceType = ContentSourceType.LOCAL_LIBRARY,
+                        ).items.firstOrNull()
+                    }
+                    if (source != null && visibleSource == null) null else shelf.copy(sourceItem = visibleSource)
+                }
                 val policyFilteredHiddenGems = hiddenGemsShelf?.copy(
                     items = contentPolicyFilter.filterItems(
                         policy = policy,
@@ -1947,7 +1972,11 @@ class HomeViewModel(
             addAll(state.shelves.flatMap { it.items })
             addAll(state.watchlistItems)
             addAll(state.upcomingSchedule.take(24))
-            addAll(state.becauseYouWatched.flatMap { it.items })
+            addAll(
+                state.becauseYouWatched.flatMap { shelf ->
+                    listOfNotNull(shelf.sourceItem) + shelf.items
+                },
+            )
             state.hiddenGemsShelf?.let { addAll(it.items) }
             addAll(state.recentlyWatched)
             addAll(state.customShelves.values.flatten())
@@ -1984,7 +2013,10 @@ class HomeViewModel(
             upcomingSchedule = updatedUpcomingSchedule,
             watchlistShelf = watchlistShelf?.copy(items = updatedWatchlistItems),
             becauseYouWatched = becauseYouWatched.map { shelf ->
-                shelf.copy(items = shelf.items.map { it.applyArtworkBackfill(backfilledArtwork) })
+                shelf.copy(
+                    items = shelf.items.map { it.applyArtworkBackfill(backfilledArtwork) },
+                    sourceItem = shelf.sourceItem?.applyArtworkBackfill(backfilledArtwork),
+                )
             },
             hiddenGemsShelf = hiddenGemsShelf?.copy(
                 items = hiddenGemsShelf.items.map { it.applyArtworkBackfill(backfilledArtwork) }
@@ -2056,7 +2088,10 @@ class HomeViewModel(
 
     private fun hydrateShelvesFromCache(shelves: List<CatalogShelf>): List<CatalogShelf> {
         return shelves.map { shelf ->
-            shelf.copy(items = hydrateItemsFromCache(shelf.items))
+            shelf.copy(
+                items = hydrateItemsFromCache(shelf.items),
+                sourceItem = shelf.sourceItem?.let { hydrateItemsFromCache(listOf(it)).firstOrNull() },
+            )
                 .sortTopRatedShelfByExternalRatings()
         }
     }
@@ -2320,6 +2355,7 @@ class HomeViewModel(
     }
 
     companion object {
+        private const val MAX_BECAUSE_YOU_WATCHED_RAILS = 3
         private const val HOME_SNAPSHOT_KEY = "home_snapshot_v2"
         private const val HOME_SNAPSHOT_MAX_STALE_AGE_MS = 30L * 24L * 60L * 60L * 1000L
         private val HOME_LOAD_AUTO_RETRY_DELAYS_MS = longArrayOf(5_000L, 15_000L, 30_000L)

@@ -769,14 +769,28 @@ fun HomeScreen(
                                             Spacer(Modifier.height(8.dp))
                                             Column {
                                                 state.becauseYouWatched.forEach { shelf ->
+                                                    val source = shelf.sourceItem ?: return@forEach
+                                                    val previewItems = listOf(source) + shelf.items
+                                                        .filterNot { candidate ->
+                                                            candidate.tmdbId == source.tmdbId &&
+                                                                candidate.type == source.type
+                                                        }
+                                                        .take(10)
                                                     CatalogShelf(
-                                                        title = shelf.title,
-                                                        items = shelf.items,
+                                                        title = "Because You Watched",
+                                                        items = previewItems,
                                                         shelfType = shelf.type,
-                                                        onItemClick = onMediaClick,
-                                                        onSeeAll = {
-                                                            SeeAllViewModel.pendingItems[shelf.id] = shelf.title to shelf.items
-                                                            onSeeAllClick("shelf:${shelf.id}")
+                                                        onItemClick = { item ->
+                                                            if (
+                                                                item.tmdbId == source.tmdbId &&
+                                                                item.type == source.type
+                                                            ) {
+                                                                SeeAllViewModel.pendingItems[shelf.id] =
+                                                                    "Because You Watched ${source.title}" to shelf.items
+                                                                onSeeAllClick("shelf:${shelf.id}")
+                                                            } else {
+                                                                onMediaClick(item)
+                                                            }
                                                         },
                                                     )
                                                     Spacer(Modifier.height(8.dp))

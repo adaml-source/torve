@@ -1795,12 +1795,19 @@
     <string name="app_update_notification_body">A new update is ready. Select Download &amp; install to update Torve.</string>
     <string name="app_update_download_install">Download &amp; install</string>
     <string name="app_update_later">Later</string>
+    <string name="app_update_resolving">Resolving the signed Torve %1$s update…</string>
     <string name="app_update_downloading">Downloading the signed Torve %1$s update…</string>
     <string name="app_update_verifying">Verifying the downloaded update…</string>
     <string name="app_update_permission_required">Allow Torve to install this signed update, then return to continue.</string>
     <string name="app_update_allow_installation">Allow installation</string>
     <string name="app_update_opening_installer">Opening the system installer…</string>
     <string name="app_update_download_failed">The update could not be downloaded or verified. Please try again.</string>
+    <string name="app_update_network_failed">The update download was interrupted by a network error. Check the connection and try again.</string>
+    <string name="app_update_http_failed">The update server did not return the APK. Please try again shortly.</string>
+    <string name="app_update_invalid_asset">The release server returned an invalid update asset. Torve did not install it.</string>
+    <string name="app_update_verification_failed">The downloaded update failed Torve’s signature or integrity check and was not installed.</string>
+    <string name="app_update_permission_failed">Torve could not open the installation permission. Enable “Install unknown apps” for Torve in Fire TV settings, then retry.</string>
+    <string name="app_update_installer_failed">Torve downloaded and verified the update, but could not open the Fire TV installer. Please retry.</string>
     <string name="app_update_retry">Retry</string>
     <string name="app_update_open_downloader">Opening Downloader…</string>
     <string name="app_update_downloader_not_found">The Downloader app is required to install updates. Please install Downloader from the Amazon Appstore.</string>
@@ -1808,6 +1815,7 @@
     <string name="tv_settings_check_for_updates_desc">Check if a new version of Torve is available</string>
     <string name="tv_settings_check_for_updates_checking">Checking for updates…</string>
     <string name="tv_settings_check_for_updates_up_to_date">Torve is up to date</string>
+    <string name="tv_settings_check_for_updates_failed">Could not check the release server. Check the network and try again.</string>
     <string name="tv_settings_check_for_updates_available">Torve %1$s is available — select to open Downloader</string>
     <string name="notif_new_episodes">New Episodes Available</string>
     <string name="notif_episodes_and_more">%1$s and %2$d more</string>

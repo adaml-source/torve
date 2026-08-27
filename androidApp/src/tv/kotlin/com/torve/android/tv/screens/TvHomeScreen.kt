@@ -130,7 +130,6 @@ internal fun TvHomeScreen(
     val availableNowTitle = stringResource(R.string.tv_home_available_now)
     val downloadsOnDesktopTitle = stringResource(R.string.tv_home_downloads_on_desktop)
     val recentlyAddedTitle = stringResource(R.string.tv_home_recently_added_sources)
-    val moreLikeThisTitle = stringResource(R.string.tv_detail_more_like_this)
 
     val rails = remember(
         state,
@@ -284,12 +283,14 @@ internal fun TvHomeScreen(
             }
         },
         onRailMediaClick = { railKey, item ->
-            if (railKey != TV_HOME_BECAUSE_YOU_WATCHED_SEEDS_KEY) {
+            val recommendationSet = state.becauseYouWatched.firstOrNull { it.id == railKey }
+            val source = recommendationSet?.sourceItem
+            if (source == null || !source.hasSameTvRecommendationIdentity(item)) {
                 false
             } else {
-                val destination = item.tvMoreLikeRailKey()
+                val destination = source.tvMoreLikeRailKey()
                 if (destination != null && onSeeAll != null) {
-                    onSeeAll(destination, "$moreLikeThisTitle: ${item.title}")
+                    onSeeAll(destination, "$TV_HOME_BECAUSE_YOU_WATCHED_TITLE ${source.title}")
                     true
                 } else {
                     false
@@ -588,29 +589,20 @@ private fun buildBuiltInRails(
         }
 
         HomeSection.BECAUSE_YOU_WATCHED -> {
-            val watchedSeeds = state.recentlyWatched
-                .asSequence()
-                .filter { item -> item.tmdbId?.let { it > 0 } == true }
-                .distinctBy { "${it.type}:${it.tmdbId}" }
-                .toList()
-                .tvHomeCardItems()
-            if (watchedSeeds.isEmpty()) {
-                emptyList()
-            } else {
-                listOf(
-                    TvContentRail(
-                        key = TV_HOME_BECAUSE_YOU_WATCHED_SEEDS_KEY,
-                        title = title,
-                        items = watchedSeeds,
-                        // Each watched poster is the entry point to its own
-                        // recommendations page; a rail-level See All would
-                        // incorrectly show the watch-history seeds themselves.
-                        showSeeAllCard = false,
-                        // Recently Watched is a separate, detail-oriented rail.
-                        // Preserve these intentional duplicates because this rail
-                        // has a different action and destination.
-                        allowCrossRailDuplicates = true,
-                    ),
+            state.becauseYouWatched.mapNotNull { shelf ->
+                val source = shelf.sourceItem ?: return@mapNotNull null
+                val recommendations = shelf.items
+                    .filterNot(source::hasSameTvRecommendationIdentity)
+                    .tvHomeCardItems(limit = TV_HOME_BECAUSE_YOU_WATCHED_PREVIEW_LIMIT)
+                if (recommendations.isEmpty()) return@mapNotNull null
+                TvContentRail(
+                    key = shelf.id,
+                    title = TV_HOME_BECAUSE_YOU_WATCHED_TITLE,
+                    items = listOf(source) + recommendations,
+                    showSeeAllCard = false,
+                    // The source poster intentionally also appears in Recently
+                    // Watched, but has a different action in this rail.
+                    allowCrossRailDuplicates = true,
                 )
             }
         }
@@ -644,12 +636,22 @@ private fun MediaItem.isTvHomeDisplayable(): Boolean =
 
 private const val TV_HOME_PERSON_ID_PREFIX = "person:"
 private const val TV_HOME_PROVIDER_ID_PREFIX = "provider:"
-internal const val TV_HOME_BECAUSE_YOU_WATCHED_SEEDS_KEY = "because_you_watched_seeds"
+internal const val TV_HOME_BECAUSE_YOU_WATCHED_TITLE = "Because You Watched"
+private const val TV_HOME_BECAUSE_YOU_WATCHED_PREVIEW_LIMIT = 10
 
 internal fun MediaItem.tvMoreLikeRailKey(): String? {
     val id = tmdbId?.takeIf { it > 0 } ?: return null
     val mediaType = if (type == MediaType.SERIES) "tv" else "movie"
     return "more_like_${mediaType}_$id"
+}
+
+private fun MediaItem.hasSameTvRecommendationIdentity(other: MediaItem): Boolean {
+    val canonicalTmdbId = tmdbId?.takeIf { it > 0 }
+    return if (canonicalTmdbId != null && other.tmdbId != null) {
+        canonicalTmdbId == other.tmdbId && type == other.type
+    } else {
+        id == other.id && type == other.type
+    }
 }
 
 private fun PersonSummary.toTvHomePersonItem(): MediaItem = MediaItem(
