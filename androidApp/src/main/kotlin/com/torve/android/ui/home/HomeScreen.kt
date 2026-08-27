@@ -768,28 +768,25 @@ fun HomeScreen(
                                         ) {
                                             Spacer(Modifier.height(8.dp))
                                             Column {
-                                                state.becauseYouWatched.forEach { shelf ->
-                                                    val source = shelf.sourceItem ?: return@forEach
-                                                    val previewItems = listOf(source) + shelf.items
-                                                        .filterNot { candidate ->
-                                                            candidate.tmdbId == source.tmdbId &&
-                                                                candidate.type == source.type
+                                                state.becauseYouWatched
+                                                    .filter { shelf ->
+                                                        mediaType == "all" || shelf.items.any { item ->
+                                                            (mediaType == "movie" && item.type == MediaType.MOVIE) ||
+                                                                (mediaType == "tv" && item.type == MediaType.SERIES)
                                                         }
-                                                        .take(10)
+                                                    }
+                                                    .forEach { shelf ->
                                                     CatalogShelf(
-                                                        title = "Because You Watched",
-                                                        items = previewItems,
+                                                        title = shelf.title,
+                                                        items = shelf.items,
                                                         shelfType = shelf.type,
                                                         onItemClick = { item ->
-                                                            if (
-                                                                item.tmdbId == source.tmdbId &&
-                                                                item.type == source.type
-                                                            ) {
-                                                                SeeAllViewModel.pendingItems[shelf.id] =
-                                                                    "Because You Watched ${source.title}" to shelf.items
-                                                                onSeeAllClick("shelf:${shelf.id}")
-                                                            } else {
-                                                                onMediaClick(item)
+                                                            item.tmdbId?.let { tmdbId ->
+                                                                val type = if (item.type == MediaType.SERIES) "tv" else "movie"
+                                                                val destination = "more_like_${type}_$tmdbId"
+                                                                SeeAllViewModel.pendingItems[destination] =
+                                                                    "Because You Watched ${item.title}" to emptyList()
+                                                                onSeeAllClick(destination)
                                                             }
                                                         },
                                                     )

@@ -8,6 +8,10 @@ import com.torve.domain.model.HomeSectionConfig
 import com.torve.domain.model.MediaItem
 import com.torve.domain.model.MediaType
 import com.torve.domain.model.PersonSummary
+import com.torve.presentation.home.BECAUSE_YOU_WATCHED_MOVIES_ID
+import com.torve.presentation.home.BECAUSE_YOU_WATCHED_MOVIES_TITLE
+import com.torve.presentation.home.BECAUSE_YOU_WATCHED_TV_ID
+import com.torve.presentation.home.BECAUSE_YOU_WATCHED_TV_TITLE
 import com.torve.presentation.home.HomeUiState
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -112,17 +116,16 @@ class TvHomeRailsConfigurationTest {
     }
 
     @Test
-    fun becauseYouWatchedUsesExplicitSourceAsFirstPosterBeforeRecommendations() {
-        val watchedMovie = media("watched-movie").copy(tmdbId = 101)
-        val suggestion = media("suggestion").copy(tmdbId = 303)
+    fun becauseYouWatchedMovieRailContainsOnlyWatchedSourcePosters() {
+        val watchedMovieA = media("watched-movie-a").copy(tmdbId = 101)
+        val watchedMovieB = media("watched-movie-b").copy(tmdbId = 102)
         val rails = buildTvHomeRails(
             state = HomeUiState(
                 becauseYouWatched = listOf(
                     CatalogShelf(
-                        id = "because_movie_101",
-                        title = "Because You Watched",
-                        items = listOf(watchedMovie, suggestion),
-                        sourceItem = watchedMovie,
+                        id = BECAUSE_YOU_WATCHED_MOVIES_ID,
+                        title = BECAUSE_YOU_WATCHED_MOVIES_TITLE,
+                        items = listOf(watchedMovieA, watchedMovieB),
                     ),
                 ),
             ),
@@ -134,35 +137,31 @@ class TvHomeRailsConfigurationTest {
         )
 
         val rail = rails.single()
-        assertEquals("because_movie_101", rail.key)
-        assertEquals(TV_HOME_BECAUSE_YOU_WATCHED_TITLE, rail.title)
-        assertEquals(listOf(watchedMovie, suggestion), rail.items)
+        assertEquals(BECAUSE_YOU_WATCHED_MOVIES_ID, rail.key)
+        assertEquals(BECAUSE_YOU_WATCHED_MOVIES_TITLE, rail.title)
+        assertEquals(listOf(watchedMovieA, watchedMovieB), rail.items)
         assertFalse(rail.showSeeAllCard)
         assertTrue(rail.allowCrossRailDuplicates)
-        assertEquals("more_like_movie_101", watchedMovie.tvMoreLikeRailKey())
+        assertEquals("more_like_movie_101", watchedMovieA.tvMoreLikeRailKey())
     }
 
     @Test
-    fun multipleBecauseYouWatchedSetsRemainIndependentBesideRecentlyWatched() {
+    fun becauseYouWatchedIsExactlyOneMoviesAndOneTvShowsRail() {
         val watchedMovie = media("watched-movie").copy(tmdbId = 101)
         val watchedSeries = media("watched-series", MediaType.SERIES).copy(tmdbId = 202)
-        val movieSuggestion = media("movie-suggestion").copy(tmdbId = 301)
-        val seriesSuggestion = media("series-suggestion", MediaType.SERIES).copy(tmdbId = 302)
         val rails = buildTvHomeRails(
             state = HomeUiState(
                 recentlyWatched = listOf(watchedMovie),
                 becauseYouWatched = listOf(
                     CatalogShelf(
-                        "because_movie_101",
-                        "Wrong dynamic heading",
-                        listOf(movieSuggestion),
-                        sourceItem = watchedMovie,
+                        BECAUSE_YOU_WATCHED_MOVIES_ID,
+                        BECAUSE_YOU_WATCHED_MOVIES_TITLE,
+                        listOf(watchedMovie),
                     ),
                     CatalogShelf(
-                        "because_tv_202",
-                        "Another dynamic heading",
-                        listOf(seriesSuggestion),
-                        sourceItem = watchedSeries,
+                        BECAUSE_YOU_WATCHED_TV_ID,
+                        BECAUSE_YOU_WATCHED_TV_TITLE,
+                        listOf(watchedSeries),
                     ),
                 ),
             ),
@@ -175,11 +174,11 @@ class TvHomeRailsConfigurationTest {
         )
 
         assertEquals(
-            listOf("recently_watched", "because_movie_101", "because_tv_202"),
+            listOf("recently_watched", BECAUSE_YOU_WATCHED_MOVIES_ID, BECAUSE_YOU_WATCHED_TV_ID),
             rails.map { it.key },
         )
         assertEquals(
-            listOf(TV_HOME_BECAUSE_YOU_WATCHED_TITLE, TV_HOME_BECAUSE_YOU_WATCHED_TITLE),
+            listOf(BECAUSE_YOU_WATCHED_MOVIES_TITLE, BECAUSE_YOU_WATCHED_TV_TITLE),
             rails.drop(1).map { it.title },
         )
         assertEquals(watchedMovie, rails[1].items.first())

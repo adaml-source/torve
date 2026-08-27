@@ -283,18 +283,22 @@ internal fun TvHomeScreen(
             }
         },
         onRailMediaClick = { railKey, item ->
-            val recommendationSet = state.becauseYouWatched.firstOrNull { it.id == railKey }
-            val source = recommendationSet?.sourceItem
-            if (source == null || !source.hasSameTvRecommendationIdentity(item)) {
+            val watchedSourceRail = state.becauseYouWatched.firstOrNull { shelf ->
+                shelf.id == railKey && shelf.items.any { it.hasSameTvRecommendationIdentity(item) }
+            }
+            if (watchedSourceRail == null) {
                 false
             } else {
-                val destination = source.tvMoreLikeRailKey()
-                if (destination != null && onSeeAll != null) {
-                    onSeeAll(destination, "$TV_HOME_BECAUSE_YOU_WATCHED_TITLE ${source.title}")
-                    true
-                } else {
-                    false
+                val destination = item.tvMoreLikeRailKey()
+                if (destination != null) {
+                    onSeeAll?.invoke(
+                        destination,
+                        "$TV_HOME_BECAUSE_YOU_WATCHED_COLLECTION_PREFIX ${item.title}",
+                    )
                 }
+                // Never fall through to the normal detail-page click path for
+                // posters in these watched-source rails.
+                true
             }
         },
         onSeeAll = onSeeAll,
@@ -590,18 +594,15 @@ private fun buildBuiltInRails(
 
         HomeSection.BECAUSE_YOU_WATCHED -> {
             state.becauseYouWatched.mapNotNull { shelf ->
-                val source = shelf.sourceItem ?: return@mapNotNull null
-                val recommendations = shelf.items
-                    .filterNot(source::hasSameTvRecommendationIdentity)
-                    .tvHomeCardItems(limit = TV_HOME_BECAUSE_YOU_WATCHED_PREVIEW_LIMIT)
-                if (recommendations.isEmpty()) return@mapNotNull null
+                val watchedSources = shelf.items.tvHomeCardItems()
+                if (watchedSources.isEmpty()) return@mapNotNull null
                 TvContentRail(
                     key = shelf.id,
-                    title = TV_HOME_BECAUSE_YOU_WATCHED_TITLE,
-                    items = listOf(source) + recommendations,
+                    title = shelf.title,
+                    items = watchedSources,
                     showSeeAllCard = false,
-                    // The source poster intentionally also appears in Recently
-                    // Watched, but has a different action in this rail.
+                    // Watched posters intentionally also appear in Recently
+                    // Watched, but every poster here opens recommendations.
                     allowCrossRailDuplicates = true,
                 )
             }
@@ -636,8 +637,7 @@ private fun MediaItem.isTvHomeDisplayable(): Boolean =
 
 private const val TV_HOME_PERSON_ID_PREFIX = "person:"
 private const val TV_HOME_PROVIDER_ID_PREFIX = "provider:"
-internal const val TV_HOME_BECAUSE_YOU_WATCHED_TITLE = "Because You Watched"
-private const val TV_HOME_BECAUSE_YOU_WATCHED_PREVIEW_LIMIT = 10
+internal const val TV_HOME_BECAUSE_YOU_WATCHED_COLLECTION_PREFIX = "Because You Watched"
 
 internal fun MediaItem.tvMoreLikeRailKey(): String? {
     val id = tmdbId?.takeIf { it > 0 } ?: return null

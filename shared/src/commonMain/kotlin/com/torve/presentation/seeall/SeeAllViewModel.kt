@@ -116,6 +116,19 @@ private data class SeeAllFetchPage(
     val totalResults: Int,
 )
 
+internal data class MoreLikeSource(
+    val mediaType: String,
+    val tmdbId: Int,
+)
+
+internal fun parseMoreLikeSectionId(sectionId: String): MoreLikeSource? {
+    val parts = sectionId.split('_')
+    if (parts.size != 4 || parts[0] != "more" || parts[1] != "like") return null
+    val mediaType = parts[2].takeIf { it == "movie" || it == "tv" } ?: return null
+    val tmdbId = parts[3].toIntOrNull()?.takeIf { it > 0 } ?: return null
+    return MoreLikeSource(mediaType, tmdbId)
+}
+
 fun applySortAndFilter(
     items: List<MediaItem>,
     sortMode: SeeAllSortMode,
@@ -211,7 +224,8 @@ class SeeAllViewModel(
     private val traktApi: TraktAuthorizedApi? = null,
 ) {
     companion object {
-        /** Temporary holder for shelf items that can't be paginated from an API. */
+        private const val TMDB_PAGE_SIZE = 20
+        /** Temporary route context: titles and any non-paginated shelf items. */
         val pendingItems: MutableMap<String, Pair<String, List<MediaItem>>> = mutableMapOf()
     }
     private val scope = CoroutineScope(SupervisorJob() + mainDispatcher)
@@ -423,6 +437,33 @@ class SeeAllViewModel(
     }
 
     private suspend fun fetchSection(sectionId: String, page: Int): SeeAllFetchPage {
+        parseMoreLikeSectionId(sectionId)?.let { source ->
+            val (recommendations, similar) = coroutineScope {
+                val recommendationsDeferred = async {
+                    runCatching {
+                        metadataRepo.getRecommendations(source.mediaType, source.tmdbId, page)
+                    }.getOrDefault(emptyList())
+                }
+                val similarDeferred = async {
+                    runCatching {
+                        metadataRepo.getSimilar(source.mediaType, source.tmdbId, page)
+                    }.getOrDefault(emptyList())
+                }
+                recommendationsDeferred.await() to similarDeferred.await()
+            }
+            val items = (recommendations + similar)
+                .asSequence()
+                .filterNot { candidate -> candidate.tmdbId == source.tmdbId }
+                .distinctBy { candidate -> "${candidate.type}:${candidate.tmdbId ?: candidate.id}" }
+                .toList()
+            return SeeAllFetchPage(
+                title = pendingItems[sectionId]?.first ?: "Because You Watched",
+                items = items,
+                hasMore = recommendations.size >= TMDB_PAGE_SIZE || similar.size >= TMDB_PAGE_SIZE,
+                totalResults = 0,
+            )
+        }
+
         if (sectionId.startsWith("shelf:")) {
             val shelfId = sectionId.removePrefix("shelf:")
             // Peek rather than remove — on back-nav and re-open, the shelf

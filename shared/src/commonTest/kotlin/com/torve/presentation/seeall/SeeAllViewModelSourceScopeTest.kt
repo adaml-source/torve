@@ -250,6 +250,48 @@ class SeeAllViewModelSourceScopeTest {
     }
 
     @Test
+    fun moreLikeSeeAllLoadsSuggestionsForTheSelectedWatchedPoster() = runTest(dispatcher) {
+        val seed = 391312
+        val duplicate = media("duplicate", "Duplicate", tmdbId = 501)
+        val metadata = ScopedMetadataRepository(
+            recommendationPages = mapOf(
+                "movie:$seed:1" to listOf(
+                    media("seed", "Seed", tmdbId = seed),
+                    media("recommendation", "Recommendation", tmdbId = 500),
+                    duplicate,
+                ),
+            ),
+            similarPages = mapOf(
+                "movie:$seed:1" to listOf(
+                    duplicate.copy(id = "duplicate-from-similar"),
+                    media("similar", "Similar", tmdbId = 502),
+                ),
+            ),
+        )
+        val sectionId = "more_like_movie_$seed"
+        SeeAllViewModel.pendingItems[sectionId] = "Because You Watched Eddington" to emptyList()
+        val viewModel = viewModel(metadata = metadata)
+
+        viewModel.loadSection(sectionId)
+        advanceUntilIdle()
+
+        assertEquals("Because You Watched Eddington", viewModel.state.value.title)
+        assertEquals(listOf(500, 501, 502), viewModel.state.value.items.map { it.tmdbId })
+        assertEquals(listOf("movie:$seed:1"), metadata.recommendationCalls)
+        assertEquals(listOf("movie:$seed:1"), metadata.similarCalls)
+        assertEquals(0, metadata.discoverCalls)
+        assertEquals(0, metadata.searchCalls)
+    }
+
+    @Test
+    fun moreLikeRouteRequiresARealTmdbSourceIdentity() {
+        assertEquals(MoreLikeSource("movie", 101), parseMoreLikeSectionId("more_like_movie_101"))
+        assertEquals(MoreLikeSource("tv", 202), parseMoreLikeSectionId("more_like_tv_202"))
+        assertEquals(null, parseMoreLikeSectionId("more_like_movie_0"))
+        assertEquals(null, parseMoreLikeSectionId("more_like_person_101"))
+    }
+
+    @Test
     fun missingImdbRatingsSortLastWithoutChangingSourceSet() {
         val rated = media("rated", "Rated", ratings = MediaRatings(imdbScore = 8.4f))
         val missing = media("missing", "Missing")
@@ -282,12 +324,16 @@ class SeeAllViewModelSourceScopeTest {
         private val trendingMoviePages: Map<Int, PagedResult> = emptyMap(),
         private val popularMoviePages: Map<Int, PagedResult> = emptyMap(),
         private val discoverPages: Map<String, PagedResult> = emptyMap(),
+        private val recommendationPages: Map<String, List<MediaItem>> = emptyMap(),
+        private val similarPages: Map<String, List<MediaItem>> = emptyMap(),
     ) : MetadataRepository {
         var discoverCalls = 0
         var searchCalls = 0
         val trendingPagedCalls = mutableListOf<String>()
         val popularPagedCalls = mutableListOf<String>()
         val discoverPageCalls = mutableListOf<String>()
+        val recommendationCalls = mutableListOf<String>()
+        val similarCalls = mutableListOf<String>()
 
         override suspend fun getTrending(type: String, page: Int): List<MediaItem> = emptyList()
         override suspend fun getPopular(type: String, page: Int): List<MediaItem> = emptyList()
@@ -302,8 +348,16 @@ class SeeAllViewModelSourceScopeTest {
         override suspend fun findByImdbId(imdbId: String, preferredType: String?): MediaItem? = null
         override suspend fun getDetail(type: String, id: Int): MediaItem =
             media("tmdb:$id", "Detail $id", tmdbId = id, rating = 7.0)
-        override suspend fun getSimilar(type: String, id: Int, page: Int): List<MediaItem> = emptyList()
-        override suspend fun getRecommendations(type: String, id: Int, page: Int): List<MediaItem> = emptyList()
+        override suspend fun getSimilar(type: String, id: Int, page: Int): List<MediaItem> {
+            val key = "$type:$id:$page"
+            similarCalls += key
+            return similarPages[key].orEmpty()
+        }
+        override suspend fun getRecommendations(type: String, id: Int, page: Int): List<MediaItem> {
+            val key = "$type:$id:$page"
+            recommendationCalls += key
+            return recommendationPages[key].orEmpty()
+        }
         override suspend fun getHomeShelves(): List<CatalogShelf> = emptyList()
         override suspend fun getPersonCredits(personId: Int): List<MediaItem> = emptyList()
         override suspend fun getPersonDetail(personId: Int): TmdbPerson = error("unused")

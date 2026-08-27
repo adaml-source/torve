@@ -768,9 +768,8 @@ class HomeViewModel(
                     val historyDeferred = async {
                         try {
                             // Pull a wide window so dedup-by-show has material to
-                            // collapse across. The Because-You-Watched shelf caps
-                            // at one rail after dedup (see below); the window also
-                            // feeds the recently-watched dedup loop.
+                            // collapse across. This also feeds the watched-source
+                            // Movies and TV Shows recommendation entry rails.
                             watchHistoryRepo.getRecent(40)
                         } catch (_: Exception) {
                             emptyList()
@@ -1047,45 +1046,10 @@ class HomeViewModel(
                     )
                 } else null
 
-                // Build independent recommendation sets for the most recent
-                // distinct watched titles. Each source remains explicit so the
-                // UI can give its poster a See-All action without treating it
-                // as one of its own recommendation results.
-                val becauseYouWatched = recentlyWatched
-                    .asSequence()
-                    .filter { it.tmdbId?.let { id -> id > 0 } == true }
-                    .distinctBy { "${it.type}:${it.tmdbId}" }
-                    .take(MAX_BECAUSE_YOU_WATCHED_RAILS)
-                    .map { source ->
-                        async {
-                            val tmdbId = requireNotNull(source.tmdbId)
-                            val type = if (source.type == MediaType.SERIES) "tv" else "movie"
-                            val similar = try {
-                                metadataRepo.getSimilar(type, tmdbId)
-                            } catch (_: Exception) {
-                                emptyList()
-                            }
-                                .asSequence()
-                                .filterNot { candidate ->
-                                    candidate.tmdbId == tmdbId && candidate.type == source.type
-                                }
-                                .distinctBy { it.stableKey() }
-                                .take(20)
-                                .toList()
-                            if (similar.isEmpty()) {
-                                null
-                            } else {
-                                CatalogShelf(
-                                    id = "because_${type}_$tmdbId",
-                                    title = "Because You Watched",
-                                    items = similar,
-                                    sourceItem = source,
-                                )
-                            }
-                        }
-                    }
-                    .toList()
-                    .mapNotNull { it.await() }
+                // These are watched-source rails, not recommendation-preview
+                // rails. Selecting a source poster opens its own paginated
+                // More Like collection; Home never mixes suggestions into it.
+                val becauseYouWatched = buildBecauseYouWatchedShelves(recentlyWatched)
 
                 // Build hidden gems shelf
                 val hiddenGemsShelf = if (hiddenGems.isNotEmpty()) {
@@ -1152,32 +1116,11 @@ class HomeViewModel(
                     policy = policy,
                     context = ContentAccessContext.HISTORY_DERIVED,
                     shelves = becauseYouWatched.mapNotNull { shelf ->
-                        val source = shelf.sourceItem
-                        val visibleSource = source?.let {
-                            ParentalFilter.filter(listOf(it), maxRating).firstOrNull()
-                        }
-                        if (source != null && visibleSource == null) {
-                            null
-                        } else {
-                            shelf.copy(
-                                sourceItem = visibleSource,
-                                items = ParentalFilter.filter(shelf.items, maxRating),
-                            )
-                        }
+                        shelf.copy(items = ParentalFilter.filter(shelf.items, maxRating))
+                            .takeIf { it.items.isNotEmpty() }
                     },
-                    sourceType = ContentSourceType.TMDB,
-                ).mapNotNull { shelf ->
-                    val source = shelf.sourceItem
-                    val visibleSource = source?.let {
-                        contentPolicyFilter.filterItems(
-                            policy = policy,
-                            context = ContentAccessContext.HISTORY_DERIVED,
-                            items = listOf(it),
-                            sourceType = ContentSourceType.LOCAL_LIBRARY,
-                        ).items.firstOrNull()
-                    }
-                    if (source != null && visibleSource == null) null else shelf.copy(sourceItem = visibleSource)
-                }
+                    sourceType = ContentSourceType.LOCAL_LIBRARY,
+                )
                 val policyFilteredHiddenGems = hiddenGemsShelf?.copy(
                     items = contentPolicyFilter.filterItems(
                         policy = policy,
@@ -1290,8 +1233,10 @@ class HomeViewModel(
                         if (filtered.isEmpty()) null else shelf.copy(items = filtered)
                     }
 
-                    // 5. Cross-dedup Because You Watched, Addon, MDBList shelves
-                    val finalByw = withinDedupedByw.dedupeAcrossShelves(globalSeen)
+                    // 5. Watched-source rails intentionally repeat items from
+                    // Recently Watched because they navigate to recommendation
+                    // collections rather than details. Other shelves still dedupe.
+                    val finalByw = withinDedupedByw
                     val finalAddons = withinDedupedAddons.dedupeAcrossShelves(globalSeen)
                     val finalMdbList = withinDedupedMdbList.dedupeAcrossShelves(globalSeen)
 
@@ -1972,11 +1917,7 @@ class HomeViewModel(
             addAll(state.shelves.flatMap { it.items })
             addAll(state.watchlistItems)
             addAll(state.upcomingSchedule.take(24))
-            addAll(
-                state.becauseYouWatched.flatMap { shelf ->
-                    listOfNotNull(shelf.sourceItem) + shelf.items
-                },
-            )
+            addAll(state.becauseYouWatched.flatMap { it.items })
             state.hiddenGemsShelf?.let { addAll(it.items) }
             addAll(state.recentlyWatched)
             addAll(state.customShelves.values.flatten())
@@ -2013,10 +1954,7 @@ class HomeViewModel(
             upcomingSchedule = updatedUpcomingSchedule,
             watchlistShelf = watchlistShelf?.copy(items = updatedWatchlistItems),
             becauseYouWatched = becauseYouWatched.map { shelf ->
-                shelf.copy(
-                    items = shelf.items.map { it.applyArtworkBackfill(backfilledArtwork) },
-                    sourceItem = shelf.sourceItem?.applyArtworkBackfill(backfilledArtwork),
-                )
+                shelf.copy(items = shelf.items.map { it.applyArtworkBackfill(backfilledArtwork) })
             },
             hiddenGemsShelf = hiddenGemsShelf?.copy(
                 items = hiddenGemsShelf.items.map { it.applyArtworkBackfill(backfilledArtwork) }
@@ -2088,10 +2026,7 @@ class HomeViewModel(
 
     private fun hydrateShelvesFromCache(shelves: List<CatalogShelf>): List<CatalogShelf> {
         return shelves.map { shelf ->
-            shelf.copy(
-                items = hydrateItemsFromCache(shelf.items),
-                sourceItem = shelf.sourceItem?.let { hydrateItemsFromCache(listOf(it)).firstOrNull() },
-            )
+            shelf.copy(items = hydrateItemsFromCache(shelf.items))
                 .sortTopRatedShelfByExternalRatings()
         }
     }
@@ -2355,8 +2290,10 @@ class HomeViewModel(
     }
 
     companion object {
-        private const val MAX_BECAUSE_YOU_WATCHED_RAILS = 3
-        private const val HOME_SNAPSHOT_KEY = "home_snapshot_v2"
+        // v3 removes the old recommendation-preview representation from
+        // Because You Watched; a v2 snapshot would mislabel suggestions as
+        // watched source posters until the next successful refresh.
+        private const val HOME_SNAPSHOT_KEY = "home_snapshot_v3"
         private const val HOME_SNAPSHOT_MAX_STALE_AGE_MS = 30L * 24L * 60L * 60L * 1000L
         private val HOME_LOAD_AUTO_RETRY_DELAYS_MS = longArrayOf(5_000L, 15_000L, 30_000L)
         private const val KEY_RATINGS_CACHE_VERSION = "ratings_cache_version"
@@ -2380,6 +2317,43 @@ class HomeViewModel(
         // Hard cap on the rate-limit retry loop so a broken MDBList endpoint
         // can't keep the coroutine alive forever. 5 × 60s = 5 min worst case.
         private const val MAX_RATINGS_ENRICHMENT_ITERATIONS = 5
+    }
+}
+
+internal const val BECAUSE_YOU_WATCHED_MOVIES_ID = "because_you_watched_movies"
+internal const val BECAUSE_YOU_WATCHED_TV_ID = "because_you_watched_tv"
+internal const val BECAUSE_YOU_WATCHED_MOVIES_TITLE = "Because You Watched (Movies)"
+internal const val BECAUSE_YOU_WATCHED_TV_TITLE = "Because You Watched (TV Shows)"
+
+internal fun buildBecauseYouWatchedShelves(watchedItems: List<MediaItem>): List<CatalogShelf> {
+    val eligible = watchedItems
+        .asSequence()
+        .filter { item -> item.tmdbId?.let { it > 0 } == true }
+        .distinctBy { it.stableKey() }
+        .toList()
+    return buildList {
+        eligible.filter { it.type == MediaType.MOVIE }
+            .takeIf { it.isNotEmpty() }
+            ?.let { movies ->
+                add(
+                    CatalogShelf(
+                        id = BECAUSE_YOU_WATCHED_MOVIES_ID,
+                        title = BECAUSE_YOU_WATCHED_MOVIES_TITLE,
+                        items = movies,
+                    ),
+                )
+            }
+        eligible.filter { it.type == MediaType.SERIES }
+            .takeIf { it.isNotEmpty() }
+            ?.let { shows ->
+                add(
+                    CatalogShelf(
+                        id = BECAUSE_YOU_WATCHED_TV_ID,
+                        title = BECAUSE_YOU_WATCHED_TV_TITLE,
+                        items = shows,
+                    ),
+                )
+            }
     }
 }
 
