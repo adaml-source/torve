@@ -15,10 +15,13 @@ import com.torve.domain.model.ShelfConfig
 import com.torve.domain.model.WatchlistItem
 import com.torve.domain.model.AddonPolicyFlags
 import com.torve.domain.model.collectStableKeys
+import com.torve.domain.model.configurableHomeSections
 import com.torve.domain.model.dedupeAcrossShelves
 import com.torve.domain.model.dedupeByStableKey
 import com.torve.domain.model.extractImdbIdOrNull
 import com.torve.domain.model.extractTmdbIdOrNull
+import com.torve.domain.model.migrateLegacyBecauseYouWatchedConfigs
+import com.torve.domain.model.migrateLegacyBecauseYouWatchedLayoutOrder
 import com.torve.domain.model.ratingEnrichmentLookupKeys
 import com.torve.domain.model.stableKey
 import com.torve.domain.model.updateSectionPresetId
@@ -326,10 +329,11 @@ class HomeViewModel(
         return if (saved != null) {
             try {
                 val decoded = json.decodeFromString<List<HomeSectionConfig>>(saved)
+                val migrated = migrateLegacyBecauseYouWatchedConfigs(decoded)
                 val defaults = defaultSectionConfigs()
-                val bySection = decoded.associateBy { it.section }
+                val bySection = migrated.associateBy { it.section }
                 val presetIds = loadCardStylePresetIds()
-                defaults.map { def ->
+                val resolvedConfigs = defaults.map { def ->
                     val resolved = bySection[def.section] ?: def
                     // Only strip invalid preset IDs if presets are actually loaded.
                     // When presetIds is empty, presets may not be persisted yet —
@@ -344,6 +348,10 @@ class HomeViewModel(
                         resolved
                     }
                 }
+                if (resolvedConfigs != decoded) {
+                    prefsRepo.setString(key, json.encodeToString(resolvedConfigs))
+                }
+                resolvedConfigs
             } catch (_: Exception) {
                 defaultSectionConfigs()
             }
@@ -353,7 +361,7 @@ class HomeViewModel(
     }
 
     private fun defaultSectionConfigs(): List<HomeSectionConfig> =
-        HomeSection.entries.map { section ->
+        configurableHomeSections.map { section ->
             // Continue Watching ships pre-bound to the built-in
             // "landscape-default" preset so freshly-installed users see
             // backdrops there (which are designed for the in-progress
@@ -460,7 +468,12 @@ class HomeViewModel(
         val saved = try { prefsRepo.getString(key) } catch (_: Exception) { null }
         return if (saved != null) {
             try {
-                json.decodeFromString<List<String>>(saved)
+                val decoded = json.decodeFromString<List<String>>(saved)
+                val migrated = migrateLegacyBecauseYouWatchedLayoutOrder(decoded)
+                if (migrated != decoded) {
+                    prefsRepo.setString(key, json.encodeToString(migrated))
+                }
+                migrated
             } catch (_: Exception) {
                 emptyList()
             }
@@ -791,7 +804,11 @@ class HomeViewModel(
                         try {
                             val seen = mutableSetOf<String>()
                             val out = mutableListOf<MediaItem>()
-                            for (entry in watchHistoryRepo.getRecent(80)) {
+                            val sourceCountByType = mutableMapOf<MediaType, Int>()
+                            // Read the complete local history for source rails.
+                            // A raw 80-row window can contain 80 episodes of one
+                            // show and incorrectly crowd every watched movie out.
+                            for (entry in watchHistoryRepo.getAll()) {
                                 // Synthetic mediaIds from openPreResolvedStream
                                 // (NZB-sourced playbacks) carry no catalog
                                 // metadata; Adult/Sports are also excluded
@@ -808,8 +825,13 @@ class HomeViewModel(
                                 // same series collapse into a single card. Never
                                 // surface individual episode posters or titles.
                                 val showKey = tmdb?.toString() ?: imdb ?: entry.mediaId
-                                if (showKey in seen) continue
-                                seen += showKey
+                                val mediaType = if (isSeries) MediaType.SERIES else MediaType.MOVIE
+                                val historyKey = "${mediaType.name}:$showKey"
+                                if (historyKey in seen) continue
+                                seen += historyKey
+                                val typeCount = sourceCountByType[mediaType] ?: 0
+                                if (typeCount >= MAX_WATCHED_SOURCES_PER_TYPE) continue
+                                sourceCountByType[mediaType] = typeCount + 1
                                 // For series, the card MUST reference the show
                                 // (show title + show poster) — never the played
                                 // episode — so "The Boys" is one card, not one per
@@ -823,7 +845,7 @@ class HomeViewModel(
                                     id = showKey,
                                     tmdbId = tmdb,
                                     imdbId = imdb,
-                                    type = if (isSeries) MediaType.SERIES else MediaType.MOVIE,
+                                    type = mediaType,
                                     title = displayTitle,
                                     posterUrl = entry.posterUrl,
                                     backdropUrl = entry.backdropUrl,
@@ -920,7 +942,8 @@ class HomeViewModel(
                 val watchlistItems = loadInputs.watchlistItems
                 val recentHistory = loadInputs.recentHistory
                 val hiddenGems = loadInputs.hiddenGems
-                val recentlyWatched = loadInputs.recentlyWatched
+                val allWatchedSources = loadInputs.recentlyWatched
+                val recentlyWatched = allWatchedSources.take(MAX_RECENTLY_WATCHED_ITEMS)
                 val upcomingScheduleResult = loadInputs.upcomingSchedule
                 val upcomingSchedule = upcomingScheduleResult.items
                 val popularPeople = loadInputs.popularPeople
@@ -1049,7 +1072,7 @@ class HomeViewModel(
                 // These are watched-source rails, not recommendation-preview
                 // rails. Selecting a source poster opens its own paginated
                 // More Like collection; Home never mixes suggestions into it.
-                val becauseYouWatched = buildBecauseYouWatchedShelves(recentlyWatched)
+                val becauseYouWatched = buildBecauseYouWatchedShelves(allWatchedSources)
 
                 // Build hidden gems shelf
                 val hiddenGemsShelf = if (hiddenGems.isNotEmpty()) {
@@ -2290,10 +2313,11 @@ class HomeViewModel(
     }
 
     companion object {
-        // v3 removes the old recommendation-preview representation from
-        // Because You Watched; a v2 snapshot would mislabel suggestions as
-        // watched source posters until the next successful refresh.
-        private const val HOME_SNAPSHOT_KEY = "home_snapshot_v3"
+        // v4 rebuilds watched-source rails from independently bounded movie
+        // and TV history, instead of restoring the old raw 80-row window.
+        private const val HOME_SNAPSHOT_KEY = "home_snapshot_v4"
+        private const val MAX_RECENTLY_WATCHED_ITEMS = 80
+        private const val MAX_WATCHED_SOURCES_PER_TYPE = 80
         private const val HOME_SNAPSHOT_MAX_STALE_AGE_MS = 30L * 24L * 60L * 60L * 1000L
         private val HOME_LOAD_AUTO_RETRY_DELAYS_MS = longArrayOf(5_000L, 15_000L, 30_000L)
         private const val KEY_RATINGS_CACHE_VERSION = "ratings_cache_version"

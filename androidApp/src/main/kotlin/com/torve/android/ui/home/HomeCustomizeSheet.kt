@@ -82,6 +82,7 @@ import com.torve.android.ui.theme.Snow
 import com.torve.android.ui.theme.Steel
 import com.torve.domain.model.HomeSection
 import com.torve.domain.model.HomeSectionConfig
+import com.torve.domain.model.configurableHomeSections
 import coil3.request.ImageRequest
 import coil3.request.CachePolicy
 import coil3.request.transformations
@@ -135,7 +136,7 @@ fun HomeCustomizeSheet(
                 )
                 TextButton(onClick = {
                     onReset()
-                    orderedSections = HomeSection.entries
+                    orderedSections = configurableHomeSections
                         .filter { it != HomeSection.DIRECTORS && it != HomeSection.ON_NOW }
                         .map { HomeSectionConfig(it, it.defaultEnabled, it.defaultOrder) }
                         .sortedBy { it.order }
@@ -313,7 +314,9 @@ fun HomeSection.icon(): ImageVector = when (this) {
     HomeSection.DIRECTORS -> Icons.Rounded.Theaters
     HomeSection.HIDDEN_GEMS -> Icons.Rounded.AutoAwesome
     HomeSection.ADDON_SHELVES -> Icons.Rounded.Subscriptions
-    HomeSection.BECAUSE_YOU_WATCHED -> Icons.Rounded.History
+    HomeSection.BECAUSE_YOU_WATCHED,
+    HomeSection.BECAUSE_YOU_WATCHED_MOVIES,
+    HomeSection.BECAUSE_YOU_WATCHED_TV -> Icons.Rounded.History
     HomeSection.MDBLIST_SHELVES -> Icons.Rounded.Star
 }
 

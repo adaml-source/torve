@@ -457,7 +457,8 @@ private fun buildBuiltInRails(
         HomeSection.SEARCH_BAR,
         HomeSection.HERO,
         HomeSection.ON_NOW,
-        HomeSection.ADDON_SHELVES -> {
+        HomeSection.ADDON_SHELVES,
+        HomeSection.BECAUSE_YOU_WATCHED -> {
             emptyList()
         }
 
@@ -592,20 +593,22 @@ private fun buildBuiltInRails(
             else listOf(TvContentRail(key = shelf?.id ?: "hidden_gems", title = title, items = items))
         }
 
-        HomeSection.BECAUSE_YOU_WATCHED -> {
-            state.becauseYouWatched.mapNotNull { shelf ->
-                val watchedSources = shelf.items.tvHomeCardItems()
-                if (watchedSources.isEmpty()) return@mapNotNull null
+        HomeSection.BECAUSE_YOU_WATCHED_MOVIES,
+        HomeSection.BECAUSE_YOU_WATCHED_TV -> {
+            val shelf = state.becauseYouWatched.firstOrNull { it.id == config.section.shelfId }
+            val watchedSources = shelf?.items?.tvHomeCardItems().orEmpty()
+            if (shelf == null || watchedSources.isEmpty()) emptyList()
+            else listOf(
                 TvContentRail(
                     key = shelf.id,
-                    title = shelf.title,
+                    title = config.customTitle ?: shelf.title,
                     items = watchedSources,
                     showSeeAllCard = false,
                     // Watched posters intentionally also appear in Recently
                     // Watched, but every poster here opens recommendations.
                     allowCrossRailDuplicates = true,
-                )
-            }
+                ),
+            )
         }
 
         HomeSection.MDBLIST_SHELVES -> {

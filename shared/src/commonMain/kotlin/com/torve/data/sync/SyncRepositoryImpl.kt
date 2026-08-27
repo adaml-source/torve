@@ -8,6 +8,8 @@ import com.torve.domain.model.CardSizePreset
 import com.torve.domain.model.CardStyle
 import com.torve.domain.model.CardStylePreset
 import com.torve.domain.model.HomeSectionConfig
+import com.torve.domain.model.migrateLegacyBecauseYouWatchedConfigs
+import com.torve.domain.model.migrateLegacyBecauseYouWatchedLayoutOrder
 import com.torve.domain.model.RatingDisplayPrefs
 import com.torve.domain.model.RatingSource
 import com.torve.domain.model.defaultTorveWeights
@@ -440,6 +442,12 @@ class SyncRepositoryImpl(
                 }.getOrNull() ?: emptyList()
                 json.encodeToString(sanitizeHomeSectionConfigs(parsed))
             }
+            "home_layout_order" -> {
+                val parsed = runCatching {
+                    tolerantJson.decodeFromString<List<String>>(raw)
+                }.getOrNull() ?: emptyList()
+                json.encodeToString(migrateLegacyBecauseYouWatchedLayoutOrder(parsed))
+            }
             else -> raw
         }
     }
@@ -531,7 +539,7 @@ class SyncRepositoryImpl(
 
     private fun sanitizeHomeSectionConfigs(configs: List<HomeSectionConfig>): List<HomeSectionConfig> {
         val seen = mutableSetOf<com.torve.domain.model.HomeSection>()
-        return configs.asSequence()
+        return migrateLegacyBecauseYouWatchedConfigs(configs).asSequence()
             .filter { seen.add(it.section) }
             .map { config ->
                 config.copy(

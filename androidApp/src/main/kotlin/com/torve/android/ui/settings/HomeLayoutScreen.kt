@@ -76,6 +76,7 @@ import com.torve.domain.model.CatalogShelf
 import com.torve.domain.model.CustomSection
 import com.torve.domain.model.HomeSection
 import com.torve.domain.model.HomeSectionConfig
+import com.torve.domain.model.configurableHomeSections
 import com.torve.presentation.home.HomeViewModel
 import com.torve.presentation.settings.SettingsViewModel
 import org.koin.compose.koinInject
@@ -166,7 +167,7 @@ fun HomeLayoutScreen(
             TextButton(onClick = {
                 viewModel.resetSections()
                 orderedItems = buildList {
-                    HomeSection.entries
+                    configurableHomeSections
                         .filter { it != HomeSection.DIRECTORS && it != HomeSection.ADDON_SHELVES }
                         .map { HomeSectionConfig(it, it.defaultEnabled, it.defaultOrder) }
                         .forEach { add(SectionItem(it)) }

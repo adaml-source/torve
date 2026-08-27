@@ -760,39 +760,37 @@ fun HomeScreen(
                                 // compatibility but doesn't render anything.
                             }
 
-                            HomeSection.BECAUSE_YOU_WATCHED -> {
-                                if (state.becauseYouWatched.isNotEmpty()) {
-                                    item(key = "because_you_watched") {
+                            HomeSection.BECAUSE_YOU_WATCHED -> Unit
+
+                            HomeSection.BECAUSE_YOU_WATCHED_MOVIES,
+                            HomeSection.BECAUSE_YOU_WATCHED_TV -> {
+                                val shelf = state.becauseYouWatched
+                                    .firstOrNull { it.id == config.section.shelfId }
+                                    ?.takeIf {
+                                        mediaType == "all" ||
+                                            (mediaType == "movie" && config.section == HomeSection.BECAUSE_YOU_WATCHED_MOVIES) ||
+                                            (mediaType == "tv" && config.section == HomeSection.BECAUSE_YOU_WATCHED_TV)
+                                    }
+                                if (shelf != null && shelf.items.isNotEmpty()) {
+                                    item(key = shelf.id) {
                                         androidx.compose.runtime.CompositionLocalProvider(
                                             LocalCardStyle provides sectionStyle,
                                         ) {
                                             Spacer(Modifier.height(8.dp))
-                                            Column {
-                                                state.becauseYouWatched
-                                                    .filter { shelf ->
-                                                        mediaType == "all" || shelf.items.any { item ->
-                                                            (mediaType == "movie" && item.type == MediaType.MOVIE) ||
-                                                                (mediaType == "tv" && item.type == MediaType.SERIES)
-                                                        }
+                                            CatalogShelf(
+                                                title = config.customTitle ?: shelf.title,
+                                                items = shelf.items,
+                                                shelfType = shelf.type,
+                                                onItemClick = { item ->
+                                                    item.tmdbId?.let { tmdbId ->
+                                                        val type = if (item.type == MediaType.SERIES) "tv" else "movie"
+                                                        val destination = "more_like_${type}_$tmdbId"
+                                                        SeeAllViewModel.pendingItems[destination] =
+                                                            "Because You Watched ${item.title}" to emptyList()
+                                                        onSeeAllClick(destination)
                                                     }
-                                                    .forEach { shelf ->
-                                                    CatalogShelf(
-                                                        title = shelf.title,
-                                                        items = shelf.items,
-                                                        shelfType = shelf.type,
-                                                        onItemClick = { item ->
-                                                            item.tmdbId?.let { tmdbId ->
-                                                                val type = if (item.type == MediaType.SERIES) "tv" else "movie"
-                                                                val destination = "more_like_${type}_$tmdbId"
-                                                                SeeAllViewModel.pendingItems[destination] =
-                                                                    "Because You Watched ${item.title}" to emptyList()
-                                                                onSeeAllClick(destination)
-                                                            }
-                                                        },
-                                                    )
-                                                    Spacer(Modifier.height(8.dp))
-                                                }
-                                            }
+                                                },
+                                            )
                                         }
                                     }
                                 }

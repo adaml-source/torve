@@ -304,10 +304,51 @@ fun V2HomePage(
                         }
                     }
 
-                    val curatedItems = homeState.becauseYouWatched.firstOrNull()?.items ?: homeState.recommendedItems.map { it.item }
-                    val curatedSection = if (homeState.becauseYouWatched.isNotEmpty()) HomeSection.BECAUSE_YOU_WATCHED else HomeSection.RECOMMENDED
+                    homeState.becauseYouWatched.forEach { shelf ->
+                        val watchedSection = when (shelf.id) {
+                            "because_you_watched_movies" -> HomeSection.BECAUSE_YOU_WATCHED_MOVIES
+                            "because_you_watched_tv" -> HomeSection.BECAUSE_YOU_WATCHED_TV
+                            else -> null
+                        }
+                        if (watchedSection != null && shelf.items.isNotEmpty() && isSectionVisible(watchedSection)) {
+                            val watchedTitle = titleFor(watchedSection, shelf.title)
+                            val watchedStyle = cardStyleForOrDefault(watchedSection)
+                            val watchedWidth = widthFor(watchedSection)
+                            V2Shelf(
+                                watchedTitle,
+                                modifier = Modifier.padding(start = 72.dp),
+                            ) {
+                                shelf.items.forEach { item ->
+                                    V2PosterCard(
+                                        item.title,
+                                        item.posterUrl,
+                                        Modifier.width(watchedWidth),
+                                        year = item.year?.toString(),
+                                        rating = item.rating?.let { String.format("%.1f", it) },
+                                        ratings = item.ratings,
+                                        backdropUrl = item.backdropUrl,
+                                        overview = item.overview,
+                                        cardStyle = watchedStyle,
+                                        onClick = {
+                                            val tmdbId = item.tmdbId ?: return@V2PosterCard
+                                            val type = if (item.type == com.torve.domain.model.MediaType.SERIES) "tv" else "movie"
+                                            onSeeAll(
+                                                SeeAllRequest(
+                                                    "more_like_${type}_$tmdbId",
+                                                    "Because You Watched ${item.title}",
+                                                ),
+                                            )
+                                        },
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    val curatedItems = homeState.recommendedItems.map { it.item }
+                    val curatedSection = HomeSection.RECOMMENDED
                     if (curatedItems.isNotEmpty() && isSectionVisible(curatedSection)) {
-                        val curatedTitle = if (homeState.becauseYouWatched.isNotEmpty()) ds("Because You Watched") else ds("Recommended")
+                        val curatedTitle = ds("Recommended")
                         val curatedShelfKey = "shelf:recommended_${curatedTitle.hashCode()}"
                         val curatedStyle = cardStyleForOrDefault(curatedSection)
                         val curatedWidth = widthFor(curatedSection)

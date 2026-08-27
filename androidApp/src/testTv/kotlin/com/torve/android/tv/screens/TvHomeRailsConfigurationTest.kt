@@ -8,10 +8,6 @@ import com.torve.domain.model.HomeSectionConfig
 import com.torve.domain.model.MediaItem
 import com.torve.domain.model.MediaType
 import com.torve.domain.model.PersonSummary
-import com.torve.presentation.home.BECAUSE_YOU_WATCHED_MOVIES_ID
-import com.torve.presentation.home.BECAUSE_YOU_WATCHED_MOVIES_TITLE
-import com.torve.presentation.home.BECAUSE_YOU_WATCHED_TV_ID
-import com.torve.presentation.home.BECAUSE_YOU_WATCHED_TV_TITLE
 import com.torve.presentation.home.HomeUiState
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -130,10 +126,10 @@ class TvHomeRailsConfigurationTest {
                 ),
             ),
             sectionConfigs = listOf(
-                HomeSectionConfig(HomeSection.BECAUSE_YOU_WATCHED, enabled = true, order = 0),
+                HomeSectionConfig(HomeSection.BECAUSE_YOU_WATCHED_MOVIES, enabled = true, order = 0),
             ),
             customSections = emptyList(),
-            homeLayoutOrder = listOf("section:BECAUSE_YOU_WATCHED"),
+            homeLayoutOrder = listOf("section:BECAUSE_YOU_WATCHED_MOVIES"),
         )
 
         val rail = rails.single()
@@ -167,10 +163,15 @@ class TvHomeRailsConfigurationTest {
             ),
             sectionConfigs = listOf(
                 HomeSectionConfig(HomeSection.RECENTLY_WATCHED, enabled = true, order = 0),
-                HomeSectionConfig(HomeSection.BECAUSE_YOU_WATCHED, enabled = true, order = 1),
+                HomeSectionConfig(HomeSection.BECAUSE_YOU_WATCHED_MOVIES, enabled = true, order = 1),
+                HomeSectionConfig(HomeSection.BECAUSE_YOU_WATCHED_TV, enabled = true, order = 2),
             ),
             customSections = emptyList(),
-            homeLayoutOrder = listOf("section:RECENTLY_WATCHED", "section:BECAUSE_YOU_WATCHED"),
+            homeLayoutOrder = listOf(
+                "section:RECENTLY_WATCHED",
+                "section:BECAUSE_YOU_WATCHED_MOVIES",
+                "section:BECAUSE_YOU_WATCHED_TV",
+            ),
         )
 
         assertEquals(
@@ -185,6 +186,48 @@ class TvHomeRailsConfigurationTest {
         assertEquals(watchedSeries, rails[2].items.first())
     }
 
+    @Test
+    fun becauseYouWatchedMovieAndTvRailsCanBeEnabledIndependently() {
+        val watchedMovie = media("watched-movie").copy(tmdbId = 101)
+        val watchedSeries = media("watched-series", MediaType.SERIES).copy(tmdbId = 202)
+        val state = HomeUiState(
+            becauseYouWatched = listOf(
+                CatalogShelf(
+                    BECAUSE_YOU_WATCHED_MOVIES_ID,
+                    BECAUSE_YOU_WATCHED_MOVIES_TITLE,
+                    listOf(watchedMovie),
+                ),
+                CatalogShelf(
+                    BECAUSE_YOU_WATCHED_TV_ID,
+                    BECAUSE_YOU_WATCHED_TV_TITLE,
+                    listOf(watchedSeries),
+                ),
+            ),
+        )
+
+        val movieOnly = buildTvHomeRails(
+            state = state,
+            sectionConfigs = listOf(
+                HomeSectionConfig(HomeSection.BECAUSE_YOU_WATCHED_MOVIES, enabled = true, order = 0),
+                HomeSectionConfig(HomeSection.BECAUSE_YOU_WATCHED_TV, enabled = false, order = 1),
+            ),
+            customSections = emptyList(),
+            homeLayoutOrder = emptyList(),
+        )
+        val tvOnly = buildTvHomeRails(
+            state = state,
+            sectionConfigs = listOf(
+                HomeSectionConfig(HomeSection.BECAUSE_YOU_WATCHED_MOVIES, enabled = false, order = 0),
+                HomeSectionConfig(HomeSection.BECAUSE_YOU_WATCHED_TV, enabled = true, order = 1),
+            ),
+            customSections = emptyList(),
+            homeLayoutOrder = emptyList(),
+        )
+
+        assertEquals(listOf(BECAUSE_YOU_WATCHED_MOVIES_ID), movieOnly.map { it.key })
+        assertEquals(listOf(BECAUSE_YOU_WATCHED_TV_ID), tvOnly.map { it.key })
+    }
+
     private fun media(id: String, type: MediaType = MediaType.MOVIE) = MediaItem(
         id = id,
         type = type,
@@ -192,3 +235,8 @@ class TvHomeRailsConfigurationTest {
         posterUrl = "/$id.jpg",
     )
 }
+
+private const val BECAUSE_YOU_WATCHED_MOVIES_ID = "because_you_watched_movies"
+private const val BECAUSE_YOU_WATCHED_MOVIES_TITLE = "Because You Watched (Movies)"
+private const val BECAUSE_YOU_WATCHED_TV_ID = "because_you_watched_tv"
+private const val BECAUSE_YOU_WATCHED_TV_TITLE = "Because You Watched (TV Shows)"

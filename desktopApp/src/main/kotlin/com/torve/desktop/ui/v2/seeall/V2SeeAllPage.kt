@@ -285,6 +285,9 @@ fun V2SeeAllPage(
             val key = request.sectionId.removePrefix("shelf:")
             SeeAllViewModel.pendingItems[key] = request.title to request.fallbackItems
         }
+        if (request.sectionId.startsWith("more_like_")) {
+            SeeAllViewModel.pendingItems[request.sectionId] = request.title to emptyList()
+        }
         viewModel.loadSection(request.sectionId)
         if (shouldInitializeSort) {
             viewModel.setSortMode(
