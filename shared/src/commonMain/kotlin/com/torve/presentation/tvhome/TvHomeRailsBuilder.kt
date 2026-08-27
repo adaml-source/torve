@@ -2,6 +2,7 @@ package com.torve.presentation.tvhome
 
 import com.torve.domain.model.EnrichedChannel
 import com.torve.domain.model.MediaItem
+import com.torve.domain.model.dedupeByStableKey
 import com.torve.domain.providerhealth.ProviderHealthEntry
 import com.torve.domain.providerhealth.ProviderHealthStatus
 import com.torve.domain.sourceavailability.SourceAvailabilityRecord
@@ -46,11 +47,20 @@ object TvHomeRailsBuilder {
         availability: Map<Int, SourceAvailabilityRecord>,
     ): List<MediaItem> {
         if (candidates.isEmpty() || availability.isEmpty()) return emptyList()
-        return candidates.filter { item ->
-            val tmdbId = item.tmdbId ?: return@filter false
-            val record = availability[tmdbId] ?: return@filter false
-            record.signals.any { it.isPlaybackPath() }
-        }
+        return candidates
+            .filter { item ->
+                val tmdbId = item.tmdbId ?: return@filter false
+                val record = availability[tmdbId] ?: return@filter false
+                record.signals.any { it.isPlaybackPath() }
+            }
+            // Home candidates are merged from Continue Watching, Watchlist,
+            // Recommendations, and Recently Watched. Those repositories can
+            // represent the same TMDB title with different local IDs, so an
+            // ID-only distinct operation still renders duplicate posters.
+            // MediaItem's stable key is type + TMDB ID (with local ID only as
+            // a fallback), which preserves caller order while merging any
+            // useful metadata carried by later copies.
+            .dedupeByStableKey()
     }
 
     /**
