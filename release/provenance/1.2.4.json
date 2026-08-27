@@ -1,12 +1,13 @@
 {
   "schema_version": 1,
   "version": "1.2.4",
-  "released_at_utc": "2026-08-26T18:48:04Z",
+  "build_number": 118,
+  "released_at_utc": "2026-08-27T12:57:42Z",
   "source": {
     "repository": "https://github.com/adaml-source/torve",
-    "commit": "beb02a31373e08cce3990536acf60cbad7dd9eca",
-    "tag": "v1.2.4",
-    "tag_url": "https://github.com/adaml-source/torve/tree/v1.2.4"
+    "commit": "c0edbbd46faa9ecf2cdbe3cb67ef00131986ed04",
+    "tag": "v1.2.4-build.118",
+    "tag_url": "https://github.com/adaml-source/torve/tree/v1.2.4-build.118"
   },
   "required_artifacts": [
     "amazon_tv_apk",
@@ -17,25 +18,28 @@
     {
       "id": "amazon_tv_apk",
       "local_path": "androidApp/build/outputs/apk/amazonTv/release/androidApp-amazon-tv-release.apk",
-      "public_url": "https://torve.app/downloads/android/torve-android-tv-1.2.4-20260826.apk",
-      "bytes": 92398249,
-      "sha256": "c0395a891099902f18b796b88c218dd9a89e115ef234cbb6ad9b2918ef852c5b",
+      "public_url": "https://torve.app/downloads/android/torve-android-tv-1.2.4-20118-20260827.apk",
+      "version_code": 20118,
+      "bytes": 92404653,
+      "sha256": "d6e137afc6c847e3842e926fdd5703efee4ec5aaf2598aa3e160cf2c57b00822",
       "signer_certificate_sha256": "cc4e51f3d775e199059f58b0c80444e7b9e8c86e23e3ed29d2332b485c73e2fa"
     },
     {
       "id": "google_tv_apk",
       "local_path": "androidApp/build/outputs/apk/googleTv/release/androidApp-google-tv-release.apk",
       "public_url": null,
-      "bytes": 94693901,
-      "sha256": "0298a60fde86b5e9ef6fe69d4e0dcf8c4fb01d8430dec9a5435c8681b29e2c9f",
+      "version_code": 20118,
+      "bytes": 94696809,
+      "sha256": "051370c22f666eeeed93a047caaa6e74caa4964047d1220f94bcb982cfd4b2d3",
       "signer_certificate_sha256": "cc4e51f3d775e199059f58b0c80444e7b9e8c86e23e3ed29d2332b485c73e2fa"
     },
     {
       "id": "google_mobile_apk",
       "local_path": "androidApp/build/outputs/apk/googleMobile/release/androidApp-google-mobile-release.apk",
       "public_url": null,
-      "bytes": 92965363,
-      "sha256": "e679929266788b33f4b38a8be61c255ce4bac933576a4e78273b9036042ae0c3",
+      "version_code": 10118,
+      "bytes": 92968131,
+      "sha256": "53ab75adb5b43265e3b91f171992e213b77e1a4b3bcbb9ecd90cf8ca5dbf0127",
       "signer_certificate_sha256": "cc4e51f3d775e199059f58b0c80444e7b9e8c86e23e3ed29d2332b485c73e2fa"
     }
   ]
