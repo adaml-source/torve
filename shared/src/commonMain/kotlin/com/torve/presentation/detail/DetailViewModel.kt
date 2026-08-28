@@ -272,6 +272,17 @@ class DetailViewModel(
         deviceCodecCaps = caps
     }
 
+    /**
+     * Loads the requested title only when this destination does not already
+     * own usable state for it. Navigation Compose may remove a details screen
+     * from composition while Player is above it; returning from Player must
+     * not clear and fetch the same title again before focus can be restored.
+     */
+    fun ensureDetailLoaded(type: String, id: Int) {
+        if (currentType == type && currentId == id && _state.value.mediaItem != null) return
+        loadDetail(type, id)
+    }
+
     fun loadDetail(type: String, id: Int) {
         detailLoadJob?.cancel()
         warmupJob?.cancel()

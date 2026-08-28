@@ -14,6 +14,21 @@ internal fun playbackReturnFocusRoute(
     else -> returnDestinationRoute
 }
 
+/**
+ * Combines the root focus-restoration epoch with the destination-owned player
+ * return epoch. A player OSD Stop can pop its route before Details is composed,
+ * so the destination epoch is stored on the Details back-stack entry. Keeping
+ * both epochs in the effect key prevents either owner from masking the other.
+ */
+internal fun playbackFocusRestoreEffectId(
+    rootRequestId: Int,
+    destinationRequestId: Int,
+): Long =
+    (rootRequestId.toLong() shl 32) or (destinationRequestId.toLong() and 0xffff_ffffL)
+
+internal fun nextPlaybackDestinationRequestId(current: Int): Int =
+    if (current == Int.MAX_VALUE) 1 else (current + 1).coerceAtLeast(1)
+
 internal fun didPlaybackReturnFocusReachContent(
     focusRoute: String,
     destinationHasFocus: Boolean,

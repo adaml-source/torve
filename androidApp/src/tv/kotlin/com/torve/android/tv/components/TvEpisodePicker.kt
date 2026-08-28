@@ -28,7 +28,9 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -50,6 +52,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
 import com.torve.android.R
+import com.torve.android.tv.focus.isTvPlaybackEpisodeFocusTargetReady
 import com.torve.android.ui.components.PreferredRatingPills
 import com.torve.android.ui.theme.*
 import com.torve.domain.model.Episode
@@ -120,6 +123,7 @@ fun TvEpisodePicker(
     val episodeRequesters = remember(selectedSeason, episodeNumbers) {
         episodeNumbers.associateWith { FocusRequester() }
     }
+    val composedEpisodeNumbers = remember(selectedSeason) { mutableStateListOf<Int>() }
     val fallbackEpisodeRequester = remember { FocusRequester() }
     val firstEpisodeRequester = episodeNumbers.firstOrNull()
         ?.let { episodeRequesters[it] }
@@ -163,11 +167,29 @@ fun TvEpisodePicker(
     androidx.compose.runtime.LaunchedEffect(restoreFocusEpisode, selectedSeason, episodeNumbers) {
         val episodeNumber = resolvedRestoreEpisodeNumber ?: return@LaunchedEffect
         val index = episodeNumbers.indexOf(episodeNumber)
-        val requester = episodeRequesters[episodeNumber]
-        if (index < 0 || requester == null) return@LaunchedEffect
+        if (index < 0) return@LaunchedEffect
 
         episodesListState.scrollToItem(index)
-        androidx.compose.runtime.withFrameNanos { }
+    }
+    val composedEpisodeSnapshot = composedEpisodeNumbers.toSet()
+    androidx.compose.runtime.LaunchedEffect(
+        restoreFocusEpisode,
+        selectedSeason,
+        resolvedRestoreEpisodeNumber,
+        composedEpisodeSnapshot,
+    ) {
+        val episodeNumber = resolvedRestoreEpisodeNumber ?: return@LaunchedEffect
+        if (
+            !isTvPlaybackEpisodeFocusTargetReady(
+                requestedEpisode = restoreFocusEpisode,
+                selectedSeason = selectedSeason,
+                resolvedEpisodeNumber = episodeNumber,
+                composedEpisodeNumbers = composedEpisodeSnapshot,
+            )
+        ) {
+            return@LaunchedEffect
+        }
+        val requester = episodeRequesters[episodeNumber] ?: return@LaunchedEffect
         runCatching { requester.requestFocus() }
     }
     androidx.compose.runtime.LaunchedEffect(autoFocusFirstSeason) {
@@ -271,6 +293,14 @@ fun TvEpisodePicker(
                         items = selectedSeasonDetail.episodes,
                         key = { _, ep -> "ep_${selectedSeason}_${ep.episodeNumber}" },
                     ) { index, episode ->
+                        DisposableEffect(selectedSeason, episode.episodeNumber) {
+                            if (episode.episodeNumber !in composedEpisodeNumbers) {
+                                composedEpisodeNumbers.add(episode.episodeNumber)
+                            }
+                            onDispose {
+                                composedEpisodeNumbers.remove(episode.episodeNumber)
+                            }
+                        }
                         val episodeRequester = episodeRequesters[episode.episodeNumber]
                             ?: fallbackEpisodeRequester
                         val episodeKey = "s${selectedSeason}e${episode.episodeNumber}"

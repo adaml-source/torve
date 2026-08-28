@@ -9,6 +9,22 @@ import org.junit.Test
 class TvPlaybackFocusRestorePolicyTest {
 
     @Test
+    fun destinationOwnedStopSignalCannotBeMaskedByRootEpoch() {
+        val first = playbackFocusRestoreEffectId(
+            rootRequestId = 42,
+            destinationRequestId = 1,
+        )
+        val second = playbackFocusRestoreEffectId(
+            rootRequestId = 42,
+            destinationRequestId = 2,
+        )
+
+        assertFalse(first == second)
+        assertEquals(1, nextPlaybackDestinationRequestId(Int.MAX_VALUE))
+        assertEquals(8, nextPlaybackDestinationRequestId(7))
+    }
+
+    @Test
     fun capturedReturnRouteTargetsDetailsEvenWhenPlayerPopHasNotSettled() {
         assertEquals(
             TvRoutes.DETAILS,

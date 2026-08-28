@@ -181,15 +181,17 @@ fun TvDetailsScreen(
     onFirstContentRequester: (FocusRequester) -> Unit,
     onContentFocused: (FocusRequester) -> Unit,
     onContentFocusStateChanged: (Boolean) -> Unit = {},
-    playbackFocusRestoreRequestId: Int = 0,
+    playbackFocusRestoreRequestId: Long = 0L,
+    playbackFocusRestoreSeason: Int? = null,
+    playbackFocusRestoreEpisode: Int? = null,
     onMediaClick: (MediaItem) -> Unit = {},
     onCastClick: (castId: Int, castName: String) -> Unit = { _, _ -> },
     onSettingsClick: () -> Unit = {},
     onLibraryAutomationClick: () -> Unit = {},
     onRequestLifetimeUnlock: (TvEntitledFeature) -> Unit = {},
     onWatchedStatusChanged: (MediaItem, Boolean) -> Unit = { _, _ -> },
+    detailViewModel: DetailViewModel = koinInject(),
 ) {
-    val detailViewModel: DetailViewModel = koinInject()
     val metadataRepository: MetadataRepository = koinInject()
     val settingsViewModel: SettingsViewModel = koinInject()
     val watchlistViewModel: WatchlistViewModel = koinInject()
@@ -279,6 +281,9 @@ fun TvDetailsScreen(
     var pendingEpisodeFocusRestore by remember(type, id) { mutableStateOf<Pair<Int, Int>?>(null) }
     var playbackOriginSeason by rememberSaveable(type, id) { mutableIntStateOf(-1) }
     var playbackOriginEpisode by rememberSaveable(type, id) { mutableIntStateOf(-1) }
+    var lastHandledPlaybackFocusRestoreRequestId by rememberSaveable(type, id) {
+        mutableLongStateOf(0L)
+    }
     var initialPlayFocusAssigned by rememberSaveable(type, id) { mutableStateOf(false) }
     var restorePlayFocusAfterSourceDismiss by remember { mutableStateOf(false) }
     val showCinematicSourceLoading = state.shouldShowCinematicSourceLoading(
@@ -373,7 +378,7 @@ fun TvDetailsScreen(
     }
 
     LaunchedEffect(type, id) {
-        detailViewModel.loadDetail(type, id)
+        detailViewModel.ensureDetailLoaded(type, id)
         mediaFavoritesRepository.refresh(force = true)
     }
 
@@ -410,12 +415,18 @@ fun TvDetailsScreen(
     // primary Play action. Scrolling makes the target compose before focus is
     // requested, without lifecycle timing delays.
     LaunchedEffect(playbackFocusRestoreRequestId, state.mediaItem?.id) {
-        if (playbackFocusRestoreRequestId <= 0) return@LaunchedEffect
+        if (
+            playbackFocusRestoreRequestId <= 0L ||
+            playbackFocusRestoreRequestId == lastHandledPlaybackFocusRestoreRequestId
+        ) {
+            return@LaunchedEffect
+        }
         val item = state.mediaItem ?: return@LaunchedEffect
+        lastHandledPlaybackFocusRestoreRequestId = playbackFocusRestoreRequestId
         val restoreTarget = resolveTvDetailsPlaybackReturnTarget(
             isSeries = item.type == MediaType.SERIES,
-            originSeason = playbackOriginSeason,
-            originEpisode = playbackOriginEpisode,
+            originSeason = playbackFocusRestoreSeason ?: playbackOriginSeason,
+            originEpisode = playbackFocusRestoreEpisode ?: playbackOriginEpisode,
         )
         if (restoreTarget is TvDetailsPlaybackReturnTarget.PrimaryAction) {
             listState.scrollToItem(0)

@@ -3,6 +3,7 @@ package com.torve.android.tv.nav
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
@@ -23,6 +24,8 @@ import androidx.navigation.navArgument
 import com.torve.android.tv.TvScreenCache
 import com.torve.android.tv.TvNotificationQueue
 import com.torve.android.tv.focus.TvScreenFocusHandle
+import com.torve.android.tv.focus.nextPlaybackDestinationRequestId
+import com.torve.android.tv.focus.playbackFocusRestoreEffectId
 import com.torve.android.tv.screens.TvDetailsScreen
 import com.torve.android.tv.screens.TvDeviceLimitReachedScreen
 import com.torve.android.tv.screens.TvBugReportScreen
@@ -44,12 +47,26 @@ import com.torve.domain.model.MediaType
 import com.torve.domain.model.WatchProgress
 import com.torve.domain.model.extractTmdbIdOrNull
 import com.torve.domain.repository.WatchProgressRepository
+import com.torve.presentation.detail.DetailViewModel
 import kotlinx.coroutines.launch
 import org.koin.compose.koinInject
 
 private const val TV_STREAM_RESOLVING_NOTIFICATION_TAG = "tv_stream_resolving"
 private const val TV_RESUME_MIN_POSITION_MS = 20_000L
 private const val TV_RESUME_MAX_PROGRESS = 0.85
+private const val TV_PLAYBACK_RETURN_REQUEST_ID = "tv_playback_return_request_id"
+private const val TV_PLAYBACK_RETURN_SEASON = "tv_playback_return_season"
+private const val TV_PLAYBACK_RETURN_EPISODE = "tv_playback_return_episode"
+
+private fun androidx.lifecycle.SavedStateHandle.queuePlaybackFocusRestore(
+    seasonNumber: Int?,
+    episodeNumber: Int?,
+) {
+    val current = get<Int>(TV_PLAYBACK_RETURN_REQUEST_ID) ?: 0
+    set(TV_PLAYBACK_RETURN_SEASON, seasonNumber ?: -1)
+    set(TV_PLAYBACK_RETURN_EPISODE, episodeNumber ?: -1)
+    set(TV_PLAYBACK_RETURN_REQUEST_ID, nextPlaybackDestinationRequestId(current))
+}
 
 private fun ActivePlaybackSession.tvPlayerRoute(): String = if (ActivePlaybackState.isLiveSession) {
     TvRoutes.livePlayer(
@@ -136,6 +153,15 @@ internal fun TvNavHost(
 ) {
     val watchProgressRepo: WatchProgressRepository = koinInject()
     val navScope = rememberCoroutineScope()
+    val detailViewModelStore = androidx.compose.runtime.remember {
+        TvRetainedDestinationStore<String, DetailViewModel>(
+            maxEntries = 6,
+            onRelease = DetailViewModel::clear,
+        )
+    }
+    DisposableEffect(detailViewModelStore) {
+        onDispose { detailViewModelStore.clear() }
+    }
     val currentBackStackEntry = navController.currentBackStackEntryAsState().value
     val currentRoute = currentBackStackEntry?.destination?.route
     val returnToPlayerRequestId = ActivePlaybackState.returnToPlayerRequestId
@@ -402,6 +428,25 @@ internal fun TvNavHost(
             val autoPlay = backStackEntry.arguments?.getBoolean("autoPlay") ?: false
             val handoffPositionMs = backStackEntry.arguments?.getLong("handoffPositionMs") ?: 0L
             val focusEpisodes = backStackEntry.arguments?.getBoolean("focusEpisodes") ?: false
+            val destinationPlaybackRestoreRequestId = backStackEntry.savedStateHandle
+                .getStateFlow(TV_PLAYBACK_RETURN_REQUEST_ID, 0)
+                .collectAsState()
+                .value
+            val destinationPlaybackRestoreSeason = backStackEntry.savedStateHandle
+                .getStateFlow(TV_PLAYBACK_RETURN_SEASON, -1)
+                .collectAsState()
+                .value
+                .takeIf { it > 0 }
+            val destinationPlaybackRestoreEpisode = backStackEntry.savedStateHandle
+                .getStateFlow(TV_PLAYBACK_RETURN_EPISODE, -1)
+                .collectAsState()
+                .value
+                .takeIf { it > 0 }
+            val detailViewModel = androidx.compose.runtime.remember(backStackEntry.id) {
+                detailViewModelStore.getOrPut(backStackEntry.id) {
+                    org.koin.java.KoinJavaComponent.getKoin().get<DetailViewModel>()
+                }
+            }
             TvDetailsScreen(
                 type = detailType,
                 id = detailId,
@@ -412,7 +457,12 @@ internal fun TvNavHost(
                 onFirstContentRequester = { onFirstContentRequester(TvRoutes.DETAILS, it) },
                 onContentFocused = { onContentFocused(TvRoutes.DETAILS, it) },
                 onContentFocusStateChanged = onDetailsContentFocusStateChanged,
-                playbackFocusRestoreRequestId = playbackFocusRestoreRequestId,
+                playbackFocusRestoreRequestId = playbackFocusRestoreEffectId(
+                    rootRequestId = playbackFocusRestoreRequestId,
+                    destinationRequestId = destinationPlaybackRestoreRequestId,
+                ),
+                playbackFocusRestoreSeason = destinationPlaybackRestoreSeason,
+                playbackFocusRestoreEpisode = destinationPlaybackRestoreEpisode,
                 onMediaClick = { item -> navController.navigateToTvDetails(item) },
                 onSettingsClick = {
                     // Focus state cleanup handled in TvRoot via isSubRouteActive LaunchedEffect
@@ -424,6 +474,7 @@ internal fun TvNavHost(
                 },
                 onRequestLifetimeUnlock = onRequestLifetimeUnlock,
                 onWatchedStatusChanged = onWatchedStatusChanged,
+                detailViewModel = detailViewModel,
                 onCastClick = { castId, castName ->
                     navController.navigate(
                         TvRoutes.seeAll(
@@ -558,17 +609,33 @@ internal fun TvNavHost(
                         }
                     },
                     onBack = {
-                        val returnRoute = navController.previousBackStackEntry?.destination?.route
-                        navController.popBackStack()
+                        val returnEntry = navController.previousBackStackEntry
+                        val returnRoute = returnEntry?.destination?.route
                         // Exo playback deliberately hands focus to the retained
                         // playback card. MPV/non-retained exits have no such
                         // owner, so restore the originating details control.
+                        if (ActivePlaybackState.session == null) {
+                            returnEntry?.savedStateHandle?.queuePlaybackFocusRestore(
+                                seasonNumber = backStackEntry.arguments?.getInt("seasonNumber")
+                                    ?.takeIf { it > 0 },
+                                episodeNumber = backStackEntry.arguments?.getInt("episodeNumber")
+                                    ?.takeIf { it > 0 },
+                            )
+                        }
+                        navController.popBackStack()
                         if (ActivePlaybackState.session == null) {
                             onPlaybackFocusRestoreRequest(returnRoute)
                         }
                     },
                     onStop = {
-                        val returnRoute = navController.previousBackStackEntry?.destination?.route
+                        val returnEntry = navController.previousBackStackEntry
+                        val returnRoute = returnEntry?.destination?.route
+                        returnEntry?.savedStateHandle?.queuePlaybackFocusRestore(
+                            seasonNumber = backStackEntry.arguments?.getInt("seasonNumber")
+                                ?.takeIf { it > 0 },
+                            episodeNumber = backStackEntry.arguments?.getInt("episodeNumber")
+                                ?.takeIf { it > 0 },
+                        )
                         navController.popBackStack()
                         onPlaybackFocusRestoreRequest(returnRoute)
                     },

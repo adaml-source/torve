@@ -16,3 +16,13 @@ internal fun resolveTvDetailsPlaybackReturnTarget(
         TvDetailsPlaybackReturnTarget.PrimaryAction
     }
 }
+
+internal fun isTvPlaybackEpisodeFocusTargetReady(
+    requestedEpisode: Pair<Int, Int>?,
+    selectedSeason: Int,
+    resolvedEpisodeNumber: Int?,
+    composedEpisodeNumbers: Set<Int>,
+): Boolean =
+    requestedEpisode?.first == selectedSeason &&
+        resolvedEpisodeNumber != null &&
+        resolvedEpisodeNumber in composedEpisodeNumbers
