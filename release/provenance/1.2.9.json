@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "version": "1.2.9",
+  "build_number": 125,
+  "released_at_utc": "2026-08-28T14:14:43Z",
+  "source": {
+    "repository": "https://github.com/adaml-source/torve",
+    "commit": "e22462f4b6190993600fe9198aec297089533bd3",
+    "tag": "v1.2.9-build.125",
+    "tag_url": "https://github.com/adaml-source/torve/tree/v1.2.9-build.125"
+  },
+  "required_artifacts": [
+    "amazon_tv_apk"
+  ],
+  "artifacts": [
+    {
+      "id": "amazon_tv_apk",
+      "local_path": "androidApp/build/outputs/apk/amazonTv/release/androidApp-amazon-tv-release.apk",
+      "public_url": "https://torve.app/downloads/android/torve-android-tv-1.2.9-20125-20260828.apk",
+      "version_code": 20125,
+      "bytes": 92454001,
+      "sha256": "8785ed969c92d0769fa09dce107033813bfddb4891bb76da6a1859912573aeea",
+      "signer_certificate_sha256": "cc4e51f3d775e199059f58b0c80444e7b9e8c86e23e3ed29d2332b485c73e2fa"
+    }
+  ]
+}
