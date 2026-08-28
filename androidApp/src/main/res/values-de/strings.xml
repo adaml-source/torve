@@ -2208,6 +2208,7 @@
     <string name="app_update_download_failed">Das Update konnte nicht heruntergeladen oder überprüft werden. Bitte versuche es erneut.</string>
     <string name="app_update_retry">Wiederholen</string>
     <string name="app_update_resolving">Signiertes Torve-%1$s-Update wird vorbereitet…</string>
+    <string name="app_update_open_installer">Installationsprogramm öffnen</string>
     <string name="app_update_network_failed">Der Download des Updates wurde durch einen Netzwerkfehler unterbrochen. Prüfe die Verbindung und versuche es erneut.</string>
     <string name="app_update_http_failed">Der Update-Server hat keine APK zurückgegeben. Bitte versuche es in Kürze erneut.</string>
     <string name="app_update_invalid_asset">Der Release-Server hat eine ungültige Update-Datei zurückgegeben. Torve hat sie nicht installiert.</string>

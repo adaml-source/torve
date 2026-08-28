@@ -2208,6 +2208,7 @@
     <string name="app_update_download_failed">La mise à jour n’a pas pu être téléchargée ou vérifiée. Réessayez.</string>
     <string name="app_update_retry">Réessayer</string>
     <string name="app_update_resolving">Préparation de la mise à jour signée Torve %1$s…</string>
+    <string name="app_update_open_installer">Ouvrir le programme d’installation</string>
     <string name="app_update_network_failed">Le téléchargement de la mise à jour a été interrompu par une erreur réseau. Vérifiez la connexion et réessayez.</string>
     <string name="app_update_http_failed">Le serveur de mise à jour n’a pas renvoyé l’APK. Réessayez dans quelques instants.</string>
     <string name="app_update_invalid_asset">Le serveur de versions a renvoyé un fichier de mise à jour non valide. Torve ne l’a pas installé.</string>

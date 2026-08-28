@@ -195,6 +195,7 @@ class AppUpdateActivity : AppCompatActivity() {
     private var update: AvailableAppUpdate? = null
     private var updaterState by mutableStateOf(AppUpdaterState())
     private var downloadJob: Job? = null
+    private var awaitingInstallerReturn = false
     private val attemptMutex = Mutex()
 
     private val unknownSourcesLauncher = registerForActivityResult(
@@ -255,6 +256,21 @@ class AppUpdateActivity : AppCompatActivity() {
             }
         }
         startAttempt(refreshMetadata = false, cleanAttempt = false)
+    }
+
+    override fun onResume() {
+        super.onResume()
+        if (!awaitingInstallerReturn) return
+        awaitingInstallerReturn = false
+        val apk = updaterState.verifiedApk
+        if (apk == null || !apk.isFile) {
+            fail(UpdateFailureReason.INVALID_APK)
+            return
+        }
+        updaterState = updaterState.copy(
+            phase = UpdaterPhase.READY_TO_INSTALL,
+            requiresInstallPermission = !canRequestPackageInstalls(),
+        )
     }
 
     private fun startAttempt(refreshMetadata: Boolean, cleanAttempt: Boolean) {
@@ -320,11 +336,12 @@ class AppUpdateActivity : AppCompatActivity() {
                         progress = 1f,
                         verifiedApk = apk,
                     )
-                    if (canRequestPackageInstalls()) {
-                        openSystemInstaller(apk)
-                    } else {
-                        updaterState = updaterState.copy(requiresInstallPermission = true)
-                    }
+                    // Fire OS does not expose an app in "Install unknown apps"
+                    // until that app has actually attempted an APK install.
+                    // Let the system installer own the permission prompt first;
+                    // if it returns without installing, onResume exposes the
+                    // recoverable permission/installer action.
+                    openSystemInstaller(apk)
                 } catch (cancelled: CancellationException) {
                     throw cancelled
                 } catch (error: Throwable) {
@@ -341,6 +358,8 @@ class AppUpdateActivity : AppCompatActivity() {
                 startAttempt(refreshMetadata = true, cleanAttempt = true)
             updaterState.phase == UpdaterPhase.READY_TO_INSTALL && updaterState.requiresInstallPermission ->
                 openUnknownSourcesSettings()
+            updaterState.phase == UpdaterPhase.READY_TO_INSTALL ->
+                updaterState.verifiedApk?.let(::openSystemInstaller)
         }
     }
 
@@ -387,15 +406,16 @@ class AppUpdateActivity : AppCompatActivity() {
         val installIntent = Intent(Intent.ACTION_VIEW).apply {
             setDataAndType(uri, APK_MIME_TYPE)
             clipData = ClipData.newRawUri("Torve update", uri)
-            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         }
+        awaitingInstallerReturn = true
         runCatching { startActivity(installIntent) }
             .onSuccess {
                 Log.i(TAG, "event=installer_intent_accepted package=$packageName")
                 updaterState = updaterState.copy(phase = UpdaterPhase.INSTALLER_LAUNCHED)
-                finish()
             }
             .onFailure { error ->
+                awaitingInstallerReturn = false
                 Log.e(TAG, "event=installer_intent_failed", error)
                 fail(UpdateFailureReason.INSTALLER_UNAVAILABLE)
             }
@@ -449,10 +469,19 @@ class AppUpdateActivity : AppCompatActivity() {
     }
 }
 
-private enum class UpdateAction {
+internal enum class UpdateAction {
     NONE,
     RETRY,
     ALLOW_INSTALLATION,
+    OPEN_INSTALLER,
+}
+
+internal fun AppUpdaterState.updateAction(): UpdateAction = when {
+    phase == UpdaterPhase.FAILED -> UpdateAction.RETRY
+    phase == UpdaterPhase.READY_TO_INSTALL && requiresInstallPermission ->
+        UpdateAction.ALLOW_INSTALLATION
+    phase == UpdaterPhase.READY_TO_INSTALL -> UpdateAction.OPEN_INSTALLER
+    else -> UpdateAction.NONE
 }
 
 @Composable
@@ -462,12 +491,7 @@ private fun UpdateInstallScreen(
     onPrimaryAction: () -> Unit,
     onBack: () -> Unit,
 ) {
-    val action = when {
-        state.phase == UpdaterPhase.FAILED -> UpdateAction.RETRY
-        state.phase == UpdaterPhase.READY_TO_INSTALL && state.requiresInstallPermission ->
-            UpdateAction.ALLOW_INSTALLATION
-        else -> UpdateAction.NONE
-    }
+    val action = state.updateAction()
     val actionRequester = remember { FocusRequester() }
     LaunchedEffect(action) {
         if (action != UpdateAction.NONE) actionRequester.requestFocus()
@@ -520,7 +544,11 @@ private fun UpdateInstallScreen(
                             Text(
                                 stringResource(
                                     if (action == UpdateAction.RETRY) R.string.app_update_retry
-                                    else R.string.app_update_allow_installation,
+                                    else if (action == UpdateAction.ALLOW_INSTALLATION) {
+                                        R.string.app_update_allow_installation
+                                    } else {
+                                        R.string.app_update_open_installer
+                                    },
                                 ),
                             )
                         }

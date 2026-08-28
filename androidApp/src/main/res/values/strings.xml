@@ -1801,6 +1801,7 @@
     <string name="app_update_permission_required">Allow Torve to install this signed update, then return to continue.</string>
     <string name="app_update_allow_installation">Allow installation</string>
     <string name="app_update_opening_installer">Opening the system installer…</string>
+    <string name="app_update_open_installer">Open installer</string>
     <string name="app_update_download_failed">The update could not be downloaded or verified. Please try again.</string>
     <string name="app_update_network_failed">The update download was interrupted by a network error. Check the connection and try again.</string>
     <string name="app_update_http_failed">The update server did not return the APK. Please try again shortly.</string>

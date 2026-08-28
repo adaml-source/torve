@@ -2180,6 +2180,7 @@
     <string name="app_update_download_failed">No se pudo descargar o verificar la actualización. Inténtalo de nuevo.</string>
     <string name="app_update_retry">Reintentar</string>
     <string name="app_update_resolving">Preparando la actualización firmada de Torve %1$s…</string>
+    <string name="app_update_open_installer">Abrir instalador</string>
     <string name="app_update_network_failed">La descarga de la actualización se interrumpió por un error de red. Comprueba la conexión e inténtalo de nuevo.</string>
     <string name="app_update_http_failed">El servidor de actualizaciones no devolvió el APK. Vuelve a intentarlo en breve.</string>
     <string name="app_update_invalid_asset">El servidor de versiones devolvió un archivo de actualización no válido. Torve no lo instaló.</string>

@@ -150,6 +150,32 @@ class AppUpdateVerificationTest {
     }
 
     @Test
+    fun readyStateAlwaysExposesARecoverableInstallerAction() {
+        assertEquals(
+            UpdateAction.ALLOW_INSTALLATION,
+            AppUpdaterState(
+                phase = UpdaterPhase.READY_TO_INSTALL,
+                requiresInstallPermission = true,
+            ).updateAction(),
+        )
+        assertEquals(
+            UpdateAction.OPEN_INSTALLER,
+            AppUpdaterState(
+                phase = UpdaterPhase.READY_TO_INSTALL,
+                requiresInstallPermission = false,
+            ).updateAction(),
+        )
+        assertEquals(
+            UpdateAction.RETRY,
+            AppUpdaterState(phase = UpdaterPhase.FAILED).updateAction(),
+        )
+        assertEquals(
+            UpdateAction.NONE,
+            AppUpdaterState(phase = UpdaterPhase.DOWNLOADING).updateAction(),
+        )
+    }
+
+    @Test
     fun debugDiagnosticsExposePrefixesAndTypedReasonWithoutUrlSecrets() {
         val diagnostics = UpdateDiagnostics(
             requestedUrl = redactUpdateUrl(update.downloadUrl + "?token=secret"),
