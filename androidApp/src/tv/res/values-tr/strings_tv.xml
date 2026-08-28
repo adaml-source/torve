@@ -538,4 +538,7 @@
     <string name="tv_unlock_go_to_premium">Devam et</string>
     <string name="tv_settings_account_refreshed_epg_hint">Hesap kurulumu yenilendi. Kanallar veya rehber verileri hâlâ eksikse Ayarlar &gt; Kanallar\'ı açın ve EPG\'yi Yenile\'yi seçin.</string>
     <string name="tv_update_available">Torve %1$s kullanıma sunuldu ve indirilmeye hazır.</string>
+    <string name="tv_settings_refresh_channels_title">Kanalları yenile</string>
+    <string name="tv_settings_refresh_channels_subtitle">Program rehberini almadan kanal listesini yeniden indir</string>
+    <string name="tv_settings_refresh_channels_started">Kanal yenileme başlatıldı</string>
 </resources>

@@ -7,6 +7,7 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Build
+import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
@@ -41,6 +42,8 @@ internal data class AvailableAppUpdate(
     val sizeBytes: Long,
     val versionCode: Long = 0L,
 )
+
+internal const val APP_UPDATE_MANIFEST_URL = "https://torve.app/downloads/releases.json"
 
 internal fun usesVpsReleaseUpdates(flavor: String): Boolean =
     flavor.contains("amazon", ignoreCase = true) && flavor.contains("tv", ignoreCase = true)
@@ -116,6 +119,7 @@ internal fun parseAvailableUpdateStrict(
     val sha256 = entry["sha256"]?.jsonPrimitive?.contentOrNull?.trim()?.lowercase().orEmpty()
     val sizeBytes = entry["size_bytes"]?.jsonPrimitive?.longOrNull ?: 0L
     if (
+        versionCode <= 0L ||
         !isTrustedUpdateUrl(downloadUrl) ||
         !sha256.matches(Regex("^[0-9a-f]{64}$")) ||
         sizeBytes <= 0L
@@ -131,24 +135,19 @@ internal fun parseAvailableUpdateStrict(
 }
 
 internal object AppUpdateChecker {
-    private const val RELEASE_MANIFEST_URL = "https://torve.app/downloads/releases.json"
-
     suspend fun checkForUpdate(): AvailableAppUpdate? = withContext(Dispatchers.IO) {
         if (!usesVpsReleaseUpdates(BuildConfig.FLAVOR)) return@withContext null
-        val connection = (URL(RELEASE_MANIFEST_URL).openConnection() as HttpURLConnection).apply {
-            connectTimeout = 8_000
-            readTimeout = 8_000
-            requestMethod = "GET"
-            setRequestProperty("Accept", "application/json")
-            // The VPS deliberately serves a short cache lifetime. Explicit revalidation
-            // prevents an older local HTTP cache from hiding a newly uploaded release.
-            setRequestProperty("Cache-Control", "no-cache")
-            useCaches = false
-        }
+        val connection = openManifestConnection()
         try {
             if (connection.responseCode !in 200..299) {
                 throw IOException("Release manifest returned HTTP ${connection.responseCode}")
             }
+            Log.i(
+                "TorveUpdate",
+                "event=manifest_response requested=${redactUpdateUrl(APP_UPDATE_MANIFEST_URL)} " +
+                    "final=${redactUpdateUrl(connection.url.toString())} http=${connection.responseCode} " +
+                    "content_type=${connection.contentType ?: "-"} declared_bytes=${connection.contentLengthLong}",
+            )
             val manifest = connection.inputStream.bufferedReader().use { it.readText() }
             parseAvailableUpdateStrict(
                 manifest = manifest,
@@ -160,13 +159,41 @@ internal object AppUpdateChecker {
             connection.disconnect()
         }
     }
+
+    private fun openManifestConnection(): HttpURLConnection {
+        var currentUrl = URL(APP_UPDATE_MANIFEST_URL)
+        repeat(9) { redirectCount ->
+            val connection = (currentUrl.openConnection() as HttpURLConnection).apply {
+                connectTimeout = 8_000
+                readTimeout = 8_000
+                requestMethod = "GET"
+                instanceFollowRedirects = false
+                setRequestProperty("Accept", "application/json")
+                setRequestProperty("Cache-Control", "no-cache")
+                useCaches = false
+            }
+            val status = connection.responseCode
+            if (!isUpdateRedirectStatus(status)) return connection
+            val location = connection.getHeaderField("Location")?.trim().orEmpty()
+            connection.disconnect()
+            if (location.isBlank() || redirectCount >= 8) {
+                throw IOException("Release manifest redirect failed")
+            }
+            val redirected = URL(currentUrl, location)
+            if (!isTrustedUpdateUrl(redirected.toString())) {
+                throw IOException("Release manifest redirected to an untrusted host")
+            }
+            currentUrl = redirected
+        }
+        throw IOException("Release manifest redirect limit exceeded")
+    }
 }
 
 internal object AppUpdateNotifier {
     private const val CHANNEL_ID = "app_updates"
     private const val NOTIFICATION_ID = 1104
     private const val PREFS_NAME = "app_update_notifications"
-    private const val LAST_NOTIFIED_VERSION = "last_notified_version"
+    private const val LAST_NOTIFIED_RELEASE = "last_notified_release"
 
     @Synchronized
     fun showSystemNotificationIfNew(context: Context, update: AvailableAppUpdate): Boolean {
@@ -175,7 +202,8 @@ internal object AppUpdateNotifier {
         AppUpdateHandoffStore(context).save(update)
         if (!hasNotificationPermission(context)) return false
         val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        if (prefs.getString(LAST_NOTIFIED_VERSION, null) == update.version) return false
+        val releaseIdentity = "${update.version}:${update.versionCode}"
+        if (prefs.getString(LAST_NOTIFIED_RELEASE, null) == releaseIdentity) return false
 
         ensureChannel(context)
         val downloadAndInstall = PendingIntent.getActivity(
@@ -205,7 +233,7 @@ internal object AppUpdateNotifier {
 
         return try {
             NotificationManagerCompat.from(context).notify(NOTIFICATION_ID, notification)
-            prefs.edit().putString(LAST_NOTIFIED_VERSION, update.version).apply()
+        prefs.edit().putString(LAST_NOTIFIED_RELEASE, releaseIdentity).apply()
             true
         } catch (_: SecurityException) {
             false
@@ -236,8 +264,11 @@ class AppUpdateWorker(
 ) : CoroutineWorker(context, params) {
     override suspend fun doWork(): Result = try {
         if (!usesVpsReleaseUpdates(BuildConfig.FLAVOR)) return Result.success()
-        AppUpdateChecker.checkForUpdate()?.let { update ->
+        val update = AppUpdateChecker.checkForUpdate()
+        if (update != null) {
             AppUpdateNotifier.showSystemNotificationIfNew(applicationContext, update)
+        } else {
+            AppUpdateDownloader.cleanupInstalledUpdateFiles(applicationContext)
         }
         Result.success()
     } catch (_: Exception) {

@@ -84,6 +84,15 @@ foreach ($artifact in @($provenance.artifacts)) {
     if ([long]$artifact.bytes -le 0) {
         throw "Artifact $id must have a positive byte length."
     }
+    if ($id -eq 'amazon_tv_apk') {
+        if ([long]$artifact.version_code -le 0L) {
+            throw "Artifact $id must declare a positive Android version_code."
+        }
+        $signerFingerprint = ([string]$artifact.signer_certificate_sha256).ToLowerInvariant()
+        if ($signerFingerprint -notmatch '^[0-9a-f]{64}$') {
+            throw "Artifact $id must declare the production signer certificate SHA-256 fingerprint."
+        }
+    }
 
     $publicUrl = [string]$artifact.public_url
     if (-not [string]::IsNullOrWhiteSpace($publicUrl)) {

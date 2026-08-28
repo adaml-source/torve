@@ -5,6 +5,8 @@ import android.content.Intent
 import android.net.Uri
 import android.util.Log
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatDelegate
 import androidx.core.content.pm.PackageInfoCompat
 import androidx.core.os.LocaleListCompat
@@ -180,7 +182,6 @@ private data class TvSettingsFocusMoveRequest(
     val nonce: Int,
     val target: TvSettingsFocusMoveTarget,
     val category: TvSettingsCategory? = null,
-    val delayMs: Long = 50L,
 )
 
 private data class PendingSuggestedAddonInstallRestore(
@@ -510,6 +511,15 @@ internal fun TvSettingsScreen(
     }
     val selectedCategory = settingsFocusController.selectedCategory
     val settingsListState = rememberLazyListState()
+    val appUpdateLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult(),
+    ) {
+        settingsFocusController.requestRestore(
+            itemId = TvSettingsItemIds.ABOUT_CHECK_FOR_UPDATES,
+            reason = "app_update_return",
+            outerListState = settingsListState,
+        )
+    }
     LaunchedEffect(selectedCategory, providerHealthAutoRefreshStarted) {
         if (providerHealthAutoRefreshStarted) return@LaunchedEffect
         if (selectedCategory != TvSettingsCategory.ADVANCED &&
@@ -2195,20 +2205,46 @@ internal fun TvSettingsScreen(
         val request = pendingFocusMove ?: return@LaunchedEffect
         try {
             settingsListState.scrollToItem(0)
-            if (request.delayMs > 0) {
-                kotlinx.coroutines.delay(request.delayMs)
+            // Category changes replace the detail subtree. Wait for attachment by
+            // observing Compose frames, not by guessing a device-dependent delay.
+            repeat(12) {
+                withFrameNanos { }
+                if (pendingFocusMove?.nonce != request.nonce) return@LaunchedEffect
+                val requester = when (request.target) {
+                    TvSettingsFocusMoveTarget.SELECTED_CATEGORY_CHIP -> selectedCategoryFocusRequester
+                    TvSettingsFocusMoveTarget.CATEGORY_CHIP -> categoryRequesters.getValue(
+                        request.category ?: selectedCategory,
+                    )
+                    TvSettingsFocusMoveTarget.CATEGORY_DETAIL -> detailRequesterForCategory(
+                        request.category ?: selectedCategory,
+                    )
+                }
+                runCatching { requester.requestFocus() }
+                withFrameNanos { }
+                val targetCategory = request.category ?: selectedCategory
+                val reachedTarget = when (request.target) {
+                    TvSettingsFocusMoveTarget.CATEGORY_DETAIL ->
+                        settingsFocusController.focusedTarget()?.category == targetCategory
+                    TvSettingsFocusMoveTarget.SELECTED_CATEGORY_CHIP,
+                    TvSettingsFocusMoveTarget.CATEGORY_CHIP ->
+                        categoryPaneHasFocus && selectedCategory == targetCategory
+                }
+                if (reachedTarget) {
+                    return@LaunchedEffect
+                }
             }
-            val requester = when (request.target) {
-                TvSettingsFocusMoveTarget.SELECTED_CATEGORY_CHIP -> selectedCategoryFocusRequester
-                TvSettingsFocusMoveTarget.CATEGORY_CHIP -> categoryRequesters.getValue(
-                    request.category ?: selectedCategory,
-                )
-                TvSettingsFocusMoveTarget.CATEGORY_DETAIL -> detailRequesterForCategory(
-                    request.category ?: selectedCategory,
-                )
+            Log.w(
+                "TvSettings",
+                "Focus target was not attached target=${request.target} " +
+                    "category=${request.category ?: selectedCategory}",
+            )
+            val categoryFallback = categoryRequesters.getValue(request.category ?: selectedCategory)
+            runCatching { categoryFallback.requestFocus() }
+            withFrameNanos { }
+            if (!categoryPaneHasFocus) {
+                // Absolute invariant fallback: never leave the TV with no focus owner.
+                runCatching { railFocusRequester.requestFocus() }
             }
-            runCatching { requester.requestFocus() }
-                .onFailure { Log.w("TvSettings", "Deferred focus request failed for target=${request.target} category=${request.category ?: selectedCategory}: ${it.message}") }
         } finally {
             if (pendingFocusMove?.nonce == request.nonce) {
                 pendingFocusMove = null
@@ -2371,13 +2407,12 @@ internal fun TvSettingsScreen(
                                             return@onPreviewKeyEvent false
                                         }
                                         val targetCategory = categoryOrder[targetIndex]
-                                        settingsFocusController.selectedCategory = targetCategory
+                                        settingsFocusController.beginCategorySwitch(targetCategory)
                                         focusMoveNonce += 1
                                         pendingFocusMove = TvSettingsFocusMoveRequest(
                                             nonce = focusMoveNonce,
                                             target = TvSettingsFocusMoveTarget.CATEGORY_CHIP,
                                             category = targetCategory,
-                                            delayMs = 40L,
                                         )
                                         true
                                     }
@@ -6663,7 +6698,12 @@ internal fun TvSettingsScreen(
                     onClick = {
                         when (val s = checkState) {
                             is UpdateCheckState.UpdateAvailable -> {
-                                context.startActivity(AppUpdateActivity.createIntent(context, s.update))
+                                settingsFocusController.captureOrigin(
+                                    itemId = TvSettingsItemIds.ABOUT_CHECK_FOR_UPDATES,
+                                    outerListState = settingsListState,
+                                    reason = "app_update_launch",
+                                )
+                                appUpdateLauncher.launch(AppUpdateActivity.createIntent(context, s.update))
                             }
                             UpdateCheckState.Checking -> Unit
                             else -> {

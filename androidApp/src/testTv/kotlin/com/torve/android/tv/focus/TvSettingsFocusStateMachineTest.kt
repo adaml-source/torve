@@ -101,6 +101,66 @@ class TvSettingsFocusStateMachineTest {
         )
     }
 
+    @Test
+    fun updaterRoundTripRestoresExactAboutRowBeforeFallbacks() {
+        val controller = TvSettingsFocusStateMachine(TvSettingsCategory.ABOUT)
+        register(controller, "about-version", TvSettingsCategory.ABOUT, 0)
+        register(controller, "about-check-for-updates", TvSettingsCategory.ABOUT, 2)
+        register(controller, "about-support", TvSettingsCategory.ABOUT, 3)
+
+        val launchOrigin = requireNotNull(
+            controller.captureOrigin(
+                itemId = "about-check-for-updates",
+                reason = "app_update_launch",
+                requestedAtMillis = 20L,
+            ),
+        )
+        val returnOrigin = requireNotNull(
+            controller.requestRestore(
+                itemId = "about-check-for-updates",
+                reason = "app_update_return",
+            ),
+        )
+
+        assertEquals(launchOrigin.itemId, returnOrigin.itemId)
+        assertEquals(TvSettingsCategory.ABOUT, controller.selectedCategory)
+        assertEquals(
+            listOf("about-check-for-updates"),
+            controller.resolveCandidates(returnOrigin).map { it.itemId },
+        )
+    }
+
+    @Test
+    fun missingUpdaterOriginFallsBackWithinAboutWithoutLosingFocusSurface() {
+        val controller = TvSettingsFocusStateMachine(TvSettingsCategory.ABOUT)
+        register(controller, "about-version", TvSettingsCategory.ABOUT, 0)
+        register(controller, "about-check-for-updates", TvSettingsCategory.ABOUT, 2)
+        register(controller, "about-support", TvSettingsCategory.ABOUT, 3)
+        val origin = requireNotNull(
+            controller.captureOrigin("about-check-for-updates", reason = "app_update_launch"),
+        )
+
+        controller.unregisterItem("about-check-for-updates")
+
+        assertEquals(
+            listOf("about-support", "about-version"),
+            controller.resolveCandidates(origin).map { it.itemId },
+        )
+    }
+
+    @Test
+    fun everyOrdinaryCategoryCanSwitchToItsVisibleNeighbor() {
+        val order = TvSettingsCategory.entries
+        order.forEachIndexed { index, category ->
+            if (index > 0) {
+                assertEquals(order[index - 1], adjacentTvSettingsCategory(order, category, -1, "action"))
+            }
+            if (index < order.lastIndex) {
+                assertEquals(order[index + 1], adjacentTvSettingsCategory(order, category, 1, "navigation"))
+            }
+        }
+    }
+
     private fun register(
         controller: TvSettingsFocusStateMachine,
         itemId: String,

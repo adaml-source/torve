@@ -1809,6 +1809,15 @@
     <string name="app_update_permission_failed">Torve could not open the installation permission. Enable “Install unknown apps” for Torve in Fire TV settings, then retry.</string>
     <string name="app_update_installer_failed">Torve downloaded and verified the update, but could not open the Fire TV installer. Please retry.</string>
     <string name="app_update_retry">Retry</string>
+    <string name="app_update_back">Back</string>
+    <string name="app_update_invalid_content">The update server did not return a valid APK file. Nothing was installed.</string>
+    <string name="app_update_download_incomplete">Torve couldn’t download the complete update. Please try again.</string>
+    <string name="app_update_invalid_apk">The downloaded file is not a valid Torve installation package and was discarded.</string>
+    <string name="app_update_hash_mismatch">Torve couldn’t verify the downloaded update. The invalid file was discarded.</string>
+    <string name="app_update_signature_mismatch">This update was signed with an unexpected certificate and cannot be installed.</string>
+    <string name="app_update_package_mismatch">The downloaded package is not a Torve update and was discarded.</string>
+    <string name="app_update_version_mismatch">The downloaded package has the wrong Torve version and was discarded.</string>
+    <string name="app_update_file_provider_failed">Torve verified the update but could not safely share it with the system installer. Please retry.</string>
     <string name="app_update_open_downloader">Opening Downloader…</string>
     <string name="app_update_downloader_not_found">The Downloader app is required to install updates. Please install Downloader from the Amazon Appstore.</string>
     <string name="tv_settings_check_for_updates">Check for updates</string>

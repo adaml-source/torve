@@ -538,4 +538,7 @@
     <string name="tv_unlock_go_to_premium">Continua</string>
     <string name="tv_settings_account_refreshed_epg_hint">Configurazione dell\'account aggiornata. Se mancano ancora canali o dati della guida, apri Impostazioni &gt; Canali e scegli Aggiorna EPG.</string>
     <string name="tv_update_available">Torve %1$s è disponibile e pronto per il download.</string>
+    <string name="tv_settings_refresh_channels_title">Aggiorna canali</string>
+    <string name="tv_settings_refresh_channels_subtitle">Scarica di nuovo l’elenco dei canali senza recuperare la guida programmi</string>
+    <string name="tv_settings_refresh_channels_started">Aggiornamento dei canali avviato</string>
 </resources>

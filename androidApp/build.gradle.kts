@@ -73,14 +73,20 @@ android {
         }
     }
 
-    val baseVersionCode = 121
+    // The override exists solely for signed on-device updater regression fixtures
+    // (for example, exercising 20120 -> 20121). The publication gate still
+    // rejects any non-newer artifact, so a fixture cannot replace production.
+    val baseVersionCode = providers.gradleProperty("torveUpdaterFixtureBaseVersionCode")
+        .orNull
+        ?.toIntOrNull()
+        ?: 122
 
     defaultConfig {
         applicationId = "com.torve.app"
         minSdk = 24
         targetSdk = 36
         versionCode = baseVersionCode
-        versionName = "1.2.5"
+        versionName = "1.2.6"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         multiDexEnabled = true
         multiDexKeepProguard = file("multidex-config.pro")

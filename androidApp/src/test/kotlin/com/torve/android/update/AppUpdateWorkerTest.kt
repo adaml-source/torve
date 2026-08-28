@@ -95,6 +95,13 @@ class AppUpdateWorkerTest {
                 "1.1.4",
             )
         }
+        assertThrows(IllegalArgumentException::class.java) {
+            parseAvailableUpdateStrict(
+                manifest(version = "1.2.0", status = "available", versionCode = 0),
+                "fire_tv",
+                "1.1.4",
+            )
+        }
     }
 
     private fun manifest(
