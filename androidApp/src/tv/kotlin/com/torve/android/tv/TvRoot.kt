@@ -102,7 +102,6 @@ import com.torve.android.tv.focus.TvFocusOrigin
 import com.torve.android.tv.focus.TvScreenFocusHandle
 import com.torve.android.tv.focus.TvSettingsItemIds
 import com.torve.android.tv.focus.TvSettingsEntryRestoreInputs
-import com.torve.android.tv.focus.canPlaybackReturnFallbackToRail
 import com.torve.android.tv.focus.deferredOptionalDestinationVisibility
 import com.torve.android.tv.focus.didPlaybackReturnFocusReachContent
 import com.torve.android.tv.focus.playbackReturnFocusRoute
@@ -515,6 +514,7 @@ fun TvRoot(
     val firstContentFocusByRoute = remember { mutableStateMapOf<String, FocusRequester>() }
     val lastFocusedContentByRoute = remember { mutableStateMapOf<String, FocusRequester>() }
     val focusHandlesByRoute = remember { mutableStateMapOf<String, TvScreenFocusHandle>() }
+    val rememberedFocusOriginByRoute = remember { mutableStateMapOf<String, TvFocusOrigin>() }
     var contentFocusEpoch by remember { mutableIntStateOf(0) }
     var focusedContentRoute by remember { mutableStateOf<String?>(null) }
     var detailsContentHasFocus by remember { mutableStateOf(false) }
@@ -529,6 +529,7 @@ fun TvRoot(
         firstContentFocusByRoute.clear()
         lastFocusedContentByRoute.clear()
         focusHandlesByRoute.clear()
+        rememberedFocusOriginByRoute.clear()
         TvScreenCache.clearAccountScoped()
     }
 
@@ -599,6 +600,9 @@ fun TvRoot(
         lastFocusedContentByRoute[route] = requester
         focusedContentRoute = route
         contentFocusEpoch += 1
+        if (pendingContentEntryRoute == route) {
+            pendingContentEntryRoute = null
+        }
         val pendingBack = pendingFocusBackRestore
         val restoredStableOrigin = pendingBack?.origin?.let { origin ->
             focusHandlesByRoute[route]?.isOriginFocused(origin) == true
@@ -858,6 +862,52 @@ fun TvRoot(
     var backgroundWorkWasVisible by remember { mutableStateOf(false) }
     var suppressNextSeeAllReturnFocusRestore by remember { mutableStateOf(false) }
 
+    fun registerFirstContentFocus(route: String, requester: FocusRequester) {
+        val changed = firstContentFocusByRoute[route] !== requester
+        firstContentFocusByRoute[route] = requester
+        if (
+            changed &&
+            pendingContentEntryRoute == route &&
+            rememberedFocusOriginByRoute[route] == null
+        ) {
+            contentEntryRequestNonce += 1
+            focusRestoreTrigger++
+        }
+        if (changed && pendingPlaybackFocusRestoreRoute == route) {
+            playbackFocusRestoreRequestNonce += 1
+        }
+    }
+
+    fun registerTopLevelFocusHandle(route: String, handle: TvScreenFocusHandle?) {
+        if (handle == null) {
+            focusHandlesByRoute[route]
+                ?.captureFocusedOrigin()
+                ?.let { rememberedFocusOriginByRoute[route] = it }
+            focusHandlesByRoute.remove(route)
+            return
+        }
+        focusHandlesByRoute[route] = handle
+        if (pendingContentEntryRoute == route) {
+            val rememberedOrigin = rememberedFocusOriginByRoute[route]
+            if (rememberedOrigin != null) {
+                handle.requestRestore(rememberedOrigin, "destination_reentry")
+            } else {
+                contentEntryRequestNonce += 1
+                focusRestoreTrigger++
+            }
+        }
+    }
+
+    fun unregisterDestinationFocus(route: String) {
+        focusHandlesByRoute[route]
+            ?.captureFocusedOrigin()
+            ?.let { rememberedFocusOriginByRoute[route] = it }
+        firstContentFocusByRoute.remove(route)
+        lastFocusedContentByRoute.remove(route)
+        focusHandlesByRoute.remove(route)
+        if (focusedContentRoute == route) focusedContentRoute = null
+    }
+
     val pendingPlaybackLastRequester = pendingPlaybackFocusRestoreRoute?.let(lastFocusedContentByRoute::get)
     val pendingPlaybackFirstRequester = pendingPlaybackFocusRestoreRoute?.let(firstContentFocusByRoute::get)
 
@@ -881,55 +931,56 @@ fun TvRoot(
     ) {
         if (playbackFocusRestoreRequestNonce == 0) return@LaunchedEffect
         val focusRoute = pendingPlaybackFocusRestoreRoute ?: return@LaunchedEffect
+        val routeReady = when {
+            focusRoute == TvRoutes.DETAILS -> currentSubRoute?.startsWith("tv_details/") == true
+            focusRoute in topLevelRoutes -> !isSubRouteActive && selectedTopRoute == focusRoute
+            else -> currentSubRoute == focusRoute
+        }
+        if (!routeReady) return@LaunchedEffect
+        if (focusRoute == TvRoutes.DETAILS) {
+            // Details owns logical Play/episode restoration because its focus
+            // requesters are recreated across the player destination.
+            Log.d("TvFocusRestore", "playback_return_delegated route=$focusRoute")
+            return@LaunchedEffect
+        }
 
-        repeat(60) {
+        val candidates = listOfNotNull(
+            lastFocusedContentByRoute[focusRoute],
+            firstContentFocusByRoute[focusRoute],
+        ).distinct()
+        for (requester in candidates) {
+            val contentEpochBefore = contentFocusEpoch
+            val subRouteEpochBefore = subRouteFocusEpoch
+            runCatching { requester.requestFocus() }
+            kotlinx.coroutines.yield()
             withFrameNanos { }
-            if (pendingPlaybackFocusRestoreRoute != focusRoute) return@LaunchedEffect
-
-            val candidates = listOfNotNull(
-                lastFocusedContentByRoute[focusRoute],
-                firstContentFocusByRoute[focusRoute],
-            ).distinct()
-            for (requester in candidates) {
-                val contentEpochBefore = contentFocusEpoch
-                val subRouteEpochBefore = subRouteFocusEpoch
-                runCatching { requester.requestFocus() }
-                kotlinx.coroutines.yield()
-                withFrameNanos { }
-                if (
-                    didPlaybackReturnFocusReachContent(
-                        focusRoute = focusRoute,
-                        destinationHasFocus = if (focusRoute == TvRoutes.DETAILS) {
-                            detailsContentHasFocus
-                        } else {
-                            rootHasFocus && !isRailFocused && focusedContentRoute == focusRoute
-                        },
-                        contentFocusEpochBefore = contentEpochBefore,
-                        contentFocusEpochAfter = contentFocusEpoch,
-                        focusedContentRoute = focusedContentRoute,
-                        subRouteFocusEpochBefore = subRouteEpochBefore,
-                        subRouteFocusEpochAfter = subRouteFocusEpoch,
-                    )
-                ) {
-                    pendingPlaybackFocusRestoreRoute = null
-                    pendingContentEntryRoute = null
-                    return@LaunchedEffect
-                }
+            if (
+                didPlaybackReturnFocusReachContent(
+                    focusRoute = focusRoute,
+                    destinationHasFocus = if (focusRoute == TvRoutes.DETAILS) {
+                        detailsContentHasFocus
+                    } else {
+                        rootHasFocus && !isRailFocused && focusedContentRoute == focusRoute
+                    },
+                    contentFocusEpochBefore = contentEpochBefore,
+                    contentFocusEpochAfter = contentFocusEpoch,
+                    focusedContentRoute = focusedContentRoute,
+                    subRouteFocusEpochBefore = subRouteEpochBefore,
+                    subRouteFocusEpochAfter = subRouteFocusEpoch,
+                )
+            ) {
+                pendingPlaybackFocusRestoreRoute = null
+                pendingContentEntryRoute = null
+                return@LaunchedEffect
             }
         }
 
-        if (pendingPlaybackFocusRestoreRoute != focusRoute) return@LaunchedEffect
-        if (canPlaybackReturnFallbackToRail(focusRoute, isSubRouteActive)) {
-            pendingPlaybackFocusRestoreRoute = null
-            pendingContentEntryRoute = focusRoute
-            contentEntryRequestNonce += 1
-            focusRestoreTrigger++
-        } else {
-            // Details owns the whole screen and the rail is deliberately not
-            // focusable. Keep the pending route so a newly registered details
-            // requester restarts this effect instead of dropping focus.
-            Log.w("TvFocusRestore", "playback_return_waiting route=$focusRoute")
-        }
+        // Target registration or destination readiness will restart this
+        // single-shot effect. Do not redirect focus to the hidden/global rail.
+        Log.d(
+            "TvFocusRestore",
+            "playback_return_pending route=$focusRoute candidates=${candidates.size}",
+        )
     }
 
     // External TV apps (for example YouTube trailer playback) take window focus
@@ -960,43 +1011,16 @@ fun TvRoot(
         if (foregroundFocusRestoreTrigger == 0 || showCredentialTransferNudge) {
             return@LaunchedEffect
         }
-        val delays = listOf(80L, 180L, 360L, 700L)
-        for (waitMs in delays) {
-            delay(waitMs)
-            if (showCredentialTransferNudge || isPlayerRoute) return@LaunchedEffect
-
-            val destinationRoute = navController.currentDestination?.route
-            val focusRoute = if (destinationRoute?.startsWith("tv_details/") == true) {
-                TvRoutes.DETAILS
-            } else {
-                selectedTopRoute
-            }
-            val candidates = listOfNotNull(
-                lastFocusedContentByRoute[focusRoute],
-                firstContentFocusByRoute[focusRoute],
-            ).distinct()
-            for (requester in candidates) {
-                val beforeSubRouteEpoch = subRouteFocusEpoch
-                runCatching { requester.requestFocus() }
-                kotlinx.coroutines.yield()
-                withFrameNanos { }
-                val restored = if (focusRoute == TvRoutes.DETAILS) {
-                    detailsContentHasFocus || subRouteFocusEpoch != beforeSubRouteEpoch
-                } else {
-                    rootHasFocus &&
-                        !isRailFocused &&
-                        focusedContentRoute == focusRoute
-                }
-                if (restored) {
-                    return@LaunchedEffect
-                }
-            }
+        if (isPlayerRoute) return@LaunchedEffect
+        val destinationRoute = navController.currentDestination?.route
+        if (destinationRoute?.startsWith("tv_details/") == true) {
+            pendingPlaybackFocusRestoreRoute = TvRoutes.DETAILS
+            playbackFocusRestoreRequestNonce += 1
+        } else if (!isSubRouteActive) {
+            pendingContentEntryRoute = selectedTopRoute
+            contentEntryRequestNonce += 1
+            focusRestoreTrigger++
         }
-
-        // A stale requester can outlive a lazy item. The permanent rail is the
-        // safe final target, so foreground return can never leave the UI inert.
-        pendingRailEntryRoute = selectedTopRoute
-        runCatching { railFocusRequester.requestFocus() }
     }
 
     LaunchedEffect(backgroundWorkStatus.blockNavigation) {
@@ -1110,9 +1134,7 @@ fun TvRoot(
         }
     }
 
-    /* ── Focus restore: try content first, rail is guaranteed fallback ─────────────── */
-    // Use a counter (not a boolean) so the effect key doesn't change inside its body,
-    // which would cancel the coroutine before delay() completes.
+    /* ── Focus restore: destination-owned, registration-driven handoff ────────────── */
     LaunchedEffect(focusRestoreTrigger, showCredentialTransferNudge) {
         if (focusRestoreTrigger == 0) return@LaunchedEffect
         if (showCredentialTransferNudge) return@LaunchedEffect
@@ -1137,22 +1159,19 @@ fun TvRoot(
             Log.d("TvSettingsFocus", "root_focus_restore_suppressed pendingToken=$pendingSettingsModalRestoreToken")
             return@LaunchedEffect
         }
-        val isSettingsSubmenu = selectedTopRoute == TvRoutes.SETTINGS &&
-            settingsDestination != TvSettingsDestination.MAIN
-        // Multiple attempts with progressive delays — Settings composable takes
-        // many seconds to JIT-compile on Fire TV Stick, so focus targets may not be
-        // ready for a while after tab switch.
-        val delays = if (isSettingsSubmenu) {
-            listOf(40L, 90L, 160L, 260L, 500L)
-        } else if (selectedTopRoute == TvRoutes.SETTINGS) {
-            listOf(100L, 300L, 600L, 1000L, 2000L, 3000L)
-        } else {
-            // Content tabs need longer retries when returning from sub-routes
-            // (See All, Details) because tab composables re-attach focus after
-            // the sub-route overlay is removed.
-            listOf(60L, 150L, 400L, 800L, 1500L)
+        val requestedTopRoute = pendingContentEntryRoute
+        if (requestedTopRoute in topLevelRoutes && requestedTopRoute != selectedTopRoute) {
+            Log.d(
+                "TvFocusRestore",
+                "content_entry_cancelled staleRoute=$requestedTopRoute active=$selectedTopRoute",
+            )
+            pendingContentEntryRoute = null
+            return@LaunchedEffect
         }
-        for ((attempt, waitMs) in delays.withIndex()) {
+        // One single-shot attempt. Registration of a newly composed target
+        // re-arms the contract without timing guesses.
+        val delays = listOf(0L)
+        for (waitMs in delays) {
             delay(waitMs)
             if (isRailFocused && railInteractionEpoch != restoreRailEpoch) {
                 Log.d("TvFocusRestore", "root_focus_restore_cancelled railInteractionEpochChanged")
@@ -1223,19 +1242,18 @@ fun TvRoot(
                     }
                 } catch (_: Throwable) { }
             }
-            // All candidates failed or focus didn't move — retry after next delay
+            // A missing target remains pending until its destination registers.
         }
-        pendingContentEntryRoute = null
-        if (isRailFocused && railInteractionEpoch != restoreRailEpoch) {
-            Log.d("TvFocusRestore", "root_focus_restore_fallback_cancelled railInteractionEpochChanged")
-            return@LaunchedEffect
-        }
-        // Last resort: put focus back on the rail so the user isn't stuck
-        pendingRailEntryRoute = selectedTopRoute
-        try { railFocusRequester.requestFocus() } catch (_: Throwable) { }
+        // A newly selected destination may not be composed yet. Its focus
+        // target registration restarts this single-shot restoration. Keep the
+        // pending owner instead of silently redirecting focus to Home/the rail.
+        Log.d(
+            "TvFocusRestore",
+            "content_entry_pending route=$pendingContentEntryRoute",
+        )
     }
 
-    /* ── Focus watchdog: if focus is truly lost, put it on the rail ─────────────────── */
+    /* ── Focus watchdog: re-arm the active destination contract ───────────────────── */
     // Reduced polling frequency from 250+150ms to 1500+500ms to lower CPU overhead.
     // Focus is typically restored by the focusRestoreTrigger LaunchedEffect above;
     // this watchdog is only for edge cases where focus escapes entirely.
@@ -1247,10 +1265,14 @@ fun TvRoot(
             delay(500)
             if (showCredentialTransferNudge) continue
             if (isSubRouteActive || rootHasFocus || selectedTopRoute == TvRoutes.SETTINGS) continue
-            Log.d("TvFocusWatchdog", "Focus lost — restoring to rail")
-            com.torve.android.debug.AnrDebugLogger.log("FOCUS_WATCHDOG fired — restoring to rail")
-            pendingRailEntryRoute = selectedTopRoute
-            try { railFocusRequester.requestFocus() } catch (_: Throwable) { }
+            Log.d("TvFocusWatchdog", "Focus lost — re-arming destination=$selectedTopRoute")
+            com.torve.android.debug.AnrDebugLogger.log(
+                "FOCUS_WATCHDOG fired — re-arming destination=$selectedTopRoute",
+            )
+            if (pendingPlaybackFocusRestoreRoute != null || pendingContentEntryRoute != null) continue
+            pendingContentEntryRoute = selectedTopRoute
+            contentEntryRequestNonce += 1
+            focusRestoreTrigger++
         }
     }
 
@@ -2057,45 +2079,10 @@ fun TvRoot(
     fun requestContentFocusFromRail(route: String) {
         pendingContentEntryRoute = route
         contentEntryRequestNonce += 1
-        val candidates = if (route == TvRoutes.SETTINGS) {
-            orderedSettingsEntryCandidates(
-                settingsEntryRequester = settingsEntryRequester,
-                settingsMainEntryFocusRequester = settingsMainEntryFocusRequester,
-                firstContentFocusRequester = firstContentFocusByRoute[TvRoutes.SETTINGS],
-            )
-        } else {
-            if (
-                route == TvRoutes.MOVIES ||
-                route == TvRoutes.SHOWS ||
-                route == TvRoutes.HOME ||
-                route == TvRoutes.SEARCH
-            ) {
-                listOfNotNull(
-                    lastFocusedContentByRoute[route],
-                    firstContentFocusByRoute[route],
-                )
-            } else {
-                listOfNotNull(
-                    lastFocusedContentByRoute[route],
-                    firstContentFocusByRoute[route],
-                )
-            }
-        }
-        rootScope.launch {
-            for (candidate in candidates) {
-                val beforeEpoch = contentFocusEpoch
-                val movedFocus = runCatching {
-                    candidate.requestFocus()
-                    withFrameNanos { }
-                    contentFocusEpoch != beforeEpoch && focusedContentRoute == route
-                }.getOrDefault(false)
-                if (movedFocus) {
-                    pendingContentEntryRoute = null
-                    return@launch
-                }
-            }
-            focusRestoreTrigger++
-        }
+        // The selected destination owns the handoff. Existing live targets are
+        // tried by the root restoration effect; a newly composed destination
+        // re-arms that effect from registerFirstContentFocus().
+        focusRestoreTrigger++
     }
 
     fun resolvedProgress(item: MediaItem, railProgress: Float?): Float? {
@@ -2755,15 +2742,9 @@ fun TvRoot(
                             onProviderBannerAction = {
                                 navController.navigate(TvRoutes.SETTINGS)
                             },
-                            onFirstContentRequester = { firstContentFocusByRoute[TvRoutes.HOME] = it },
+                            onFirstContentRequester = { registerFirstContentFocus(TvRoutes.HOME, it) },
                             onContentFocused = { markContentFocused(TvRoutes.HOME, it) },
-                            registerFocusHandle = { handle ->
-                                if (handle == null) {
-                                    focusHandlesByRoute.remove(TvRoutes.HOME)
-                                } else {
-                                    focusHandlesByRoute[TvRoutes.HOME] = handle
-                                }
-                            },
+                            registerFocusHandle = { handle -> registerTopLevelFocusHandle(TvRoutes.HOME, handle) },
                             onMediaFocused = onBrowseMediaFocused,
                             progressResolver = ::resolvedProgress,
                             contextMenuActionsForItem = contextMenuActionsForItem,
@@ -2800,6 +2781,9 @@ fun TvRoot(
                 retainedContentRoutes.forEach { tabRoute ->
                     val isTabVisible = tabRoute == activeTabRoute && tabContentVisible
                     stateHolder.SaveableStateProvider(tabRoute) {
+                        DisposableEffect(tabRoute) {
+                            onDispose { unregisterDestinationFocus(tabRoute) }
+                        }
                         Box(
                             modifier = Modifier
                                 .fillMaxSize()
@@ -2832,15 +2816,9 @@ fun TvRoot(
                                             pushFocusReturnEntry(TvRoutes.MOVIES)
                                             navController.navigateToTvDetails(item)
                                         },
-                                        onFirstContentRequester = { firstContentFocusByRoute[TvRoutes.MOVIES] = it },
+                                        onFirstContentRequester = { registerFirstContentFocus(TvRoutes.MOVIES, it) },
                                         onContentFocused = { markContentFocused(TvRoutes.MOVIES, it) },
-                                        registerFocusHandle = { handle ->
-                                            if (handle == null) {
-                                                focusHandlesByRoute.remove(TvRoutes.MOVIES)
-                                            } else {
-                                                focusHandlesByRoute[TvRoutes.MOVIES] = handle
-                                            }
-                                        },
+                                        registerFocusHandle = { handle -> registerTopLevelFocusHandle(TvRoutes.MOVIES, handle) },
                                         onMediaFocused = { item ->
                                             if (isTabVisible) onBrowseMediaFocused(item)
                                         },
@@ -2865,15 +2843,9 @@ fun TvRoot(
                                             pushFocusReturnEntry(TvRoutes.SHOWS)
                                             navController.navigateToTvDetails(item)
                                         },
-                                        onFirstContentRequester = { firstContentFocusByRoute[TvRoutes.SHOWS] = it },
+                                        onFirstContentRequester = { registerFirstContentFocus(TvRoutes.SHOWS, it) },
                                         onContentFocused = { markContentFocused(TvRoutes.SHOWS, it) },
-                                        registerFocusHandle = { handle ->
-                                            if (handle == null) {
-                                                focusHandlesByRoute.remove(TvRoutes.SHOWS)
-                                            } else {
-                                                focusHandlesByRoute[TvRoutes.SHOWS] = handle
-                                            }
-                                        },
+                                        registerFocusHandle = { handle -> registerTopLevelFocusHandle(TvRoutes.SHOWS, handle) },
                                         onMediaFocused = { item ->
                                             if (isTabVisible) onBrowseMediaFocused(item)
                                         },
@@ -2896,18 +2868,12 @@ fun TvRoot(
                                             pushFocusReturnEntry(TvRoutes.SEARCH)
                                             navController.navigateToTvDetails(item)
                                         },
-                                        onFirstContentRequester = { firstContentFocusByRoute[TvRoutes.SEARCH] = it },
+                                        onFirstContentRequester = { registerFirstContentFocus(TvRoutes.SEARCH, it) },
                                         onContentFocused = { markContentFocused(TvRoutes.SEARCH, it) },
                                         initialQuery = searchSeedQuery.orEmpty(),
                                         shouldAutoFocus = pendingContentEntryRoute == TvRoutes.SEARCH &&
                                             lastFocusedContentByRoute[TvRoutes.SEARCH] == null,
-                                        registerFocusHandle = { handle ->
-                                            if (handle == null) {
-                                                focusHandlesByRoute.remove(TvRoutes.SEARCH)
-                                            } else {
-                                                focusHandlesByRoute[TvRoutes.SEARCH] = handle
-                                            }
-                                        },
+                                        registerFocusHandle = { handle -> registerTopLevelFocusHandle(TvRoutes.SEARCH, handle) },
                                     )
 
                                     TvRoutes.IPTV -> {
@@ -2983,7 +2949,7 @@ fun TvRoot(
                                                 pendingContentEntryRoute = TvRoutes.SETTINGS
                                                 focusRestoreTrigger++
                                             },
-                                            onFirstContentRequester = { firstContentFocusByRoute[TvRoutes.IPTV] = it },
+                                            onFirstContentRequester = { registerFirstContentFocus(TvRoutes.IPTV, it) },
                                             onContentFocused = { markContentFocused(TvRoutes.IPTV, it) },
                                             shouldAutoFocus = pendingContentEntryRoute == TvRoutes.IPTV,
                                             isActive = true,
@@ -3019,15 +2985,9 @@ fun TvRoot(
                                             pendingPandaSetupReturnSettingsItemId = null
                                             navController.navigate(TvRoutes.PANDA_SETUP)
                                         },
-                                        onFirstContentRequester = { firstContentFocusByRoute[TvRoutes.SPORTS] = it },
+                                        onFirstContentRequester = { registerFirstContentFocus(TvRoutes.SPORTS, it) },
                                         onContentFocused = { markContentFocused(TvRoutes.SPORTS, it) },
-                                        registerFocusHandle = { handle ->
-                                            if (handle == null) {
-                                                focusHandlesByRoute.remove(TvRoutes.SPORTS)
-                                            } else {
-                                                focusHandlesByRoute[TvRoutes.SPORTS] = handle
-                                            }
-                                        },
+                                        registerFocusHandle = { handle -> registerTopLevelFocusHandle(TvRoutes.SPORTS, handle) },
                                     )
 
                                     TvRoutes.JELLYFIN -> TvJellyfinScreen(
@@ -3038,17 +2998,9 @@ fun TvRoot(
                                             pushFocusReturnEntry(TvRoutes.JELLYFIN)
                                             navController.navigateToTvDetails(item)
                                         },
-                                        onFirstContentRequester = {
-                                            firstContentFocusByRoute[TvRoutes.JELLYFIN] = it
-                                        },
+                                        onFirstContentRequester = { registerFirstContentFocus(TvRoutes.JELLYFIN, it) },
                                         onContentFocused = { markContentFocused(TvRoutes.JELLYFIN, it) },
-                                        registerFocusHandle = { handle ->
-                                            if (handle == null) {
-                                                focusHandlesByRoute.remove(TvRoutes.JELLYFIN)
-                                            } else {
-                                                focusHandlesByRoute[TvRoutes.JELLYFIN] = handle
-                                            }
-                                        },
+                                        registerFocusHandle = { handle -> registerTopLevelFocusHandle(TvRoutes.JELLYFIN, handle) },
                                         onMediaFocused = onBrowseMediaFocused,
                                         shouldAutoFocus = pendingContentEntryRoute == TvRoutes.JELLYFIN,
                                         onJellyfinItemPlay = { streamUrl, title ->
@@ -3074,15 +3026,9 @@ fun TvRoot(
                                             pushFocusReturnEntry(TvRoutes.LIBRARY)
                                             navController.navigateToTvDetails(item)
                                         },
-                                        onFirstContentRequester = { firstContentFocusByRoute[TvRoutes.LIBRARY] = it },
+                                        onFirstContentRequester = { registerFirstContentFocus(TvRoutes.LIBRARY, it) },
                                         onContentFocused = { markContentFocused(TvRoutes.LIBRARY, it) },
-                                        registerFocusHandle = { handle ->
-                                            if (handle == null) {
-                                                focusHandlesByRoute.remove(TvRoutes.LIBRARY)
-                                            } else {
-                                                focusHandlesByRoute[TvRoutes.LIBRARY] = handle
-                                            }
-                                        },
+                                        registerFocusHandle = { handle -> registerTopLevelFocusHandle(TvRoutes.LIBRARY, handle) },
                                         onMediaFocused = onBrowseMediaFocused,
                                         progressResolver = ::resolvedProgress,
                                         contextMenuActionsForItem = contextMenuActionsForItem,
@@ -3165,10 +3111,7 @@ fun TvRoot(
                                             TvSettingsScreen(
                                                 railFocusRequester = railFocusRequester,
                                                 onFirstContentRequester = { requester ->
-                                                    firstContentFocusByRoute[TvRoutes.SETTINGS] = requester
-                                                    if (pendingContentEntryRoute == TvRoutes.SETTINGS) {
-                                                        focusRestoreTrigger++
-                                                    }
+                                                    registerFirstContentFocus(TvRoutes.SETTINGS, requester)
                                                 },
                                                 onContentFocused = { markContentFocused(TvRoutes.SETTINGS, it) },
                                                 onMoveFocusToRail = {
@@ -3397,22 +3340,31 @@ fun TvRoot(
                             TvEntitledFeature.STREAM_PLAYBACK,
                             accessTier,
                         ),
-                        onPlaybackFocusRestoreRequest = {
+                        onPlaybackFocusRestoreRequest = { returnDestinationRoute ->
                             pendingPlaybackFocusRestoreRoute = playbackReturnFocusRoute(
-                                currentDestinationRoute = navController.currentDestination?.route,
+                                returnDestinationRoute = returnDestinationRoute,
                                 selectedTopRoute = selectedTopRoute,
                             )
                             playbackFocusRestoreRequestNonce += 1
                         },
-                        onFirstContentRequester = { req ->
-                            firstContentFocusByRoute[TvRoutes.DETAILS] = req
-                            if (pendingPlaybackFocusRestoreRoute == TvRoutes.DETAILS) {
-                                playbackFocusRestoreRequestNonce += 1
-                            }
+                        playbackFocusRestoreRequestId = if (
+                            pendingPlaybackFocusRestoreRoute == TvRoutes.DETAILS
+                        ) {
+                            playbackFocusRestoreRequestNonce
+                        } else {
+                            0
                         },
-                        onContentFocused = { req ->
-                            lastFocusedContentByRoute[TvRoutes.DETAILS] = req
+                        onFirstContentRequester = { route, req ->
+                            registerFirstContentFocus(route, req)
+                        },
+                        onContentFocused = { route, req ->
+                            lastFocusedContentByRoute[route] = req
+                            focusedContentRoute = route
                             subRouteFocusEpoch += 1
+                            if (pendingPlaybackFocusRestoreRoute == route) {
+                                pendingPlaybackFocusRestoreRoute = null
+                                pendingContentEntryRoute = null
+                            }
                         },
                         onDetailsContentFocusStateChanged = { hasFocus ->
                             detailsContentHasFocus = hasFocus

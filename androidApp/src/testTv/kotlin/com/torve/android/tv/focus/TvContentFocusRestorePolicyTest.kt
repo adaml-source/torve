@@ -2,10 +2,26 @@ package com.torve.android.tv.focus
 
 import com.torve.android.tv.nav.TvRoutes
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class TvContentFocusRestorePolicyTest {
+
+    @Test
+    fun pendingSportsEntryRemainsOwnedBySportsInsteadOfFallingBackToHome() {
+        assertEquals(
+            TvRoutes.SPORTS,
+            resolveContentEntryRoute(
+                pendingContentEntryRoute = TvRoutes.SPORTS,
+                currentSubRoute = null,
+                isSubRouteActive = false,
+                isRailFocused = true,
+                confirmedTopRoute = TvRoutes.SPORTS,
+                selectedTopRoute = TvRoutes.SPORTS,
+            ),
+        )
+    }
 
     @Test
     fun activeDetailsAlreadyFocused_stopsImplicitRestoreRetries() {

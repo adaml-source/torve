@@ -64,6 +64,17 @@ internal class TvModalFocusRestoreController {
         return requesterByTarget.getOrPut(target) { FocusRequester() }
     }
 
+    /**
+     * Returns a requester only while its focus target is actually composed.
+     * Lazy-list requesters deliberately remain cached for restoration, but a
+     * cached requester must never be installed as a directional focus edge
+     * after its node has left composition.
+     */
+    fun activeRequesterFor(target: TvFocusTargetId): FocusRequester? {
+        val registrations = activeTargets[target] ?: 0
+        return requesterByTarget[target]?.takeIf { registrations > 0 }
+    }
+
     fun registerTarget(
         target: TvFocusTargetId,
         requester: FocusRequester = requesterFor(target),

@@ -131,6 +131,12 @@ fun TvEpisodePicker(
     val preferredEpisodeRequester = preferredEpisodeNumber
         ?.let { episodeRequesters[it] }
         ?: firstEpisodeRequester
+    val resolvedRestoreEpisodeNumber = restoreFocusEpisode
+        ?.takeIf { it.first == selectedSeason }
+        ?.let { target ->
+            target.second.takeIf { it in episodeNumbers }
+                ?: episodeNumbers.minByOrNull { kotlin.math.abs(it - target.second) }
+        }
     val selectedSeasonEpisodeCount = selectedSeasonDetail
         ?.takeIf { it.seasonNumber == selectedSeason }
         ?.episodes
@@ -155,20 +161,14 @@ fun TvEpisodePicker(
         episodesListState.scrollToItem(preferredIndex)
     }
     androidx.compose.runtime.LaunchedEffect(restoreFocusEpisode, selectedSeason, episodeNumbers) {
-        val target = restoreFocusEpisode ?: return@LaunchedEffect
-        if (target.first != selectedSeason) return@LaunchedEffect
-        val index = episodeNumbers.indexOf(target.second)
-        val requester = episodeRequesters[target.second]
+        val episodeNumber = resolvedRestoreEpisodeNumber ?: return@LaunchedEffect
+        val index = episodeNumbers.indexOf(episodeNumber)
+        val requester = episodeRequesters[episodeNumber]
         if (index < 0 || requester == null) return@LaunchedEffect
 
         episodesListState.scrollToItem(index)
-        repeat(3) { attempt ->
-            if (attempt > 0) kotlinx.coroutines.delay(60)
-            if (runCatching { requester.requestFocus() }.isSuccess) {
-                onEpisodeFocusRestored()
-                return@LaunchedEffect
-            }
-        }
+        androidx.compose.runtime.withFrameNanos { }
+        runCatching { requester.requestFocus() }
     }
     androidx.compose.runtime.LaunchedEffect(autoFocusFirstSeason) {
         if (autoFocusFirstSeason) {
@@ -271,6 +271,8 @@ fun TvEpisodePicker(
                         items = selectedSeasonDetail.episodes,
                         key = { _, ep -> "ep_${selectedSeason}_${ep.episodeNumber}" },
                     ) { index, episode ->
+                        val episodeRequester = episodeRequesters[episode.episodeNumber]
+                            ?: fallbackEpisodeRequester
                         val episodeKey = "s${selectedSeason}e${episode.episodeNumber}"
                         val isWatched = episodeKey in watchedEpisodes
                         val episodeProgress = if (
@@ -297,11 +299,15 @@ fun TvEpisodePicker(
                             onClick = { onEpisodeSelected(selectedSeason, episode.episodeNumber) },
                             onLongClick = { onToggleEpisodeWatched(selectedSeason, episode.episodeNumber) },
                             modifier = Modifier
-                                .then(
-                                    episodeRequesters[episode.episodeNumber]
-                                        ?.let { Modifier.focusRequester(it) }
-                                        ?: Modifier,
-                                )
+                                .focusRequester(episodeRequester)
+                                .onFocusChanged { focusState ->
+                                    if (focusState.isFocused) {
+                                        onContentFocused(episodeRequester)
+                                        if (episode.episodeNumber == resolvedRestoreEpisodeNumber) {
+                                            onEpisodeFocusRestored()
+                                        }
+                                    }
+                                }
                                 .focusProperties { up = selectedSeasonRequester },
                         )
                     }

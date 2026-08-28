@@ -65,6 +65,8 @@ import com.torve.android.tv.focus.TvScreenFocusHandle
 import com.torve.android.tv.focus.TvSportsFocusStateMachine
 import com.torve.android.tv.focus.TvSportsFocusTarget
 import com.torve.android.tv.focus.TvSportsTopAction
+import com.torve.android.tv.focus.resolveSportsCategoryEntry
+import com.torve.android.tv.focus.resolveSportsResultEntry
 import com.torve.android.tv.focus.rememberRegisteredTvFocusRequester
 import com.torve.android.tv.focus.rememberTvModalFocusRestoreController
 import com.torve.android.catalog.SportsBootstrapJson
@@ -430,7 +432,6 @@ internal fun TvSportsScreen(
     val countsByBucket: Map<SportBucket, Int> = remember(classified) {
         classified.groupingBy { it.bucket }.eachCount()
     }
-    val chipListState = rememberLazyListState()
     val selectedChipIndex = remember(selectedSportsMode) {
         when (selectedSportsMode) {
             SPORTS_FILTER_ALL -> 0
@@ -442,6 +443,7 @@ internal fun TvSportsScreen(
             }
         }
     }
+    val chipListState = rememberLazyListState(initialFirstVisibleItemIndex = selectedChipIndex)
     LaunchedEffect(selectedChipIndex) {
         val selectedIsVisible = chipListState.layoutInfo.visibleItemsInfo.any { it.index == selectedChipIndex }
         if (!selectedIsVisible) chipListState.animateScrollToItem(selectedChipIndex)
@@ -544,12 +546,31 @@ internal fun TvSportsScreen(
         }
     }
     val selectedCategoryRequester = categoryRequesters[selectedSportsMode] ?: firstChipRequester
-    val rememberedEventIndex = sportsFocusState.state.focusedEventId
-        ?.let(visibleEventIds::indexOf)
-        ?.takeIf { it >= 0 }
-        ?: 0
-    val categoryDownRequester = visibleEventIds.getOrNull(rememberedEventIndex)?.let { eventId ->
-        focusRestoreController.requesterFor(sportsEventTarget(eventId, rememberedEventIndex))
+    val composedCategoryIds = categoryIds.filterIndexed { index, categoryId ->
+        focusRestoreController.activeRequesterFor(sportsCategoryTarget(categoryId, index)) != null
+    }.toSet()
+    val categoryRowEntryTarget = resolveSportsCategoryEntry(
+        categoryIds = categoryIds,
+        selectedCategoryId = selectedSportsMode,
+        composedCategoryIds = composedCategoryIds,
+    )
+    val activeCategoryEntryRequester = categoryRowEntryTarget?.let { entry ->
+        focusRestoreController.activeRequesterFor(sportsCategoryTarget(entry.categoryId, entry.index))
+    }
+    // Cached requesters can outlive their LazyColumn nodes. Only install a
+    // directional Down edge when its result target is currently composed;
+    // otherwise leave Down unspecified so Compose can perform spatial focus
+    // search rather than consuming the move against a stale requester.
+    val composedEventIds = visibleEventIds.filterIndexed { index, eventId ->
+        focusRestoreController.activeRequesterFor(sportsEventTarget(eventId, index)) != null
+    }.toSet()
+    val resultEntryTarget = resolveSportsResultEntry(
+        visibleEventIds = visibleEventIds,
+        rememberedEvent = sportsFocusState.rememberedEventForSelectedCategory(),
+        composedEventIds = composedEventIds,
+    )
+    val categoryDownRequester = resultEntryTarget?.let { entry ->
+        focusRestoreController.activeRequesterFor(sportsEventTarget(entry.eventId, entry.index))
     }
     val selectedRefreshScope = tvSportsRefreshPlan(selectedSportsMode, query).scopeId
     val selectedScopeRefreshing = selectedRefreshScope in pageState.activeRefreshScopes
@@ -564,7 +585,9 @@ internal fun TvSportsScreen(
         val repair = sportsFocusState.repairAfterTopActionMutation(availableTopActions)
         if (isActive && repair is TvSportsFocusTarget.Category) {
             withFrameNanos { }
-            runCatching { selectedCategoryRequester.requestFocus() }
+            activeCategoryEntryRequester?.let { requester ->
+                runCatching { requester.requestFocus() }
+            }
         }
     }
     fun selectSportsCategory(mode: String, bucket: SportBucket?) {
@@ -573,7 +596,7 @@ internal fun TvSportsScreen(
         sportsFocusState.selectCategory(mode)
         NzbBrowseStateHolder.update(pageKey) { it.copy(selectedSportBucket = mode) }
     }
-    LaunchedEffect(Unit) { onFirstContentRequester(firstChipRequester) }
+    LaunchedEffect(selectedCategoryRequester) { onFirstContentRequester(selectedCategoryRequester) }
 
     Column(
         modifier = Modifier
@@ -622,8 +645,10 @@ internal fun TvSportsScreen(
         fun collapseSearchToFilters() {
             keyboardController?.hide()
             searchExpanded = query.isNotBlank()
-            runCatching { selectedCategoryRequester.requestFocus() }
-            onContentFocused(selectedCategoryRequester)
+            activeCategoryEntryRequester?.let { requester ->
+                runCatching { requester.requestFocus() }
+                onContentFocused(requester)
+            }
         }
         // On TV, pressing Back while the search field is focused clears focus back to the rail.
         BackHandler(enabled = searchFieldFocused || searchExpanded) {
@@ -640,7 +665,7 @@ internal fun TvSportsScreen(
                     .focusRequester(refreshFocusRequester)
                     .focusProperties {
                         left = railFocusRequester
-                        down = selectedCategoryRequester
+                        activeCategoryEntryRequester?.let { down = it }
                     },
                 onClick = {
                     if (configured && !selectedScopeRefreshing) startFetch()
@@ -671,7 +696,7 @@ internal fun TvSportsScreen(
                         .focusRequester(searchFocusRequester)
                         .focusProperties {
                             left = refreshFocusRequester
-                            down = selectedCategoryRequester
+                            activeCategoryEntryRequester?.let { down = it }
                         }
                         .onFocusChanged {
                             searchFieldFocused = it.hasFocus
@@ -689,7 +714,7 @@ internal fun TvSportsScreen(
                         .focusRequester(searchFocusRequester)
                         .focusProperties {
                             left = refreshFocusRequester
-                            down = selectedCategoryRequester
+                            activeCategoryEntryRequester?.let { down = it }
                         },
                     onClick = {
                         searchExpanded = true
@@ -843,7 +868,7 @@ internal fun TvSportsScreen(
                             .focusRequester(requester)
                             .focusProperties {
                                 left = railFocusRequester
-                                up = selectedCategoryRequester
+                                activeCategoryEntryRequester?.let { up = it }
                             },
                         onClick = { if (!selectedScopeRefreshing) startFetch() },
                         onFocused = {
@@ -913,7 +938,7 @@ internal fun TvSportsScreen(
                         },
                         leftFocusRequester = railFocusRequester,
                         focusRequester = requester,
-                        upFocusRequester = if (index == 0) selectedCategoryRequester else null,
+                        upFocusRequester = if (index == 0) activeCategoryEntryRequester else null,
                         onFocused = {
                             sportsFocusState.markEventFocused(rowKey, index)
                             focusRestoreController.markFocused(target)

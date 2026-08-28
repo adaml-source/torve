@@ -3,12 +3,15 @@ package com.torve.android.tv.focus
 import com.torve.android.tv.nav.TvRoutes
 
 internal fun playbackReturnFocusRoute(
-    currentDestinationRoute: String?,
+    returnDestinationRoute: String?,
     selectedTopRoute: String,
-): String = if (currentDestinationRoute?.startsWith("tv_details/") == true) {
-    TvRoutes.DETAILS
-} else {
-    selectedTopRoute
+): String = when {
+    returnDestinationRoute?.startsWith("tv_details/") == true -> TvRoutes.DETAILS
+    returnDestinationRoute.isNullOrBlank() -> selectedTopRoute
+    returnDestinationRoute == TvRoutes.SUB_NAV_START -> selectedTopRoute
+    returnDestinationRoute == TvRoutes.PLAYER -> selectedTopRoute
+    returnDestinationRoute == TvRoutes.LIVE_PLAYER -> selectedTopRoute
+    else -> returnDestinationRoute
 }
 
 internal fun didPlaybackReturnFocusReachContent(
@@ -32,8 +35,3 @@ internal fun didPlaybackReturnFocusReachContent(
         contentFocusEpochAfter != contentFocusEpochBefore && focusedContentRoute == focusRoute
     }
 }
-
-internal fun canPlaybackReturnFallbackToRail(
-    focusRoute: String,
-    isSubRouteActive: Boolean,
-): Boolean = focusRoute != TvRoutes.DETAILS && !isSubRouteActive

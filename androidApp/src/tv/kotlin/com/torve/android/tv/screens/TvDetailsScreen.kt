@@ -47,6 +47,7 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.remember
@@ -93,6 +94,8 @@ import com.torve.android.tv.components.TvEpisodePicker
 import com.torve.android.tv.focus.TvFocusTargetId
 import com.torve.android.tv.focus.rememberRegisteredTvFocusRequester
 import com.torve.android.tv.focus.rememberTvModalFocusRestoreController
+import com.torve.android.tv.focus.TvDetailsPlaybackReturnTarget
+import com.torve.android.tv.focus.resolveTvDetailsPlaybackReturnTarget
 import com.torve.android.tv.premium.TvEntitledFeature
 import com.torve.android.tv.premium.TvPremiumAccess
 import androidx.compose.material.icons.Icons
@@ -178,6 +181,7 @@ fun TvDetailsScreen(
     onFirstContentRequester: (FocusRequester) -> Unit,
     onContentFocused: (FocusRequester) -> Unit,
     onContentFocusStateChanged: (Boolean) -> Unit = {},
+    playbackFocusRestoreRequestId: Int = 0,
     onMediaClick: (MediaItem) -> Unit = {},
     onCastClick: (castId: Int, castName: String) -> Unit = { _, _ -> },
     onSettingsClick: () -> Unit = {},
@@ -273,6 +277,8 @@ fun TvDetailsScreen(
     var sourcePickerEpisode by remember { mutableStateOf<Int?>(null) }
     var sourcePickerOriginEpisode by remember(type, id) { mutableStateOf<Pair<Int, Int>?>(null) }
     var pendingEpisodeFocusRestore by remember(type, id) { mutableStateOf<Pair<Int, Int>?>(null) }
+    var playbackOriginSeason by rememberSaveable(type, id) { mutableIntStateOf(-1) }
+    var playbackOriginEpisode by rememberSaveable(type, id) { mutableIntStateOf(-1) }
     var initialPlayFocusAssigned by rememberSaveable(type, id) { mutableStateOf(false) }
     var restorePlayFocusAfterSourceDismiss by remember { mutableStateOf(false) }
     val showCinematicSourceLoading = state.shouldShowCinematicSourceLoading(
@@ -291,6 +297,28 @@ fun TvDetailsScreen(
         }
         sourcePickerOriginEpisode = null
         resolvingEpisodeTarget = null
+    }
+
+    fun launchResolvedPlayback(
+        url: String,
+        fallbackUrl: String,
+        mediaItem: MediaItem,
+        season: Int?,
+        episode: Int?,
+        autoSourceSelection: Boolean,
+        episodeName: String,
+    ) {
+        playbackOriginSeason = season ?: -1
+        playbackOriginEpisode = episode ?: -1
+        onPlayResolved(
+            url,
+            fallbackUrl,
+            mediaItem,
+            season,
+            episode,
+            autoSourceSelection,
+            episodeName,
+        )
     }
     val watchlistModalRestoreController = rememberTvModalFocusRestoreController(
         key = "details_watchlist_${type}_$id",
@@ -375,6 +403,62 @@ fun TvDetailsScreen(
             if (sourcePickerState != null) return@LaunchedEffect
             runCatching { playFocusRequester.requestFocus() }
         }
+    }
+
+    // Player return is a destination-owned, single-shot restoration. The
+    // episode identity survives requester recreation; movies return to the
+    // primary Play action. Scrolling makes the target compose before focus is
+    // requested, without lifecycle timing delays.
+    LaunchedEffect(playbackFocusRestoreRequestId, state.mediaItem?.id) {
+        if (playbackFocusRestoreRequestId <= 0) return@LaunchedEffect
+        val item = state.mediaItem ?: return@LaunchedEffect
+        val restoreTarget = resolveTvDetailsPlaybackReturnTarget(
+            isSeries = item.type == MediaType.SERIES,
+            originSeason = playbackOriginSeason,
+            originEpisode = playbackOriginEpisode,
+        )
+        if (restoreTarget is TvDetailsPlaybackReturnTarget.PrimaryAction) {
+            listState.scrollToItem(0)
+            withFrameNanos { }
+            runCatching { playFocusRequester.requestFocus() }
+            return@LaunchedEffect
+        }
+
+        val episodeTarget = restoreTarget as TvDetailsPlaybackReturnTarget.Episode
+        val episodeIdentity = episodeTarget.season to episodeTarget.episode
+        pendingEpisodeFocusRestore = episodeIdentity
+        if (state.selectedSeason != episodeTarget.season) {
+            item.tmdbId?.let { detailViewModel.loadSeasonDetail(it, episodeTarget.season) }
+        }
+        val episodesIndex = 1 +
+            (if (!item.tagline.isNullOrBlank()) 1 else 0) +
+            (if (item.genres.isNotEmpty()) 1 else 0) +
+            (if (
+                item.ratings.withFallbackTmdbScore(item.rating) != null &&
+                settingsState.ratingPrefs.showRatingsOnDetailPage
+            ) 2 else 0) +
+            (if (!item.overview.isNullOrBlank()) 1 else 0) +
+            (if (!item.director.isNullOrBlank()) 1 else 0) +
+            (if (item.cast.isNotEmpty()) 1 else 0)
+        listState.scrollToItem(episodesIndex.coerceAtLeast(0))
+    }
+
+    LaunchedEffect(
+        playbackFocusRestoreRequestId,
+        pendingEpisodeFocusRestore,
+        state.selectedSeason,
+        state.seasonDetail?.seasonNumber,
+        state.seasonDetail?.episodes?.size,
+        state.isLoadingSeasonDetail,
+    ) {
+        val target = pendingEpisodeFocusRestore ?: return@LaunchedEffect
+        val loadedSeason = state.seasonDetail?.takeIf { it.seasonNumber == target.first }
+            ?: return@LaunchedEffect
+        if (state.isLoadingSeasonDetail || loadedSeason.episodes.isNotEmpty()) return@LaunchedEffect
+        pendingEpisodeFocusRestore = null
+        listState.scrollToItem(0)
+        withFrameNanos { }
+        runCatching { playFocusRequester.requestFocus() }
     }
 
     // Dismissing the modal is the only post-entry path that deliberately
@@ -593,7 +677,7 @@ fun TvDetailsScreen(
         TvNotificationQueue.clear(TV_USENET_PREPARING_NOTIFICATION_TAG)
         val epName = state.seasonDetail?.episodes
             ?.find { it.episodeNumber == state.streamContextEpisode }?.name.orEmpty()
-        onPlayResolved(
+        launchResolvedPlayback(
             intent.url,
             "",
             media,
@@ -635,7 +719,7 @@ fun TvDetailsScreen(
 
         val epName = state.seasonDetail?.episodes
             ?.find { it.episodeNumber == state.streamContextEpisode }?.name.orEmpty()
-        onPlayResolved(
+        launchResolvedPlayback(
             playbackUrl,
             fallbackUrl,
             media,
@@ -1994,7 +2078,7 @@ fun TvDetailsScreen(
                     ?.find { it.episodeNumber == selectedEpisode }?.name.orEmpty()
                 when (val route = option.route) {
                     is PlaybackRoute.LocalFile -> {
-                        onPlayResolved(
+                        launchResolvedPlayback(
                             "file://${route.absolutePath}",
                             "",
                             selectedMediaItem,
@@ -2006,7 +2090,7 @@ fun TvDetailsScreen(
                     }
                     is PlaybackRoute.JellyfinStream -> {
                         PendingLanPlaybackHandoff.stage(route)
-                        onPlayResolved(
+                        launchResolvedPlayback(
                             route.url,
                             "",
                             selectedMediaItem,
@@ -2020,7 +2104,7 @@ fun TvDetailsScreen(
                         // Stage headers BEFORE navigating — PlayerScreen
                         // attaches X-Torve-Lan-Auth before play().
                         PendingLanPlaybackHandoff.stage(route)
-                        onPlayResolved(
+                        launchResolvedPlayback(
                             route.url,
                             "",
                             selectedMediaItem,

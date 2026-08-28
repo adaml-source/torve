@@ -25,6 +25,22 @@ internal data class TvSportsFocusState(
     val focusedEventId: String? = null,
     val focusedEventIndex: Int = 0,
     val focusedSourceId: String? = null,
+    val rememberedEventsByCategory: Map<String, TvSportsRememberedEvent> = emptyMap(),
+)
+
+internal data class TvSportsRememberedEvent(
+    val eventId: String,
+    val index: Int,
+)
+
+internal data class TvSportsResultEntry(
+    val eventId: String,
+    val index: Int,
+)
+
+internal data class TvSportsCategoryEntry(
+    val categoryId: String,
+    val index: Int,
 )
 
 internal sealed interface TvSportsFocusTarget {
@@ -43,23 +59,27 @@ internal class TvSportsFocusStateMachine(initialCategoryId: String) {
         private set
 
     fun selectCategory(categoryId: String) {
+        val remembered = state.rememberedEventsByCategory[categoryId]
         state = state.copy(
             selectedCategoryId = categoryId,
             focusedRegion = TvSportsFocusRegion.CATEGORY_ROW,
             focusedCategoryId = categoryId,
             focusedTopAction = null,
-            focusedEventId = null,
-            focusedSourceId = null,
+            focusedEventId = remembered?.eventId,
+            focusedEventIndex = remembered?.index ?: 0,
+            focusedSourceId = remembered?.eventId,
         )
     }
 
     fun markCategoryFocused(categoryId: String) {
+        val remembered = state.rememberedEventsByCategory[state.selectedCategoryId]
         state = state.copy(
             focusedRegion = TvSportsFocusRegion.CATEGORY_ROW,
             focusedCategoryId = categoryId,
             focusedTopAction = null,
-            focusedEventId = null,
-            focusedSourceId = null,
+            focusedEventId = remembered?.eventId,
+            focusedEventIndex = remembered?.index ?: 0,
+            focusedSourceId = remembered?.eventId,
         )
     }
 
@@ -67,20 +87,25 @@ internal class TvSportsFocusStateMachine(initialCategoryId: String) {
         state = state.copy(
             focusedRegion = TvSportsFocusRegion.TOP_ACTIONS,
             focusedTopAction = action,
-            focusedEventId = null,
-            focusedSourceId = null,
         )
     }
 
     fun markEventFocused(eventId: String, index: Int, sourceId: String = eventId) {
+        val safeIndex = index.coerceAtLeast(0)
         state = state.copy(
             focusedRegion = TvSportsFocusRegion.EVENT_LIST,
             focusedTopAction = null,
             focusedEventId = eventId,
-            focusedEventIndex = index.coerceAtLeast(0),
+            focusedEventIndex = safeIndex,
             focusedSourceId = sourceId,
+            rememberedEventsByCategory = state.rememberedEventsByCategory + (
+                state.selectedCategoryId to TvSportsRememberedEvent(eventId, safeIndex)
+            ),
         )
     }
+
+    fun rememberedEventForSelectedCategory(): TvSportsRememberedEvent? =
+        state.rememberedEventsByCategory[state.selectedCategoryId]
 
     /**
      * Returns a target only when the current event disappeared. Existing
@@ -102,6 +127,7 @@ internal class TvSportsFocusStateMachine(initialCategoryId: String) {
                 focusedCategoryId = state.selectedCategoryId,
                 focusedEventId = null,
                 focusedSourceId = null,
+                rememberedEventsByCategory = state.rememberedEventsByCategory - state.selectedCategoryId,
             )
             return TvSportsFocusTarget.Category(state.selectedCategoryId)
         }
@@ -111,6 +137,9 @@ internal class TvSportsFocusStateMachine(initialCategoryId: String) {
             focusedEventId = replacementId,
             focusedEventIndex = replacementIndex,
             focusedSourceId = replacementId,
+            rememberedEventsByCategory = state.rememberedEventsByCategory + (
+                state.selectedCategoryId to TvSportsRememberedEvent(replacementId, replacementIndex)
+            ),
         )
         return TvSportsFocusTarget.Event(replacementId, replacementIndex)
     }
@@ -159,4 +188,48 @@ internal class TvSportsFocusStateMachine(initialCategoryId: String) {
 internal fun nearestSportsItemIndex(previousIndex: Int, itemCount: Int): Int? {
     if (itemCount <= 0) return null
     return previousIndex.coerceIn(0, itemCount - 1)
+}
+
+/**
+ * Resolves CATEGORY_ROW -> RESULTS_LIST using only result nodes that are
+ * currently composed. A remembered off-screen item is not a valid direct
+ * FocusRequester target; in that case the first composed row is the safe
+ * deterministic entry point and normal list navigation can continue from it.
+ */
+internal fun resolveSportsResultEntry(
+    visibleEventIds: List<String>,
+    rememberedEvent: TvSportsRememberedEvent?,
+    composedEventIds: Set<String>,
+): TvSportsResultEntry? {
+    if (visibleEventIds.isEmpty() || composedEventIds.isEmpty()) return null
+
+    val rememberedIndex = rememberedEvent
+        ?.eventId
+        ?.let(visibleEventIds::indexOf)
+        ?.takeIf { it >= 0 && visibleEventIds[it] in composedEventIds }
+    if (rememberedIndex != null) {
+        return TvSportsResultEntry(visibleEventIds[rememberedIndex], rememberedIndex)
+    }
+
+    val firstComposedIndex = visibleEventIds.indexOfFirst(composedEventIds::contains)
+        .takeIf { it >= 0 }
+        ?: return null
+    return TvSportsResultEntry(visibleEventIds[firstComposedIndex], firstComposedIndex)
+}
+
+internal fun resolveSportsCategoryEntry(
+    categoryIds: List<String>,
+    selectedCategoryId: String,
+    composedCategoryIds: Set<String>,
+): TvSportsCategoryEntry? {
+    if (categoryIds.isEmpty() || composedCategoryIds.isEmpty()) return null
+    val selectedIndex = categoryIds.indexOf(selectedCategoryId).takeIf { it >= 0 } ?: 0
+    if (categoryIds[selectedIndex] in composedCategoryIds) {
+        return TvSportsCategoryEntry(categoryIds[selectedIndex], selectedIndex)
+    }
+    val nearestIndex = categoryIds.indices
+        .filter { categoryIds[it] in composedCategoryIds }
+        .minByOrNull { kotlin.math.abs(it - selectedIndex) }
+        ?: return null
+    return TvSportsCategoryEntry(categoryIds[nearestIndex], nearestIndex)
 }

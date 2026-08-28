@@ -4,6 +4,7 @@ import androidx.compose.ui.focus.FocusRequester
 import org.junit.Assert.assertNotSame
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -32,6 +33,20 @@ class TvModalFocusRestoreControllerTest {
 
         controller.pruneInactiveTargets(setOf(target))
 
+        assertSame(requester, controller.requesterFor(target))
+    }
+
+    @Test
+    fun cachedLazyRequesterIsNotExposedAsDirectionalTargetWhenUnregistered() {
+        val controller = TvModalFocusRestoreController()
+        val target = target("sports-result-42")
+        val requester = controller.registerTarget(target, FocusRequester())
+
+        assertSame(requester, controller.activeRequesterFor(target))
+
+        controller.unregisterTarget(target)
+
+        assertNull(controller.activeRequesterFor(target))
         assertSame(requester, controller.requesterFor(target))
     }
 

@@ -121,9 +121,10 @@ internal fun TvNavHost(
     onRequestLifetimeUnlock: (TvEntitledFeature) -> Unit = {},
     onWatchedStatusChanged: (MediaItem, Boolean) -> Unit = { _, _ -> },
     isStreamPlaybackLocked: Boolean = false,
-    onPlaybackFocusRestoreRequest: () -> Unit = {},
-    onFirstContentRequester: (FocusRequester) -> Unit = {},
-    onContentFocused: (FocusRequester) -> Unit = {},
+    onPlaybackFocusRestoreRequest: (returnDestinationRoute: String?) -> Unit = {},
+    playbackFocusRestoreRequestId: Int = 0,
+    onFirstContentRequester: (route: String, FocusRequester) -> Unit = { _, _ -> },
+    onContentFocused: (route: String, FocusRequester) -> Unit = { _, _ -> },
     onDetailsContentFocusStateChanged: (Boolean) -> Unit = {},
     registerSeeAllFocusHandle: ((TvScreenFocusHandle?) -> Unit)? = null,
     homeLayoutEntryFocusRequester: FocusRequester,
@@ -169,8 +170,8 @@ internal fun TvNavHost(
             TvHomeLayoutScreen(
                 railFocusRequester = railFocusRequester,
                 onBack = onHomeLayoutBack,
-                onFirstContentRequester = onFirstContentRequester,
-                onContentFocused = onContentFocused,
+                onFirstContentRequester = { onFirstContentRequester(TvRoutes.HOME_LAYOUT, it) },
+                onContentFocused = { onContentFocused(TvRoutes.HOME_LAYOUT, it) },
                 entryFocusRequester = homeLayoutEntryFocusRequester,
                 onEntryFocusReadyChanged = onHomeLayoutEntryReadyChanged,
                 onEntryFocusFocused = onHomeLayoutEntryFocused,
@@ -181,8 +182,8 @@ internal fun TvNavHost(
             TvRatingsSettingsScreen(
                 railFocusRequester = railFocusRequester,
                 onBack = onRatingsBack,
-                onFirstContentRequester = onFirstContentRequester,
-                onContentFocused = onContentFocused,
+                onFirstContentRequester = { onFirstContentRequester(TvRoutes.RATINGS_SETTINGS, it) },
+                onContentFocused = { onContentFocused(TvRoutes.RATINGS_SETTINGS, it) },
                 entryFocusRequester = ratingsEntryFocusRequester,
                 onEntryFocusReadyChanged = onRatingsEntryReadyChanged,
                 onEntryFocusFocused = onRatingsEntryFocused,
@@ -204,8 +205,8 @@ internal fun TvNavHost(
                     }
                 },
                 onRequestLifetimeUnlock = onRequestLifetimeUnlock,
-                onFirstContentRequester = onFirstContentRequester,
-                onContentFocused = onContentFocused,
+                onFirstContentRequester = { onFirstContentRequester(TvRoutes.WATCH_STATS, it) },
+                onContentFocused = { onContentFocused(TvRoutes.WATCH_STATS, it) },
                 entryFocusRequester = entryFocusRequester,
             )
         }
@@ -312,8 +313,8 @@ internal fun TvNavHost(
                     navController.navigateToTvDetails(item)
                 },
                 onBack = onSeeAllBack,
-                onFirstContentRequester = onFirstContentRequester,
-                onContentFocused = onContentFocused,
+                onFirstContentRequester = { onFirstContentRequester(TvRoutes.SEE_ALL, it) },
+                onContentFocused = { onContentFocused(TvRoutes.SEE_ALL, it) },
                 onSeeAll = { childRailKey, childTitle, childMediaType ->
                     navController.navigate(
                         TvRoutes.seeAll(
@@ -380,8 +381,8 @@ internal fun TvNavHost(
                             }
                         }
                     },
-                    onFirstContentRequester = onFirstContentRequester,
-                    onContentFocused = onContentFocused,
+                    onFirstContentRequester = { onFirstContentRequester(TvRoutes.VOD_SERIES_DETAILS, it) },
+                    onContentFocused = { onContentFocused(TvRoutes.VOD_SERIES_DETAILS, it) },
                 )
             }
         }
@@ -408,9 +409,10 @@ internal fun TvNavHost(
                 focusEpisodes = focusEpisodes,
                 railFocusRequester = railFocusRequester,
                 onBack = onDetailsBack,
-                onFirstContentRequester = onFirstContentRequester,
-                onContentFocused = onContentFocused,
+                onFirstContentRequester = { onFirstContentRequester(TvRoutes.DETAILS, it) },
+                onContentFocused = { onContentFocused(TvRoutes.DETAILS, it) },
                 onContentFocusStateChanged = onDetailsContentFocusStateChanged,
+                playbackFocusRestoreRequestId = playbackFocusRestoreRequestId,
                 onMediaClick = { item -> navController.navigateToTvDetails(item) },
                 onSettingsClick = {
                     // Focus state cleanup handled in TvRoot via isSubRouteActive LaunchedEffect
@@ -497,11 +499,12 @@ internal fun TvNavHost(
                     initialReplayEndMs = backStackEntry.arguments?.getLong("replayEndMs") ?: -1L,
                     initialReplayTitle = backStackEntry.arguments?.getString("replayTitle").orEmpty(),
                     onBack = {
+                        val returnRoute = navController.previousBackStackEntry?.destination?.route
                         navController.popBackStack()
                         // Live playback has no persistent playback card to own
                         // focus after exit. Restore the originating IPTV surface
                         // explicitly as well as through the route transition.
-                        onPlaybackFocusRestoreRequest()
+                        onPlaybackFocusRestoreRequest(returnRoute)
                     },
                 )
             }
@@ -555,17 +558,19 @@ internal fun TvNavHost(
                         }
                     },
                     onBack = {
+                        val returnRoute = navController.previousBackStackEntry?.destination?.route
                         navController.popBackStack()
                         // Exo playback deliberately hands focus to the retained
                         // playback card. MPV/non-retained exits have no such
                         // owner, so restore the originating details control.
                         if (ActivePlaybackState.session == null) {
-                            onPlaybackFocusRestoreRequest()
+                            onPlaybackFocusRestoreRequest(returnRoute)
                         }
                     },
                     onStop = {
+                        val returnRoute = navController.previousBackStackEntry?.destination?.route
                         navController.popBackStack()
-                        onPlaybackFocusRestoreRequest()
+                        onPlaybackFocusRestoreRequest(returnRoute)
                     },
                 )
             }
@@ -594,11 +599,11 @@ internal fun TvNavHost(
                     onTogglePlayback = ActivePlaybackState::togglePlayback,
                     onStop = {
                         ActivePlaybackState.stopAndClear()
-                        onPlaybackFocusRestoreRequest()
+                        onPlaybackFocusRestoreRequest(currentRoute)
                     },
                     requestInitialFocus = true,
                     focusRequestId = ActivePlaybackState.focusPlaybackBarRequestId,
-                    onNavigateAway = onPlaybackFocusRestoreRequest,
+                    onNavigateAway = { onPlaybackFocusRestoreRequest(currentRoute) },
                 )
             }
         }

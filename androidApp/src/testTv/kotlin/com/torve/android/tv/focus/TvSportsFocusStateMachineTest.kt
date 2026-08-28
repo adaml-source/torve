@@ -109,4 +109,93 @@ class TvSportsFocusStateMachineTest {
             )
         }
     }
+
+    @Test
+    fun categoryRetainsPerCategoryResultMemoryWithoutLockingFocus() {
+        val state = TvSportsFocusStateMachine("FOOTBALL")
+        state.markEventFocused("football-6", 5)
+        state.markCategoryFocused("FOOTBALL")
+
+        assertEquals(
+            TvSportsRememberedEvent("football-6", 5),
+            state.rememberedEventForSelectedCategory(),
+        )
+        assertEquals(TvSportsFocusRegion.CATEGORY_ROW, state.state.focusedRegion)
+
+        state.selectCategory("BASKETBALL")
+        state.markEventFocused("basketball-2", 1)
+        state.selectCategory("FOOTBALL")
+
+        assertEquals("football-6", state.state.focusedEventId)
+        assertEquals(5, state.state.focusedEventIndex)
+    }
+
+    @Test
+    fun categoryEntryUsesRememberedResultOnlyWhenItsNodeIsComposed() {
+        val ids = listOf("event-1", "event-2", "event-6", "event-7")
+
+        assertEquals(
+            TvSportsResultEntry("event-6", 2),
+            resolveSportsResultEntry(
+                visibleEventIds = ids,
+                rememberedEvent = TvSportsRememberedEvent("event-6", 2),
+                composedEventIds = setOf("event-2", "event-6", "event-7"),
+            ),
+        )
+        assertEquals(
+            TvSportsResultEntry("event-2", 1),
+            resolveSportsResultEntry(
+                visibleEventIds = ids,
+                rememberedEvent = TvSportsRememberedEvent("event-1", 0),
+                composedEventIds = setOf("event-2", "event-6", "event-7"),
+            ),
+        )
+    }
+
+    @Test
+    fun categoryEntryNeverTargetsLoadingOrEmptyResults() {
+        assertNull(
+            resolveSportsResultEntry(
+                visibleEventIds = listOf("event-1"),
+                rememberedEvent = TvSportsRememberedEvent("event-1", 0),
+                composedEventIds = emptySet(),
+            ),
+        )
+        assertNull(
+            resolveSportsResultEntry(
+                visibleEventIds = emptyList(),
+                rememberedEvent = null,
+                composedEventIds = emptySet(),
+            ),
+        )
+    }
+
+    @Test
+    fun categoryRowEntryUsesSelectedChipWhenComposedOrNearestLiveChip() {
+        val categories = listOf("all", "today", "recent", "football", "basketball")
+
+        assertEquals(
+            TvSportsCategoryEntry("football", 3),
+            resolveSportsCategoryEntry(
+                categoryIds = categories,
+                selectedCategoryId = "football",
+                composedCategoryIds = setOf("recent", "football", "basketball"),
+            ),
+        )
+        assertEquals(
+            TvSportsCategoryEntry("recent", 2),
+            resolveSportsCategoryEntry(
+                categoryIds = categories,
+                selectedCategoryId = "football",
+                composedCategoryIds = setOf("all", "today", "recent"),
+            ),
+        )
+        assertNull(
+            resolveSportsCategoryEntry(
+                categoryIds = categories,
+                selectedCategoryId = "football",
+                composedCategoryIds = emptySet(),
+            ),
+        )
+    }
 }

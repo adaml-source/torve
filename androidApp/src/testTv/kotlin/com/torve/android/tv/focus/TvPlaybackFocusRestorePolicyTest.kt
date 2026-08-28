@@ -9,7 +9,7 @@ import org.junit.Test
 class TvPlaybackFocusRestorePolicyTest {
 
     @Test
-    fun playbackReturnTargetsDetailsWhenDetailsOwnsTheDestination() {
+    fun capturedReturnRouteTargetsDetailsEvenWhenPlayerPopHasNotSettled() {
         assertEquals(
             TvRoutes.DETAILS,
             playbackReturnFocusRoute("tv_details/tv/123", TvRoutes.SHOWS),
@@ -17,6 +17,10 @@ class TvPlaybackFocusRestorePolicyTest {
         assertEquals(
             TvRoutes.IPTV,
             playbackReturnFocusRoute(TvRoutes.SUB_NAV_START, TvRoutes.IPTV),
+        )
+        assertEquals(
+            TvRoutes.VOD_SERIES_DETAILS,
+            playbackReturnFocusRoute(TvRoutes.VOD_SERIES_DETAILS, TvRoutes.LIBRARY),
         )
     }
 
@@ -83,9 +87,4 @@ class TvPlaybackFocusRestorePolicyTest {
         )
     }
 
-    @Test
-    fun detailsNeverFallsBackToTheHiddenRail() {
-        assertFalse(canPlaybackReturnFallbackToRail(TvRoutes.DETAILS, isSubRouteActive = true))
-        assertTrue(canPlaybackReturnFallbackToRail(TvRoutes.SHOWS, isSubRouteActive = false))
-    }
 }
