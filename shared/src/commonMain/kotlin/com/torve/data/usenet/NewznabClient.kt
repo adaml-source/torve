@@ -42,11 +42,13 @@ class NewznabClient(
         category: String,
         offset: Int = 0,
         limit: Int = 100,
+        maxAgeDays: Int? = null,
     ): List<NewznabItem> {
         if (baseUrl.isBlank() || apiKey.isBlank()) return emptyList()
         val url = buildUrl(
             baseUrl,
-            mapOf(
+            buildMap {
+                putAll(mapOf(
                 "t" to "movie",
                 "cat" to category,
                 "apikey" to apiKey,
@@ -54,7 +56,9 @@ class NewznabClient(
                 "offset" to offset.toString(),
                 "limit" to limit.toString(),
                 "o" to "xml",
-            ),
+                ))
+                maxAgeDays?.takeIf { it > 0 }?.let { put("maxage", it.toString()) }
+            },
         )
         val xml = fetchOrNull(url) ?: return emptyList()
         return parseItems(xml, baseUrl).sortedByPubDateDesc()
@@ -67,11 +71,13 @@ class NewznabClient(
         query: String,
         offset: Int = 0,
         limit: Int = 100,
+        maxAgeDays: Int? = null,
     ): List<NewznabItem> {
         if (baseUrl.isBlank() || apiKey.isBlank() || query.isBlank()) return emptyList()
         val url = buildUrl(
             baseUrl,
-            mapOf(
+            buildMap {
+                putAll(mapOf(
                 "t" to "search",
                 "cat" to category,
                 "q" to query,
@@ -80,7 +86,9 @@ class NewznabClient(
                 "offset" to offset.toString(),
                 "limit" to limit.toString(),
                 "o" to "xml",
-            ),
+                ))
+                maxAgeDays?.takeIf { it > 0 }?.let { put("maxage", it.toString()) }
+            },
         )
         val xml = fetchOrNull(url) ?: return emptyList()
         return parseItems(xml, baseUrl).sortedByPubDateDesc()
@@ -99,9 +107,10 @@ class NewznabClient(
         category: String,
         maxItems: Int,
         pageSize: Int = 100,
+        maxAgeDays: Int? = null,
         onProgress: ((fetched: Int, max: Int) -> Unit)? = null,
     ): List<NewznabItem> = paginate(maxItems, pageSize, onProgress) { offset, limit ->
-        browse(baseUrl, apiKey, category, offset, limit)
+        browse(baseUrl, apiKey, category, offset, limit, maxAgeDays)
     }
 
     suspend fun searchAllPages(
@@ -111,9 +120,10 @@ class NewznabClient(
         query: String,
         maxItems: Int,
         pageSize: Int = 100,
+        maxAgeDays: Int? = null,
         onProgress: ((fetched: Int, max: Int) -> Unit)? = null,
     ): List<NewznabItem> = paginate(maxItems, pageSize, onProgress) { offset, limit ->
-        search(baseUrl, apiKey, category, query, offset, limit)
+        search(baseUrl, apiKey, category, query, offset, limit, maxAgeDays)
     }
 
     private suspend fun paginate(

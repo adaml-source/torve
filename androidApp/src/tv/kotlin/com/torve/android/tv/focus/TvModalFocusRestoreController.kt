@@ -253,13 +253,26 @@ internal class TvModalFocusRestoreController {
         )
 
         origin.outerListSnapshot?.let { snapshot ->
-            outerListState?.scrollToItem(snapshot.firstVisibleItemIndex, snapshot.firstVisibleItemScrollOffset)
+            outerListState?.let { state ->
+                val lastIndex = (state.layoutInfo.totalItemsCount - 1).coerceAtLeast(0)
+                runCatching {
+                    state.scrollToItem(
+                        snapshot.firstVisibleItemIndex.coerceIn(0, lastIndex),
+                        snapshot.firstVisibleItemScrollOffset,
+                    )
+                }
+            }
         }
         origin.innerListSnapshot?.let { snapshot ->
-            innerListStateForRowKey(origin.rowKey)?.scrollToItem(
-                snapshot.firstVisibleItemIndex,
-                snapshot.firstVisibleItemScrollOffset,
-            )
+            innerListStateForRowKey(origin.rowKey)?.let { state ->
+                val lastIndex = (state.layoutInfo.totalItemsCount - 1).coerceAtLeast(0)
+                runCatching {
+                    state.scrollToItem(
+                        snapshot.firstVisibleItemIndex.coerceIn(0, lastIndex),
+                        snapshot.firstVisibleItemScrollOffset,
+                    )
+                }
+            }
         }
 
         repeat(maxAttempts) {

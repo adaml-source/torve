@@ -3021,6 +3021,13 @@ fun TvRoot(
                                         },
                                         onFirstContentRequester = { firstContentFocusByRoute[TvRoutes.SPORTS] = it },
                                         onContentFocused = { markContentFocused(TvRoutes.SPORTS, it) },
+                                        registerFocusHandle = { handle ->
+                                            if (handle == null) {
+                                                focusHandlesByRoute.remove(TvRoutes.SPORTS)
+                                            } else {
+                                                focusHandlesByRoute[TvRoutes.SPORTS] = handle
+                                            }
+                                        },
                                     )
 
                                     TvRoutes.JELLYFIN -> TvJellyfinScreen(

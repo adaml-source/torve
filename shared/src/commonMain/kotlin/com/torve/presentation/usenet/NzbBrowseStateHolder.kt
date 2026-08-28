@@ -3,6 +3,7 @@ package com.torve.presentation.usenet
 import com.torve.data.usenet.NewznabItem
 import com.torve.util.ioDispatcher
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -31,6 +32,10 @@ object NzbBrowseStateHolder {
         val selectedCategories: Set<String> = emptySet(),
         val selectedSportBucket: String? = null,
         val selectedLanguages: Set<String> = emptySet(),
+        /** Sports refresh work is scoped so one category never locks another. */
+        val activeRefreshScopes: Set<String> = emptySet(),
+        val refreshProgressByScope: Map<String, String> = emptyMap(),
+        val refreshErrorsByScope: Map<String, String> = emptyMap(),
     )
 
     // Persistent scope — survives composable disposal so fetches complete in background
@@ -64,6 +69,8 @@ object NzbBrowseStateHolder {
         _jobs[pageKey] = scope.launch {
             try {
                 block()
+            } catch (cancelled: CancellationException) {
+                throw cancelled
             } catch (_: Exception) {
                 update(pageKey) { it.copy(loading = false, progress = null) }
             }

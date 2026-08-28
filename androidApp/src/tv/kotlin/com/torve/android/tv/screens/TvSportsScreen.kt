@@ -27,6 +27,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -35,6 +36,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -45,7 +47,6 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
-import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -59,6 +60,13 @@ import com.torve.android.tv.TV_FILTER_ROW_NESTED_END_GUTTER
 import com.torve.android.tv.TV_PAGE_BOTTOM_GUTTER
 import com.torve.android.tv.TV_PAGE_CONTENT_GUTTER
 import com.torve.android.tv.TV_PAGE_TOP_GUTTER
+import com.torve.android.tv.focus.TvFocusTargetId
+import com.torve.android.tv.focus.TvScreenFocusHandle
+import com.torve.android.tv.focus.TvSportsFocusStateMachine
+import com.torve.android.tv.focus.TvSportsFocusTarget
+import com.torve.android.tv.focus.TvSportsTopAction
+import com.torve.android.tv.focus.rememberRegisteredTvFocusRequester
+import com.torve.android.tv.focus.rememberTvModalFocusRestoreController
 import com.torve.android.catalog.SportsBootstrapJson
 import com.torve.android.catalog.SportsBootstrapPayload
 import com.torve.android.catalog.sportsBootstrapKey
@@ -85,16 +93,15 @@ import com.torve.domain.integrations.IntegrationSecretStore
 import com.torve.presentation.panda.PandaConfigStateStore
 import com.torve.presentation.usenet.NzbBrowseStateHolder
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import org.koin.compose.koinInject
 import com.torve.data.auth.AuthClient
-
-private const val SPORTS_FILTER_ALL = "all"
-private const val SPORTS_FILTER_TODAY = "today"
-private const val SPORTS_FILTER_RECENT = "recent"
 
 private val SPORTS_PRIMARY_BUCKETS = listOf(
     SportBucket.F1,
@@ -106,6 +113,20 @@ private val SPORTS_PRIMARY_BUCKETS = listOf(
     SportBucket.BASEBALL,
     SportBucket.SOCCER,
     SportBucket.HOCKEY,
+    SportBucket.TENNIS,
+    SportBucket.GOLF,
+    SportBucket.CRICKET,
+    SportBucket.RUGBY,
+)
+
+private const val SPORTS_SCREEN_ID = "tv_sports"
+private const val SPORTS_ROW_TOP_ACTIONS = "top_actions"
+private const val SPORTS_ROW_CATEGORIES = "categories"
+private const val SPORTS_ROW_EVENTS = "events"
+
+private data class SportsResolveUiState(
+    val message: String,
+    val isWorking: Boolean,
 )
 
 /**
@@ -121,12 +142,13 @@ private val SPORTS_PRIMARY_BUCKETS = listOf(
  * empty grid.
  */
 @Composable
-fun TvSportsScreen(
+internal fun TvSportsScreen(
     railFocusRequester: FocusRequester,
     onPlayStream: (url: String, title: String, sizeBytes: Long?) -> Unit,
     onOpenPandaSetup: () -> Unit = {},
     onFirstContentRequester: (FocusRequester) -> Unit = {},
     onContentFocused: (FocusRequester) -> Unit = {},
+    registerFocusHandle: ((TvScreenFocusHandle?) -> Unit)? = null,
     isActive: Boolean = true,
     pandaStore: PandaConfigStateStore = koinInject(),
     newznab: NewznabClient = koinInject(),
@@ -193,83 +215,144 @@ fun TvSportsScreen(
         "tv_sports_cache:${indexerUrl.hashCode()}:${indexerKey.hashCode()}"
     }
     val sportsJson = remember { Json { ignoreUnknownKeys = true } }
+    val sportsCacheWriteMutex = remember { Mutex() }
     val pageState by NzbBrowseStateHolder.flow(pageKey).collectAsState()
     val savedOnce = remember { NzbBrowseStateHolder.get(pageKey) }
     var query by remember { mutableStateOf(savedOnce.query) }
+    val savedMode = savedOnce.selectedSportBucket ?: SPORTS_FILTER_ALL
     var selectedBucket by remember {
         mutableStateOf(
-            savedOnce.selectedSportBucket?.let { name ->
+            savedMode.let { name ->
                 SportBucket.entries.firstOrNull { it.name == name }
             },
         )
     }
     var selectedSportsMode by remember {
-        mutableStateOf(savedOnce.selectedSportBucket ?: SPORTS_FILTER_ALL)
+        mutableStateOf(savedMode)
     }
-    var resolveStatus by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
+    val sportsFocusState = remember { TvSportsFocusStateMachine(selectedSportsMode) }
+    var resolveStatus by remember { mutableStateOf<Map<String, SportsResolveUiState>>(emptyMap()) }
     val listState = rememberLazyListState(
         initialFirstVisibleItemIndex = savedOnce.scrollIndex,
         initialFirstVisibleItemScrollOffset = savedOnce.scrollOffset,
     )
 
-    fun startFetch() {
+    fun startFetch(forceAll: Boolean = false, replaceInFlight: Boolean = false) {
         val q = query
-        val bucket = selectedBucket
-        NzbBrowseStateHolder.startFetch(pageKey) {
+        val requestedMode = if (forceAll) SPORTS_FILTER_ALL else selectedSportsMode
+        val plan = tvSportsRefreshPlan(requestedMode, q)
+        val fetchJobKey = tvSportsRefreshJobKey(pageKey, plan.scopeId)
+        if (NzbBrowseStateHolder.isFetching(fetchJobKey) && !replaceInFlight) return
+        NzbBrowseStateHolder.startFetch(fetchJobKey) {
             NzbBrowseStateHolder.update(pageKey) {
                 it.copy(
-                    loading = it.items.isEmpty(),
-                    errorText = null,
-                    progress = if (it.items.isEmpty()) null else "Refreshing cached sports releases...",
+                    loading = it.items.isEmpty() && plan.kind == TvSportsRefreshKind.ALL,
+                    errorText = if (plan.kind == TvSportsRefreshKind.ALL) null else it.errorText,
+                    activeRefreshScopes = it.activeRefreshScopes + plan.scopeId,
+                    refreshProgressByScope = it.refreshProgressByScope +
+                        (plan.scopeId to "Starting ${sportsScopeLabel(plan.scopeId)} refresh…"),
                 )
             }
             try {
                 val sportsCat = UsenetIndexerCategoryMap.sportsCategoriesFor(indexerType)
-                val items = if (q.isBlank()) {
+                val items = if (plan.remoteQuery.isNullOrBlank()) {
                     newznab.browseAllPages(
-                        indexerUrl, indexerKey, sportsCat, maxItems = 200,
+                        indexerUrl,
+                        indexerKey,
+                        sportsCat,
+                        maxItems = plan.maxItems,
+                        maxAgeDays = plan.maxAgeDays,
                         onProgress = { fetched, max ->
-                            NzbBrowseStateHolder.update(pageKey) { it.copy(progress = "Loading… $fetched / $max") }
+                            NzbBrowseStateHolder.update(pageKey) {
+                                it.copy(
+                                    refreshProgressByScope = it.refreshProgressByScope +
+                                        (plan.scopeId to "Loading… $fetched / $max"),
+                                )
+                            }
                         },
                     )
                 } else {
                     newznab.searchAllPages(
-                        indexerUrl, indexerKey, sportsCat, q.trim(), maxItems = 200,
+                        indexerUrl,
+                        indexerKey,
+                        sportsCat,
+                        plan.remoteQuery,
+                        maxItems = plan.maxItems,
+                        maxAgeDays = plan.maxAgeDays,
                         onProgress = { fetched, max ->
-                            NzbBrowseStateHolder.update(pageKey) { it.copy(progress = "Loading… $fetched / $max") }
+                            NzbBrowseStateHolder.update(pageKey) {
+                                it.copy(
+                                    refreshProgressByScope = it.refreshProgressByScope +
+                                        (plan.scopeId to "Loading… $fetched / $max"),
+                                )
+                            }
                         },
                     )
                 }
                 val error = if (items.isEmpty() && configured) {
-                    if (q.isBlank()) "Indexer returned 0 results." else "No matches for \"$q\"."
+                    if (plan.remoteQuery.isNullOrBlank()) {
+                        "Indexer returned 0 results for ${sportsScopeLabel(plan.scopeId)}."
+                    } else {
+                        "No matches for \"${plan.remoteQuery}\"."
+                    }
                 } else null
+                var mergedItems: List<NewznabItem> = emptyList()
                 NzbBrowseStateHolder.update(pageKey) {
+                    mergedItems = mergeTvSportsRefresh(it.items, items, plan)
                     it.copy(
-                        loading = false, progress = null, items = items, errorText = error,
-                        query = q, selectedSportBucket = bucket?.name,
+                        loading = false,
+                        progress = null,
+                        items = mergedItems,
+                        errorText = if (mergedItems.isEmpty() && plan.kind == TvSportsRefreshKind.ALL) {
+                            error
+                        } else {
+                            null
+                        },
+                        query = q,
+                        selectedSportBucket = it.selectedSportBucket ?: requestedMode,
                         scrollIndex = listState.firstVisibleItemIndex,
                         scrollOffset = listState.firstVisibleItemScrollOffset,
+                        activeRefreshScopes = it.activeRefreshScopes - plan.scopeId,
+                        refreshProgressByScope = it.refreshProgressByScope - plan.scopeId,
+                        refreshErrorsByScope = if (error == null) {
+                            it.refreshErrorsByScope - plan.scopeId
+                        } else {
+                            it.refreshErrorsByScope + (plan.scopeId to error)
+                        },
                     )
                 }
                 withContext(Dispatchers.IO) {
-                    val payload = TvSportsCachePayload(
-                        savedAtMs = System.currentTimeMillis(),
-                        query = q,
-                        selectedSportBucket = bucket?.name,
-                        items = items,
-                    )
-                    prefsRepo.setString(
-                        sportsCacheKey,
-                        sportsJson.encodeToString(TvSportsCachePayload.serializer(), payload),
-                    )
+                    sportsCacheWriteMutex.withLock {
+                        val latest = NzbBrowseStateHolder.get(pageKey)
+                        val payload = TvSportsCachePayload(
+                            savedAtMs = System.currentTimeMillis(),
+                            query = latest.query,
+                            selectedSportBucket = latest.selectedSportBucket,
+                            items = latest.items,
+                        )
+                        prefsRepo.setString(
+                            sportsCacheKey,
+                            sportsJson.encodeToString(TvSportsCachePayload.serializer(), payload),
+                        )
+                    }
                 }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
             } catch (t: Throwable) {
+                val message = t.message ?: "Indexer call failed."
                 NzbBrowseStateHolder.update(pageKey) {
                     it.copy(
                         loading = false,
                         progress = null,
                         items = it.items,
-                        errorText = t.message ?: "Indexer call failed.",
+                        errorText = if (it.items.isEmpty() && plan.kind == TvSportsRefreshKind.ALL) {
+                            message
+                        } else {
+                            it.errorText
+                        },
+                        activeRefreshScopes = it.activeRefreshScopes - plan.scopeId,
+                        refreshProgressByScope = it.refreshProgressByScope - plan.scopeId,
+                        refreshErrorsByScope = it.refreshErrorsByScope + (plan.scopeId to message),
                     )
                 }
             }
@@ -304,9 +387,11 @@ fun TvSportsScreen(
             if (restored != null && restored.items.isNotEmpty()) {
                 restoredFromCache = true
                 query = restored.query
-                selectedBucket = restored.selectedSportBucket?.let { name ->
+                selectedSportsMode = restored.selectedSportBucket ?: SPORTS_FILTER_ALL
+                selectedBucket = selectedSportsMode.let { name ->
                     SportBucket.entries.firstOrNull { it.name == name }
                 }
+                sportsFocusState.selectCategory(selectedSportsMode)
                 NzbBrowseStateHolder.put(
                     pageKey,
                     NzbBrowseStateHolder.State(
@@ -320,8 +405,8 @@ fun TvSportsScreen(
         }
         if (!restoredFromCache && NzbBrowseStateHolder.get(pageKey).items.isEmpty()) {
             val current = NzbBrowseStateHolder.get(pageKey)
-            if (!current.loading && !NzbBrowseStateHolder.isFetching(pageKey)) {
-                startFetch()
+            if (!current.loading) {
+                startFetch(forceAll = true)
             }
         }
     }
@@ -358,7 +443,8 @@ fun TvSportsScreen(
         }
     }
     LaunchedEffect(selectedChipIndex) {
-        chipListState.animateScrollToItem(selectedChipIndex)
+        val selectedIsVisible = chipListState.layoutInfo.visibleItemsInfo.any { it.index == selectedChipIndex }
+        if (!selectedIsVisible) chipListState.animateScrollToItem(selectedChipIndex)
     }
     val todayTitlePattern = remember {
         java.time.LocalDate.now().format(java.time.format.DateTimeFormatter.ofPattern("yyyy.MM.dd"))
@@ -375,8 +461,118 @@ fun TvSportsScreen(
         }
     }
 
-    val firstChipRequester = remember { FocusRequester() }
+    val categoryIds = remember {
+        listOf(SPORTS_FILTER_ALL, SPORTS_FILTER_TODAY, SPORTS_FILTER_RECENT) +
+            SPORTS_PRIMARY_BUCKETS.map(SportBucket::name)
+    }
+    val categoryRequesters = remember {
+        categoryIds.associateWith { FocusRequester() }
+    }
+    val firstChipRequester = categoryRequesters.getValue(SPORTS_FILTER_ALL)
     val refreshFocusRequester = remember { FocusRequester() }
+    val searchFocusRequester = remember { FocusRequester() }
+    val retryFocusRequester = remember { FocusRequester() }
+    val focusRestoreController = rememberTvModalFocusRestoreController(SPORTS_SCREEN_ID)
+    val refreshTarget = remember { sportsTopActionTarget(TvSportsTopAction.REFRESH) }
+    val searchTarget = remember { sportsTopActionTarget(TvSportsTopAction.SEARCH) }
+    val retryTarget = remember { sportsTopActionTarget(TvSportsTopAction.RETRY) }
+    rememberRegisteredTvFocusRequester(focusRestoreController, refreshTarget, refreshFocusRequester)
+    rememberRegisteredTvFocusRequester(focusRestoreController, searchTarget, searchFocusRequester)
+    val visibleEventIds = remember(visible, configured) {
+        if (configured) visible.map { it.item.sportsStableId() } else emptyList()
+    }
+    val visibleEventTargets = remember(visibleEventIds) {
+        visibleEventIds.mapIndexed { index, id -> sportsEventTarget(id, index) }.toSet()
+    }
+    val validFocusTargets = remember(categoryIds, visibleEventTargets) {
+        buildSet {
+            add(refreshTarget)
+            add(searchTarget)
+            add(retryTarget)
+            categoryIds.forEachIndexed { index, id -> add(sportsCategoryTarget(id, index)) }
+            addAll(visibleEventTargets)
+        }
+    }
+    LaunchedEffect(validFocusTargets) {
+        focusRestoreController.pruneInactiveTargets(validFocusTargets)
+    }
+    DisposableEffect(registerFocusHandle, focusRestoreController) {
+        registerFocusHandle?.invoke(
+            TvScreenFocusHandle(
+                captureFocusedOrigin = {
+                    focusRestoreController.captureFocusedOrigin(
+                        screenId = SPORTS_SCREEN_ID,
+                        outerListState = listState,
+                    )
+                },
+                requestRestore = { origin, reason ->
+                    focusRestoreController.requestRestore(origin, reason)
+                },
+                isOriginFocused = focusRestoreController::isOriginFocused,
+            ),
+        )
+        onDispose { registerFocusHandle?.invoke(null) }
+    }
+    LaunchedEffect(
+        focusRestoreController.pendingRestore?.restoreToken,
+        visibleEventIds,
+        isActive,
+    ) {
+        focusRestoreController.restorePendingFocus(
+            screenId = SPORTS_SCREEN_ID,
+            outerListState = listState,
+            isScreenActive = { isActive },
+        )
+    }
+    LaunchedEffect(visibleEventIds, focusRestoreController.focusedTarget, selectedSportsMode, isActive) {
+        if (!isActive) return@LaunchedEffect
+        when (val repair = sportsFocusState.repairAfterEventMutation(visibleEventIds)) {
+            is TvSportsFocusTarget.Event -> {
+                listState.scrollToItem(repair.index)
+                withFrameNanos { }
+                runCatching {
+                    focusRestoreController.requesterFor(sportsEventTarget(repair.eventId, repair.index)).requestFocus()
+                }
+            }
+            is TvSportsFocusTarget.Category -> {
+                withFrameNanos { }
+                categoryRequesters[repair.categoryId]?.let { requester ->
+                    runCatching { requester.requestFocus() }
+                }
+            }
+            else -> Unit
+        }
+    }
+    val selectedCategoryRequester = categoryRequesters[selectedSportsMode] ?: firstChipRequester
+    val rememberedEventIndex = sportsFocusState.state.focusedEventId
+        ?.let(visibleEventIds::indexOf)
+        ?.takeIf { it >= 0 }
+        ?: 0
+    val categoryDownRequester = visibleEventIds.getOrNull(rememberedEventIndex)?.let { eventId ->
+        focusRestoreController.requesterFor(sportsEventTarget(eventId, rememberedEventIndex))
+    }
+    val selectedRefreshScope = tvSportsRefreshPlan(selectedSportsMode, query).scopeId
+    val selectedScopeRefreshing = selectedRefreshScope in pageState.activeRefreshScopes
+    val selectedScopeProgress = pageState.refreshProgressByScope[selectedRefreshScope]
+    val selectedScopeError = pageState.refreshErrorsByScope[selectedRefreshScope]
+    val availableTopActions = buildSet {
+        add(TvSportsTopAction.REFRESH)
+        add(TvSportsTopAction.SEARCH)
+        if (selectedScopeError != null || pageState.errorText != null) add(TvSportsTopAction.RETRY)
+    }
+    LaunchedEffect(availableTopActions, isActive) {
+        val repair = sportsFocusState.repairAfterTopActionMutation(availableTopActions)
+        if (isActive && repair is TvSportsFocusTarget.Category) {
+            withFrameNanos { }
+            runCatching { selectedCategoryRequester.requestFocus() }
+        }
+    }
+    fun selectSportsCategory(mode: String, bucket: SportBucket?) {
+        selectedSportsMode = mode
+        selectedBucket = bucket
+        sportsFocusState.selectCategory(mode)
+        NzbBrowseStateHolder.update(pageKey) { it.copy(selectedSportBucket = mode) }
+    }
     LaunchedEffect(Unit) { onFirstContentRequester(firstChipRequester) }
 
     Column(
@@ -403,9 +599,15 @@ fun TvSportsScreen(
             color = Snow,
         )
         Text(
-            text = pageState.progress ?: "Sports releases detected from release names",
+            text = selectedScopeProgress
+                ?: selectedScopeError
+                ?: "Sports releases detected from release names",
             style = MaterialTheme.typography.bodySmall,
-            color = if (pageState.progress != null) Amber else Torve.colors.textSecondary,
+            color = if (selectedScopeProgress != null || selectedScopeError != null) {
+                Amber
+            } else {
+                Torve.colors.textSecondary
+            },
         )
 
         // Search row — submit (IME action / OK on the field) triggers
@@ -413,17 +615,15 @@ fun TvSportsScreen(
         // categories. Empty query falls back to browse on next reload.
         // Clearing the field via the trailing X re-runs the browse so
         // the user sees a fresh list without re-tapping Search.
-        val focusManager = LocalFocusManager.current
         val keyboardController = LocalSoftwareKeyboardController.current
         var searchFieldFocused by remember { mutableStateOf(false) }
         var searchExpanded by remember { mutableStateOf(query.isNotBlank()) }
         var searchStartEditingSignal by remember { mutableIntStateOf(0) }
         fun collapseSearchToFilters() {
             keyboardController?.hide()
-            focusManager.clearFocus()
             searchExpanded = query.isNotBlank()
-            runCatching { firstChipRequester.requestFocus() }
-            onContentFocused(firstChipRequester)
+            runCatching { selectedCategoryRequester.requestFocus() }
+            onContentFocused(selectedCategoryRequester)
         }
         // On TV, pressing Back while the search field is focused clears focus back to the rail.
         BackHandler(enabled = searchFieldFocused || searchExpanded) {
@@ -435,15 +635,20 @@ fun TvSportsScreen(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             TvSportsSearchChip(
-                label = if (pageState.loading || NzbBrowseStateHolder.isFetching(pageKey)) "Refreshing…" else "Refresh",
+                label = if (selectedScopeRefreshing) "Refreshing…" else "Refresh",
                 modifier = Modifier
                     .focusRequester(refreshFocusRequester)
                     .focusProperties {
                         left = railFocusRequester
-                        down = firstChipRequester
+                        down = selectedCategoryRequester
                     },
                 onClick = {
-                    if (!pageState.loading && !NzbBrowseStateHolder.isFetching(pageKey)) startFetch()
+                    if (configured && !selectedScopeRefreshing) startFetch()
+                },
+                onFocused = {
+                    sportsFocusState.markTopActionFocused(TvSportsTopAction.REFRESH)
+                    focusRestoreController.markFocused(refreshTarget)
+                    onContentFocused(refreshFocusRequester)
                 },
             )
             if (searchExpanded) {
@@ -452,10 +657,10 @@ fun TvSportsScreen(
                     onValueChange = { newValue ->
                         val clearing = query.isNotBlank() && newValue.isBlank()
                         query = newValue
-                        if (clearing) startFetch()
+                        if (clearing) startFetch(forceAll = true, replaceInFlight = true)
                     },
                     placeholder = if (pageState.loading) "Searching…" else "Search sport releases",
-                    onSubmit = { startFetch() },
+                    onSubmit = { startFetch(forceAll = true, replaceInFlight = true) },
                     showFocusRing = true,
                     editOnClick = true,
                     startEditingSignal = searchStartEditingSignal,
@@ -463,22 +668,37 @@ fun TvSportsScreen(
                     modifier = Modifier
                         .width(300.dp)
                         .height(38.dp)
+                        .focusRequester(searchFocusRequester)
                         .focusProperties {
                             left = refreshFocusRequester
-                            down = firstChipRequester
+                            down = selectedCategoryRequester
                         }
-                        .onFocusChanged { searchFieldFocused = it.hasFocus },
+                        .onFocusChanged {
+                            searchFieldFocused = it.hasFocus
+                            if (it.hasFocus) {
+                                sportsFocusState.markTopActionFocused(TvSportsTopAction.SEARCH)
+                                focusRestoreController.markFocused(searchTarget)
+                                onContentFocused(searchFocusRequester)
+                            }
+                        },
                 )
             } else {
                 TvSportsSearchChip(
                     label = if (query.isBlank()) "Search" else "Search: $query",
-                    modifier = Modifier.focusProperties {
-                        left = refreshFocusRequester
-                        down = firstChipRequester
-                    },
+                    modifier = Modifier
+                        .focusRequester(searchFocusRequester)
+                        .focusProperties {
+                            left = refreshFocusRequester
+                            down = selectedCategoryRequester
+                        },
                     onClick = {
                         searchExpanded = true
                         searchStartEditingSignal += 1
+                    },
+                    onFocused = {
+                        sportsFocusState.markTopActionFocused(TvSportsTopAction.SEARCH)
+                        focusRestoreController.markFocused(searchTarget)
+                        onContentFocused(searchFocusRequester)
                     },
                 )
             }
@@ -494,49 +714,92 @@ fun TvSportsScreen(
                 modifier = Modifier.fillMaxWidth(),
             ) {
             item(key = "bucket_all") {
+                val target = remember { sportsCategoryTarget(SPORTS_FILTER_ALL, 0) }
+                val requester = rememberRegisteredTvFocusRequester(
+                    focusRestoreController,
+                    target,
+                    firstChipRequester,
+                )
                 TvBucketChip(
                     label = "All · ${classified.size}",
                     selected = selectedSportsMode == SPORTS_FILTER_ALL,
-                    onClick = {
-                        selectedSportsMode = SPORTS_FILTER_ALL
-                        selectedBucket = null
-                    },
-                    focusRequester = firstChipRequester,
+                    onClick = { selectSportsCategory(SPORTS_FILTER_ALL, null) },
+                    focusRequester = requester,
                     leftFocusRequester = railFocusRequester,
-                    onFocused = { onContentFocused(firstChipRequester) },
+                    upFocusRequester = refreshFocusRequester,
+                    downFocusRequester = categoryDownRequester,
+                    onFocused = {
+                        sportsFocusState.markCategoryFocused(SPORTS_FILTER_ALL)
+                        focusRestoreController.markFocused(target)
+                        onContentFocused(requester)
+                    },
                 )
             }
             item(key = "bucket_today") {
+                val target = remember { sportsCategoryTarget(SPORTS_FILTER_TODAY, 1) }
+                val requester = rememberRegisteredTvFocusRequester(
+                    focusRestoreController,
+                    target,
+                    categoryRequesters.getValue(SPORTS_FILTER_TODAY),
+                )
                 val todayCount = classified.count {
                     it.item.title.contains(todayTitlePattern) || it.item.title.contains(todayTitlePatternSpaced)
                 }
                 TvBucketChip(
                     label = "Today $todayCount",
                     selected = selectedSportsMode == SPORTS_FILTER_TODAY,
-                    onClick = {
-                        selectedSportsMode = SPORTS_FILTER_TODAY
-                        selectedBucket = null
+                    onClick = { selectSportsCategory(SPORTS_FILTER_TODAY, null) },
+                    focusRequester = requester,
+                    upFocusRequester = refreshFocusRequester,
+                    downFocusRequester = categoryDownRequester,
+                    onFocused = {
+                        sportsFocusState.markCategoryFocused(SPORTS_FILTER_TODAY)
+                        focusRestoreController.markFocused(target)
+                        onContentFocused(requester)
                     },
                 )
             }
             item(key = "bucket_recent") {
+                val target = remember { sportsCategoryTarget(SPORTS_FILTER_RECENT, 2) }
+                val requester = rememberRegisteredTvFocusRequester(
+                    focusRestoreController,
+                    target,
+                    categoryRequesters.getValue(SPORTS_FILTER_RECENT),
+                )
                 TvBucketChip(
                     label = "Recent ${classified.take(80).size}",
                     selected = selectedSportsMode == SPORTS_FILTER_RECENT,
-                    onClick = {
-                        selectedSportsMode = SPORTS_FILTER_RECENT
-                        selectedBucket = null
+                    onClick = { selectSportsCategory(SPORTS_FILTER_RECENT, null) },
+                    focusRequester = requester,
+                    upFocusRequester = refreshFocusRequester,
+                    downFocusRequester = categoryDownRequester,
+                    onFocused = {
+                        sportsFocusState.markCategoryFocused(SPORTS_FILTER_RECENT)
+                        focusRestoreController.markFocused(target)
+                        onContentFocused(requester)
                     },
                 )
             }
             items(SPORTS_PRIMARY_BUCKETS, key = { it.name }) { bucket ->
+                val categoryIndex = 3 + SPORTS_PRIMARY_BUCKETS.indexOf(bucket)
+                val target = remember(bucket) { sportsCategoryTarget(bucket.name, categoryIndex) }
+                val requester = rememberRegisteredTvFocusRequester(
+                    focusRestoreController,
+                    target,
+                    categoryRequesters.getValue(bucket.name),
+                )
                 val count = countsByBucket[bucket] ?: 0
                 TvBucketChip(
                     label = "${bucket.label} · $count",
                     selected = selectedSportsMode == bucket.name,
-                    onClick = {
-                        selectedSportsMode = bucket.name
-                        selectedBucket = bucket
+                    onClick = { selectSportsCategory(bucket.name, bucket) },
+                    focusRequester = requester,
+                    upFocusRequester = refreshFocusRequester,
+                    downFocusRequester = categoryDownRequester,
+                    onFocused = {
+                        sportsFocusState.markCategoryFocused(bucket.name)
+                        focusRestoreController.markFocused(target)
+                        onContentFocused(requester)
                     },
                 )
             }
@@ -549,14 +812,19 @@ fun TvSportsScreen(
                     pandaState.nzbIndexers.any { it.type != "none" },
                 onOpenPandaSetup = onOpenPandaSetup,
             )
-            pageState.loading -> Box(
+            pageState.loading && pageState.items.isEmpty() && selectedScopeError == null -> Box(
                 modifier = Modifier.fillMaxWidth().height(120.dp),
                 contentAlignment = Alignment.Center,
             ) { CircularProgressIndicator(color = Amber) }
-            pageState.errorText != null -> Surface(
+            visible.isEmpty() && (selectedScopeError != null || pageState.errorText != null) -> Surface(
                 color = Charcoal,
                 shape = RoundedCornerShape(8.dp),
             ) {
+                val requester = rememberRegisteredTvFocusRequester(
+                    focusRestoreController,
+                    retryTarget,
+                    retryFocusRequester,
+                )
                 Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Text(
                         text = "Couldn't load",
@@ -565,9 +833,24 @@ fun TvSportsScreen(
                         color = Snow,
                     )
                     Text(
-                        text = pageState.errorText.orEmpty(),
+                        text = selectedScopeError ?: pageState.errorText.orEmpty(),
                         style = MaterialTheme.typography.bodySmall,
                         color = Torve.colors.textSecondary,
+                    )
+                    TvSportsSearchChip(
+                        label = if (selectedScopeRefreshing) "Retrying…" else "Retry",
+                        modifier = Modifier
+                            .focusRequester(requester)
+                            .focusProperties {
+                                left = railFocusRequester
+                                up = selectedCategoryRequester
+                            },
+                        onClick = { if (!selectedScopeRefreshing) startFetch() },
+                        onFocused = {
+                            sportsFocusState.markTopActionFocused(TvSportsTopAction.RETRY)
+                            focusRestoreController.markFocused(retryTarget)
+                            onContentFocused(requester)
+                        },
                     )
                 }
             }
@@ -584,36 +867,58 @@ fun TvSportsScreen(
                 verticalArrangement = Arrangement.spacedBy(10.dp),
                 modifier = Modifier.fillMaxSize(),
             ) {
-                itemsIndexed(visible, key = { _, ci -> ci.item.guid ?: ci.item.nzbUrl }) { index, ci ->
-                    val rowKey = ci.item.guid ?: ci.item.nzbUrl
-                    val status = resolveStatus[rowKey]
+                itemsIndexed(visible, key = { _, ci -> ci.item.sportsStableId() }) { index, ci ->
+                    val rowKey = ci.item.sportsStableId()
+                    val target = remember(rowKey, index) { sportsEventTarget(rowKey, index) }
+                    val requester = rememberRegisteredTvFocusRequester(
+                        focusRestoreController,
+                        target,
+                    )
+                    val resolveState = resolveStatus[rowKey]
                     val torboxConfigured = torboxKey.isNotBlank()
                     TvSportsEventHubCard(
                         item = ci.item,
                         bucket = ci.bucket,
                         display = ci.display,
-                        statusText = status,
+                        statusText = resolveState?.message,
+                        isWorking = resolveState?.isWorking == true,
                         torboxConfigured = torboxConfigured,
                         onPlay = {
                             // IO dispatcher so the blocking NZB upload
                             // doesn't freeze the Compose dispatcher for
                             // the duration of the TorBox round-trip.
-                            resolveStatus = resolveStatus + (rowKey to "Starting…")
+                            resolveStatus = resolveStatus +
+                                (rowKey to SportsResolveUiState("Starting…", isWorking = true))
                             scope.launch {
                                 val res = withContext(Dispatchers.IO) {
                                     torbox.resolve(ci.item.nzbUrl, torboxKey) { msg ->
-                                        resolveStatus = resolveStatus + (rowKey to msg)
+                                        scope.launch {
+                                            resolveStatus = resolveStatus +
+                                                (rowKey to SportsResolveUiState(msg, isWorking = true))
+                                        }
                                     }
                                 }
                                 res.onSuccess { resolved ->
                                     resolveStatus = resolveStatus - rowKey
                                     onPlayStream(resolved.streamUrl, resolved.fileName, resolved.sizeBytes)
                                 }.onFailure { t ->
-                                    resolveStatus = resolveStatus + (rowKey to (t.message ?: "Unknown error"))
+                                    resolveStatus = resolveStatus + (
+                                        rowKey to SportsResolveUiState(
+                                            t.message ?: "Unknown error",
+                                            isWorking = false,
+                                        )
+                                    )
                                 }
                             }
                         },
                         leftFocusRequester = railFocusRequester,
+                        focusRequester = requester,
+                        upFocusRequester = if (index == 0) selectedCategoryRequester else null,
+                        onFocused = {
+                            sportsFocusState.markEventFocused(rowKey, index)
+                            focusRestoreController.markFocused(target)
+                            onContentFocused(requester)
+                        },
                     )
                 }
             }
@@ -626,6 +931,7 @@ private fun TvSportsSearchChip(
     label: String,
     modifier: Modifier = Modifier,
     onClick: () -> Unit,
+    onFocused: () -> Unit = {},
 ) {
     var focused by remember { mutableStateOf(false) }
     Surface(
@@ -638,7 +944,10 @@ private fun TvSportsSearchChip(
                 color = if (focused) Amber.copy(alpha = 0.9f) else Color.White.copy(alpha = 0.12f),
                 shape = RoundedCornerShape(50),
             )
-            .onFocusChanged { focused = it.isFocused }
+            .onFocusChanged {
+                focused = it.isFocused
+                if (it.isFocused) onFocused()
+            }
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null,
@@ -664,6 +973,8 @@ private fun TvBucketChip(
     onClick: () -> Unit,
     focusRequester: FocusRequester? = null,
     leftFocusRequester: FocusRequester? = null,
+    upFocusRequester: FocusRequester? = null,
+    downFocusRequester: FocusRequester? = null,
     onFocused: () -> Unit = {},
 ) {
     var focused by remember { mutableStateOf(false) }
@@ -682,8 +993,15 @@ private fun TvBucketChip(
             .border(1.dp, borderColor, RoundedCornerShape(50))
             .then(focusRequester?.let { Modifier.focusRequester(it) } ?: Modifier)
             .then(
-                if (leftFocusRequester != null) Modifier.focusProperties { left = leftFocusRequester }
-                else Modifier,
+                if (leftFocusRequester != null || upFocusRequester != null || downFocusRequester != null) {
+                    Modifier.focusProperties {
+                        leftFocusRequester?.let { left = it }
+                        upFocusRequester?.let { up = it }
+                        downFocusRequester?.let { down = it }
+                    }
+                } else {
+                    Modifier
+                },
             )
             .onFocusChanged {
                 focused = it.isFocused
@@ -711,14 +1029,16 @@ private fun TvSportsEventHubCard(
     bucket: SportBucket,
     display: SportsReleaseDisplay,
     statusText: String?,
+    isWorking: Boolean,
     torboxConfigured: Boolean,
     onPlay: () -> Unit,
     leftFocusRequester: FocusRequester? = null,
+    focusRequester: FocusRequester? = null,
+    upFocusRequester: FocusRequester? = null,
+    onFocused: () -> Unit = {},
 ) {
     var focused by remember { mutableStateOf(false) }
-    val isWorking = statusText != null &&
-        !statusText.startsWith("Failed") &&
-        !statusText.startsWith("TorBox error")
+    val interaction = tvSportsEventInteraction(torboxConfigured, isWorking)
     val metaLine = listOfNotNull(
         display.leagueLabel,
         display.dateLabel,
@@ -733,6 +1053,7 @@ private fun TvSportsEventHubCard(
     val statusLabel = when {
         !torboxConfigured -> "Setup"
         isWorking -> "Working"
+        statusText != null -> "Retry"
         else -> "Ready"
     }
     val secondaryPills = listOfNotNull(display.qualityLabel, statusLabel)
@@ -748,16 +1069,29 @@ private fun TvSportsEventHubCard(
                 color = if (focused) Amber.copy(alpha = 0.90f) else Color.White.copy(alpha = 0.045f),
                 shape = RoundedCornerShape(12.dp),
             )
+            .then(focusRequester?.let { Modifier.focusRequester(it) } ?: Modifier)
             .then(
-                if (leftFocusRequester != null) Modifier.focusProperties { left = leftFocusRequester }
-                else Modifier,
+                if (leftFocusRequester != null || upFocusRequester != null) {
+                    Modifier.focusProperties {
+                        leftFocusRequester?.let { left = it }
+                        upFocusRequester?.let { up = it }
+                    }
+                } else {
+                    Modifier
+                },
             )
-            .onFocusChanged { focused = it.isFocused }
+            .onFocusChanged {
+                focused = it.isFocused
+                if (it.isFocused) onFocused()
+            }
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null,
-                enabled = torboxConfigured && !isWorking,
-                onClick = onPlay,
+                // Keep one stable focus node while status changes from Ready
+                // to Working and back. Duplicate activation is ignored by the
+                // caller instead of removing this row from the focus graph.
+                enabled = interaction.canFocus,
+                onClick = { if (interaction.acceptsActivation) onPlay() },
             ),
     ) {
         Box(
@@ -1012,6 +1346,40 @@ private fun NotConfiguredBanner(redacted: Boolean, onOpenPandaSetup: () -> Unit)
             )
         }
     }
+}
+
+private fun sportsTopActionTarget(action: TvSportsTopAction): TvFocusTargetId = TvFocusTargetId(
+    screenId = SPORTS_SCREEN_ID,
+    rowKey = SPORTS_ROW_TOP_ACTIONS,
+    itemKey = action.actionId,
+    rowIndex = -1,
+    itemIndex = action.ordinal,
+    targetType = "sports_action",
+)
+
+private fun sportsCategoryTarget(categoryId: String, index: Int): TvFocusTargetId = TvFocusTargetId(
+    screenId = SPORTS_SCREEN_ID,
+    rowKey = SPORTS_ROW_CATEGORIES,
+    itemKey = categoryId,
+    rowIndex = 0,
+    itemIndex = index,
+    targetType = "sports_category",
+)
+
+private fun sportsEventTarget(eventId: String, index: Int): TvFocusTargetId = TvFocusTargetId(
+    screenId = SPORTS_SCREEN_ID,
+    rowKey = SPORTS_ROW_EVENTS,
+    itemKey = eventId,
+    rowIndex = 1,
+    itemIndex = index,
+    targetType = "sports_event",
+)
+
+private fun sportsScopeLabel(scopeId: String): String = when (scopeId) {
+    SPORTS_FILTER_ALL -> "all Sports"
+    SPORTS_FILTER_TODAY -> "today's Sports"
+    SPORTS_FILTER_RECENT -> "recent Sports"
+    else -> SportBucket.entries.firstOrNull { it.name == scopeId }?.label ?: "Sports"
 }
 
 private fun humanBytes(bytes: Long): String {
