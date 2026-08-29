@@ -1,0 +1,54 @@
+{
+  "schema_version": 1,
+  "version": "1.3.0",
+  "build_number": 127,
+  "released_at_utc": "2026-08-29T06:47:43Z",
+  "source": {
+    "repository": "https://github.com/adaml-source/torve",
+    "commit": "3c8b0e4034b97dee08e1d1ea7e572641b7fd5594",
+    "tag": "v1.3.0-build.127",
+    "tag_url": "https://github.com/adaml-source/torve/tree/v1.3.0-build.127"
+  },
+  "required_artifacts": [
+    "amazon_tv_apk",
+    "windows_msi",
+    "google_tv_aab",
+    "google_mobile_aab"
+  ],
+  "artifacts": [
+    {
+      "id": "amazon_tv_apk",
+      "local_path": "androidApp/build/outputs/apk/amazonTv/release/androidApp-amazon-tv-release.apk",
+      "public_url": "https://torve.app/downloads/android/torve-android-tv-1.3.0-20127-20260829.apk",
+      "version_code": 20127,
+      "bytes": 92454001,
+      "sha256": "282c6e89b83f5861cd4c65ae8dab1130b7a69785c70777d3406995ac3aa2208c",
+      "signer_certificate_sha256": "cc4e51f3d775e199059f58b0c80444e7b9e8c86e23e3ed29d2332b485c73e2fa"
+    },
+    {
+      "id": "windows_msi",
+      "local_path": "desktopApp/build/compose/binaries/main-closeapp/msi/Torve-1.3.0.msi",
+      "public_url": "https://torve.app/downloads/windows/torve-windows-1.3.0-20260829.msi",
+      "bytes": 207680912,
+      "sha256": "1c9fd5c366fa9c1b32ac924b90b882cc96b2e7dbf61e6528cd8add4f5ea8d8f0"
+    },
+    {
+      "id": "google_tv_aab",
+      "local_path": "androidApp/build/outputs/bundle/googleTvRelease/androidApp-google-tv-release.aab",
+      "public_url": null,
+      "version_code": 20127,
+      "bytes": 61523968,
+      "sha256": "ab568ff487d4eab59429e2b8e0983b392c854ad3b4a6b2f8b85d9bc9f38b98d4",
+      "signer_certificate_sha256": "cc4e51f3d775e199059f58b0c80444e7b9e8c86e23e3ed29d2332b485c73e2fa"
+    },
+    {
+      "id": "google_mobile_aab",
+      "local_path": "androidApp/build/outputs/bundle/googleMobileRelease/androidApp-google-mobile-release.aab",
+      "public_url": null,
+      "version_code": 10127,
+      "bytes": 57755889,
+      "sha256": "1e5c58c7f5a66666c8f148a445c624ca4659cb55d1a8c3f0193ea148dcbee8e8",
+      "signer_certificate_sha256": "cc4e51f3d775e199059f58b0c80444e7b9e8c86e23e3ed29d2332b485c73e2fa"
+    }
+  ]
+}
