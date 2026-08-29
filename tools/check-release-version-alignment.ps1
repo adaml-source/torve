@@ -8,12 +8,17 @@ $ErrorActionPreference = "Stop"
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $androidBuild = Get-Content -Raw -Encoding utf8 (Join-Path $repoRoot "androidApp\build.gradle.kts")
 $desktopBuild = Get-Content -Raw -Encoding utf8 (Join-Path $repoRoot "desktopApp\build.gradle.kts")
+$iosInfo = Get-Content -Raw -Encoding utf8 (Join-Path $repoRoot "iosApp\iosApp\Info.plist")
 $manifestFile = Join-Path $repoRoot $ManifestPath
 
 $androidMatch = [regex]::Match($androidBuild, 'versionName\s*=\s*"([^"]+)"')
 $desktopMatch = [regex]::Match($desktopBuild, 'torveMsiVersion[^\r\n]*\?:\s*"([^"]+)"')
-if (-not $androidMatch.Success -or -not $desktopMatch.Success) {
-    throw "Could not determine Android or desktop release version."
+$iosMatch = [regex]::Match(
+    $iosInfo,
+    '<key>CFBundleShortVersionString</key>\s*<string>([^<]+)</string>'
+)
+if (-not $androidMatch.Success -or -not $desktopMatch.Success -or -not $iosMatch.Success) {
+    throw "Could not determine Android, desktop, or iOS release version."
 }
 if (-not $SourceOnly -and -not (Test-Path -LiteralPath $manifestFile)) {
     throw "Release manifest not found: $manifestFile"
@@ -21,12 +26,16 @@ if (-not $SourceOnly -and -not (Test-Path -LiteralPath $manifestFile)) {
 
 $expected = $androidMatch.Groups[1].Value
 $desktop = $desktopMatch.Groups[1].Value
+$ios = $iosMatch.Groups[1].Value
 if ($desktop -ne $expected) {
     throw "Desktop version $desktop does not match Android version $expected."
 }
+if ($ios -ne $expected) {
+    throw "iOS version $ios does not match Android version $expected."
+}
 
 if ($SourceOnly) {
-    Write-Output "Source release versions aligned at $expected across Android and desktop."
+    Write-Output "Source release versions aligned at $expected across Android, desktop, and iOS."
     exit 0
 }
 
@@ -61,4 +70,4 @@ if ($Fix) {
     [System.IO.File]::WriteAllText($manifestFile, $json + [Environment]::NewLine, [System.Text.UTF8Encoding]::new($false))
 }
 
-Write-Output "Release versions aligned at $expected across Android, desktop, Windows, Google TV/mobile, and Fire TV."
+Write-Output "Release versions aligned at $expected across Android, desktop, iOS, Windows, Google TV/mobile, and Fire TV."
