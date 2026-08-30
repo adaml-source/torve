@@ -107,6 +107,7 @@ kotlin {
             dependencies {
                 implementation(libs.ktor.okhttp)
                 implementation(libs.sqldelight.android)
+                implementation(libs.androidx.sqlite.framework)
                 implementation(libs.kotlinx.coroutines.android)
                 implementation(libs.qrcode.kotlin)
             }

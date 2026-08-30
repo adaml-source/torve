@@ -14,6 +14,8 @@ import com.torve.domain.stats.WatchStatsFilters
 import com.torve.domain.stats.WatchStatsMetadata
 import com.torve.domain.stats.WatchStatsRepository
 import com.torve.domain.stats.WatchStatsSummary
+import com.torve.util.ioDispatcher
+import kotlinx.coroutines.withContext
 
 class WatchStatsRepositoryImpl(
     private val database: TorveDatabase,
@@ -28,23 +30,23 @@ class WatchStatsRepositoryImpl(
         currentUserId = { userIdProvider.currentUserId() },
     )
 
-    override suspend fun getSessions(filters: WatchStatsFilters): List<WatchSession> {
+    override suspend fun getSessions(filters: WatchStatsFilters): List<WatchSession> = withContext(ioDispatcher) {
         val bundle = loadSessionBundle()
-        return bundle.sessions.filter { session ->
+        bundle.sessions.filter { session ->
             filters.matches(session, bundle.metadataBySessionId[session.id])
         }
     }
 
-    override suspend fun getAggregation(filters: WatchStatsFilters): WatchStatsSummary {
+    override suspend fun getAggregation(filters: WatchStatsFilters): WatchStatsSummary = withContext(ioDispatcher) {
         val bundle = loadSessionBundle()
-        return engine.aggregate(
+        engine.aggregate(
             sessions = bundle.sessions,
             filters = filters,
             metadataBySessionId = bundle.metadataBySessionId,
         )
     }
 
-    override suspend fun upsertSession(session: WatchSession) {
+    override suspend fun upsertSession(session: WatchSession) = withContext(ioDispatcher) {
         database.torveQueries.insertOrReplaceWatchSession(session.copy(userId = userIdProvider.currentUserId()))
     }
 
@@ -58,7 +60,7 @@ class WatchStatsRepositoryImpl(
         completionPercent: Double,
         runtimeConfidence: RuntimeConfidence,
         updatedAt: Long,
-    ) {
+    ) = withContext(ioDispatcher) {
         database.torveQueries.updateWatchSessionProgress(
             userId = userIdProvider.currentUserId(),
             id = id,
@@ -73,15 +75,15 @@ class WatchStatsRepositoryImpl(
         )
     }
 
-    override suspend fun runBackfillIfNeeded() {
+    override suspend fun runBackfillIfNeeded() = withContext(ioDispatcher) {
         backfill.runIfNeeded()
     }
 
-    override suspend fun clearForCurrentUser() {
+    override suspend fun clearForCurrentUser() = withContext(ioDispatcher) {
         database.torveQueries.clearWatchSessionsForUser(userIdProvider.currentUserId())
     }
 
-    override suspend fun clearForMedia(mediaId: String) {
+    override suspend fun clearForMedia(mediaId: String) = withContext(ioDispatcher) {
         database.torveQueries.clearWatchSessionsForUserAndMedia(
             userId = userIdProvider.currentUserId(),
             mediaId = mediaId,

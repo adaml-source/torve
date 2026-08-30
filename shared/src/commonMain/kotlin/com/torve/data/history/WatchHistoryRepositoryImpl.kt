@@ -25,6 +25,8 @@ import com.torve.domain.model.extractImdbIdOrNull
 import com.torve.domain.model.extractTmdbIdOrNull
 import com.torve.domain.repository.WatchHistoryRepository
 import com.torve.domain.stats.WatchSessionSource
+import com.torve.util.ioDispatcher
+import kotlinx.coroutines.withContext
 import kotlinx.datetime.Instant
 
 class WatchHistoryRepositoryImpl(
@@ -39,34 +41,34 @@ class WatchHistoryRepositoryImpl(
 ) : WatchHistoryRepository {
     private val queries get() = database.torveQueries
 
-    override suspend fun getRecent(limit: Int): List<WatchHistoryEntry> {
-        return queries.getRecentHistory(
+    override suspend fun getRecent(limit: Int): List<WatchHistoryEntry> = withContext(ioDispatcher) {
+        queries.getRecentHistory(
             userId = userIdProvider.currentUserId(),
             limit = limit.toLong(),
         ).executeAsList().map { it.toDomain() }
     }
 
-    override suspend fun getByDateRange(startMs: Long, endMs: Long): List<WatchHistoryEntry> {
-        return queries.getHistoryByDate(
+    override suspend fun getByDateRange(startMs: Long, endMs: Long): List<WatchHistoryEntry> = withContext(ioDispatcher) {
+        queries.getHistoryByDate(
             userId = userIdProvider.currentUserId(),
             startMs = startMs,
             endMs = endMs,
         ).executeAsList().map { it.toDomain() }
     }
 
-    override suspend fun getAll(): List<WatchHistoryEntry> {
-        return queries.getAllHistory(userId = userIdProvider.currentUserId())
+    override suspend fun getAll(): List<WatchHistoryEntry> = withContext(ioDispatcher) {
+        queries.getAllHistory(userId = userIdProvider.currentUserId())
             .executeAsList().map { it.toDomain() }
     }
 
-    override suspend fun getForMedia(mediaId: String): List<WatchHistoryEntry> {
-        return queries.getHistoryForMedia(
+    override suspend fun getForMedia(mediaId: String): List<WatchHistoryEntry> = withContext(ioDispatcher) {
+        queries.getHistoryForMedia(
             userId = userIdProvider.currentUserId(),
             mediaId = mediaId,
         ).executeAsList().map { it.toDomain() }
     }
 
-    override suspend fun record(entry: WatchHistoryEntry) {
+    override suspend fun record(entry: WatchHistoryEntry) = withContext(ioDispatcher) {
         queries.insertHistory(
             user_id = userIdProvider.currentUserId(),
             id = entry.id,
@@ -81,7 +83,7 @@ class WatchHistoryRepositoryImpl(
             episode_number = entry.episodeNumber?.toLong(),
             show_title = entry.showTitle,
         )
-        val tmdbId = entry.mediaId.extractTmdbIdOrNull() ?: return
+        val tmdbId = entry.mediaId.extractTmdbIdOrNull() ?: return@withContext
         val isMovie = entry.mediaType.equals("movie", ignoreCase = true)
         val imdbId = resolveImdbId(entry.mediaId, isMovie, tmdbId)
         runCatching {
@@ -135,27 +137,28 @@ class WatchHistoryRepositoryImpl(
                 simklClient.addToHistory(token, body)
             }
         }
+        Unit
     }
 
-    override suspend fun delete(id: String) {
+    override suspend fun delete(id: String) = withContext(ioDispatcher) {
         queries.deleteHistory(
             userId = userIdProvider.currentUserId(),
             historyId = id,
         )
     }
 
-    override suspend fun clearAll() {
+    override suspend fun clearAll() = withContext(ioDispatcher) {
         queries.clearAllHistory(userId = userIdProvider.currentUserId())
     }
 
-    override suspend fun getCount(): Long {
-        return queries.getHistoryCount(userId = userIdProvider.currentUserId()).executeAsOne()
+    override suspend fun getCount(): Long = withContext(ioDispatcher) {
+        queries.getHistoryCount(userId = userIdProvider.currentUserId()).executeAsOne()
     }
 
-    override suspend fun syncFromTrakt() {
+    override suspend fun syncFromTrakt() = withContext(ioDispatcher) {
         try {
             val historyItems = traktApi.getHistory(limit = 100)
-            if (historyItems.isEmpty()) return
+            if (historyItems.isEmpty()) return@withContext
 
             val userId = userIdProvider.currentUserId()
             val localIds = queries.getAllHistory(userId = userId).executeAsList()

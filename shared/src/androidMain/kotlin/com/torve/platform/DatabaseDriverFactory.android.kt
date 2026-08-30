@@ -2,75 +2,81 @@ package com.torve.platform
 
 import android.content.Context
 import androidx.sqlite.db.SupportSQLiteDatabase
+import androidx.sqlite.db.SupportSQLiteOpenHelper
+import androidx.sqlite.db.framework.FrameworkSQLiteOpenHelperFactory
 import app.cash.sqldelight.db.SqlDriver
 import app.cash.sqldelight.driver.android.AndroidSqliteDriver
 import com.torve.db.TorveDatabase
 
 actual class DatabaseDriverFactory(private val context: Context) {
-    actual fun createDriver(): SqlDriver =
-        AndroidSqliteDriver(
-            schema = TorveDatabase.Schema,
-            context = context,
-            name = "torve.db",
-            callback = object : AndroidSqliteDriver.Callback(TorveDatabase.Schema) {
-                override fun onConfigure(db: SupportSQLiteDatabase) {
-                    super.onConfigure(db)
-                    runCatching { db.enableWriteAheadLogging() }
+    actual fun createDriver(): SqlDriver {
+        val callback = object : AndroidSqliteDriver.Callback(TorveDatabase.Schema) {
+            override fun onOpen(db: SupportSQLiteDatabase) {
+                super.onOpen(db)
+                // Only run the expensive ensureAllTables() migration on
+                // databases that pre-date the current schema version.
+                // Check for a table added in a later sprint; if it exists
+                // the schema is already up to date and we skip 44+ DDL
+                // statements that block the main thread on Fire TV.
+                val cur = db.query(
+                    "SELECT 1 FROM sqlite_master WHERE type='table' AND name='rating_cache'",
+                )
+                val alreadyDone = cur.moveToFirst()
+                cur.close()
+                if (!alreadyDone) {
+                    ensureAllTables(db)
                 }
-
-                override fun onOpen(db: SupportSQLiteDatabase) {
-                    super.onOpen(db)
-                    // Only run the expensive ensureAllTables() migration on
-                    // databases that pre-date the current schema version.
-                    // Check for a table added in a later sprint; if it exists
-                    // the schema is already up to date and we skip 44+ DDL
-                    // statements that block the main thread on Fire TV.
-                    val cur = db.query(
-                        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='rating_cache'",
-                    )
-                    val alreadyDone = cur.moveToFirst()
-                    cur.close()
-                    if (!alreadyDone) {
-                        ensureAllTables(db)
-                    }
-                    // Lightweight incremental migrations — always run (idempotent).
-                    db.execSQL(
-                        """CREATE TABLE IF NOT EXISTS iptv_hidden_channel (
-                            hidden_id TEXT NOT NULL PRIMARY KEY
-                        )""",
-                    )
-                    db.execSQL(
-                        """CREATE TABLE IF NOT EXISTS stream_resolve_memory (
-                            content_key TEXT NOT NULL,
-                            stream_key TEXT NOT NULL,
-                            media_type TEXT NOT NULL,
-                            imdb_id TEXT NOT NULL,
-                            season_number INTEGER,
-                            episode_number INTEGER,
-                            addon_name TEXT NOT NULL,
-                            stream_title TEXT NOT NULL,
-                            info_hash TEXT,
-                            direct_url TEXT,
-                            quality TEXT NOT NULL,
-                            source_name TEXT,
-                            is_cached INTEGER NOT NULL DEFAULT 0,
-                            resolved_provider TEXT,
-                            success_count INTEGER NOT NULL DEFAULT 0,
-                            last_success_at INTEGER NOT NULL,
-                            PRIMARY KEY (content_key, stream_key)
-                        )""",
-                    )
-                    db.execSQL(
-                        """CREATE INDEX IF NOT EXISTS idx_stream_resolve_memory_content_recent
-                            ON stream_resolve_memory(content_key, last_success_at DESC)""",
-                    )
-                    ensureWatchSessionTable(db)
-                    runCatching { db.execSQL("ALTER TABLE addon ADD COLUMN server_id TEXT") }
-                    runCatching { db.execSQL("ALTER TABLE addon ADD COLUMN synced_at INTEGER") }
-                    runCatching { db.execSQL("ALTER TABLE addon ADD COLUMN installed_from TEXT NOT NULL DEFAULT 'app'") }
-                }
-            },
+                // Lightweight incremental migrations — always run (idempotent).
+                db.execSQL(
+                    """CREATE TABLE IF NOT EXISTS iptv_hidden_channel (
+                        hidden_id TEXT NOT NULL PRIMARY KEY
+                    )""",
+                )
+                db.execSQL(
+                    """CREATE TABLE IF NOT EXISTS stream_resolve_memory (
+                        content_key TEXT NOT NULL,
+                        stream_key TEXT NOT NULL,
+                        media_type TEXT NOT NULL,
+                        imdb_id TEXT NOT NULL,
+                        season_number INTEGER,
+                        episode_number INTEGER,
+                        addon_name TEXT NOT NULL,
+                        stream_title TEXT NOT NULL,
+                        info_hash TEXT,
+                        direct_url TEXT,
+                        quality TEXT NOT NULL,
+                        source_name TEXT,
+                        is_cached INTEGER NOT NULL DEFAULT 0,
+                        resolved_provider TEXT,
+                        success_count INTEGER NOT NULL DEFAULT 0,
+                        last_success_at INTEGER NOT NULL,
+                        PRIMARY KEY (content_key, stream_key)
+                    )""",
+                )
+                db.execSQL(
+                    """CREATE INDEX IF NOT EXISTS idx_stream_resolve_memory_content_recent
+                        ON stream_resolve_memory(content_key, last_success_at DESC)""",
+                )
+                ensureWatchSessionTable(db)
+                runCatching { db.execSQL("ALTER TABLE addon ADD COLUMN server_id TEXT") }
+                runCatching { db.execSQL("ALTER TABLE addon ADD COLUMN synced_at INTEGER") }
+                runCatching { db.execSQL("ALTER TABLE addon ADD COLUMN installed_from TEXT NOT NULL DEFAULT 'app'") }
+            }
+        }
+        val configuration = SupportSQLiteOpenHelper.Configuration.builder(context)
+            .name("torve.db")
+            .callback(callback)
+            .build()
+        val openHelper = FrameworkSQLiteOpenHelperFactory().create(configuration)
+        // Configure WAL before the database is opened. Enabling it from
+        // Callback.onConfigure() can fail during the open callback and used to
+        // leave Fire OS with a single connection, making foreground writes wait
+        // behind long IPTV reads.
+        openHelper.setWriteAheadLoggingEnabled(true)
+        return AndroidSqliteDriver(
+            openHelper = openHelper,
         )
+    }
 
     private fun ensureAllTables(db: SupportSQLiteDatabase) {
         db.execSQL(

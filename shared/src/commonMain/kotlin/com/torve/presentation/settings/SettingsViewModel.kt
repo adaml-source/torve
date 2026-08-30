@@ -65,6 +65,7 @@ import com.torve.platform.recommendedMaxQuality
 import com.torve.platform.torveVerboseLog
 import com.torve.presentation.integrations.syncTorBoxCredentialPair
 import com.torve.presentation.settings.SettingsRefreshNotifier
+import com.torve.util.ioDispatcher
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.coroutines.CoroutineScope
@@ -79,6 +80,7 @@ import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.datetime.Clock
 import kotlin.random.Random
 
@@ -1442,11 +1444,13 @@ class SettingsViewModel(
     }
 
     private suspend fun initialTraktImport() {
-        retryTraktStartupSync("watchlist") { watchlistRepo.syncFromTrakt() }
-        retryTraktStartupSync("progress") { watchProgressRepo.syncFromTrakt() }
-        retryTraktStartupSync("history") { watchHistoryRepo.syncFromTrakt() }
-        retryTraktStartupSync("ratings") { traktSyncRepo.syncRatingsFromTrakt() }
-        retryTraktStartupSync("queue_flush") { traktSyncRepo.flushPendingWrites() }
+        withContext(ioDispatcher) {
+            retryTraktStartupSync("watchlist") { watchlistRepo.syncFromTrakt() }
+            retryTraktStartupSync("progress") { watchProgressRepo.syncFromTrakt() }
+            retryTraktStartupSync("history") { watchHistoryRepo.syncFromTrakt() }
+            retryTraktStartupSync("ratings") { traktSyncRepo.syncRatingsFromTrakt() }
+            retryTraktStartupSync("queue_flush") { traktSyncRepo.flushPendingWrites() }
+        }
         syncTraktTokensFromStore()
         val now = Clock.System.now().toEpochMilliseconds()
         prefsRepo.setString(KEY_TRAKT_LAST_SYNC_TIME, now.toString())

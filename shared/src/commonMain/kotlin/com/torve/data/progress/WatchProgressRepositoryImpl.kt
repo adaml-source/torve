@@ -28,6 +28,7 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.launch
 import com.torve.util.ioDispatcher
+import kotlinx.coroutines.withContext
 import kotlinx.datetime.Clock
 import kotlinx.datetime.Instant
 
@@ -44,7 +45,7 @@ class WatchProgressRepositoryImpl(
     private val _progressChanges = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
     override val progressChanges: Flow<Unit> = _progressChanges.asSharedFlow()
 
-    override suspend fun getInProgress(limit: Long): List<WatchProgress> {
+    override suspend fun getInProgress(limit: Long): List<WatchProgress> = withContext(ioDispatcher) {
         val userId = userIdProvider.currentUserId()
         val rows = database.torveQueries.getInProgress(userId = userId, limit = limit).executeAsList()
         // Return local data immediately — don't block on TMDB calls.
@@ -99,12 +100,12 @@ class WatchProgressRepositoryImpl(
                 }
             }
         }
-        return result
+        result
     }
 
-    override suspend fun getProgress(mediaId: String): WatchProgress? {
+    override suspend fun getProgress(mediaId: String): WatchProgress? = withContext(ioDispatcher) {
         val userId = userIdProvider.currentUserId()
-        return database.torveQueries.getProgress(userId = userId, mediaId = mediaId).executeAsOneOrNull()?.let { row ->
+        database.torveQueries.getProgress(userId = userId, mediaId = mediaId).executeAsOneOrNull()?.let { row ->
             WatchProgress(
                 mediaId = row.media_id,
                 mediaType = MediaType.fromString(row.media_type),
@@ -121,7 +122,7 @@ class WatchProgressRepositoryImpl(
         }
     }
 
-    override suspend fun saveProgress(progress: WatchProgress) {
+    override suspend fun saveProgress(progress: WatchProgress) = withContext(ioDispatcher) {
         val userId = userIdProvider.currentUserId()
         // Preserve existing poster/backdrop URLs if the new values are null,
         // so a failed TMDB lookup or Trakt sync doesn't overwrite good data.
@@ -158,7 +159,7 @@ class WatchProgressRepositoryImpl(
             0.0
         }
         if (ratio >= 0.85) {
-            val tmdbId = progress.mediaId.extractTmdbIdOrNull() ?: return
+            val tmdbId = progress.mediaId.extractTmdbIdOrNull() ?: return@withContext
             val imdbId = resolveImdbId(progress.mediaId, progress.mediaType, tmdbId)
             runCatching {
                 if (
@@ -222,9 +223,9 @@ class WatchProgressRepositoryImpl(
         }
     }
 
-    override suspend fun getAllProgress(): List<WatchProgress> {
+    override suspend fun getAllProgress(): List<WatchProgress> = withContext(ioDispatcher) {
         val userId = userIdProvider.currentUserId()
-        return database.torveQueries.getAllProgress(userId = userId).executeAsList().map { row ->
+        database.torveQueries.getAllProgress(userId = userId).executeAsList().map { row ->
             WatchProgress(
                 mediaId = row.media_id,
                 mediaType = MediaType.fromString(row.media_type),
@@ -241,23 +242,25 @@ class WatchProgressRepositoryImpl(
         }
     }
 
-    override suspend fun deleteProgress(mediaId: String) {
+    override suspend fun deleteProgress(mediaId: String) = withContext(ioDispatcher) {
         database.torveQueries.deleteProgressByMediaId(
             userId = userIdProvider.currentUserId(),
             mediaId = mediaId,
         )
         _progressChanges.tryEmit(Unit)
+        Unit
     }
 
-    override suspend fun clearAllProgress() {
+    override suspend fun clearAllProgress() = withContext(ioDispatcher) {
         database.torveQueries.clearAllProgress(userId = userIdProvider.currentUserId())
         _progressChanges.tryEmit(Unit)
+        Unit
     }
 
-    override suspend fun syncFromTrakt() {
+    override suspend fun syncFromTrakt() = withContext(ioDispatcher) {
         try {
             val playbackItems = traktApi.getPlaybackProgress()
-            if (playbackItems.isEmpty()) return
+            if (playbackItems.isEmpty()) return@withContext
 
             val userId = userIdProvider.currentUserId()
             val localIds = database.torveQueries.getAllProgress(userId = userId).executeAsList()

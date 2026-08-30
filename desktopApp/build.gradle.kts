@@ -331,7 +331,7 @@ tasks.register("generateSampleAppcast") {
     doLast {
         val out = layout.projectDirectory.file("release/appcast.sample.xml").asFile
         out.parentFile?.mkdirs()
-        val version = "1.3.0"
+        val version = "1.3.1"
         val pubDate = DateTimeFormatter
             .ofPattern("EEE, dd MMM yyyy HH:mm:ss Z", Locale.US)
             .withZone(ZoneId.of("UTC"))
@@ -421,7 +421,7 @@ tasks.register("verifyPackagedDesktopUpdateMetadata") {
     description = "Checks that the packaged desktop launcher contains the release version and updater feed."
     dependsOn("createDistributable", "verifyDesktopUpdateFeed")
     val packagedConfig = layout.buildDirectory.file("compose/binaries/main/app/Torve/app/Torve.cfg")
-    val expectedVersion = (project.findProperty("torveMsiVersion") as String?) ?: "1.3.0"
+    val expectedVersion = (project.findProperty("torveMsiVersion") as String?) ?: "1.3.1"
     inputs.file(packagedConfig)
     inputs.property("expectedDesktopVersion", expectedVersion)
     inputs.property("expectedDesktopUpdateFeed", desktopUpdateFeedUrl)
@@ -449,7 +449,7 @@ tasks.register("packageMsiCloseApp") {
     // Single source of truth shared with compose.desktop.application
     // (jvmArgs `-Dtorve.desktop.version` + packageVersion). Override per
     // build via `-PtorveMsiVersion=X.Y.Z`.
-    val torveVersion = (project.findProperty("torveMsiVersion") as String?) ?: "1.3.0"
+    val torveVersion = (project.findProperty("torveMsiVersion") as String?) ?: "1.3.1"
     val wixResourceDir = layout.projectDirectory.dir("wix-resources")
     val licenseFile = layout.projectDirectory.file("LICENSE")
     val iconFile = layout.projectDirectory.file("src/main/resources/torve.ico")
@@ -643,7 +643,7 @@ compose.desktop {
         // consumed by the packageMsiCloseApp task and the Compose Desktop
         // packageVersion below, so the JVM-reported version, the MSI's
         // ProductVersion, and the in-app About panel all stay in lockstep.
-        val torveAppVersion = (project.findProperty("torveMsiVersion") as String?) ?: "1.3.0"
+        val torveAppVersion = (project.findProperty("torveMsiVersion") as String?) ?: "1.3.1"
         // Auto-update feed URL — baked into the packaged build so the
         // in-app updater works out of the box for end users without
         // any TORVE_UPDATE_FEED env-var ceremony. The runtime resolver
