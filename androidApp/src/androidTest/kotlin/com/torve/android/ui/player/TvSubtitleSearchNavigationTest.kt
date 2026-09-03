@@ -5,7 +5,10 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.ui.test.assertIsFocused
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.semantics.getOrNull
 import com.torve.android.test.TorveTestHostActivity
 import com.torve.data.subtitles.SubtitleMatchTier
 import androidx.test.espresso.Espresso
@@ -32,6 +35,10 @@ class TvSubtitleSearchNavigationTest {
             }
         }
         composeRule.waitUntil(timeoutMillis = 15_000) {
+            runCatching {
+                composeRule.onNodeWithText("Smart Match", substring = true).assertIsFocused()
+                true
+            }.getOrDefault(false) ||
             runCatching {
                 composeRule.onNodeWithText("✓ Smart Match").assertIsFocused()
                 true
@@ -93,6 +100,40 @@ class TvSubtitleSearchNavigationTest {
     }
 
     @Test
+    fun dpadSkipsDisabledSearchMoreFilter() {
+        composeRule.setContent {
+            MaterialTheme {
+                TvSubtitleSearchOverlay(
+                    state = results(canLoadMore = false),
+                    onSelect = {},
+                    onLoadMore = {},
+                    onDismiss = {},
+                )
+            }
+        }
+        composeRule.waitUntil(timeoutMillis = 15_000) {
+            composeRule.onAllNodesWithText("Smart Match", substring = true)
+                .fetchSemanticsNodes()
+                .any { it.config.getOrNull(SemanticsProperties.Focused) == true } ||
+            runCatching {
+                composeRule.onNodeWithText("Smart Match", substring = true).assertIsFocused()
+                true
+            }.getOrDefault(false) ||
+            runCatching {
+                composeRule.onNodeWithText("âœ“ Smart Match").assertIsFocused()
+                true
+            }.getOrDefault(false)
+        }
+        pressRemoteKey(KeyEvent.KEYCODE_DPAD_RIGHT)
+        composeRule.waitUntil(timeoutMillis = 15_000) {
+            runCatching {
+                composeRule.onNodeWithText("Strong only").assertIsFocused()
+                true
+            }.getOrDefault(false)
+        }
+    }
+
+    @Test
     fun dpadCanRequestAdditionalProviderPages() {
         var loadMoreRequested = false
         composeRule.setContent {
@@ -123,7 +164,7 @@ class TvSubtitleSearchNavigationTest {
         composeRule.waitUntil(timeoutMillis = 5_000) { loadMoreRequested }
     }
 
-    private fun results() = SubtitleFetchState.Results(
+    private fun results(canLoadMore: Boolean = true) = SubtitleFetchState.Results(
         subtitles = listOf(
             SubtitleCandidate(
                 flagEmoji = "EN",
@@ -163,7 +204,7 @@ class TvSubtitleSearchNavigationTest {
         hasStrongMatch = true,
         providerStatus = "OpenSubtitles.com: Loaded 1 of 25 · Subtitle addons: Not configured",
         openSubtitlesPageLimit = 2,
-        canLoadMore = true,
+        canLoadMore = canLoadMore,
     )
 
     private fun pressRemoteKey(keyCode: Int) {

@@ -1090,6 +1090,7 @@ fun TvSubtitleSearchOverlay(
     BackHandler(onBack = onDismiss)
     val firstRowRequester = remember { FocusRequester() }
     val loadMoreRequester = remember { FocusRequester() }
+    val strongFilterRequester = remember { FocusRequester() }
     val firstLanguageRequester = remember { FocusRequester() }
     var selectedLanguage by remember { mutableStateOf<String?>(null) }
     var strongOnly by remember { mutableStateOf(false) }
@@ -1123,6 +1124,15 @@ fun TvSubtitleSearchOverlay(
         }
     }
 
+    val loadMoreIsFocusable = (state as? SubtitleFetchState.Results)
+        ?.let { it.canLoadMore && !it.isLoadingMore }
+        ?: false
+    LaunchedEffect(loadMoreIsFocusable) {
+        if (!loadMoreIsFocusable && focusedFilterKey == "load-more") {
+            requestFocusWithRetry(strongFilterRequester)
+        }
+    }
+
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -1132,11 +1142,19 @@ fun TvSubtitleSearchOverlay(
                     false
                 } else when {
                     focusedFilterKey == "sort" && event.key == Key.DirectionRight -> {
-                        requestFocusSafely(loadMoreRequester)
+                        requestFocusSafely(if (loadMoreIsFocusable) loadMoreRequester else strongFilterRequester)
                         true
                     }
                     focusedFilterKey == "load-more" && event.key == Key.DirectionLeft -> {
                         requestFocusSafely(firstRowRequester)
+                        true
+                    }
+                    focusedFilterKey == "load-more" && event.key == Key.DirectionRight -> {
+                        requestFocusSafely(strongFilterRequester)
+                        true
+                    }
+                    focusedFilterKey == "strong" && event.key == Key.DirectionLeft -> {
+                        requestFocusSafely(if (loadMoreIsFocusable) loadMoreRequester else firstRowRequester)
                         true
                     }
                     focusedFilterKey == "load-more" && isConfirmKey(event.key) &&
@@ -1317,13 +1335,17 @@ fun TvSubtitleSearchOverlay(
                                 isSelected = true,
                                 modifier = Modifier
                                     .focusRequester(firstRowRequester)
-                                    .focusProperties { right = loadMoreRequester }
+                                    .focusProperties {
+                                        right = if (loadMoreIsFocusable) loadMoreRequester else strongFilterRequester
+                                    }
                                     .then(moveToLanguageRow),
                                 onFocused = {
                                     focusedFilterKey = "sort"
                                     initialSortFocusSeen = true
                                 },
-                                onRight = { requestFocusSafely(loadMoreRequester) },
+                                onRight = {
+                                    requestFocusSafely(if (loadMoreIsFocusable) loadMoreRequester else strongFilterRequester)
+                                },
                                 onClick = {
                                     sortMode = SubtitleSortMode.entries[(sortMode.ordinal + 1) % SubtitleSortMode.entries.size]
                                 },
@@ -1339,15 +1361,35 @@ fun TvSubtitleSearchOverlay(
                                 isSelected = false,
                                 modifier = Modifier
                                     .focusRequester(loadMoreRequester)
-                                    .focusProperties { left = firstRowRequester }
+                                    .focusProperties {
+                                        left = firstRowRequester
+                                        right = strongFilterRequester
+                                    }
                                     .then(moveToLanguageRow),
                                 enabled = state.canLoadMore && !state.isLoadingMore,
                                 onFocused = { focusedFilterKey = "load-more" },
                                 onLeft = { requestFocusSafely(firstRowRequester) },
+                                onRight = { requestFocusSafely(strongFilterRequester) },
                                 onClick = onLoadMore,
                             )
                         }
-                        item(key = "strong") { SubtitleFilterPill("Strong only", strongOnly, modifier = moveToLanguageRow, onClick = { strongOnly = !strongOnly }) }
+                        item(key = "strong") {
+                            SubtitleFilterPill(
+                                "Strong only",
+                                strongOnly,
+                                modifier = Modifier
+                                    .focusRequester(strongFilterRequester)
+                                    .focusProperties {
+                                        left = if (loadMoreIsFocusable) loadMoreRequester else firstRowRequester
+                                    }
+                                    .then(moveToLanguageRow),
+                                onFocused = { focusedFilterKey = "strong" },
+                                onLeft = {
+                                    requestFocusSafely(if (loadMoreIsFocusable) loadMoreRequester else firstRowRequester)
+                                },
+                                onClick = { strongOnly = !strongOnly },
+                            )
+                        }
                         item(key = "trusted") { SubtitleFilterPill("Trusted", trustedOnly, modifier = moveToLanguageRow, onClick = { trustedOnly = !trustedOnly }) }
                         item(key = "automated") { SubtitleFilterPill("Exclude AI/MT", excludeAutomated, modifier = moveToLanguageRow, onClick = { excludeAutomated = !excludeAutomated }) }
                         item(key = "rating") {
