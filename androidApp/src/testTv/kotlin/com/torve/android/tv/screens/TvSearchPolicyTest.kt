@@ -173,6 +173,89 @@ class TvSearchPolicyTest {
         )
     }
 
+    @Test
+    fun aiDiscoveryRequestKeepsPageAndPushesUiFiltersToTmdb() {
+        val plan = TvAiSearchPagingPlan(
+            query = "smart space dramas",
+            title = "Smart Space Dramas",
+            mediaType = "movie",
+            sortBy = "vote_average.desc",
+            genreIds = setOf(878),
+            keywordIds = setOf(123, 456),
+            yearFrom = 1990,
+            yearTo = 2020,
+            minRating = 7.0f,
+            personId = 42,
+            isDirector = false,
+        )
+
+        val request = plan.pageRequest(
+            page = 3,
+            filterType = "tv",
+            selectedGenreIds = setOf(18),
+            selectedStudioIds = setOf(213, 49),
+            selectedYearFrom = 2000,
+            selectedYearTo = 2009,
+            runtimeGte = 90,
+            runtimeLte = 120,
+            originalLanguage = "de",
+            withWatchProviders = "8|9",
+            regionCode = "DE",
+        )
+
+        assertEquals(3, request.page)
+        assertEquals("tv", request.type)
+        assertEquals("18,878", request.withGenres)
+        assertEquals("123|456", request.withKeywords)
+        assertEquals("49|213", request.withCompanies)
+        assertEquals(2000, request.yearFrom)
+        assertEquals(2009, request.yearTo)
+        assertEquals(90, request.runtimeGte)
+        assertEquals(120, request.runtimeLte)
+        assertEquals("de", request.originalLanguage)
+        assertEquals("8|9", request.withWatchProviders)
+        assertEquals("DE", request.watchRegion)
+        assertEquals("42", request.withCast)
+        assertEquals(null, request.withCrew)
+        assertFalse(request.hasEmptyYearRange)
+    }
+
+    @Test
+    fun aiDiscoveryRequestRejectsUiYearOutsideInterpretedRange() {
+        val plan = TvAiSearchPagingPlan(
+            query = "recent thrillers",
+            title = "Recent Thrillers",
+            mediaType = "movie",
+            sortBy = "popularity.desc",
+            genreIds = emptySet(),
+            keywordIds = emptySet(),
+            yearFrom = 2020,
+            yearTo = null,
+            minRating = null,
+            personId = 99,
+            isDirector = true,
+        )
+
+        val request = plan.pageRequest(
+            page = 0,
+            filterType = null,
+            selectedGenreIds = emptySet(),
+            selectedStudioIds = emptySet(),
+            selectedYearFrom = 1990,
+            selectedYearTo = 1999,
+            runtimeGte = null,
+            runtimeLte = null,
+            originalLanguage = null,
+            withWatchProviders = null,
+            regionCode = "US",
+        )
+
+        assertEquals(1, request.page)
+        assertEquals("99", request.withCrew)
+        assertEquals(null, request.withCast)
+        assertTrue(request.hasEmptyYearRange)
+    }
+
     private fun item(
         id: String = "tmdb:1",
         tmdbId: Int? = 1,

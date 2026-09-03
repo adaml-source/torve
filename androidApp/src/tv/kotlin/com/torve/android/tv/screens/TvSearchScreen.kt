@@ -103,6 +103,7 @@ import com.torve.android.tv.focus.TvScreenFocusHandle
 import com.torve.android.tv.focus.rememberRegisteredTvFocusRequester
 import com.torve.android.tv.focus.rememberTvModalFocusRestoreController
 import com.torve.android.ui.theme.*
+import com.torve.data.ai.KeywordSearchResult
 import com.torve.data.ai.KeywordSearchService
 import com.torve.data.mdblist.MdbListApi
 import com.torve.data.mdblist.RatingsEnricher
@@ -204,6 +205,87 @@ private data class TvSearchCandidatePage(
     val totalPages: Int,
 )
 
+internal data class TvAiSearchPagingPlan(
+    val query: String,
+    val title: String,
+    val mediaType: String,
+    val sortBy: String,
+    val genreIds: Set<Int>,
+    val keywordIds: Set<Int>,
+    val yearFrom: Int?,
+    val yearTo: Int?,
+    val minRating: Float?,
+    val personId: Int?,
+    val isDirector: Boolean,
+)
+
+internal data class TvAiSearchPageRequest(
+    val type: String,
+    val page: Int,
+    val sortBy: String,
+    val withGenres: String?,
+    val withKeywords: String?,
+    val minRating: Float?,
+    val yearFrom: Int?,
+    val yearTo: Int?,
+    val runtimeGte: Int?,
+    val runtimeLte: Int?,
+    val originalLanguage: String?,
+    val withWatchProviders: String?,
+    val watchRegion: String?,
+    val withCompanies: String?,
+    val withCast: String?,
+    val withCrew: String?,
+    val hasEmptyYearRange: Boolean,
+)
+
+internal fun TvAiSearchPagingPlan.pageRequest(
+    page: Int,
+    filterType: String?,
+    selectedGenreIds: Set<Int>,
+    selectedStudioIds: Set<Int>,
+    selectedYearFrom: Int?,
+    selectedYearTo: Int?,
+    runtimeGte: Int?,
+    runtimeLte: Int?,
+    originalLanguage: String?,
+    withWatchProviders: String?,
+    regionCode: String,
+): TvAiSearchPageRequest {
+    val effectiveYearFrom = listOfNotNull(yearFrom, selectedYearFrom).maxOrNull()
+    val effectiveYearTo = listOfNotNull(yearTo, selectedYearTo).minOrNull()
+    return TvAiSearchPageRequest(
+        type = filterType?.takeIf { it == "movie" || it == "tv" } ?: mediaType,
+        page = page.coerceAtLeast(1),
+        sortBy = sortBy,
+        withGenres = (genreIds + selectedGenreIds)
+            .takeIf { it.isNotEmpty() }
+            ?.sorted()
+            ?.joinToString(","),
+        withKeywords = keywordIds
+            .takeIf { it.isNotEmpty() }
+            ?.sorted()
+            ?.joinToString("|"),
+        minRating = minRating,
+        yearFrom = effectiveYearFrom,
+        yearTo = effectiveYearTo,
+        runtimeGte = runtimeGte,
+        runtimeLte = runtimeLte,
+        originalLanguage = originalLanguage,
+        withWatchProviders = withWatchProviders,
+        watchRegion = withWatchProviders?.let { regionCode },
+        withCompanies = selectedStudioIds
+            .takeIf { it.isNotEmpty() }
+            ?.sorted()
+            ?.joinToString("|"),
+        withCast = personId?.takeUnless { isDirector }?.toString(),
+        withCrew = personId?.takeIf { isDirector }?.toString(),
+        hasEmptyYearRange = effectiveYearFrom != null &&
+            effectiveYearTo != null &&
+            effectiveYearFrom > effectiveYearTo,
+    )
+}
+
 private data class TvSearchVerifiedBrowseBatch(
     val candidates: List<MediaItem>,
     val results: List<MediaItem>,
@@ -276,6 +358,8 @@ internal fun TvSearchScreen(
     var sortApplyNonce by remember { mutableStateOf(0) }
     var aiResultTitle by remember { mutableStateOf(restoredContentCache?.aiResultTitle) }
     var aiFallback by remember { mutableStateOf(restoredContentCache?.aiFallback ?: false) }
+    var aiResolvedQuery by remember { mutableStateOf(restoredContentCache?.aiResolvedQuery) }
+    var aiPagingPlan by remember { mutableStateOf(restoredContentCache?.aiPagingPlan) }
     var filtersVisible by rememberSaveable { mutableStateOf(restoredContentCache?.filtersVisible ?: false) }
     var showFilters by rememberSaveable { mutableStateOf(false) }
     var density by rememberSaveable { mutableStateOf(restoredContentCache?.density ?: TvSearchDensity.BALANCED) }
@@ -949,12 +1033,26 @@ internal fun TvSearchScreen(
         }
     }
 
-    // AI search
-    LaunchedEffect(query, searchMode) {
+    // AI search. Discovery results retain their TMDB query plan so changing a
+    // filter restarts the remote query and focus-driven paging can continue past
+    // TMDB's 20-item first page without asking the AI to interpret the text again.
+    LaunchedEffect(
+        query,
+        searchMode,
+        filterType,
+        selectedGenreIds,
+        selectedStudioIds,
+        selectedYear,
+        selectedMinRating,
+        selectedMinImdbVotes,
+        selectedRuntimeFilter,
+        selectedLanguageFilter,
+        selectedAvailabilityFilter,
+    ) {
         if (searchMode != SearchMode.AI) return@LaunchedEffect
-        aiFallback = false
+        val trimmedQuery = query.trim()
         val loadStateKey = tvSearchLoadStateKey(
-            query = query,
+            query = trimmedQuery,
             searchMode = SearchMode.AI,
             filterType = filterType,
             selectedGenreIds = selectedGenreIds,
@@ -972,7 +1070,7 @@ internal fun TvSearchScreen(
             error = null
             return@LaunchedEffect
         }
-        if (query.length < 2 || !hasAiKey) {
+        if (trimmedQuery.length < 2 || !hasAiKey) {
             // AI mode is only a search interpretation mode. Toggling it on
             // without a real query must not remove the browse/results surface,
             // because that detaches poster focus targets from the TV focus graph.
@@ -981,136 +1079,212 @@ internal fun TvSearchScreen(
             aiResultTitle = null
             return@LaunchedEffect
         }
-        Log.d("TvSearchCache", "search_cache_miss loadKey=$loadStateKey")
-        loading = true
-        error = null
-        aiResultTitle = null
-        try {
-            delay(300)
-            val aiResult = keywordSearchService.searchWithAi(
-                settingsState.aiProvider,
-                settingsState.activeAiApiKey,
-                query,
-            )
-            aiResultTitle = aiResult.title
 
-            val resolvedItems: List<MediaItem> = when {
-                aiResult.mode == "specific" && aiResult.specificItems.isNotEmpty() -> {
-                    aiResult.specificItems.mapNotNull { item ->
-                        runCatching { metadataRepo.getDetail(item.mediaType, item.tmdbId) }.getOrNull()
-                    }
-                }
-                aiResult.mode == "person_credits" && aiResult.personId != null -> {
-                    metadataRepo.getPersonCredits(aiResult.personId!!)
-                }
-                aiResult.mode == "person_filtered" && aiResult.specificItems.isNotEmpty() -> {
-                    aiResult.specificItems.mapNotNull { item ->
-                        runCatching { metadataRepo.getDetail(item.mediaType, item.tmdbId) }.getOrNull()
-                    }
-                }
-                aiResult.mode == "person_filtered" && aiResult.personId != null -> {
-                    val type = aiResult.mediaType ?: "movie"
-                    val castParam = if (!aiResult.isDirector) aiResult.personId.toString() else null
-                    val crewParam = if (aiResult.isDirector) aiResult.personId.toString() else null
-                    metadataRepo.discover(
-                        type = type,
-                        sortBy = aiResult.sortBy,
-                        withGenres = aiResult.genreIds.takeIf { it.isNotEmpty() }?.joinToString(","),
-                        minRating = aiResult.minRating,
-                        year = aiResult.yearFrom,
-                        yearTo = aiResult.yearTo,
-                        withCast = castParam,
-                        withCrew = crewParam,
-                    ).items.take(TV_SEARCH_MAX_RESULTS)
-                }
-                else -> { // "discover"
-                    val type = aiResult.mediaType ?: "movie"
-                    metadataRepo.discover(
-                        type = type,
-                        sortBy = aiResult.sortBy,
-                        withGenres = aiResult.genreIds.takeIf { it.isNotEmpty() }?.joinToString(","),
-                        withKeywords = aiResult.keywordIds.takeIf { it.isNotEmpty() }?.joinToString("|"),
-                        minRating = aiResult.minRating,
-                        year = aiResult.yearFrom,
-                        yearTo = aiResult.yearTo,
-                    ).items.take(TV_SEARCH_MAX_RESULTS)
+        fun filteredAiItems(items: List<MediaItem>): List<MediaItem> = items
+            .filter { item ->
+                when (filterType) {
+                    "movie" -> item.type == MediaType.MOVIE
+                    "tv" -> item.type == MediaType.SERIES
+                    else -> true
                 }
             }
+            .filterTvSearchItems(
+                genreIds = selectedGenreIds,
+                studioIds = selectedStudioIds,
+                year = selectedYear,
+                minRating = selectedMinRating,
+                minImdbVotes = selectedMinImdbVotes,
+                runtimeFilter = selectedRuntimeFilter,
+                availabilityFilter = selectedAvailabilityFilter,
+                sourceAvailabilityByTmdbId = sourceAvailabilityByTmdbId,
+            )
 
-            // If AI resolution returned nothing, fall back to standard search
-            if (resolvedItems.isEmpty()) {
-                aiFallback = true
-                aiResultTitle = null
-                val fallbackPage = metadataRepo.searchMultiPaged(
-                    tvSearchEffectiveQuery(query, selectedAvailabilityFilter),
-                    1,
-                    filterType,
-                )
-                nextSearchPage = fallbackPage.page + 1
-                searchTotalPages = fallbackPage.totalPages
-                searchCanLoadMore = fallbackPage.page < fallbackPage.totalPages &&
-                    fallbackPage.items.isNotEmpty() &&
-                    fallbackPage.items.size < TV_SEARCH_MAX_RESULTS
-                baseResults = fallbackPage.items
-                results = baseResults.filterTvSearchItems(
+        suspend fun loadFallbackFirstPage() {
+            aiFallback = true
+            aiPagingPlan = null
+            aiResultTitle = null
+            val fallbackPage = metadataRepo.searchMultiPaged(
+                tvSearchEffectiveQuery(trimmedQuery, selectedAvailabilityFilter),
+                1,
+                filterType,
+            )
+            nextSearchPage = fallbackPage.page + 1
+            searchTotalPages = fallbackPage.totalPages
+            searchCanLoadMore = fallbackPage.page < fallbackPage.totalPages &&
+                fallbackPage.items.isNotEmpty() &&
+                fallbackPage.items.size < TV_SEARCH_MAX_RESULTS
+            baseResults = fallbackPage.items
+            results = filteredAiItems(baseResults)
+        }
+
+        suspend fun loadPlanFirstPage(plan: TvAiSearchPagingPlan) {
+            aiFallback = false
+            aiResultTitle = plan.title
+            if (requiresImdbFilterData) {
+                val apiKey = withContext(Dispatchers.IO) {
+                    runCatching {
+                        secretStore.get(IntegrationSecretKey.MDBLIST_API_KEY)
+                            ?: prefsRepo.getString(SettingsViewModel.KEY_MDBLIST_API_KEY)
+                            ?: MdbListApi.DEFAULT_API_KEY
+                    }.getOrDefault(MdbListApi.DEFAULT_API_KEY)
+                }
+                val batch = metadataRepo.loadVerifiedBrowseBatch(
+                    ratingsEnricher = ratingsEnricher,
+                    apiKey = apiKey,
+                    existingCandidates = emptyList(),
+                    existingResults = emptyList(),
+                    startPage = 1,
+                    targetResultCount = TV_SEARCH_VERIFIED_INITIAL_RESULT_COUNT,
+                    filterType = filterType,
                     genreIds = selectedGenreIds,
                     studioIds = selectedStudioIds,
                     year = selectedYear,
                     minRating = selectedMinRating,
                     minImdbVotes = selectedMinImdbVotes,
                     runtimeFilter = selectedRuntimeFilter,
+                    languageFilter = selectedLanguageFilter,
                     availabilityFilter = selectedAvailabilityFilter,
+                    regionCode = settingsState.regionCode,
                     sourceAvailabilityByTmdbId = sourceAvailabilityByTmdbId,
+                    candidatePageLoader = { requestedPage ->
+                        metadataRepo.loadTvAiSearchPage(
+                            plan = plan,
+                            filterType = filterType,
+                            selectedGenreIds = selectedGenreIds,
+                            selectedStudioIds = selectedStudioIds,
+                            selectedYear = selectedYear,
+                            runtimeFilter = selectedRuntimeFilter,
+                            languageFilter = selectedLanguageFilter,
+                            availabilityFilter = selectedAvailabilityFilter,
+                            regionCode = settingsState.regionCode,
+                            page = requestedPage,
+                        )
+                    },
                 )
+                baseResults = batch.candidates
+                results = batch.results
+                nextSearchPage = batch.nextPage
+                searchTotalPages = batch.totalPages
+                searchCanLoadMore = batch.canLoadMore
             } else {
-                baseResults = resolvedItems.take(TV_SEARCH_MAX_RESULTS)
-                results = baseResults.filterTvSearchItems(
-                    genreIds = selectedGenreIds,
-                    studioIds = selectedStudioIds,
-                    year = selectedYear,
-                    minRating = selectedMinRating,
-                    minImdbVotes = selectedMinImdbVotes,
+                val page = metadataRepo.loadTvAiSearchPage(
+                    plan = plan,
+                    filterType = filterType,
+                    selectedGenreIds = selectedGenreIds,
+                    selectedStudioIds = selectedStudioIds,
+                    selectedYear = selectedYear,
                     runtimeFilter = selectedRuntimeFilter,
+                    languageFilter = selectedLanguageFilter,
                     availabilityFilter = selectedAvailabilityFilter,
-                    sourceAvailabilityByTmdbId = sourceAvailabilityByTmdbId,
+                    regionCode = settingsState.regionCode,
+                    page = 1,
                 )
+                baseResults = page.items
+                results = filteredAiItems(page.items).take(TV_SEARCH_MAX_RESULTS)
+                nextSearchPage = page.page + 1
+                searchTotalPages = page.totalPages
+                searchCanLoadMore = page.page < page.totalPages && page.items.isNotEmpty()
+            }
+        }
+
+        Log.d("TvSearchCache", "search_cache_miss loadKey=$loadStateKey")
+        pagingRetryBlockedResultKey = null
+        loading = true
+        error = null
+        try {
+            val canReuseResolution = aiResolvedQuery == trimmedQuery
+            val reusablePlan = aiPagingPlan?.takeIf { it.query == trimmedQuery }
+            when {
+                canReuseResolution && reusablePlan != null -> {
+                    loadPlanFirstPage(reusablePlan)
+                }
+                canReuseResolution && aiFallback -> {
+                    loadFallbackFirstPage()
+                }
+                canReuseResolution -> {
+                    // Specific-title and full person-credit modes are finite;
+                    // all their items are already in memory, so only re-filter.
+                    results = filteredAiItems(baseResults).take(TV_SEARCH_MAX_RESULTS)
+                    nextSearchPage = 2
+                    searchTotalPages = 1
+                    searchCanLoadMore = false
+                }
+                else -> {
+                    aiFallback = false
+                    aiPagingPlan = null
+                    aiResultTitle = null
+                    delay(300)
+                    val aiResult = keywordSearchService.searchWithAi(
+                        settingsState.aiProvider,
+                        settingsState.activeAiApiKey,
+                        trimmedQuery,
+                    )
+                    aiResolvedQuery = trimmedQuery
+                    aiResultTitle = aiResult.title
+
+                    val resolvedItems: List<MediaItem>? = when {
+                        aiResult.mode == "specific" && aiResult.specificItems.isNotEmpty() -> {
+                            aiResult.specificItems.mapNotNull { item ->
+                                runCatching { metadataRepo.getDetail(item.mediaType, item.tmdbId) }.getOrNull()
+                            }
+                        }
+                        aiResult.mode == "person_credits" && aiResult.personId != null -> {
+                            metadataRepo.getPersonCredits(aiResult.personId!!)
+                        }
+                        aiResult.mode == "person_filtered" && aiResult.specificItems.isNotEmpty() -> {
+                            aiResult.specificItems.mapNotNull { item ->
+                                runCatching { metadataRepo.getDetail(item.mediaType, item.tmdbId) }.getOrNull()
+                            }
+                        }
+                        else -> null
+                    }
+
+                    if (resolvedItems != null) {
+                        if (resolvedItems.isEmpty()) {
+                            loadFallbackFirstPage()
+                        } else {
+                            aiPagingPlan = null
+                            baseResults = resolvedItems.take(TV_SEARCH_MAX_RESULTS)
+                            results = filteredAiItems(baseResults).take(TV_SEARCH_MAX_RESULTS)
+                            nextSearchPage = 2
+                            searchTotalPages = 1
+                            searchCanLoadMore = false
+                        }
+                    } else {
+                        val plan = aiResult.toTvAiSearchPagingPlan(trimmedQuery)
+                        aiPagingPlan = plan
+                        loadPlanFirstPage(plan)
+                        val hasUiFilters = filterType != null ||
+                            selectedGenreIds.isNotEmpty() ||
+                            selectedStudioIds.isNotEmpty() ||
+                            selectedYear != null ||
+                            selectedMinRating != null ||
+                            selectedMinImdbVotes != null ||
+                            selectedRuntimeFilter != null ||
+                            selectedLanguageFilter != null ||
+                            selectedAvailabilityFilter != null
+                        if (baseResults.isEmpty() && !hasUiFilters) {
+                            loadFallbackFirstPage()
+                        }
+                    }
+                }
             }
             lastLoadedSearchStateKey = loadStateKey
         } catch (_: Throwable) {
-            // Fallback to standard search
-            aiFallback = true
-            aiResultTitle = null
+            // Keep the existing resilient behavior if either AI interpretation
+            // or its first TMDB page is temporarily unavailable.
+            aiResolvedQuery = trimmedQuery
             try {
-                val fallbackPage = metadataRepo.searchMultiPaged(
-                    tvSearchEffectiveQuery(query, selectedAvailabilityFilter),
-                    1,
-                    filterType,
-                )
-                nextSearchPage = fallbackPage.page + 1
-                searchTotalPages = fallbackPage.totalPages
-                searchCanLoadMore = fallbackPage.page < fallbackPage.totalPages &&
-                    fallbackPage.items.isNotEmpty() &&
-                    fallbackPage.items.size < TV_SEARCH_MAX_RESULTS
-                baseResults = fallbackPage.items
-                results = baseResults.filterTvSearchItems(
-                    genreIds = selectedGenreIds,
-                    studioIds = selectedStudioIds,
-                    year = selectedYear,
-                    minRating = selectedMinRating,
-                    minImdbVotes = selectedMinImdbVotes,
-                    runtimeFilter = selectedRuntimeFilter,
-                    availabilityFilter = selectedAvailabilityFilter,
-                    sourceAvailabilityByTmdbId = sourceAvailabilityByTmdbId,
-                )
-            lastLoadedSearchStateKey = loadStateKey
-        } catch (t: Throwable) {
-            Log.w("TvSearchInitial", "search_initial_failed loadKey=$loadStateKey", t)
-            nextSearchPage = 2
-            searchTotalPages = 1
-            searchCanLoadMore = false
-            baseResults = emptyList()
-            results = emptyList()
-            error = tvSearchSafeError(t)
+                loadFallbackFirstPage()
+                lastLoadedSearchStateKey = loadStateKey
+            } catch (t: Throwable) {
+                Log.w("TvSearchInitial", "search_initial_failed loadKey=$loadStateKey", t)
+                nextSearchPage = 2
+                searchTotalPages = 1
+                searchCanLoadMore = false
+                baseResults = emptyList()
+                results = emptyList()
+                error = tvSearchSafeError(t)
             }
         } finally {
             loading = false
@@ -1137,6 +1311,8 @@ internal fun TvSearchScreen(
         loadingMoreResults,
         loadMoreRequestPending,
         searchMode,
+        aiFallback,
+        aiPagingPlan,
         query,
         filterType,
         selectedGenreIds,
@@ -1149,12 +1325,17 @@ internal fun TvSearchScreen(
         selectedAvailabilityFilter,
         density,
     ) {
-        if (searchMode != SearchMode.STANDARD) return@LaunchedEffect
+        val activeAiPlan = aiPagingPlan?.takeIf {
+            searchMode == SearchMode.AI && !aiFallback && it.query == query.trim()
+        }
+        val supportsPaging = searchMode == SearchMode.STANDARD ||
+            (searchMode == SearchMode.AI && (activeAiPlan != null || aiFallback))
+        if (!supportsPaging) return@LaunchedEffect
         if (loading || loadingMoreResults || loadMoreRequestPending || !searchCanLoadMore) return@LaunchedEffect
         if (results.size >= TV_SEARCH_MAX_RESULTS || baseResults.size >= TV_SEARCH_MAX_CANDIDATES) return@LaunchedEffect
         val trimmedQuery = query.trim()
         val isTopRated = selectedMinRating == TV_SEARCH_TOP_RATED_FILTER
-        val isBrowseRequest = trimmedQuery.length < 2 || isTopRated
+        val isBrowseRequest = activeAiPlan != null || trimmedQuery.length < 2 || isTopRated
         val focusedIndex = selectedResultKey?.let { key ->
             results.indexOfFirst { it.tvSearchStableKey() == key }
         } ?: -1
@@ -1176,6 +1357,8 @@ internal fun TvSearchScreen(
     LaunchedEffect(
         loadMoreRequestNonce,
         searchMode,
+        aiFallback,
+        aiPagingPlan,
         query,
         filterType,
         selectedGenreIds,
@@ -1189,7 +1372,13 @@ internal fun TvSearchScreen(
     ) {
         if (loadMoreRequestNonce <= handledLoadMoreRequestNonce) return@LaunchedEffect
         handledLoadMoreRequestNonce = loadMoreRequestNonce
-        if (searchMode != SearchMode.STANDARD || loading) {
+        val trimmedQuery = query.trim()
+        val activeAiPlan = aiPagingPlan?.takeIf {
+            searchMode == SearchMode.AI && !aiFallback && it.query == trimmedQuery
+        }
+        val supportsPaging = searchMode == SearchMode.STANDARD ||
+            (searchMode == SearchMode.AI && (activeAiPlan != null || aiFallback))
+        if (!supportsPaging || loading) {
             loadMoreRequestPending = false
             return@LaunchedEffect
         }
@@ -1197,10 +1386,11 @@ internal fun TvSearchScreen(
             loadMoreRequestPending = false
             return@LaunchedEffect
         }
-        val trimmedQuery = query.trim()
         val isTopRated = selectedMinRating == TV_SEARCH_TOP_RATED_FILTER
-        val isBrowseRequest = trimmedQuery.length < 2 || isTopRated
-        val usesVerifiedBrowse = isBrowseRequest && requiresImdbFilterData
+        val isStandardBrowseRequest = searchMode == SearchMode.STANDARD &&
+            (trimmedQuery.length < 2 || isTopRated)
+        val usesVerifiedBrowse = requiresImdbFilterData &&
+            (isStandardBrowseRequest || activeAiPlan != null)
         loadingMoreResults = true
         try {
             if (usesVerifiedBrowse) {
@@ -1213,6 +1403,23 @@ internal fun TvSearchScreen(
                 }
                 val targetSize = (results.size + TV_SEARCH_VERIFIED_RESULT_INCREMENT)
                     .coerceAtMost(TV_SEARCH_MAX_RESULTS)
+                val aiCandidatePageLoader: (suspend (Int) -> TvSearchCandidatePage)? =
+                    activeAiPlan?.let { plan ->
+                        { requestedPage ->
+                            metadataRepo.loadTvAiSearchPage(
+                                plan = plan,
+                                filterType = filterType,
+                                selectedGenreIds = selectedGenreIds,
+                                selectedStudioIds = selectedStudioIds,
+                                selectedYear = selectedYear,
+                                runtimeFilter = selectedRuntimeFilter,
+                                languageFilter = selectedLanguageFilter,
+                                availabilityFilter = selectedAvailabilityFilter,
+                                regionCode = settingsState.regionCode,
+                                page = requestedPage,
+                            )
+                        }
+                    }
                 val batch = metadataRepo.loadVerifiedBrowseBatch(
                     ratingsEnricher = ratingsEnricher,
                     apiKey = apiKey,
@@ -1231,13 +1438,82 @@ internal fun TvSearchScreen(
                     availabilityFilter = selectedAvailabilityFilter,
                     regionCode = settingsState.regionCode,
                     sourceAvailabilityByTmdbId = sourceAvailabilityByTmdbId,
+                    candidatePageLoader = aiCandidatePageLoader,
                 )
                 baseResults = batch.candidates
                 results = batch.results
                 nextSearchPage = batch.nextPage
                 searchTotalPages = batch.totalPages
                 searchCanLoadMore = batch.canLoadMore
-            } else if (isBrowseRequest) {
+            } else if (activeAiPlan != null) {
+                val page = withContext(Dispatchers.IO) {
+                    runCatching {
+                        metadataRepo.loadTvAiSearchPage(
+                            plan = activeAiPlan,
+                            filterType = filterType,
+                            selectedGenreIds = selectedGenreIds,
+                            selectedStudioIds = selectedStudioIds,
+                            selectedYear = selectedYear,
+                            runtimeFilter = selectedRuntimeFilter,
+                            languageFilter = selectedLanguageFilter,
+                            availabilityFilter = selectedAvailabilityFilter,
+                            regionCode = settingsState.regionCode,
+                            page = nextSearchPage,
+                        )
+                    }.getOrElse {
+                        delay(350)
+                        runCatching {
+                            metadataRepo.loadTvAiSearchPage(
+                                plan = activeAiPlan,
+                                filterType = filterType,
+                                selectedGenreIds = selectedGenreIds,
+                                selectedStudioIds = selectedStudioIds,
+                                selectedYear = selectedYear,
+                                runtimeFilter = selectedRuntimeFilter,
+                                languageFilter = selectedLanguageFilter,
+                                availabilityFilter = selectedAvailabilityFilter,
+                                regionCode = settingsState.regionCode,
+                                page = nextSearchPage,
+                            )
+                        }.getOrElse {
+                            delay(700)
+                            metadataRepo.loadTvAiSearchPage(
+                                plan = activeAiPlan,
+                                filterType = filterType,
+                                selectedGenreIds = selectedGenreIds,
+                                selectedStudioIds = selectedStudioIds,
+                                selectedYear = selectedYear,
+                                runtimeFilter = selectedRuntimeFilter,
+                                languageFilter = selectedLanguageFilter,
+                                availabilityFilter = selectedAvailabilityFilter,
+                                regionCode = settingsState.regionCode,
+                                page = nextSearchPage,
+                            )
+                        }
+                    }
+                }
+                val merged = (baseResults + page.items)
+                    .dedupeTvSearchResults()
+                    .take(TV_SEARCH_MAX_CANDIDATES)
+                val filtered = merged.filterTvSearchItems(
+                    genreIds = selectedGenreIds,
+                    studioIds = selectedStudioIds,
+                    year = selectedYear,
+                    minRating = selectedMinRating,
+                    minImdbVotes = selectedMinImdbVotes,
+                    runtimeFilter = selectedRuntimeFilter,
+                    availabilityFilter = selectedAvailabilityFilter,
+                    sourceAvailabilityByTmdbId = sourceAvailabilityByTmdbId,
+                )
+                baseResults = merged
+                results = stableTvSearchProjection(results, filtered, TV_SEARCH_MAX_RESULTS)
+                nextSearchPage = page.page + 1
+                searchTotalPages = page.totalPages
+                searchCanLoadMore = page.page < page.totalPages &&
+                    page.items.isNotEmpty() &&
+                    merged.size < TV_SEARCH_MAX_CANDIDATES &&
+                    results.size < TV_SEARCH_MAX_RESULTS
+            } else if (isStandardBrowseRequest) {
                 val page = withContext(Dispatchers.IO) {
                     runCatching {
                         metadataRepo.loadTvSearchBrowsePage(
@@ -1401,6 +1677,8 @@ internal fun TvSearchScreen(
         selectedResultKey,
         aiResultTitle,
         aiFallback,
+        aiResolvedQuery,
+        aiPagingPlan,
         lastLoadedSearchStateKey,
         nextSearchPage,
         searchTotalPages,
@@ -1432,6 +1710,8 @@ internal fun TvSearchScreen(
                 selectedMediaKey = selectedResultKey,
                 aiResultTitle = aiResultTitle,
                 aiFallback = aiFallback,
+                aiResolvedQuery = aiResolvedQuery,
+                aiPagingPlan = aiPagingPlan,
                 loadStateKey = lastLoadedSearchStateKey,
                 nextSearchPage = nextSearchPage,
                 searchTotalPages = searchTotalPages,
@@ -2499,6 +2779,8 @@ private data class TvSearchRouteCacheState(
     val selectedMediaKey: String?,
     val aiResultTitle: String?,
     val aiFallback: Boolean,
+    val aiResolvedQuery: String?,
+    val aiPagingPlan: TvAiSearchPagingPlan?,
     val loadStateKey: String?,
     val nextSearchPage: Int,
     val searchTotalPages: Int,
@@ -4697,6 +4979,74 @@ internal fun stableTvSearchProjection(
     return (retained + availableByKey.values).take(limit)
 }
 
+private fun KeywordSearchResult.toTvAiSearchPagingPlan(query: String): TvAiSearchPagingPlan =
+    TvAiSearchPagingPlan(
+        query = query.trim(),
+        title = title,
+        mediaType = mediaType?.takeIf { it == "movie" || it == "tv" } ?: "movie",
+        sortBy = sortBy,
+        genreIds = genreIds.toSet(),
+        keywordIds = keywordIds.toSet(),
+        yearFrom = yearFrom,
+        yearTo = yearTo,
+        minRating = minRating,
+        personId = personId.takeIf { mode == "person_filtered" },
+        isDirector = isDirector,
+    )
+
+private suspend fun MetadataRepository.loadTvAiSearchPage(
+    plan: TvAiSearchPagingPlan,
+    filterType: String?,
+    selectedGenreIds: Set<Int>,
+    selectedStudioIds: Set<Int>,
+    selectedYear: Int?,
+    runtimeFilter: TvSearchRuntimeFilter?,
+    languageFilter: TvSearchLanguageFilter?,
+    availabilityFilter: TvSearchAvailabilityFilter?,
+    regionCode: String,
+    page: Int,
+): TvSearchCandidatePage {
+    val request = plan.pageRequest(
+        page = page,
+        filterType = filterType,
+        selectedGenreIds = selectedGenreIds,
+        selectedStudioIds = selectedStudioIds,
+        selectedYearFrom = selectedYear.tvSearchYearFromForApi(),
+        selectedYearTo = selectedYear.tvSearchYearToForApi(),
+        runtimeGte = runtimeFilter?.minMinutes,
+        runtimeLte = runtimeFilter?.maxMinutes,
+        originalLanguage = languageFilter?.code,
+        withWatchProviders = tvSearchWatchProvidersFor(availabilityFilter),
+        regionCode = regionCode,
+    )
+    if (request.hasEmptyYearRange) {
+        return TvSearchCandidatePage(emptyList(), request.page, request.page)
+    }
+    val result = discover(
+        type = request.type,
+        page = request.page,
+        sortBy = request.sortBy,
+        withGenres = request.withGenres,
+        withKeywords = request.withKeywords,
+        minRating = request.minRating,
+        year = request.yearFrom,
+        yearTo = request.yearTo,
+        runtimeGte = request.runtimeGte,
+        runtimeLte = request.runtimeLte,
+        originalLanguage = request.originalLanguage,
+        withWatchProviders = request.withWatchProviders,
+        watchRegion = request.watchRegion,
+        withCompanies = request.withCompanies,
+        withCast = request.withCast,
+        withCrew = request.withCrew,
+    )
+    return TvSearchCandidatePage(
+        items = result.items,
+        page = result.page,
+        totalPages = result.totalPages,
+    )
+}
+
 private suspend fun MetadataRepository.loadTvSearchBrowsePage(
     filterType: String?,
     genreIds: Set<Int>,
@@ -4804,7 +5154,22 @@ private suspend fun MetadataRepository.loadVerifiedBrowseBatch(
     availabilityFilter: TvSearchAvailabilityFilter?,
     regionCode: String,
     sourceAvailabilityByTmdbId: Map<Int, SourceAvailabilityRecord>,
+    candidatePageLoader: (suspend (Int) -> TvSearchCandidatePage)? = null,
 ): TvSearchVerifiedBrowseBatch {
+    suspend fun loadCandidatePage(requestedPage: Int): TvSearchCandidatePage =
+        candidatePageLoader?.invoke(requestedPage) ?: loadTvSearchBrowsePage(
+            filterType = filterType,
+            genreIds = genreIds,
+            year = year,
+            minRating = minRating,
+            minImdbVotes = minImdbVotes,
+            runtimeFilter = runtimeFilter,
+            languageFilter = languageFilter,
+            availabilityFilter = availabilityFilter,
+            regionCode = regionCode,
+            page = requestedPage,
+        )
+
     var candidates = existingCandidates
     var verified = candidates.filterTvSearchItems(
         genreIds = genreIds,
@@ -4832,47 +5197,14 @@ private suspend fun MetadataRepository.loadVerifiedBrowseBatch(
     ) {
         val candidatePageAttempt = runCatching {
             runCatching {
-                loadTvSearchBrowsePage(
-                    filterType = filterType,
-                    genreIds = genreIds,
-                    year = year,
-                    minRating = minRating,
-                    minImdbVotes = minImdbVotes,
-                    runtimeFilter = runtimeFilter,
-                    languageFilter = languageFilter,
-                    availabilityFilter = availabilityFilter,
-                    regionCode = regionCode,
-                    page = page,
-                )
+                loadCandidatePage(page)
             }.getOrElse {
                 delay(350)
                 runCatching {
-                    loadTvSearchBrowsePage(
-                        filterType = filterType,
-                        genreIds = genreIds,
-                        year = year,
-                        minRating = minRating,
-                        minImdbVotes = minImdbVotes,
-                        runtimeFilter = runtimeFilter,
-                        languageFilter = languageFilter,
-                        availabilityFilter = availabilityFilter,
-                        regionCode = regionCode,
-                        page = page,
-                    )
+                    loadCandidatePage(page)
                 }.getOrElse {
                     delay(700)
-                    loadTvSearchBrowsePage(
-                        filterType = filterType,
-                        genreIds = genreIds,
-                        year = year,
-                        minRating = minRating,
-                        minImdbVotes = minImdbVotes,
-                        runtimeFilter = runtimeFilter,
-                        languageFilter = languageFilter,
-                        availabilityFilter = availabilityFilter,
-                        regionCode = regionCode,
-                        page = page,
-                    )
+                    loadCandidatePage(page)
                 }
             }
         }
