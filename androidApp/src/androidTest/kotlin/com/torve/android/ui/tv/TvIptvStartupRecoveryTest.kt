@@ -112,6 +112,7 @@ class TvIptvStartupRecoveryTest {
         TvIptvScreen(
             railFocusRequester = railFocusRequester,
             onChannelPlay = {},
+            onProgrammePlayFromBeginning = { _, _, _ -> },
             onFirstContentRequester = {},
             onContentFocused = {},
             viewModel = viewModel,

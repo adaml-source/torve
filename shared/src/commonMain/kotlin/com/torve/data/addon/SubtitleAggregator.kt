@@ -50,6 +50,9 @@ class SubtitleAggregator(
                     withTimeout(addonTimeoutMs) {
                         addonClient.fetchSubtitles(baseUrl, stremioType, stremioId)
                             .subtitles
+                            .map { subtitle ->
+                                subtitle.copy(provider = addon.manifest.name.takeIf { it.isNotBlank() })
+                            }
                     }
                 } catch (_: Exception) {
                     emptyList()

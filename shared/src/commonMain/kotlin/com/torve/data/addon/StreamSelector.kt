@@ -13,7 +13,34 @@ import com.torve.domain.model.StreamQuality
  */
 class StreamSelector(
     private val scorer: StreamScorer,
+    private val continuationSelector: StreamContinuationSelector = StreamContinuationSelector(),
 ) {
+
+    /**
+     * Applies the normal compatibility/policy gate first, then ranks the viable result set using
+     * the active source as a continuity reference. This keeps autoplay heuristics out of UI code.
+     */
+    fun rankPlayableVariantsForContinuation(
+        streams: List<ParsedStream>,
+        reference: SourceProfile,
+        preferences: StreamPreferences,
+        deviceCaps: DeviceCodecCaps,
+        h264Only: Boolean = false,
+        selectionContext: StreamSelectionContext = StreamSelectionContext(),
+    ): List<RankedContinuationSource> {
+        val viable = rankPlayableVariants(
+            streams = streams,
+            preferences = preferences,
+            deviceCaps = deviceCaps,
+            h264Only = h264Only,
+            selectionContext = selectionContext,
+        )
+        return continuationSelector.rankSourcesForContinuation(
+            candidates = viable,
+            reference = reference,
+            candidateDurationMs = selectionContext.durationMs,
+        )
+    }
 
     fun selectBestPlayableVariant(
         streams: List<ParsedStream>,

@@ -132,6 +132,12 @@ import com.torve.android.voice.rememberVoiceInputController
 import com.torve.android.ui.sync.SyncDevicePickerDialog
 import com.torve.android.ui.system.configureTorveEdgeToEdge
 import com.torve.data.addon.ParsedStream
+import com.torve.data.addon.ContinuationPlaybackOutcome
+import com.torve.data.addon.ContinuationRetryPlan
+import com.torve.data.addon.ContinuationSelectionOrigin
+import com.torve.data.addon.RankedContinuationSource
+import com.torve.data.addon.SourceProfile
+import com.torve.data.addon.SourceContinuationSessionStore
 import com.torve.data.addon.StreamRuntimeTelemetry
 import com.torve.data.addon.StreamSelector
 import com.torve.data.addon.StreamSelectionContext
@@ -165,8 +171,12 @@ import com.torve.domain.model.WatchHistoryEntry
 import com.torve.domain.model.WatchProgress
 import com.torve.domain.model.extractImdbIdOrNull
 import com.torve.domain.model.extractTmdbIdOrNull
-import com.torve.data.addon.SubtitleAggregator
 import com.torve.data.subtitles.OpenSubtitlesClient
+import com.torve.data.subtitles.RankedSubtitle
+import com.torve.data.subtitles.SubtitleDiscoveryRequest
+import com.torve.data.subtitles.SubtitleDiscoveryService
+import com.torve.data.subtitles.SubtitleDownloadValidator
+import com.torve.data.subtitles.SubtitleValidationResult
 import com.torve.data.subtitles.languageInfo
 import com.torve.domain.player.ExternalSubtitle
 import com.torve.domain.player.NextEpisodeHelper
@@ -235,7 +245,6 @@ fun PlayerScreen(
     simklClient: SimklClient = koinInject(),
     integrationSecretStore: IntegrationSecretStore = koinInject(),
     prefsRepo: PreferencesRepository = koinInject(),
-    subtitleAggregator: SubtitleAggregator = koinInject(),
     openSubtitlesClient: OpenSubtitlesClient = koinInject(),
     telemetry: TelemetryEmitter = koinInject(),
     watchSessionRecorder: WatchSessionRecorder = koinInject(),
@@ -398,6 +407,8 @@ fun PlayerScreen(
     var attemptedAutoStreamKeys by remember(mediaId, seasonNumber, episodeNumber, url) {
         mutableStateOf<Set<String>>(emptySet())
     }
+    var continuationAutoplayActive by remember { mutableStateOf(false) }
+    var continuationRetryPlan by remember { mutableStateOf<ContinuationRetryPlan?>(null) }
 
     val earlyHealthWindowMs = 35_000L
     val earlyStartupTimeoutMs = 9_000L
@@ -592,49 +603,20 @@ fun PlayerScreen(
         }
     }
 
-    // Side-loaded subtitles fetched from all installed Stremio subtitle
-    // addons (e.g. OpenSubtitles). Empty list is the common case; the engine
-    // treats an empty list as a no-op. Re-fetched when the content key
-    // changes (new title or new episode). MPV engine ignores side-loaded
-    // subs in the current bindings — see PlayerEngine.play default.
+    // The source-aware browser attaches only a validated candidate. The list
+    // is cleared whenever the active source fingerprint or episode changes.
     var externalSubtitles by remember { mutableStateOf<List<ExternalSubtitle>>(emptyList()) }
-
-    LaunchedEffect(mediaId, mediaType, seasonNumber, episodeNumber, showImdbId) {
-        // Prefer the series imdb id passed by nav; otherwise try to parse
-        // mediaId (addon items sometimes carry "tt…" directly); skip if
-        // neither is available. A skipped fetch is a graceful no-op —
-        // playback still works, just without addon subs.
-        val imdb = showImdbId?.trim()?.takeIf { it.isNotBlank() }
-            ?: mediaId.extractImdbIdOrNull()
-        if (imdb == null) {
-            externalSubtitles = emptyList()
-            return@LaunchedEffect
-        }
-        val addons = runCatching { addonRepo.getInstalledAddons() }.getOrNull().orEmpty()
-        val typeEnum = if (mediaType.equals("tv", ignoreCase = true) ||
-            mediaType.equals("series", ignoreCase = true)
-        ) MediaType.SERIES else MediaType.MOVIE
-        val fetched = runCatching {
-            subtitleAggregator.fetchSubtitles(
-                addons = addons,
-                type = typeEnum,
-                imdbId = imdb,
-                season = seasonNumber,
-                episode = episodeNumber,
-            )
-        }.getOrNull().orEmpty()
-        externalSubtitles = fetched.map { stremio ->
-            ExternalSubtitle(
-                url = stremio.url,
-                languageCode = stremio.lang.takeIf { it.isNotBlank() },
-                label = stremio.label,
-                mimeType = null, // engine infers from URL extension
-            )
-        }
-    }
 
     fun requestPlayback(url: String) {
         if (url.isBlank()) return
+        if (currentUrl != url) {
+            externalSubtitles = emptyList()
+            pendingSubtitleAutoSelect = false
+            subtitleFetchState = SubtitleFetchState.Idle
+            showSubtitleSearch = false
+            subtitleDelayMs = 0
+            engine.setSubtitleDelay(0)
+        }
         if (isLiveChannelPlayback) {
             StreamPathDiagnostics.record(
                 path = StreamPlaybackPath.IPTV_DIRECT,
@@ -691,197 +673,54 @@ fun PlayerScreen(
     }
 
     suspend fun trySwitchToStableSource(reason: String, force: Boolean = false): Boolean {
-        if ((!autoSourceSelection && !force) || autoFallbackInProgress) return false
+        if ((!autoSourceSelection && !continuationAutoplayActive && !force) || autoFallbackInProgress) return false
         val imdbId = showImdbId?.trim().takeIf { !it.isNullOrBlank() } ?: return false
-        android.util.Log.w("Player", "Auto stability fallback requested: $reason")
-
-        val apiKey = settingsViewModel.getDebridApiKey()
-        // Nullable provider: addon-hosted streams (Panda + cloud download
-        // client) resolve without a local debrid key. Per-candidate
-        // resolveStream will throw if a given stream actually needs one.
-        val provider: DebridServiceType? =
-            if (apiKey.isBlank()) null else settingsViewModel.getDebridProvider()
-
+        Log.w("Player", "Auto stability fallback requested: $reason")
         autoFallbackInProgress = true
         try {
-            val preferences = settingsViewModel.buildStreamPreferences()
-            val addons = try { addonRepo.getInstalledAddons() } catch (_: Exception) { emptyList() }
-            val debridAccounts = settingsViewModel.getDebridAccounts()
-            val deviceCaps = DeviceCodecProbe.probe()
-
-            val startupSelection = loadStartupPlaybackSelection(
-                type = parsedMediaType,
+            val queuedCandidates = listOfNotNull(continuationRetryPlan?.nextCandidate())
+            val result = findContinuationFallback(
+                parsedMediaType = parsedMediaType,
                 imdbId = imdbId,
-                tmdbId = showTmdbId,
-                contentTitle = title,
-                season = currentSeasonNumber,
-                episode = currentEpisodeNumber,
+                showTmdbId = showTmdbId,
+                title = title,
+                seasonNumber = currentSeasonNumber,
+                episodeNumber = currentEpisodeNumber,
+                durationMs = duration,
+                activeAudioLanguage = audioTracks.firstOrNull { it.isSelected }?.language,
+                currentUrl = currentUrl,
+                attemptedKeys = attemptedAutoStreamKeys,
+                queuedCandidates = queuedCandidates,
                 streamRepo = streamRepo,
                 streamSelector = streamSelector,
-                addons = addons,
-                debridAccounts = debridAccounts,
-                preferences = preferences,
-                deviceCaps = deviceCaps,
+                addonRepo = addonRepo,
+                settingsViewModel = settingsViewModel,
             )
-            val rankedStartup = startupSelection.autoplayCandidates
-            if (rankedStartup.isNotEmpty()) {
-                android.util.Log.i(
-                    "Player",
-                    "startup_autoplay_candidates_available context=stability_fallback count=${rankedStartup.size}",
-                )
+            attemptedAutoStreamKeys = result.attemptedKeys
+            val winner = result.winner ?: return false
+            stagePlayerCandidate(winner, ContinuationSelectionOrigin.RETRY)
+            val resumePositionMs = maxOf(engine.state.positionMs, currentPosition).coerceAtLeast(0L)
+            currentStreamHostKey = StreamRuntimeTelemetry.keyForUrl(winner.playbackUrl)
+            continuationAutoplayActive = true
+            errorMessage = null
+            codecFallbackUsed = false
+            currentUrl = winner.playbackUrl
+            resetPlaybackHealthWindow()
+            if (resumePositionMs > 0L) {
+                pendingAutoFallbackResumePositionMs = resumePositionMs
+                pendingAutoFallbackResumeDeadlineMs = SystemClock.elapsedRealtime() + 30_000L
             }
-
-            for (candidate in rankedStartup) {
-                val key = streamKey(candidate)
-                if (key in attemptedAutoStreamKeys) continue
-                attemptedAutoStreamKeys = attemptedAutoStreamKeys + key
-
-                val hostKey = StreamRuntimeTelemetry.keyForStream(candidate)
-                StreamRuntimeTelemetry.recordPlayAttempt(hostKey)
-
-                val resolved = withTimeoutOrNull(45_000L) {
-                    streamRepo.resolveStream(candidate, provider, apiKey)
-                }
-                if (resolved == null) {
-                    android.util.Log.w(
-                        "Player",
-                        "startup_candidate_failed context=stability_fallback key=$key reason=timeout",
-                    )
-                    StreamRuntimeTelemetry.recordStartupTimeout(hostKey, 45_000L)
-                    streamRepo.reportPlaybackOutcome(candidate, provider, success = false)
-                    continue
-                }
-                // Addon-hosted URL? Probe before swapping — mid-playback we
-                // can't wait 5 min for Panda's cloud client, so skip any
-                // candidate that isn't serving right now. Non-addon URLs
-                // skip the probe entirely.
-                if (candidate.isAddonHostedUrl()) {
-                    val readiness = streamRepo.probeStreamReadiness(resolved.url.orEmpty())
-                    if (readiness !is com.torve.domain.repository.StreamReadiness.Ready) {
-                        android.util.Log.i(
-                            "Player",
-                            "startup_candidate_skip context=stability_fallback key=$key reason=${readiness::class.simpleName}",
-                        )
-                        continue
-                    }
-                }
-
-                val nextUrl = resolved.transcodeUrls?.mp4
-                    ?: resolved.transcodeUrls?.hls
-                    ?: resolved.url
-                if (nextUrl.isBlank() || nextUrl == currentUrl) {
-                    android.util.Log.w(
-                        "Player",
-                        "startup_candidate_failed context=stability_fallback key=$key reason=invalid_url",
-                    )
-                    streamRepo.reportPlaybackOutcome(candidate, provider, success = false)
-                    continue
-                }
-
-                val resumePositionMs = maxOf(engine.state.positionMs, currentPosition).coerceAtLeast(0L)
-                currentStreamHostKey = StreamRuntimeTelemetry.keyForUrl(nextUrl)
-                errorMessage = null
-                codecFallbackUsed = false
-                currentUrl = nextUrl
-                resetPlaybackHealthWindow()
-                if (resumePositionMs > 0L) {
-                    pendingAutoFallbackResumePositionMs = resumePositionMs
-                    pendingAutoFallbackResumeDeadlineMs = SystemClock.elapsedRealtime() + 30_000L
-                }
-                engine.stop()
-                requestPlayback(nextUrl)
-                android.util.Log.i(
-                    "Player",
-                    "startup_candidate_used context=stability_fallback key=$key host=$hostKey",
-                )
-                Toast.makeText(context, context.getString(R.string.player_switched_source), Toast.LENGTH_SHORT).show()
-                return true
-            }
-
-            android.util.Log.i(
+            engine.stop()
+            requestPlayback(winner.playbackUrl)
+            Log.i(
                 "Player",
-                "fallback_to_full_fetch context=stability_fallback startupCount=${rankedStartup.size}",
+                "continuation_retry_started key=${playerStreamKey(winner.stream)} " +
+                    "host=${StreamRuntimeTelemetry.keyForStream(winner.stream)}",
             )
-            val candidates = streamRepo.fetchStreams(
-                type = parsedMediaType,
-                imdbId = imdbId,
-                contentId = showTmdbId?.let { "tmdb:$it" },
-                title = title,
-                season = currentSeasonNumber,
-                episode = currentEpisodeNumber,
-                addons = addons,
-                debridAccounts = debridAccounts,
-                preferences = preferences,
-                fetchPolicy = StreamFetchPolicy.FULL,
-            )
-            val rankedBySelector = streamSelector.rankPlayableVariants(
-                streams = candidates,
-                preferences = preferences,
-                deviceCaps = deviceCaps,
-            )
-            val ranked = StreamFallbackOrdering.streamsInTryOrder(
-                streams = rankedBySelector,
-                startupCandidates = startupSelection.snapshot.candidates,
-                keyOf = ::playerStreamKey,
-            )
-            if (ranked.isEmpty()) return false
-
-            for (candidate in ranked) {
-                val key = streamKey(candidate)
-                if (key in attemptedAutoStreamKeys) continue
-                attemptedAutoStreamKeys = attemptedAutoStreamKeys + key
-
-                val hostKey = StreamRuntimeTelemetry.keyForStream(candidate)
-                StreamRuntimeTelemetry.recordPlayAttempt(hostKey)
-
-                val resolved = withTimeoutOrNull(45_000L) {
-                    streamRepo.resolveStream(candidate, provider, apiKey)
-                }
-                if (resolved == null) {
-                    StreamRuntimeTelemetry.recordStartupTimeout(hostKey, 45_000L)
-                    streamRepo.reportPlaybackOutcome(candidate, provider, success = false)
-                    continue
-                }
-                if (candidate.isAddonHostedUrl()) {
-                    val readiness = streamRepo.probeStreamReadiness(resolved.url.orEmpty())
-                    if (readiness !is com.torve.domain.repository.StreamReadiness.Ready) {
-                        android.util.Log.i(
-                            "Player",
-                            "startup_candidate_skip context=full_fetch_fallback reason=${readiness::class.simpleName}",
-                        )
-                        continue
-                    }
-                }
-
-                val nextUrl = resolved.transcodeUrls?.mp4
-                    ?: resolved.transcodeUrls?.hls
-                    ?: resolved.url
-                if (nextUrl.isBlank() || nextUrl == currentUrl) {
-                    streamRepo.reportPlaybackOutcome(candidate, provider, success = false)
-                    continue
-                }
-
-                val resumePositionMs = maxOf(engine.state.positionMs, currentPosition).coerceAtLeast(0L)
-                currentStreamHostKey = StreamRuntimeTelemetry.keyForUrl(nextUrl)
-                errorMessage = null
-                codecFallbackUsed = false
-                currentUrl = nextUrl
-                resetPlaybackHealthWindow()
-                if (resumePositionMs > 0L) {
-                    pendingAutoFallbackResumePositionMs = resumePositionMs
-                    pendingAutoFallbackResumeDeadlineMs = SystemClock.elapsedRealtime() + 30_000L
-                }
-                engine.stop()
-                requestPlayback(nextUrl)
-                android.util.Log.i(
-                    "Player",
-                    "full_fetch_winner_used context=stability_fallback key=$key host=$hostKey",
-                )
-                Toast.makeText(context, context.getString(R.string.player_switched_source), Toast.LENGTH_SHORT).show()
-                return true
-            }
-            return false
-        } catch (_: Exception) {
+            Toast.makeText(context, context.getString(R.string.player_switched_source), Toast.LENGTH_SHORT).show()
+            return true
+        } catch (error: Exception) {
+            Log.w("Player", "continuation_retry_exhausted reason=${error::class.simpleName}")
             return false
         } finally {
             autoFallbackInProgress = false
@@ -1390,12 +1229,18 @@ fun PlayerScreen(
         )
     }
 
-    LaunchedEffect(currentUrl) {
+    LaunchedEffect(currentUrl, currentSeasonNumber, currentEpisodeNumber) {
         trackPrefsAppliedForUrl = false
         currentStreamHostKey = StreamRuntimeTelemetry.keyForUrl(currentUrl)
         currentStreamHostKey?.let { StreamRuntimeTelemetry.recordPlayAttempt(it) }
         resetSeekAcceleration()
         tvSeekFeedbackVisible = false
+        externalSubtitles = emptyList()
+        pendingSubtitleAutoSelect = false
+        subtitleFetchState = SubtitleFetchState.Idle
+        showSubtitleSearch = false
+        subtitleDelayMs = 0
+        engine.setSubtitleDelay(0)
     }
 
     LaunchedEffect(trackPrefsLoaded, trackPrefsAppliedForUrl, audioTracks, subtitleTracks, currentUrl) {
@@ -1623,6 +1468,13 @@ fun PlayerScreen(
                 nextEpisodeInfo = null
                 hasMarkedWatched = false
             },
+            onAutoplaySelection = { selected, rankedCandidates ->
+                continuationAutoplayActive = true
+                attemptedAutoStreamKeys = setOf(playerStreamKey(selected))
+                continuationRetryPlan = ContinuationRetryPlan(rankedCandidates).also {
+                    it.markAttempted(selected)
+                }
+            },
             onResolvingChange = { isResolvingNextEpisode = it },
             onFailed = {
                 isResolvingNextEpisode = false
@@ -1720,9 +1572,18 @@ fun PlayerScreen(
                     currentStreamHostKey?.let { host ->
                         StreamRuntimeTelemetry.recordStartupSuccess(host, startupMs)
                     }
+                    val activeProfile = SourceContinuationSessionStore.session.recordPlaybackStarted(
+                        playbackUrl = currentUrl,
+                        durationMs = state.durationMs.takeIf { it > 0L },
+                        seasonNumber = currentSeasonNumber,
+                        episodeNumber = currentEpisodeNumber,
+                    )
+                    if (BuildConfig.DEBUG && activeProfile != null) {
+                        Log.d("SourceContinuity", "playback_started ${activeProfile.debugSummary()}")
+                    }
                 }
 
-                if (autoSourceSelection && !earlyFallbackTriggered && !autoFallbackInProgress) {
+                if ((autoSourceSelection || continuationAutoplayActive) && !earlyFallbackTriggered && !autoFallbackInProgress) {
                     val elapsedMs = nowMs - healthWindowStartedAtMs
                     val seekSuppressed = isSeekSuppressionActive(nowMs)
                     if (elapsedMs <= earlyHealthWindowMs && !seekSuppressed) {
@@ -1736,6 +1597,14 @@ fun PlayerScreen(
                         if (startupTimeout || unstableRebuffer) {
                             earlyFallbackTriggered = true
                             val reason = if (startupTimeout) "startup_timeout" else "early_rebuffer"
+                            SourceContinuationSessionStore.session.recordPlaybackFailure(
+                                currentUrl,
+                                if (startupTimeout) {
+                                    ContinuationPlaybackOutcome.STARTUP_TIMEOUT
+                                } else {
+                                    ContinuationPlaybackOutcome.EARLY_BUFFERING_FAILURE
+                                },
+                            )
                             scope.launch {
                                 val switched = trySwitchToStableSource(reason)
                                 if (!switched && startupTimeout) {
@@ -1793,6 +1662,13 @@ fun PlayerScreen(
                                 nextEpisodeInfo = null
                                 hasMarkedWatched = false
                             },
+                            onAutoplaySelection = { selected, rankedCandidates ->
+                                continuationAutoplayActive = true
+                                attemptedAutoStreamKeys = setOf(playerStreamKey(selected))
+                                continuationRetryPlan = ContinuationRetryPlan(rankedCandidates).also {
+                                    it.markAttempted(selected)
+                                }
+                            },
                             onResolvingChange = { isResolvingNextEpisode = it },
                             onFailed = {
                                 isResolvingNextEpisode = false
@@ -1827,7 +1703,11 @@ fun PlayerScreen(
                     android.util.Log.i("Player", "Ignoring transient playback error during seek suppression window")
                     return
                 }
-                if (autoSourceSelection && !codecFallbackInProgress && !autoFallbackInProgress) {
+                SourceContinuationSessionStore.session.recordPlaybackFailure(
+                    currentUrl,
+                    ContinuationPlaybackOutcome.PLAYBACK_ERROR,
+                )
+                if ((autoSourceSelection || continuationAutoplayActive) && !codecFallbackInProgress && !autoFallbackInProgress) {
                     scope.launch {
                         val switched = trySwitchToStableSource("playback_error")
                         if (!switched && !codecFallbackInProgress) {
@@ -2812,26 +2692,29 @@ fun PlayerScreen(
                     subtitleFetchState = SubtitleFetchState.Idle
                     val savedPos = currentPosition.coerceAtLeast(0L)
                     scope.launch {
-                        val subtitleUrl: String? = when {
-                            candidate.directUrl != null -> candidate.directUrl
-                            candidate.osFileId != null -> runCatching {
-                                openSubtitlesClient.getDownloadUrl(candidate.osFileId)
-                            }.getOrNull()
-                            else -> null
-                        }
-                        if (subtitleUrl != null) {
-                            val sub = ExternalSubtitle(
-                                url = subtitleUrl,
-                                languageCode = candidate.languageCode.takeIf { it.isNotBlank() },
-                                label = "${candidate.flagEmoji} ${candidate.languageName} · ${candidate.displayLabel}",
-                                mimeType = candidate.mimeType,
-                            )
-                            externalSubtitles = listOf(sub)
-                            trackPrefsAppliedForUrl = false
-                            subtitlesPreferredEnabled = true
-                            pendingSubtitleAutoSelect = true
-                            engine.play(currentUrl, externalSubtitles)
-                            pendingStartPositionMs = savedPos
+                        when (val prepared = preparePlayerSubtitle(
+                            candidate = candidate,
+                            openSubtitlesClient = openSubtitlesClient,
+                            videoDurationMs = duration.takeIf { it > 0L },
+                        )) {
+                            is PlayerSubtitlePreparation.Failed -> Toast.makeText(
+                                context,
+                                "Subtitle was not attached: ${prepared.message}",
+                                Toast.LENGTH_LONG,
+                            ).show()
+                            is PlayerSubtitlePreparation.Ready -> {
+                                if (prepared.runtimeSuspicious) {
+                                    Toast.makeText(context, "Subtitle timing may not cover this video's full runtime.", Toast.LENGTH_LONG).show()
+                                }
+                                externalSubtitles = listOf(prepared.subtitle)
+                                trackPrefsAppliedForUrl = false
+                                subtitlesPreferredEnabled = true
+                                pendingSubtitleAutoSelect = true
+                                subtitleDelayMs = 0
+                                engine.setSubtitleDelay(0)
+                                engine.play(currentUrl, externalSubtitles)
+                                pendingStartPositionMs = savedPos
+                            }
                         }
                         kotlinx.coroutines.delay(100)
                         runCatching { playerRootFocusRequester.requestFocus() }
@@ -2889,90 +2772,22 @@ fun PlayerScreen(
                         showSubtitleSearch = true
                         subtitleFetchState = SubtitleFetchState.Loading
                         scope.launch {
-                            // Resolve IMDB ID
-                            var imdb = showImdbId?.trim()?.takeIf { it.isNotBlank() }
-                                ?: mediaId.extractImdbIdOrNull()
-                            if (imdb == null && resolvedTmdbId > 0) {
-                                val typeStr = if (mediaType.equals("tv", ignoreCase = true) ||
+                            subtitleFetchState = discoverPlayerSubtitleState(
+                                openSubtitlesClient = openSubtitlesClient,
+                                addonRepository = addonRepo,
+                                metadataRepository = metadataRepo,
+                                mediaId = mediaId,
+                                showImdbId = showImdbId,
+                                resolvedTmdbId = resolvedTmdbId,
+                                mediaType = if (
+                                    mediaType.equals("tv", ignoreCase = true) ||
                                     mediaType.equals("series", ignoreCase = true)
-                                ) "tv" else "movie"
-                                imdb = runCatching {
-                                    metadataRepo.getDetail(typeStr, resolvedTmdbId).imdbId
-                                }.getOrNull()
-                            }
-                            if (imdb == null) {
-                                subtitleFetchState = SubtitleFetchState.Empty
-                                return@launch
-                            }
-
-                            if (openSubtitlesClient.isConfigured()) {
-                                // Direct OpenSubtitles.com API — rich results with flags and full names
-                                val results = runCatching {
-                                    openSubtitlesClient.searchSubtitles(
-                                        imdbId = imdb,
-                                        seasonNumber = seasonNumber,
-                                        episodeNumber = episodeNumber,
-                                    )
-                                }.getOrNull()
-                                subtitleFetchState = when {
-                                    results == null -> SubtitleFetchState.Error
-                                    results.isEmpty() -> SubtitleFetchState.Empty
-                                    else -> SubtitleFetchState.Results(
-                                        results.map { r ->
-                                            SubtitleCandidate(
-                                                flagEmoji = r.flagEmoji,
-                                                languageName = r.languageName,
-                                                languageCode = r.language,
-                                                displayLabel = r.fileName.ifBlank { r.release.ifBlank { "Subtitle" } },
-                                                osFileId = r.fileId,
-                                                downloadCount = r.downloadCount,
-                                                fromTrusted = r.fromTrusted,
-                                                hearingImpaired = r.hearingImpaired,
-                                                aiTranslated = r.aiTranslated,
-                                                ratings = r.ratings,
-                                            )
-                                        }
-                                    )
-                                }
-                            } else {
-                                // Fallback: Stremio subtitle addons
-                                val addons = runCatching { addonRepo.getInstalledAddons() }.getOrNull().orEmpty()
-                                val subtitleAddons = addons.filter { a ->
-                                    a.isEnabled && a.manifest.resources.any { it == "subtitles" }
-                                }
-                                if (subtitleAddons.isEmpty()) {
-                                    subtitleFetchState = SubtitleFetchState.NoKey
-                                    return@launch
-                                }
-                                val typeEnum = if (mediaType.equals("tv", ignoreCase = true) ||
-                                    mediaType.equals("series", ignoreCase = true)
-                                ) com.torve.domain.model.MediaType.SERIES else com.torve.domain.model.MediaType.MOVIE
-                                val fetched = runCatching {
-                                    subtitleAggregator.fetchSubtitles(
-                                        addons = addons,
-                                        type = typeEnum,
-                                        imdbId = imdb,
-                                        season = seasonNumber,
-                                        episode = episodeNumber,
-                                    )
-                                }.getOrNull()
-                                subtitleFetchState = when {
-                                    fetched == null -> SubtitleFetchState.Error
-                                    fetched.isEmpty() -> SubtitleFetchState.Empty
-                                    else -> SubtitleFetchState.Results(
-                                        fetched.map { s ->
-                                            val (flag, name) = languageInfo(s.lang.ifBlank { "" })
-                                            SubtitleCandidate(
-                                                flagEmoji = flag,
-                                                languageName = name,
-                                                languageCode = s.lang.ifBlank { "?" },
-                                                displayLabel = s.label?.ifBlank { null } ?: name,
-                                                directUrl = s.url,
-                                            )
-                                        }
-                                    )
-                                }
-                            }
+                                ) MediaType.SERIES else MediaType.MOVIE,
+                                seasonNumber = currentSeasonNumber,
+                                episodeNumber = currentEpisodeNumber,
+                                currentTitle = currentTitle,
+                                playbackUrl = currentUrl,
+                            )
                         }
                     },
                 )
@@ -3197,6 +3012,13 @@ fun PlayerScreen(
                                 isResolvingNextEpisode = false
                                 nextEpisodeInfo = null
                                 hasMarkedWatched = false
+                            },
+                            onAutoplaySelection = { selected, rankedCandidates ->
+                                continuationAutoplayActive = true
+                                attemptedAutoStreamKeys = setOf(playerStreamKey(selected))
+                                continuationRetryPlan = ContinuationRetryPlan(rankedCandidates).also {
+                                    it.markAttempted(selected)
+                                }
                             },
                             onResolvingChange = { isResolvingNextEpisode = it },
                             onFailed = {
@@ -4321,6 +4143,348 @@ private fun FocusableIconButton(
     }
 }
 
+private sealed interface PlayerSubtitlePreparation {
+    data class Ready(val subtitle: ExternalSubtitle, val runtimeSuspicious: Boolean) : PlayerSubtitlePreparation
+    data class Failed(val message: String) : PlayerSubtitlePreparation
+}
+
+private suspend fun preparePlayerSubtitle(
+    candidate: SubtitleCandidate,
+    openSubtitlesClient: OpenSubtitlesClient,
+    videoDurationMs: Long?,
+): PlayerSubtitlePreparation {
+    val validator = org.koin.core.context.GlobalContext.get().get<SubtitleDownloadValidator>()
+    val url = when {
+        candidate.directUrl != null -> candidate.directUrl
+        candidate.osFileId != null -> openSubtitlesClient.getDownloadUrl(candidate.osFileId)
+        else -> null
+    } ?: return PlayerSubtitlePreparation.Failed("Subtitle download failed")
+    return when (val validation = validator.validate(url, videoDurationMs, candidate.forced)) {
+        is SubtitleValidationResult.Invalid -> PlayerSubtitlePreparation.Failed(validation.reason)
+        is SubtitleValidationResult.Valid -> PlayerSubtitlePreparation.Ready(
+            subtitle = ExternalSubtitle(
+                url = url,
+                languageCode = candidate.languageCode.takeIf(String::isNotBlank),
+                label = "${candidate.flagEmoji} ${candidate.languageName} - ${candidate.displayLabel}",
+                mimeType = candidate.mimeType,
+            ),
+            runtimeSuspicious = validation.runtimeSuspicious,
+        )
+    }
+}
+
+private suspend fun discoverPlayerSubtitleState(
+    openSubtitlesClient: OpenSubtitlesClient,
+    addonRepository: AddonRepository,
+    metadataRepository: MetadataRepository,
+    mediaId: String,
+    showImdbId: String?,
+    resolvedTmdbId: Int,
+    mediaType: MediaType,
+    seasonNumber: Int?,
+    episodeNumber: Int?,
+    currentTitle: String,
+    playbackUrl: String,
+): SubtitleFetchState {
+    val discoveryService = org.koin.core.context.GlobalContext.get().get<SubtitleDiscoveryService>()
+    var imdbId = showImdbId?.trim()?.takeIf(String::isNotBlank)
+        ?: mediaId.extractImdbIdOrNull()
+    if (imdbId == null && resolvedTmdbId > 0) {
+        val type = if (mediaType == MediaType.SERIES) "tv" else "movie"
+        imdbId = runCatching { metadataRepository.getDetail(type, resolvedTmdbId).imdbId }.getOrNull()
+    }
+    if (imdbId == null) return SubtitleFetchState.Empty
+    val addons = runCatching { addonRepository.getInstalledAddons() }.getOrNull().orEmpty()
+    val hasSubtitleAddon = addons.any { addon ->
+        addon.isEnabled && addon.manifest.resources.any { it == "subtitles" }
+    }
+    if (!hasSubtitleAddon && !openSubtitlesClient.isConfiguredAsync()) return SubtitleFetchState.NoKey
+
+    val fingerprint = SourceContinuationSessionStore.session.currentProfile()
+        ?: SourceProfile.from(
+            stream = ParsedStream(
+                addonName = "Current playback",
+                quality = "",
+                title = currentTitle,
+                directUrl = playbackUrl,
+            ),
+            resolvedUrl = playbackUrl,
+            seasonNumber = seasonNumber,
+            episodeNumber = episodeNumber,
+        )
+    val discovery = runCatching {
+        discoveryService.discover(
+            SubtitleDiscoveryRequest(
+                contentId = mediaId.ifBlank { imdbId },
+                imdbId = imdbId,
+                mediaType = mediaType,
+                seasonNumber = seasonNumber,
+                episodeNumber = episodeNumber,
+                fingerprint = fingerprint,
+                playbackUrl = playbackUrl,
+                addons = addons,
+            ),
+        )
+    }.onFailure { error ->
+        Log.w("SubtitleMatch", "Source-aware subtitle discovery failed: ${error.message}")
+    }.getOrNull() ?: return SubtitleFetchState.Error
+
+    if (discovery.ranked.isEmpty()) return SubtitleFetchState.Empty
+    Log.d(
+        "SubtitleMatch",
+        "active=${discovery.fingerprint.debugSummary()} hash=${discovery.movieHashAvailable} " +
+            "candidates=${discovery.ranked.size} cached=${discovery.fromCache}",
+    )
+    discovery.ranked.forEach { ranked ->
+        Log.d(
+            "SubtitleMatch",
+            "candidate=${ranked.subtitle.subtitleFileId ?: ranked.subtitle.subtitleId ?: "unknown"} " +
+                "provider=${ranked.subtitle.provider} tier=${ranked.tier.displayLabel} " +
+                "match=${ranked.subtitleMatchScore} quality=${ranked.subtitleQualityScore} " +
+                "reasons=${ranked.reasons.joinToString { "${it.description}:${it.points}" }}",
+        )
+    }
+    return SubtitleFetchState.Results(
+        subtitles = discovery.ranked.map(::toPlayerSubtitleCandidate),
+        matchingRelease = discovery.fingerprint.releaseName
+            ?: discovery.fingerprint.filename
+            ?: currentTitle.ifBlank { "Current playback source" },
+        movieHashAvailable = discovery.movieHashAvailable,
+        hasStrongMatch = discovery.hasStrongMatch,
+    )
+}
+
+private fun toPlayerSubtitleCandidate(ranked: RankedSubtitle): SubtitleCandidate {
+    val subtitle = ranked.subtitle
+    val (flag, languageName) = languageInfo(subtitle.language)
+    return SubtitleCandidate(
+        flagEmoji = flag,
+        languageName = languageName,
+        languageCode = subtitle.language.ifBlank { "?" },
+        displayLabel = subtitle.subtitleFilename?.takeIf(String::isNotBlank)
+            ?: subtitle.releaseName?.takeIf(String::isNotBlank)
+            ?: languageName,
+        directUrl = subtitle.directUrl,
+        mimeType = subtitle.mimeType,
+        osFileId = subtitle.subtitleFileId,
+        releaseName = subtitle.releaseName,
+        provider = subtitle.provider,
+        fps = subtitle.fps,
+        downloadCount = subtitle.downloadCount,
+        recentDownloadCount = subtitle.recentDownloadCount,
+        fromTrusted = subtitle.trustedUploader,
+        uploaderName = subtitle.uploaderName,
+        uploaderRank = subtitle.uploaderRank,
+        hearingImpaired = subtitle.hearingImpaired,
+        forced = subtitle.forced,
+        aiTranslated = subtitle.aiTranslated,
+        machineTranslated = subtitle.machineTranslated,
+        ratings = subtitle.rating,
+        voteCount = subtitle.voteCount,
+        uploadDate = subtitle.uploadDate,
+        matchTier = ranked.tier,
+        matchScore = ranked.subtitleMatchScore,
+        qualityScore = ranked.subtitleQualityScore,
+        rankingReasons = ranked.reasons.map { reason ->
+            "${if (reason.points >= 0) "+" else ""}${reason.points} ${reason.description}"
+        },
+    )
+}
+
+private data class ResolvedPlayerCandidate(
+    val stream: ParsedStream,
+    val resolved: com.torve.domain.model.ResolvedStream,
+    val playbackUrl: String,
+)
+
+private data class PlayerFallbackResolution(
+    val winner: ResolvedPlayerCandidate?,
+    val attemptedKeys: Set<String>,
+)
+
+private suspend fun resolveCandidateBatch(
+    candidates: List<ParsedStream>,
+    attemptedKeys: Set<String>,
+    currentUrl: String,
+    streamRepo: StreamRepository,
+    provider: DebridServiceType?,
+    apiKey: String,
+    contextLabel: String,
+): PlayerFallbackResolution {
+    var attempted = attemptedKeys
+    for (candidate in candidates.distinctBy(::playerStreamKey)) {
+        val key = playerStreamKey(candidate)
+        if (key in attempted) continue
+        attempted = attempted + key
+        val hostKey = StreamRuntimeTelemetry.keyForStream(candidate)
+        StreamRuntimeTelemetry.recordPlayAttempt(hostKey)
+        var resolved = try {
+            withTimeoutOrNull(45_000L) { streamRepo.resolveStream(candidate, provider, apiKey) }
+        } catch (_: Exception) {
+            null
+        }
+        if (resolved == null) {
+            StreamRuntimeTelemetry.recordStartupTimeout(hostKey, 45_000L)
+            SourceContinuationSessionStore.session.recordOutcome(candidate, ContinuationPlaybackOutcome.STARTUP_TIMEOUT)
+            streamRepo.reportPlaybackOutcome(candidate, provider, success = false)
+            Log.w("Player", "continuation_candidate_failed context=$contextLabel key=$key reason=resolve_timeout")
+            continue
+        }
+        if (candidate.isAddonHostedUrl()) {
+            val readiness = runCatching { streamRepo.probeStreamReadiness(resolved.url.orEmpty()) }.getOrNull()
+            if (readiness !is com.torve.domain.repository.StreamReadiness.Ready) {
+                SourceContinuationSessionStore.session.recordOutcome(candidate, ContinuationPlaybackOutcome.RESOLVE_FAILURE)
+                streamRepo.reportPlaybackOutcome(candidate, provider, success = false)
+                Log.i("Player", "continuation_candidate_failed context=$contextLabel key=$key reason=not_ready")
+                continue
+            }
+            resolved = resolved.copy(url = readiness.finalUrl)
+        }
+        val playbackUrl = resolved.transcodeUrls?.mp4 ?: resolved.transcodeUrls?.hls ?: resolved.url
+        if (playbackUrl.isBlank() || playbackUrl == currentUrl) {
+            SourceContinuationSessionStore.session.recordOutcome(candidate, ContinuationPlaybackOutcome.RESOLVE_FAILURE)
+            streamRepo.reportPlaybackOutcome(candidate, provider, success = false)
+            continue
+        }
+        return PlayerFallbackResolution(
+            winner = ResolvedPlayerCandidate(candidate, resolved, playbackUrl),
+            attemptedKeys = attempted,
+        )
+    }
+    return PlayerFallbackResolution(winner = null, attemptedKeys = attempted)
+}
+
+private suspend fun findContinuationFallback(
+    parsedMediaType: MediaType,
+    imdbId: String,
+    showTmdbId: Int?,
+    title: String,
+    seasonNumber: Int?,
+    episodeNumber: Int?,
+    durationMs: Long?,
+    activeAudioLanguage: String?,
+    currentUrl: String,
+    attemptedKeys: Set<String>,
+    queuedCandidates: List<ParsedStream>,
+    streamRepo: StreamRepository,
+    streamSelector: StreamSelector,
+    addonRepo: AddonRepository,
+    settingsViewModel: SettingsViewModel,
+): PlayerFallbackResolution {
+    val preferences = settingsViewModel.buildStreamPreferences()
+    val addons = runCatching { addonRepo.getInstalledAddons() }.getOrDefault(emptyList())
+    val debridAccounts = settingsViewModel.getDebridAccounts()
+    val apiKey = settingsViewModel.getDebridApiKey()
+    val provider = if (apiKey.isBlank()) null else settingsViewModel.getDebridProvider()
+    val deviceCaps = DeviceCodecProbe.probe()
+    val selectionContext = StreamSelectionContext(
+        durationMs = durationMs?.takeIf { it > 0L },
+        activeAudioLanguage = activeAudioLanguage,
+        automatic = true,
+    )
+    val reference = SourceContinuationSessionStore.session.currentProfile()
+    val startup = loadStartupPlaybackSelection(
+        type = parsedMediaType,
+        imdbId = imdbId,
+        tmdbId = showTmdbId,
+        contentTitle = title,
+        season = seasonNumber,
+        episode = episodeNumber,
+        streamRepo = streamRepo,
+        streamSelector = streamSelector,
+        addons = addons,
+        debridAccounts = debridAccounts,
+        preferences = preferences,
+        deviceCaps = deviceCaps,
+        selectionContext = selectionContext,
+    )
+    val startupDecisions = reference?.let {
+        streamSelector.rankPlayableVariantsForContinuation(
+            startup.startupCandidates,
+            it,
+            preferences,
+            deviceCaps,
+            selectionContext = selectionContext,
+        )
+    }.orEmpty()
+    if (reference != null) logContinuationRanking(reference, startupDecisions, "stability_startup")
+    val startupCandidates = (queuedCandidates + startupDecisions.map(RankedContinuationSource::stream) +
+        startup.autoplayCandidates).distinctBy(::playerStreamKey)
+    val startupResult = resolveCandidateBatch(
+        startupCandidates,
+        attemptedKeys,
+        currentUrl,
+        streamRepo,
+        provider,
+        apiKey,
+        "stability_startup",
+    )
+    if (startupResult.winner != null) return startupResult
+
+    val fullStreams = streamRepo.fetchStreams(
+        type = parsedMediaType,
+        imdbId = imdbId,
+        contentId = showTmdbId?.let { "tmdb:$it" },
+        title = title,
+        season = seasonNumber,
+        episode = episodeNumber,
+        addons = addons,
+        debridAccounts = debridAccounts,
+        preferences = preferences,
+        fetchPolicy = StreamFetchPolicy.FULL,
+    )
+    val fullDecisions = reference?.let {
+        streamSelector.rankPlayableVariantsForContinuation(
+            fullStreams,
+            it,
+            preferences,
+            deviceCaps,
+            selectionContext = selectionContext,
+        )
+    }.orEmpty()
+    if (reference != null) logContinuationRanking(reference, fullDecisions, "stability_full")
+    val fullRanked = if (fullDecisions.isNotEmpty()) {
+        fullDecisions.map(RankedContinuationSource::stream)
+    } else {
+        StreamFallbackOrdering.streamsInTryOrder(
+            streams = streamSelector.rankPlayableVariants(
+                fullStreams,
+                preferences,
+                deviceCaps,
+                selectionContext = selectionContext,
+            ),
+            startupCandidates = startup.snapshot.candidates,
+            keyOf = ::playerStreamKey,
+        )
+    }
+    return resolveCandidateBatch(
+        fullRanked,
+        startupResult.attemptedKeys,
+        currentUrl,
+        streamRepo,
+        provider,
+        apiKey,
+        "stability_full",
+    )
+}
+
+private fun stagePlayerCandidate(candidate: ResolvedPlayerCandidate, origin: ContinuationSelectionOrigin) {
+    val resolved = candidate.resolved
+    SourceContinuationSessionStore.session.stageResolvedSource(
+        stream = candidate.stream,
+        playbackUrl = candidate.playbackUrl,
+        alternatePlaybackUrls = listOfNotNull(
+            resolved.url,
+            resolved.transcodeUrls?.mp4,
+            resolved.transcodeUrls?.hls,
+            resolved.transcodeUrls?.webm,
+        ),
+        resolvedFileName = resolved.fileName,
+        resolvedFileSize = resolved.fileSize,
+        origin = origin,
+    )
+}
+
 private data class PlayerStartupSelection(
     val snapshot: StartupCandidatesSnapshot,
     val startupCandidates: List<ParsedStream>,
@@ -4449,18 +4613,24 @@ private suspend fun List<ParsedStream>.firstResolvedOrNull(
         } catch (_: Exception) {
             null
         }
+        var playableResolved = resolved
         if (resolved != null && candidate.isAddonHostedUrl()) {
             // Next-episode auto-resolve can't host the preparing overlay;
             // skip any candidate that isn't serving right now rather than
             // waiting on the cloud client.
             val readiness = streamRepo.probeStreamReadiness(resolved.url.orEmpty())
             if (readiness !is com.torve.domain.repository.StreamReadiness.Ready) {
+                SourceContinuationSessionStore.session.recordOutcome(
+                    candidate,
+                    ContinuationPlaybackOutcome.RESOLVE_FAILURE,
+                )
                 android.util.Log.i(
                     "Player",
                     "${eventLabel}_skip context=$contextLabel key=$key reason=${readiness::class.simpleName}",
                 )
                 continue
             }
+            playableResolved = resolved.copy(url = readiness.finalUrl)
         }
         if (resolved == null) {
             android.util.Log.w(
@@ -4468,20 +4638,31 @@ private suspend fun List<ParsedStream>.firstResolvedOrNull(
                 "${eventLabel}_failed context=$contextLabel key=$key reason=resolve_failed",
             )
             StreamRuntimeTelemetry.recordStartupTimeout(hostKey, timeoutMs)
+            SourceContinuationSessionStore.session.recordOutcome(
+                candidate,
+                ContinuationPlaybackOutcome.STARTUP_TIMEOUT,
+            )
             streamRepo.reportPlaybackOutcome(candidate, provider, success = false)
             continue
         }
-        val nextUrl = resolved.transcodeUrls?.mp4 ?: resolved.transcodeUrls?.hls ?: resolved.url
+        val confirmedResolved = playableResolved ?: continue
+        val nextUrl = confirmedResolved.transcodeUrls?.mp4
+            ?: confirmedResolved.transcodeUrls?.hls
+            ?: confirmedResolved.url
         if (nextUrl.isBlank()) {
             android.util.Log.w(
                 "Player",
                 "${eventLabel}_failed context=$contextLabel key=$key reason=blank_url",
             )
             streamRepo.reportPlaybackOutcome(candidate, provider, success = false)
+            SourceContinuationSessionStore.session.recordOutcome(
+                candidate,
+                ContinuationPlaybackOutcome.RESOLVE_FAILURE,
+            )
             continue
         }
         onCandidateUsed(candidate)
-        return resolved
+        return confirmedResolved
     }
     return null
 }
@@ -4493,6 +4674,25 @@ private fun playerStreamKey(stream: ParsedStream): String {
         ?: stream.magnetUrl
         ?: stream.infoHash
         ?: "${stream.addonName}:${stream.title}"
+}
+
+private fun logContinuationRanking(
+    reference: com.torve.data.addon.SourceProfile,
+    ranked: List<RankedContinuationSource>,
+    context: String,
+) {
+    if (!BuildConfig.DEBUG) return
+    Log.d("SourceContinuity", "event=$context reference={${reference.debugSummary()}} candidateCount=${ranked.size}")
+    ranked.forEachIndexed { index, decision ->
+        Log.d("SourceContinuity", "event=$context rank=${index + 1} ${decision.debugSummary()}")
+    }
+    ranked.firstOrNull()?.let { winner ->
+        Log.d(
+            "SourceContinuity",
+            "event=$context selected=${winner.profile.releaseName ?: winner.profile.provider ?: "unknown"} " +
+                "tier=${winner.tier} score=${winner.score}",
+        )
+    }
 }
 
 private suspend fun resolveAndPlayNextEpisode(
@@ -4520,6 +4720,7 @@ private suspend fun resolveAndPlayNextEpisode(
     currentEpisodeNumber: Int?,
     requestPlayback: (String) -> Unit,
     onStateUpdate: (newSeason: Int, newEpisode: Int, newUrl: String, newTitle: String, newWatchSessionId: String?) -> Unit,
+    onAutoplaySelection: (selected: ParsedStream, rankedCandidates: List<ParsedStream>) -> Unit,
     onResolvingChange: (Boolean) -> Unit,
     onFailed: () -> Unit,
     traktScrobbler: TraktScrobbler? = null,
@@ -4539,6 +4740,12 @@ private suspend fun resolveAndPlayNextEpisode(
         val provider: DebridServiceType? =
             if (apiKey.isBlank()) null else settingsViewModel.getDebridProvider()
         val deviceCaps = DeviceCodecProbe.probe()
+        val continuityReference = SourceContinuationSessionStore.session.currentProfile()
+        val selectionContext = StreamSelectionContext(
+            durationMs = duration.takeIf { it > 0L },
+            activeAudioLanguage = activeAudioLanguage,
+            automatic = true,
+        )
         val startupSelection = loadStartupPlaybackSelection(
             type = MediaType.SERIES,
             imdbId = imdbId,
@@ -4552,21 +4759,33 @@ private suspend fun resolveAndPlayNextEpisode(
             debridAccounts = debridAccounts,
             preferences = preferences,
             deviceCaps = deviceCaps,
-            selectionContext = StreamSelectionContext(
-                durationMs = duration.takeIf { it > 0L },
-                activeAudioLanguage = activeAudioLanguage,
-                automatic = true,
-            ),
+            selectionContext = selectionContext,
         )
-        if (startupSelection.autoplayCandidates.isNotEmpty()) {
+        val startupContinuationRanking = continuityReference?.let { reference ->
+            streamSelector.rankPlayableVariantsForContinuation(
+                streams = startupSelection.startupCandidates,
+                reference = reference,
+                preferences = preferences,
+                deviceCaps = deviceCaps,
+                selectionContext = selectionContext,
+            )
+        }.orEmpty()
+        if (continuityReference != null) {
+            logContinuationRanking(continuityReference, startupContinuationRanking, "next_episode_startup")
+        }
+        val rankedStartupCandidates = startupContinuationRanking
+            .map(RankedContinuationSource::stream)
+            .ifEmpty { startupSelection.autoplayCandidates }
+        if (rankedStartupCandidates.isNotEmpty()) {
             android.util.Log.i(
                 "Player",
-                "startup_autoplay_candidates_available context=next_episode count=${startupSelection.autoplayCandidates.size}",
+                "startup_autoplay_candidates_available context=next_episode count=${rankedStartupCandidates.size}",
             )
         }
 
         var selected: ParsedStream? = null
-        var resolved = startupSelection.autoplayCandidates.firstResolvedOrNull(
+        var rankedCandidates = rankedStartupCandidates
+        var resolved = rankedStartupCandidates.firstResolvedOrNull(
             streamRepo = streamRepo,
             provider = provider,
             apiKey = apiKey,
@@ -4581,7 +4800,7 @@ private suspend fun resolveAndPlayNextEpisode(
         if (resolved == null) {
             android.util.Log.i(
                 "Player",
-                "fallback_to_full_fetch context=next_episode startupCount=${startupSelection.autoplayCandidates.size}",
+                "fallback_to_full_fetch context=next_episode startupCount=${rankedStartupCandidates.size}",
             )
             val fullStreams = streamRepo.fetchStreams(
                 type = MediaType.SERIES,
@@ -4599,37 +4818,54 @@ private suspend fun resolveAndPlayNextEpisode(
                 onFailed()
                 return
             }
-            val rankedBySelector = streamSelector.rankPlayableVariants(
-                streams = fullStreams,
-                preferences = preferences,
-                deviceCaps = deviceCaps,
-                selectionContext = StreamSelectionContext(
-                    durationMs = duration.takeIf { it > 0L },
-                    activeAudioLanguage = activeAudioLanguage,
-                    automatic = true,
-                ),
-            )
-            val ranked = StreamFallbackOrdering.streamsInTryOrder(
-                streams = rankedBySelector,
-                startupCandidates = startupSelection.snapshot.candidates,
-                keyOf = ::playerStreamKey,
-            )
-            val fallbackSelected = ranked.firstOrNull() ?: run {
+            val fullContinuationRanking = continuityReference?.let { reference ->
+                streamSelector.rankPlayableVariantsForContinuation(
+                    streams = fullStreams,
+                    reference = reference,
+                    preferences = preferences,
+                    deviceCaps = deviceCaps,
+                    selectionContext = selectionContext,
+                )
+            }.orEmpty()
+            if (continuityReference != null) {
+                logContinuationRanking(continuityReference, fullContinuationRanking, "next_episode_full")
+            }
+            val ranked = if (fullContinuationRanking.isNotEmpty()) {
+                fullContinuationRanking.map(RankedContinuationSource::stream)
+            } else {
+                val rankedBySelector = streamSelector.rankPlayableVariants(
+                    streams = fullStreams,
+                    preferences = preferences,
+                    deviceCaps = deviceCaps,
+                    selectionContext = selectionContext,
+                )
+                StreamFallbackOrdering.streamsInTryOrder(
+                    streams = rankedBySelector,
+                    startupCandidates = startupSelection.snapshot.candidates,
+                    keyOf = ::playerStreamKey,
+                )
+            }
+            if (ranked.isEmpty()) {
                 onFailed()
                 return
             }
-            selected = fallbackSelected
-            resolved = withTimeoutOrNull(90_000L) {
-                streamRepo.resolveStream(fallbackSelected, provider, apiKey)
-            }
+            rankedCandidates = ranked
+            resolved = ranked.firstResolvedOrNull(
+                streamRepo = streamRepo,
+                provider = provider,
+                apiKey = apiKey,
+                timeoutMs = 45_000L,
+                contextLabel = "next_episode_full",
+                eventLabel = "continuation_candidate",
+                onCandidateUsed = { candidate -> selected = candidate },
+            )
             if (resolved == null) {
-                streamRepo.reportPlaybackOutcome(fallbackSelected, provider, success = false)
                 onFailed()
                 return
             }
             android.util.Log.i(
                 "Player",
-                "full_fetch_winner_used context=next_episode key=${playerStreamKey(fallbackSelected)} host=${StreamRuntimeTelemetry.keyForStream(fallbackSelected)}",
+                "full_fetch_winner_used context=next_episode key=${playerStreamKey(selected!!)} host=${StreamRuntimeTelemetry.keyForStream(selected!!)}",
             )
         }
 
@@ -4640,6 +4876,20 @@ private suspend fun resolveAndPlayNextEpisode(
         val playUrl = resolved.transcodeUrls?.mp4
             ?: resolved.transcodeUrls?.hls
             ?: resolved.url
+        SourceContinuationSessionStore.session.stageResolvedSource(
+            stream = selectedStream,
+            playbackUrl = playUrl,
+            alternatePlaybackUrls = listOfNotNull(
+                resolved.url,
+                resolved.transcodeUrls?.mp4,
+                resolved.transcodeUrls?.hls,
+                resolved.transcodeUrls?.webm,
+            ),
+            resolvedFileName = resolved.fileName,
+            resolvedFileSize = resolved.fileSize,
+            origin = ContinuationSelectionOrigin.AUTOMATIC,
+        )
+        onAutoplaySelection(selectedStream, rankedCandidates)
 
         // Save progress for the current episode before switching
         if (mediaId.isNotBlank() && duration > 0) {

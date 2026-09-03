@@ -332,4 +332,6 @@ data class StremioSubtitle(
     val url: String,
     val lang: String = "",
     val label: String? = null,
+    /** Populated by Torve's aggregator; absent in raw Stremio responses. */
+    val provider: String? = null,
 )

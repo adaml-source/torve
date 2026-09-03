@@ -29,11 +29,17 @@ class OpenSubtitlesClient(
         kotlinx.coroutines.runBlocking { apiKey() != null }
     }.getOrDefault(false)
 
+    suspend fun isConfiguredAsync(): Boolean = apiKey() != null
+
     suspend fun searchSubtitles(
         imdbId: String,
         seasonNumber: Int? = null,
         episodeNumber: Int? = null,
         languages: String? = null,
+        releaseQuery: String? = null,
+        movieHash: String? = null,
+        movieByteSize: Long? = null,
+        page: Int = 1,
     ): List<OsSubtitleResult> {
         val key = apiKey() ?: return emptyList()
         // OpenSubtitles expects numeric IMDB ID without "tt" prefix
@@ -46,29 +52,51 @@ class OpenSubtitlesClient(
                 seasonNumber?.let { parameter("season_number", it) }
                 episodeNumber?.let { parameter("episode_number", it) }
                 languages?.let { parameter("languages", it) }
-                parameter("order_by", "download_count")
+                releaseQuery?.takeIf { it.isNotBlank() }?.let { parameter("query", it) }
+                movieHash?.takeIf { it.isNotBlank() }?.let { parameter("moviehash", it) }
+                movieByteSize?.takeIf { it > 0L }?.let { parameter("moviebytesize", it) }
+                parameter("page", page.coerceAtLeast(1))
+                // Provider ordering is only a transport concern. Torve re-ranks match-first.
+                parameter("order_by", "new_download_count")
                 parameter("order_direction", "desc")
             }.body<OsSearchResponse>()
         }.getOrNull() ?: return emptyList()
 
-        return response.data.mapNotNull { item ->
+        return response.data.flatMap { item ->
             val attrs = item.attributes
-            val file = attrs.files.firstOrNull() ?: return@mapNotNull null
-            if (file.fileId == 0) return@mapNotNull null
             val (flag, name) = languageInfo(attrs.language)
-            OsSubtitleResult(
-                fileId = file.fileId,
-                fileName = file.fileName.ifBlank { attrs.release.ifBlank { "subtitle" } },
-                language = attrs.language,
-                flagEmoji = flag,
-                languageName = name,
-                downloadCount = attrs.downloadCount,
-                fromTrusted = attrs.fromTrusted,
-                hearingImpaired = attrs.hearingImpaired,
-                release = attrs.release,
-                aiTranslated = attrs.aiTranslated || attrs.machineTranslated,
-                ratings = attrs.ratings,
-            )
+            attrs.files.filter { it.fileId != 0 }.map { file ->
+                OsSubtitleResult(
+                    subtitleId = attrs.subtitleId ?: item.id.takeIf(String::isNotBlank),
+                    fileId = file.fileId,
+                    fileName = file.fileName.ifBlank { attrs.release.ifBlank { "subtitle" } },
+                    language = attrs.language,
+                    flagEmoji = flag,
+                    languageName = name,
+                    downloadCount = attrs.downloadCount,
+                    recentDownloadCount = attrs.newDownloadCount,
+                    fromTrusted = attrs.fromTrusted,
+                    hearingImpaired = attrs.hearingImpaired,
+                    release = attrs.release,
+                    aiTranslated = attrs.aiTranslated,
+                    machineTranslated = attrs.machineTranslated,
+                    ratings = attrs.ratings,
+                    voteCount = attrs.votes,
+                    fps = attrs.fps?.takeIf { it > 0.0 },
+                    hd = attrs.hd,
+                    forced = attrs.foreignPartsOnly,
+                    uploadDate = attrs.uploadDate.takeIf(String::isNotBlank),
+                    uploaderName = attrs.uploader?.name,
+                    uploaderRank = attrs.uploader?.rank,
+                    comments = attrs.comments,
+                    numberOfCds = attrs.numberOfCds,
+                    movieHashMatch = attrs.movieHashMatch,
+                    mediaTitle = attrs.featureDetails?.parentTitle ?: attrs.featureDetails?.movieName ?: attrs.featureDetails?.title,
+                    mediaYear = attrs.featureDetails?.year,
+                    seasonNumber = attrs.featureDetails?.seasonNumber,
+                    episodeNumber = attrs.featureDetails?.episodeNumber,
+                )
+            }
         }
     }
 

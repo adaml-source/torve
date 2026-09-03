@@ -17,16 +17,46 @@ data class OsSubtitleItem(
 
 @Serializable
 data class OsSubtitleAttributes(
+    @SerialName("subtitle_id") val subtitleId: String? = null,
     val language: String = "",
     val files: List<OsSubtitleFile> = emptyList(),
-    @SerialName("download_count") val downloadCount: Int = 0,
-    @SerialName("from_trusted") val fromTrusted: Boolean = false,
-    @SerialName("hearing_impaired") val hearingImpaired: Boolean = false,
+    @SerialName("download_count") val downloadCount: Int? = null,
+    @SerialName("new_download_count") val newDownloadCount: Int? = null,
+    @SerialName("from_trusted") val fromTrusted: Boolean? = null,
+    @SerialName("hearing_impaired") val hearingImpaired: Boolean? = null,
+    val hd: Boolean? = null,
+    val fps: Double? = null,
+    val votes: Int? = null,
     val release: String = "",
     @SerialName("upload_date") val uploadDate: String = "",
-    @SerialName("ai_translated") val aiTranslated: Boolean = false,
-    @SerialName("machine_translated") val machineTranslated: Boolean = false,
-    val ratings: Float = 0f,
+    @SerialName("ai_translated") val aiTranslated: Boolean? = null,
+    @SerialName("machine_translated") val machineTranslated: Boolean? = null,
+    @SerialName("foreign_parts_only") val foreignPartsOnly: Boolean? = null,
+    @SerialName("nb_cd") val numberOfCds: Int? = null,
+    val ratings: Double? = null,
+    val comments: String? = null,
+    val uploader: OsSubtitleUploader? = null,
+    @SerialName("feature_details") val featureDetails: OsFeatureDetails? = null,
+    @SerialName("moviehash_match") val movieHashMatch: Boolean? = null,
+)
+
+@Serializable
+data class OsSubtitleUploader(
+    @SerialName("uploader_id") val uploaderId: Int? = null,
+    val name: String? = null,
+    val rank: String? = null,
+)
+
+@Serializable
+data class OsFeatureDetails(
+    val title: String? = null,
+    @SerialName("movie_name") val movieName: String? = null,
+    val year: Int? = null,
+    @SerialName("season_number") val seasonNumber: Int? = null,
+    @SerialName("episode_number") val episodeNumber: Int? = null,
+    @SerialName("imdb_id") val imdbId: Int? = null,
+    @SerialName("parent_imdb_id") val parentImdbId: Int? = null,
+    @SerialName("parent_title") val parentTitle: String? = null,
 )
 
 @Serializable
@@ -51,17 +81,34 @@ data class OsDownloadResponse(
 )
 
 data class OsSubtitleResult(
+    val subtitleId: String?,
     val fileId: Int,
     val fileName: String,
     val language: String,
     val flagEmoji: String,
     val languageName: String,
-    val downloadCount: Int,
-    val fromTrusted: Boolean,
-    val hearingImpaired: Boolean,
+    val downloadCount: Int?,
+    val recentDownloadCount: Int?,
+    val fromTrusted: Boolean?,
+    val hearingImpaired: Boolean?,
     val release: String,
-    val aiTranslated: Boolean,
-    val ratings: Float = 0f,
+    val aiTranslated: Boolean?,
+    val machineTranslated: Boolean?,
+    val ratings: Double?,
+    val voteCount: Int?,
+    val fps: Double?,
+    val hd: Boolean?,
+    val forced: Boolean?,
+    val uploadDate: String?,
+    val uploaderName: String?,
+    val uploaderRank: String?,
+    val comments: String?,
+    val numberOfCds: Int?,
+    val movieHashMatch: Boolean?,
+    val mediaTitle: String?,
+    val mediaYear: Int?,
+    val seasonNumber: Int?,
+    val episodeNumber: Int?,
 )
 
 fun languageInfo(code: String): Pair<String, String> {

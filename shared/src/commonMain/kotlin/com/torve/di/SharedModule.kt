@@ -15,6 +15,7 @@ import com.torve.data.availability.TmdbAvailabilityProvider
 import com.torve.data.addon.AddonSyncService
 import com.torve.data.addon.CatalogAggregator
 import com.torve.data.addon.StreamAggregator
+import com.torve.data.addon.StreamContinuationSelector
 import com.torve.data.addon.StreamScorer
 import com.torve.data.addon.StreamSelector
 import com.torve.data.addon.StremioAddonClient
@@ -328,10 +329,18 @@ val sharedModule = module {
 
     // Scoring & Aggregation
     single { StreamScorer() }
-    single { StreamSelector(get()) }
+    single { StreamContinuationSelector() }
+    single { StreamSelector(get(), get()) }
     single { CatalogAggregator(get()) }
     single { SubtitleAggregator(get()) }
     single { com.torve.data.subtitles.OpenSubtitlesClient(get(), get()) }
+    single { com.torve.data.subtitles.OpenSubtitlesHashService(get()) }
+    single { com.torve.data.subtitles.SubtitleDownloadValidator(get()) }
+    single { com.torve.data.subtitles.SubtitleIntelligence() }
+    single { com.torve.data.subtitles.SubtitleSearchCache() }
+    single {
+        com.torve.data.subtitles.SubtitleDiscoveryService(get(), get(), get(), get(), get())
+    }
     single { StreamAggregator(get(), get(), get()) }
 
     // Stream Repository

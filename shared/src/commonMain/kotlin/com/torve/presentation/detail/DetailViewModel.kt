@@ -1,6 +1,8 @@
 package com.torve.presentation.detail
 
 import com.torve.data.addon.ParsedStream
+import com.torve.data.addon.ContinuationSelectionOrigin
+import com.torve.data.addon.SourceContinuationSessionStore
 import com.torve.data.addon.StreamSelector
 import com.torve.data.addon.isAddonHostedUrl
 import com.torve.data.acceleration.StreamHandoffApiException
@@ -1980,6 +1982,7 @@ class DetailViewModel(
             // path below. Addon URLs go through probe; Ready plays, Preparing
             // locks in on this stream (no fallback), Failed falls through.
             if (dispatch == ResolvedStreamDispatch.PLAY_IMMEDIATELY) {
+                stageContinuationSelection(stream, resolved, origin = ContinuationSelectionOrigin.AUTOMATIC)
                 _state.update {
                     it.copy(
                         resolvedStream = resolved,
@@ -1999,6 +2002,12 @@ class DetailViewModel(
             }
             when (val readiness = streamRepo.probeStreamReadiness(url)) {
                 is com.torve.domain.repository.StreamReadiness.Ready -> {
+                    stageContinuationSelection(
+                        stream,
+                        resolved,
+                        playbackUrl = readiness.finalUrl,
+                        origin = ContinuationSelectionOrigin.AUTOMATIC,
+                    )
                     _state.update {
                         it.copy(
                             resolvedStream = resolved.copy(url = readiness.finalUrl),
@@ -2017,7 +2026,12 @@ class DetailViewModel(
                 }
                 com.torve.domain.repository.StreamReadiness.Preparing -> {
                     _state.update { it.copy(autoPlayMessage = null) }
-                    startPreparingLoop(stream, url, resolved)
+                    startPreparingLoop(
+                        stream,
+                        url,
+                        resolved,
+                        origin = ContinuationSelectionOrigin.AUTOMATIC,
+                    )
                 }
                 is com.torve.domain.repository.StreamReadiness.Failed -> {
                     streamRepo.reportPlaybackOutcome(stream, provider, success = false)
@@ -2154,6 +2168,7 @@ class DetailViewModel(
                 )
             }
             if (dispatch == ResolvedStreamDispatch.PLAY_IMMEDIATELY) {
+                stageContinuationSelection(stream, resolved, origin = ContinuationSelectionOrigin.AUTOMATIC)
                 _state.update {
                     it.copy(
                         resolvedStream = resolved,
@@ -2173,6 +2188,12 @@ class DetailViewModel(
             }
             when (val readiness = streamRepo.probeStreamReadiness(url)) {
                 is com.torve.domain.repository.StreamReadiness.Ready -> {
+                    stageContinuationSelection(
+                        stream,
+                        resolved,
+                        playbackUrl = readiness.finalUrl,
+                        origin = ContinuationSelectionOrigin.AUTOMATIC,
+                    )
                     _state.update {
                         it.copy(
                             resolvedStream = resolved.copy(url = readiness.finalUrl),
@@ -2192,7 +2213,12 @@ class DetailViewModel(
                 }
                 com.torve.domain.repository.StreamReadiness.Preparing -> {
                     _state.update { it.copy(autoPlayMessage = null) }
-                    startPreparingLoop(stream, url, resolved)
+                    startPreparingLoop(
+                        stream,
+                        url,
+                        resolved,
+                        origin = ContinuationSelectionOrigin.AUTOMATIC,
+                    )
                     AutoResolveResult(resolved = false, attemptedKeys = currentAttemptedKeys)
                 }
                 is com.torve.domain.repository.StreamReadiness.Failed -> {
@@ -2411,6 +2437,27 @@ class DetailViewModel(
         }
     }
 
+    private fun stageContinuationSelection(
+        stream: ParsedStream,
+        resolved: com.torve.domain.model.ResolvedStream,
+        playbackUrl: String = resolved.url,
+        origin: ContinuationSelectionOrigin,
+    ) {
+        SourceContinuationSessionStore.session.stageResolvedSource(
+            stream = stream,
+            playbackUrl = playbackUrl,
+            alternatePlaybackUrls = listOfNotNull(
+                resolved.url,
+                resolved.transcodeUrls?.mp4,
+                resolved.transcodeUrls?.hls,
+                resolved.transcodeUrls?.webm,
+            ),
+            resolvedFileName = resolved.fileName,
+            resolvedFileSize = resolved.fileSize,
+            origin = origin,
+        )
+    }
+
     /**
      * Route a freshly-resolved stream based on whether it needs a readiness
      * probe. Addon-hosted URLs (Panda's `/u/<token>/…`) go through the
@@ -2426,6 +2473,7 @@ class DetailViewModel(
         provider: DebridServiceType?,
         resolved: com.torve.domain.model.ResolvedStream,
         readyMessage: String? = null,
+        origin: ContinuationSelectionOrigin = ContinuationSelectionOrigin.MANUAL,
     ) {
         val url = resolved.url.orEmpty()
         val dispatch = DetailPlaybackStartupOrchestrator.classifyResolvedStream(
@@ -2445,6 +2493,7 @@ class DetailViewModel(
             return
         }
         if (dispatch == ResolvedStreamDispatch.PLAY_IMMEDIATELY) {
+            stageContinuationSelection(stream, resolved, origin = origin)
             _state.update {
                 it.copy(
                     resolvedStream = resolved,
@@ -2461,6 +2510,7 @@ class DetailViewModel(
         }
         when (val readiness = streamRepo.probeStreamReadiness(url)) {
             is com.torve.domain.repository.StreamReadiness.Ready -> {
+                stageContinuationSelection(stream, resolved, readiness.finalUrl, origin)
                 _state.update {
                     it.copy(
                             resolvedStream = resolved.copy(url = readiness.finalUrl),
@@ -2476,7 +2526,7 @@ class DetailViewModel(
             }
             com.torve.domain.repository.StreamReadiness.Preparing -> {
                 _state.update { it.copy(isResolving = false, autoPlayMessage = null) }
-                startPreparingLoop(stream, url, resolved, readyMessage)
+                startPreparingLoop(stream, url, resolved, readyMessage, origin)
             }
             is com.torve.domain.repository.StreamReadiness.Failed -> {
                 streamRepo.reportPlaybackOutcome(stream, provider, success = false)
@@ -2505,6 +2555,7 @@ class DetailViewModel(
         url: String,
         resolved: com.torve.domain.model.ResolvedStream,
         readyMessage: String? = null,
+        origin: ContinuationSelectionOrigin = ContinuationSelectionOrigin.MANUAL,
     ) {
         preparingJob?.cancel()
         val startedAt = Clock.System.now().toEpochMilliseconds()
@@ -2550,6 +2601,7 @@ class DetailViewModel(
                 }
                 when (result) {
                     is com.torve.domain.repository.StreamReadiness.Ready -> {
+                        stageContinuationSelection(stream, resolved, result.finalUrl, origin)
                         _state.update {
                             it.copy(
                                 preparing = null,
@@ -2661,6 +2713,7 @@ class DetailViewModel(
                         provider = provider,
                         resolved = resolved,
                         readyMessage = "Switched to a more stable source",
+                        origin = ContinuationSelectionOrigin.RETRY,
                     )
                 } else {
                     com.torve.data.addon.StreamRuntimeTelemetry.recordStartupTimeout(hostKey, 30_000L)
