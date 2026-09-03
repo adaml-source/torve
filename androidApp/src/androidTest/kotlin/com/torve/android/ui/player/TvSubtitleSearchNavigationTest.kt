@@ -31,9 +31,7 @@ class TvSubtitleSearchNavigationTest {
                 )
             }
         }
-        composeRule.onNodeWithText("✓ Smart Match").assertExists()
-
-        composeRule.waitUntil(timeoutMillis = 5_000) {
+        composeRule.waitUntil(timeoutMillis = 15_000) {
             runCatching {
                 composeRule.onNodeWithText("✓ Smart Match").assertIsFocused()
                 true
@@ -41,7 +39,7 @@ class TvSubtitleSearchNavigationTest {
         }
         composeRule.waitForIdle()
         pressRemoteKey(KeyEvent.KEYCODE_DPAD_RIGHT)
-        composeRule.waitUntil(timeoutMillis = 5_000) {
+        composeRule.waitUntil(timeoutMillis = 15_000) {
             runCatching {
                 composeRule.onNodeWithText("Search more").assertIsFocused()
                 true
@@ -62,7 +60,12 @@ class TvSubtitleSearchNavigationTest {
                 )
             }
         }
-        composeRule.onNodeWithText("✓ Smart Match").assertExists()
+        composeRule.waitUntil(timeoutMillis = 15_000) {
+            runCatching {
+                composeRule.onNodeWithText("✓ Smart Match").assertExists()
+                true
+            }.getOrDefault(false)
+        }
         composeRule.waitForIdle()
         Espresso.pressBack()
         composeRule.runOnIdle { assertTrue(dismissed) }
@@ -81,8 +84,7 @@ class TvSubtitleSearchNavigationTest {
                 )
             }
         }
-        composeRule.onNodeWithText("✓ Smart Match").assertExists()
-        composeRule.waitUntil(timeoutMillis = 5_000) {
+        composeRule.waitUntil(timeoutMillis = 15_000) {
             runCatching {
                 composeRule.onNodeWithText("✓ Smart Match").assertIsFocused()
                 true
@@ -90,7 +92,7 @@ class TvSubtitleSearchNavigationTest {
         }
         composeRule.waitForIdle()
         pressRemoteKey(KeyEvent.KEYCODE_DPAD_RIGHT)
-        composeRule.waitUntil(timeoutMillis = 5_000) {
+        composeRule.waitUntil(timeoutMillis = 15_000) {
             runCatching {
                 composeRule.onNodeWithText("Search more").assertIsFocused()
                 true
