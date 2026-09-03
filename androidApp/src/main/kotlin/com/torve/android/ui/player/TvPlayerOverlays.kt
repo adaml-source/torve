@@ -8,6 +8,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusable
+import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -58,6 +59,12 @@ import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.disabled
+import androidx.compose.ui.semantics.onClick
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.torve.android.R
@@ -1083,6 +1090,7 @@ fun TvSubtitleSearchOverlay(
     BackHandler(onBack = onDismiss)
     val firstRowRequester = remember { FocusRequester() }
     val loadMoreRequester = remember { FocusRequester() }
+    val firstLanguageRequester = remember { FocusRequester() }
     var selectedLanguage by remember { mutableStateOf<String?>(null) }
     var strongOnly by remember { mutableStateOf(false) }
     var trustedOnly by remember { mutableStateOf(false) }
@@ -1284,9 +1292,18 @@ fun TvSubtitleSearchOverlay(
                         )
                     }
 
+                    val moveToLanguageRow = if (languages.size > 1) {
+                        Modifier.focusProperties { down = firstLanguageRequester }
+                    } else {
+                        Modifier
+                    }
+
                     LazyRow(
                         horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        modifier = Modifier.fillMaxWidth().padding(bottom = 3.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = 3.dp)
+                            .focusGroup(),
                         state = rememberLazyListState(),
                     ) {
                         item(key = "sort") {
@@ -1300,7 +1317,8 @@ fun TvSubtitleSearchOverlay(
                                 isSelected = true,
                                 modifier = Modifier
                                     .focusRequester(firstRowRequester)
-                                    .focusProperties { right = loadMoreRequester },
+                                    .focusProperties { right = loadMoreRequester }
+                                    .then(moveToLanguageRow),
                                 onFocused = {
                                     focusedFilterKey = "sort"
                                     initialSortFocusSeen = true
@@ -1321,40 +1339,59 @@ fun TvSubtitleSearchOverlay(
                                 isSelected = false,
                                 modifier = Modifier
                                     .focusRequester(loadMoreRequester)
-                                    .focusProperties { left = firstRowRequester },
+                                    .focusProperties { left = firstRowRequester }
+                                    .then(moveToLanguageRow),
                                 enabled = state.canLoadMore && !state.isLoadingMore,
                                 onFocused = { focusedFilterKey = "load-more" },
                                 onLeft = { requestFocusSafely(firstRowRequester) },
                                 onClick = onLoadMore,
                             )
                         }
-                        item(key = "strong") { SubtitleFilterPill("Strong only", strongOnly, onClick = { strongOnly = !strongOnly }) }
-                        item(key = "trusted") { SubtitleFilterPill("Trusted", trustedOnly, onClick = { trustedOnly = !trustedOnly }) }
-                        item(key = "automated") { SubtitleFilterPill("Exclude AI/MT", excludeAutomated, onClick = { excludeAutomated = !excludeAutomated }) }
+                        item(key = "strong") { SubtitleFilterPill("Strong only", strongOnly, modifier = moveToLanguageRow, onClick = { strongOnly = !strongOnly }) }
+                        item(key = "trusted") { SubtitleFilterPill("Trusted", trustedOnly, modifier = moveToLanguageRow, onClick = { trustedOnly = !trustedOnly }) }
+                        item(key = "automated") { SubtitleFilterPill("Exclude AI/MT", excludeAutomated, modifier = moveToLanguageRow, onClick = { excludeAutomated = !excludeAutomated }) }
                         item(key = "rating") {
                             SubtitleFilterPill(
                                 minimumRating?.let { "Rating ${it.toInt()}+" } ?: "Any rating",
                                 minimumRating != null,
+                                modifier = moveToLanguageRow,
                                 onClick = { minimumRating = when (minimumRating) { null -> 8.0; 8.0 -> 9.0; else -> null } },
                             )
                         }
-                        item(key = "sdh") { SubtitleFilterPill("SDH", hearingImpairedOnly, onClick = { hearingImpairedOnly = !hearingImpairedOnly }) }
-                        item(key = "forced") { SubtitleFilterPill("Forced", forcedOnly, onClick = { forcedOnly = !forcedOnly }) }
-                        item(key = "poor") { SubtitleFilterPill("Include poor", showPoorMatches, onClick = { showPoorMatches = !showPoorMatches }) }
-                        item(key = "rejected") { SubtitleFilterPill("Show rejected", showRejected, onClick = { showRejected = !showRejected }) }
+                        item(key = "sdh") { SubtitleFilterPill("SDH", hearingImpairedOnly, modifier = moveToLanguageRow, onClick = { hearingImpairedOnly = !hearingImpairedOnly }) }
+                        item(key = "forced") { SubtitleFilterPill("Forced", forcedOnly, modifier = moveToLanguageRow, onClick = { forcedOnly = !forcedOnly }) }
+                        item(key = "poor") { SubtitleFilterPill("Include poor", showPoorMatches, modifier = moveToLanguageRow, onClick = { showPoorMatches = !showPoorMatches }) }
+                        item(key = "rejected") { SubtitleFilterPill("Show rejected", showRejected, modifier = moveToLanguageRow, onClick = { showRejected = !showRejected }) }
                     }
 
                     if (languages.size > 1) {
                         LazyRow(
                             horizontalArrangement = Arrangement.spacedBy(6.dp),
-                            modifier = Modifier.fillMaxWidth().padding(bottom = 3.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(bottom = 3.dp)
+                                .focusGroup(),
                             state = rememberLazyListState(),
                         ) {
-                            item(key = "all") { SubtitleFilterPill("All languages", selectedLanguage == null, onClick = { selectedLanguage = null }) }
+                            item(key = "all") {
+                                SubtitleFilterPill(
+                                    "All languages",
+                                    selectedLanguage == null,
+                                    modifier = Modifier
+                                        .focusRequester(firstLanguageRequester)
+                                        .focusProperties { up = firstRowRequester },
+                                    onClick = { selectedLanguage = null },
+                                )
+                            }
                             items(languages, key = { it.first }) { (code, label) ->
-                                SubtitleFilterPill(label, selectedLanguage == code, onClick = {
-                                    selectedLanguage = if (selectedLanguage == code) null else code
-                                })
+                                SubtitleFilterPill(
+                                    label,
+                                    selectedLanguage == code,
+                                    modifier = Modifier.focusProperties { up = firstRowRequester },
+                                    onClick = {
+                                        selectedLanguage = if (selectedLanguage == code) null else code
+                                    },
+                                )
                             }
                         }
                     }
@@ -1645,12 +1682,18 @@ private fun SubtitleFilterPill(
                     else -> false
                 }
             }
-            .clickable(
-                enabled = enabled,
-                interactionSource = remember { MutableInteractionSource() },
-                indication = null,
-                onClick = onClick,
-            )
+            // Keep one explicit focus target. Relying on clickable's implicit
+            // focus handling is not reliable in directional focus search on Fire TV.
+            .focusable(enabled = enabled)
+            .semantics(mergeDescendants = true) {
+                role = Role.Button
+                selected = isSelected
+                if (enabled) {
+                    onClick(action = { onClick(); true })
+                } else {
+                    disabled()
+                }
+            }
             .clip(shape)
             .border(
                 width = if (isFocused) 2.dp else 1.dp,

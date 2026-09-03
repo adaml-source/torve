@@ -45,6 +45,27 @@ class TvSubtitleSearchNavigationTest {
                 true
             }.getOrDefault(false)
         }
+        pressRemoteKey(KeyEvent.KEYCODE_DPAD_RIGHT)
+        composeRule.waitUntil(timeoutMillis = 15_000) {
+            runCatching {
+                composeRule.onNodeWithText("Strong only").assertIsFocused()
+                true
+            }.getOrDefault(false)
+        }
+        pressRemoteKey(KeyEvent.KEYCODE_DPAD_DOWN)
+        composeRule.waitUntil(timeoutMillis = 15_000) {
+            runCatching {
+                composeRule.onNodeWithText("All languages", substring = true).assertIsFocused()
+                true
+            }.getOrDefault(false)
+        }
+        pressRemoteKey(KeyEvent.KEYCODE_DPAD_RIGHT)
+        composeRule.waitUntil(timeoutMillis = 15_000) {
+            runCatching {
+                composeRule.onNodeWithText("EN English").assertIsFocused()
+                true
+            }.getOrDefault(false)
+        }
     }
 
     @Test
@@ -118,6 +139,22 @@ class TvSubtitleSearchNavigationTest {
                 matchTier = SubtitleMatchTier.EXACT_RELEASE,
                 matchScore = 98,
                 qualityScore = 91,
+                rankingReasons = listOf("+68 Normalized exact release"),
+            ),
+            SubtitleCandidate(
+                flagEmoji = "DE",
+                languageName = "German",
+                languageCode = "de",
+                displayLabel = "Show.S01E02.1080p.WEB-DL-GROUP.de.srt",
+                releaseName = "Show.S01E02.1080p.WEB-DL-GROUP",
+                provider = "OpenSubtitles.com",
+                ratings = 8.8,
+                voteCount = 120,
+                downloadCount = 8_100,
+                fromTrusted = true,
+                matchTier = SubtitleMatchTier.EXACT_RELEASE,
+                matchScore = 98,
+                qualityScore = 84,
                 rankingReasons = listOf("+68 Normalized exact release"),
             ),
         ),
