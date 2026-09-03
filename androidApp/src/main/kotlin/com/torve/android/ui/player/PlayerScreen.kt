@@ -177,6 +177,8 @@ import com.torve.data.subtitles.SubtitleDiscoveryRequest
 import com.torve.data.subtitles.SubtitleDiscoveryService
 import com.torve.data.subtitles.SubtitleDownloadValidator
 import com.torve.data.subtitles.SubtitleValidationResult
+import com.torve.data.subtitles.INITIAL_PAGE_LIMIT
+import com.torve.data.subtitles.MAX_PAGE_LIMIT
 import com.torve.data.subtitles.languageInfo
 import com.torve.domain.player.ExternalSubtitle
 import com.torve.domain.player.NextEpisodeHelper
@@ -2720,6 +2722,38 @@ fun PlayerScreen(
                         runCatching { playerRootFocusRequester.requestFocus() }
                     }
                 },
+                onLoadMore = loadMore@{
+                    val currentResults = subtitleFetchState as? SubtitleFetchState.Results ?: return@loadMore
+                    if (!currentResults.canLoadMore || currentResults.isLoadingMore) return@loadMore
+                    val subtitleMediaType = if (
+                        mediaType.equals("tv", ignoreCase = true) ||
+                        mediaType.equals("series", ignoreCase = true)
+                    ) MediaType.SERIES else MediaType.MOVIE
+                    val catalogTitle = if (subtitleMediaType == MediaType.SERIES) {
+                        title.ifBlank { currentTitle }
+                    } else {
+                        currentTitle.ifBlank { title }
+                    }
+                    subtitleFetchState = currentResults.copy(isLoadingMore = true)
+                    scope.launch {
+                        subtitleFetchState = discoverPlayerSubtitleState(
+                            openSubtitlesClient = openSubtitlesClient,
+                            addonRepository = addonRepo,
+                            metadataRepository = metadataRepo,
+                            mediaId = mediaId,
+                            showImdbId = showImdbId,
+                            resolvedTmdbId = resolvedTmdbId,
+                            mediaType = subtitleMediaType,
+                            seasonNumber = currentSeasonNumber,
+                            episodeNumber = currentEpisodeNumber,
+                            currentTitle = currentTitle,
+                            catalogTitle = catalogTitle,
+                            playbackUrl = currentUrl,
+                            openSubtitlesPageLimit = (currentResults.openSubtitlesPageLimit + 3).coerceAtMost(MAX_PAGE_LIMIT),
+                            forceRefresh = true,
+                        )
+                    }
+                },
                 onDismiss = {
                     showSubtitleSearch = false
                     subtitleFetchState = SubtitleFetchState.Idle
@@ -2786,6 +2820,10 @@ fun PlayerScreen(
                                 seasonNumber = currentSeasonNumber,
                                 episodeNumber = currentEpisodeNumber,
                                 currentTitle = currentTitle,
+                                catalogTitle = if (
+                                    mediaType.equals("tv", ignoreCase = true) ||
+                                    mediaType.equals("series", ignoreCase = true)
+                                ) title.ifBlank { currentTitle } else currentTitle.ifBlank { title },
                                 playbackUrl = currentUrl,
                             )
                         }
@@ -4184,7 +4222,10 @@ private suspend fun discoverPlayerSubtitleState(
     seasonNumber: Int?,
     episodeNumber: Int?,
     currentTitle: String,
+    catalogTitle: String,
     playbackUrl: String,
+    openSubtitlesPageLimit: Int = INITIAL_PAGE_LIMIT,
+    forceRefresh: Boolean = false,
 ): SubtitleFetchState {
     val discoveryService = org.koin.core.context.GlobalContext.get().get<SubtitleDiscoveryService>()
     var imdbId = showImdbId?.trim()?.takeIf(String::isNotBlank)
@@ -4221,15 +4262,17 @@ private suspend fun discoverPlayerSubtitleState(
                 seasonNumber = seasonNumber,
                 episodeNumber = episodeNumber,
                 fingerprint = fingerprint,
+                contentTitle = catalogTitle,
                 playbackUrl = playbackUrl,
                 addons = addons,
+                openSubtitlesPageLimit = openSubtitlesPageLimit,
+                forceRefresh = forceRefresh,
             ),
         )
     }.onFailure { error ->
         Log.w("SubtitleMatch", "Source-aware subtitle discovery failed: ${error.message}")
     }.getOrNull() ?: return SubtitleFetchState.Error
 
-    if (discovery.ranked.isEmpty()) return SubtitleFetchState.Empty
     Log.d(
         "SubtitleMatch",
         "active=${discovery.fingerprint.debugSummary()} hash=${discovery.movieHashAvailable} " +
@@ -4251,6 +4294,11 @@ private suspend fun discoverPlayerSubtitleState(
             ?: currentTitle.ifBlank { "Current playback source" },
         movieHashAvailable = discovery.movieHashAvailable,
         hasStrongMatch = discovery.hasStrongMatch,
+        providerStatus = discovery.providerReports.joinToString(" · ") { report ->
+            "${report.provider}: ${report.status}"
+        },
+        openSubtitlesPageLimit = discovery.openSubtitlesPageLimit,
+        canLoadMore = discovery.canLoadMore,
     )
 }
 

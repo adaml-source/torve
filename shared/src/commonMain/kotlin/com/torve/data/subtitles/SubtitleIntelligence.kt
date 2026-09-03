@@ -62,6 +62,10 @@ data class SubtitleMetadata(
     val mediaYear: Int? = null,
     val seasonNumber: Int? = null,
     val episodeNumber: Int? = null,
+    val mediaImdbId: Int? = null,
+    val parentImdbId: Int? = null,
+    /** True only when the provider endpoint itself was scoped to this exact content/episode. */
+    val identityMatchedByRequest: Boolean? = null,
 )
 
 data class SubtitleRankingReason(
@@ -198,8 +202,10 @@ class SubtitleIntelligence {
         candidates: List<SubtitleMetadata>,
         requestedSeason: Int? = fingerprint.seasonNumber,
         requestedEpisode: Int? = fingerprint.episodeNumber,
+        expectedImdbId: String? = null,
+        isSeries: Boolean = requestedEpisode != null,
     ): List<RankedSubtitle> = candidates
-        .map { score(fingerprint, it, requestedSeason, requestedEpisode) }
+        .map { score(fingerprint, it, requestedSeason, requestedEpisode, expectedImdbId, isSeries) }
         .sortedWith(smartComparator())
 
     fun applyFilters(
@@ -234,6 +240,8 @@ class SubtitleIntelligence {
         candidate: SubtitleMetadata,
         requestedSeason: Int? = fingerprint.seasonNumber,
         requestedEpisode: Int? = fingerprint.episodeNumber,
+        expectedImdbId: String? = null,
+        isSeries: Boolean = requestedEpisode != null,
     ): RankedSubtitle {
         val release = parseSubtitleRelease(candidate.releaseName ?: candidate.subtitleFilename)
         val candidateSeason = candidate.seasonNumber ?: release.seasonNumber
@@ -256,10 +264,21 @@ class SubtitleIntelligence {
         if (fingerprint.year != null && candidate.mediaYear != null && fingerprint.year != candidate.mediaYear) {
             return rejected(candidate, "Conflicting movie year")
         }
+        val expectedNumericImdbId = expectedImdbId
+            ?.removePrefix("tt")
+            ?.trimStart('0')
+            ?.toIntOrNull()
+        val providerImdbId = if (isSeries) candidate.parentImdbId else candidate.mediaImdbId
+        if (expectedNumericImdbId != null && providerImdbId != null && expectedNumericImdbId != providerImdbId) {
+            return rejected(candidate, "Provider returned a different IMDb title")
+        }
+        val providerIdentityConfirmed = candidate.identityMatchedByRequest == true ||
+            (expectedNumericImdbId != null && providerImdbId == expectedNumericImdbId)
         val activeTitle = fingerprint.parsedTitle
         val candidateTitle = candidate.mediaTitle?.let(::normalizeTitle) ?: release.titleStem
         if (activeTitle != null && candidateTitle != null && titlesClearlyConflict(activeTitle, candidateTitle)) {
-            return rejected(candidate, "Conflicting movie or series title")
+            if (!providerIdentityConfirmed) return rejected(candidate, "Conflicting movie or series title")
+            add("Provider title differs, but content identity is confirmed", -12)
         }
 
         if (candidate.movieHashMatch == true) {
@@ -273,7 +292,8 @@ class SubtitleIntelligence {
             )
         }
 
-        val identityKnown = (requestedEpisode != null && candidateEpisode == requestedEpisode) ||
+        val identityKnown = providerIdentityConfirmed ||
+            (requestedEpisode != null && candidateEpisode == requestedEpisode) ||
             (requestedEpisode == null && !titlesClearlyConflict(activeTitle, candidateTitle))
         if (identityKnown) add(if (requestedEpisode != null) "Exact episode" else "Matching title", 28)
         val normalizedExact = fingerprint.normalizedCompleteRelease != null &&
@@ -409,7 +429,13 @@ fun MediaReleaseFingerprint.subtitleCacheFingerprint(): String = listOfNotNull(
     movieHash,
 ).joinToString("|").ifBlank { sourceKey }
 
-private fun normalizeTitle(value: String): String = value.replace(Regex("[^a-zA-Z0-9]+"), " ").trim().lowercase()
+fun normalizeMediaTitle(value: String?): String? = value
+    ?.replace(Regex("[^a-zA-Z0-9]+"), " ")
+    ?.trim()
+    ?.lowercase()
+    ?.takeIf(String::isNotBlank)
+
+private fun normalizeTitle(value: String): String = normalizeMediaTitle(value).orEmpty()
 
 private fun titlesClearlyConflict(left: String?, right: String?): Boolean {
     if (left.isNullOrBlank() || right.isNullOrBlank()) return false

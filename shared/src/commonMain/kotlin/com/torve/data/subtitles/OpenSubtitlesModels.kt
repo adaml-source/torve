@@ -6,7 +6,10 @@ import kotlinx.serialization.Serializable
 @Serializable
 data class OsSearchResponse(
     val data: List<OsSubtitleItem> = emptyList(),
-    @SerialName("total_count") val totalCount: Int = 0,
+    @SerialName("total_count") val totalCount: Int? = null,
+    val page: Int? = null,
+    @SerialName("total_pages") val totalPages: Int? = null,
+    @SerialName("per_page") val perPage: Int? = null,
 )
 
 @Serializable
@@ -109,6 +112,18 @@ data class OsSubtitleResult(
     val mediaYear: Int?,
     val seasonNumber: Int?,
     val episodeNumber: Int?,
+    val mediaImdbId: Int?,
+    val parentImdbId: Int?,
+)
+
+/** One provider page plus enough diagnostics to prove whether the provider actually answered. */
+data class OpenSubtitlesSearchPage(
+    val subtitles: List<OsSubtitleResult>,
+    val page: Int,
+    val totalCount: Int?,
+    val totalPages: Int?,
+    /** Sanitized status only; never contains request URLs, API keys, or response bodies. */
+    val failure: String? = null,
 )
 
 fun languageInfo(code: String): Pair<String, String> {

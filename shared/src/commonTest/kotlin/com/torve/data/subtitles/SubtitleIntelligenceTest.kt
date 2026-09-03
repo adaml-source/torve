@@ -2,14 +2,20 @@ package com.torve.data.subtitles
 
 import com.torve.data.addon.ParsedStream
 import com.torve.data.addon.SourceProfile
+import com.torve.domain.integrations.IntegrationSecretKey
+import com.torve.domain.integrations.IntegrationSecretStore
+import com.torve.domain.integrations.IntegrationStorageMode
 import kotlinx.serialization.json.Json
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
 import io.ktor.client.plugins.HttpTimeout
+import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
+import io.ktor.http.ContentType
 import io.ktor.http.headersOf
+import io.ktor.serialization.kotlinx.json.json
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.channels.Channel
 import kotlin.test.Test
@@ -202,6 +208,47 @@ class SubtitleIntelligenceTest {
     }
 
     @Test
+    fun endpointScopedSeriesResultIsNotRejectedBecauseItsLabelIsNotTheShowTitle() {
+        val activeWithCatalogTitle = active.copy(parsedTitle = "the big bang theory")
+        val addonResult = candidate("English").copy(
+            seasonNumber = null,
+            episodeNumber = null,
+            identityMatchedByRequest = true,
+        )
+
+        val ranked = intelligence.score(
+            fingerprint = activeWithCatalogTitle,
+            candidate = addonResult,
+            requestedSeason = 7,
+            requestedEpisode = 11,
+            expectedImdbId = "tt0898266",
+            isSeries = true,
+        )
+
+        assertNotEquals(SubtitleMatchTier.REJECTED, ranked.tier)
+        assertTrue(ranked.reasons.any { it.description.contains("identity is confirmed") })
+    }
+
+    @Test
+    fun providerImdbConflictIsRejectedEvenWhenEpisodeNumberMatches() {
+        val wrongShow = candidate("The.Big.Bang.Theory.S07E11.1080p.WEB-DL").copy(
+            parentImdbId = 999999,
+            seasonNumber = 7,
+            episodeNumber = 11,
+        )
+        val ranked = intelligence.score(
+            fingerprint = active.copy(parsedTitle = "the big bang theory"),
+            candidate = wrongShow,
+            requestedSeason = 7,
+            requestedEpisode = 11,
+            expectedImdbId = "tt0898266",
+            isSeries = true,
+        )
+        assertEquals(SubtitleMatchTier.REJECTED, ranked.tier)
+        assertTrue(ranked.reasons.single().description.contains("IMDb"))
+    }
+
+    @Test
     fun osHashUsesFileSizeAndLittleEndianWindows() {
         val zeros = ByteArray(64 * 1024)
         assertEquals("0000000000020000", calculateOpenSubtitlesHash(128L * 1024L, zeros, zeros))
@@ -243,6 +290,44 @@ class SubtitleIntelligenceTest {
                 128L * 1024L,
             ),
         )
+    }
+
+    @Test
+    fun openSubtitlesPageSearchUsesExactIdentityAndReportsProviderPagination() = runBlocking {
+        val requests = Channel<Map<String, String>>(Channel.UNLIMITED)
+        val client = OpenSubtitlesClient(
+            httpClient = HttpClient(MockEngine { request ->
+                requests.trySend(
+                    mapOf(
+                        "imdb" to request.url.parameters["imdb_id"].orEmpty(),
+                        "season" to request.url.parameters["season_number"].orEmpty(),
+                        "episode" to request.url.parameters["episode_number"].orEmpty(),
+                        "page" to request.url.parameters["page"].orEmpty(),
+                    ),
+                )
+                respond(
+                    content = """{"data":[{"id":"10","attributes":{"language":"en","files":[{"file_id":30,"file_name":"Show.S07E11.srt"}],"feature_details":{"parent_imdb_id":898266,"season_number":7,"episode_number":11}}}],"total_count":80,"page":2,"total_pages":4,"per_page":20}""",
+                    status = HttpStatusCode.OK,
+                    headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                )
+            }) {
+                install(ContentNegotiation) { json(Json { ignoreUnknownKeys = true }) }
+            },
+            secretStore = OpenSubtitlesTestSecretStore(),
+        )
+
+        val result = client.searchSubtitlesPage(
+            imdbId = "tt0898266",
+            seasonNumber = 7,
+            episodeNumber = 11,
+            page = 2,
+        )
+
+        assertEquals(mapOf("imdb" to "898266", "season" to "7", "episode" to "11", "page" to "2"), requests.tryReceive().getOrNull())
+        assertEquals(80, result.totalCount)
+        assertEquals(4, result.totalPages)
+        assertEquals(898266, result.subtitles.single().parentImdbId)
+        assertEquals(null, result.failure)
     }
 
     @Test
@@ -328,4 +413,14 @@ class SubtitleIntelligenceTest {
         uploadDate = null,
         movieHashMatch = movieHashMatch,
     )
+}
+
+private class OpenSubtitlesTestSecretStore : IntegrationSecretStore {
+    override suspend fun put(key: IntegrationSecretKey, value: String, subKey: String?) = Unit
+    override suspend fun get(key: IntegrationSecretKey, subKey: String?): String? =
+        if (key == IntegrationSecretKey.OPENSUBTITLES_API_KEY) "test-key" else null
+    override suspend fun remove(key: IntegrationSecretKey, subKey: String?) = Unit
+    override suspend fun setStorageMode(key: IntegrationSecretKey, mode: IntegrationStorageMode) = Unit
+    override suspend fun getStorageMode(key: IntegrationSecretKey): IntegrationStorageMode = IntegrationStorageMode.DEVICE_ONLY
+    override suspend fun clearAllSecrets() = Unit
 }
