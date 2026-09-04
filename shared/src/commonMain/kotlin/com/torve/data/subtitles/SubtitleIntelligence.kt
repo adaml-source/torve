@@ -74,6 +74,25 @@ data class SubtitleRankingReason(
     val limitation: Boolean = points < 0,
 )
 
+enum class SubtitleEvidenceState {
+    MATCH,
+    UNKNOWN,
+    MISMATCH,
+}
+
+data class SubtitleEvidence(
+    val state: SubtitleEvidenceState,
+    val description: String,
+)
+
+enum class SubtitleMatchQuality(val displayLabel: String) {
+    BEST("BEST MATCH"),
+    STRONG("STRONG MATCH"),
+    GOOD("GOOD MATCH"),
+    POSSIBLE("POSSIBLE MATCH"),
+    WEAK("WEAK MATCH"),
+}
+
 data class RankedSubtitle(
     val subtitle: SubtitleMetadata,
     val tier: SubtitleMatchTier,
@@ -81,6 +100,13 @@ data class RankedSubtitle(
     val subtitleMatchScore: Int,
     val subtitleQualityScore: Int,
     val reasons: List<SubtitleRankingReason>,
+    val contentIdentityScore: Int = 0,
+    /** Null means the provider supplied no usable release/timing evidence. */
+    val releaseMatchScore: Int? = null,
+    val syncConfidenceScore: Int = subtitleMatchScore,
+    val matchQuality: SubtitleMatchQuality = SubtitleMatchQuality.POSSIBLE,
+    val matchExplanation: String = "Release information unavailable",
+    val evidence: List<SubtitleEvidence> = emptyList(),
 ) {
     val isAutoSelectable: Boolean
         get() = tier == SubtitleMatchTier.EXACT_FILE ||
@@ -117,8 +143,21 @@ data class ParsedSubtitleRelease(
     val fps: Double?,
 )
 
+/** Provider identifiers and opaque hashes are useful internally, but are not release metadata. */
+fun humanReadableSubtitleName(value: String?): String? {
+    val trimmed = value?.trim()?.takeIf(String::isNotBlank) ?: return null
+    val withoutExtension = trimmed.replace(Regex("(?i)\\.(srt|ass|ssa|vtt|sub|mks)$"), "")
+    if (withoutExtension.matches(Regex("\\d{5,}"))) return null
+    if (withoutExtension.matches(Regex("[0-9 .,_-]{5,}"))) return null
+    if (withoutExtension.matches(Regex("(?i)[0-9a-f]{24,}"))) return null
+    if (withoutExtension.matches(Regex("(?i)(?:subtitle|sub)[ ._-]*\\d+"))) return null
+    if (withoutExtension.matches(Regex("(?i)(?:subtitle|subtitles|unknown|untitled)"))) return null
+    if (trimmed.startsWith("http://", true) || trimmed.startsWith("https://", true)) return null
+    return trimmed
+}
+
 fun parseSubtitleRelease(value: String?): ParsedSubtitleRelease {
-    val raw = value?.lineSequence()?.firstOrNull()?.trim().orEmpty()
+    val raw = humanReadableSubtitleName(value?.lineSequence()?.firstOrNull()).orEmpty()
     val withoutExtension = raw.replace(Regex("(?i)\\.(srt|ass|ssa|vtt|sub|mks)$"), "")
     val normalized = normalizeCompleteRelease(withoutExtension)
         ?.replace(Regex("(?i)\\s(?:eng|english|en|ger|german|deu|de)$"), "")
@@ -204,9 +243,10 @@ class SubtitleIntelligence {
         requestedEpisode: Int? = fingerprint.episodeNumber,
         expectedImdbId: String? = null,
         isSeries: Boolean = requestedEpisode != null,
+        preferredLanguage: String? = null,
     ): List<RankedSubtitle> = candidates
         .map { score(fingerprint, it, requestedSeason, requestedEpisode, expectedImdbId, isSeries) }
-        .sortedWith(smartComparator())
+        .sortedWith(smartComparator(preferredLanguage))
 
     fun applyFilters(
         ranked: List<RankedSubtitle>,
@@ -243,11 +283,17 @@ class SubtitleIntelligence {
         expectedImdbId: String? = null,
         isSeries: Boolean = requestedEpisode != null,
     ): RankedSubtitle {
-        val release = parseSubtitleRelease(candidate.releaseName ?: candidate.subtitleFilename)
+        val releaseText = humanReadableSubtitleName(candidate.releaseName)
+            ?: humanReadableSubtitleName(candidate.subtitleFilename)
+        val release = parseSubtitleRelease(releaseText)
         val candidateSeason = candidate.seasonNumber ?: release.seasonNumber
         val candidateEpisode = candidate.episodeNumber ?: release.episodeNumber
         val reasons = mutableListOf<SubtitleRankingReason>()
+        val evidence = mutableListOf<SubtitleEvidence>()
         fun add(description: String, points: Int) { reasons += SubtitleRankingReason(description, points) }
+        fun evidence(state: SubtitleEvidenceState, description: String) {
+            evidence += SubtitleEvidence(state, description)
+        }
 
         if (requestedSeason != null && candidateSeason != null && requestedSeason != candidateSeason) {
             return rejected(candidate, "Wrong season: expected S$requestedSeason, got S$candidateSeason")
@@ -277,66 +323,233 @@ class SubtitleIntelligence {
         val activeTitle = fingerprint.parsedTitle
         val candidateTitle = candidate.mediaTitle?.let(::normalizeTitle) ?: release.titleStem
         if (activeTitle != null && candidateTitle != null && titlesClearlyConflict(activeTitle, candidateTitle)) {
+            val labelHasReleaseEvidence = release.seasonNumber != null || release.episodeNumber != null ||
+                release.sourceType != null || release.resolutionHeight != null || release.releaseGroup != null
             if (!providerIdentityConfirmed) return rejected(candidate, "Conflicting movie or series title")
-            add("Provider title differs, but content identity is confirmed", -12)
+            if (labelHasReleaseEvidence) {
+                add("Provider title differs, but content identity is confirmed", -12)
+            } else {
+                add("Provider-scoped content identity is confirmed; label is not a release name", 0)
+            }
+        }
+
+        val explicitEpisodeMatch = requestedEpisode != null && candidateEpisode == requestedEpisode &&
+            (requestedSeason == null || candidateSeason == null || candidateSeason == requestedSeason)
+        val identityKnown = providerIdentityConfirmed || explicitEpisodeMatch ||
+            (requestedEpisode == null && !titlesClearlyConflict(activeTitle, candidateTitle))
+        val contentIdentityScore = when {
+            expectedNumericImdbId != null && providerImdbId == expectedNumericImdbId && explicitEpisodeMatch -> 100
+            providerIdentityConfirmed && explicitEpisodeMatch -> 98
+            explicitEpisodeMatch -> 94
+            providerIdentityConfirmed -> 90
+            requestedEpisode == null && identityKnown -> 82
+            identityKnown -> 75
+            else -> 35
+        }
+        if (identityKnown) {
+            val identityDescription = when {
+                requestedSeason != null && requestedEpisode != null ->
+                    "Exact S${requestedSeason.toString().padStart(2, '0')}E${requestedEpisode.toString().padStart(2, '0')}"
+                isSeries -> "Provider-confirmed episode"
+                else -> "Matching movie identity"
+            }
+            evidence(SubtitleEvidenceState.MATCH, identityDescription)
+            add(if (requestedEpisode != null) "Exact episode" else "Matching title", 28)
+        } else {
+            evidence(SubtitleEvidenceState.UNKNOWN, "Content identity is not confirmed")
         }
 
         if (candidate.movieHashMatch == true) {
             add("Provider-confirmed exact media hash", 100)
+            evidence(SubtitleEvidenceState.MATCH, "Exact video file hash")
             return RankedSubtitle(
                 subtitle = candidate,
                 tier = SubtitleMatchTier.EXACT_FILE,
                 subtitleMatchScore = 100,
                 subtitleQualityScore = publicQualityScore(candidate),
                 reasons = reasons,
+                contentIdentityScore = 100,
+                releaseMatchScore = null,
+                syncConfidenceScore = 100,
+                matchQuality = SubtitleMatchQuality.BEST,
+                matchExplanation = "Exact video file hash match",
+                evidence = evidence,
             )
         }
 
-        val identityKnown = providerIdentityConfirmed ||
-            (requestedEpisode != null && candidateEpisode == requestedEpisode) ||
-            (requestedEpisode == null && !titlesClearlyConflict(activeTitle, candidateTitle))
-        if (identityKnown) add(if (requestedEpisode != null) "Exact episode" else "Matching title", 28)
         val normalizedExact = fingerprint.normalizedCompleteRelease != null &&
             release.normalizedCompleteRelease != null &&
             fingerprint.normalizedCompleteRelease == release.normalizedCompleteRelease
         if (normalizedExact) add("Normalized exact release", 68)
 
+        var releaseEvidenceKnown = false
+        var releasePoints = 50
+        if (normalizedExact) {
+            releaseEvidenceKnown = true
+            releasePoints = 100
+            evidence(SubtitleEvidenceState.MATCH, "Exact release name")
+        }
+
         val sameGroup = knownEqual(fingerprint.releaseGroup, release.releaseGroup)
         val groupConflict = fingerprint.releaseGroup != null && release.releaseGroup != null && !sameGroup
-        if (sameGroup) add("Release group ${fingerprint.releaseGroup}", 22)
-        else if (groupConflict) add("Different release group", -12)
+        when {
+            sameGroup -> {
+                releaseEvidenceKnown = true
+                releasePoints += 22
+                add("Release group ${fingerprint.releaseGroup}", 22)
+                evidence(SubtitleEvidenceState.MATCH, "Release group ${fingerprint.releaseGroup}")
+            }
+            groupConflict -> {
+                releaseEvidenceKnown = true
+                releasePoints -= 18
+                add("Different release group", -12)
+                evidence(SubtitleEvidenceState.MISMATCH, "Release group differs")
+            }
+            fingerprint.releaseGroup != null -> evidence(SubtitleEvidenceState.UNKNOWN, "Release group unavailable")
+        }
 
         val sameSource = knownEqual(fingerprint.releaseType, release.sourceType)
         val sourceConflict = fingerprint.releaseType != null && release.sourceType != null && !sameSource
-        if (sameSource) add("Source ${fingerprint.releaseType}", 14)
-        else if (sourceConflict) add("${release.sourceType} subtitle vs ${fingerprint.releaseType} video", -18)
+        when {
+            sameSource -> {
+                releaseEvidenceKnown = true
+                releasePoints += 20
+                add("Source ${fingerprint.releaseType}", 14)
+                evidence(SubtitleEvidenceState.MATCH, "${displayReleaseType(fingerprint.releaseType)} source")
+            }
+            sourceConflict -> {
+                releaseEvidenceKnown = true
+                releasePoints -= 28
+                add("${release.sourceType} subtitle vs ${fingerprint.releaseType} video", -18)
+                evidence(
+                    SubtitleEvidenceState.MISMATCH,
+                    "${displayReleaseType(release.sourceType)} subtitle for ${displayReleaseType(fingerprint.releaseType)} video",
+                )
+            }
+            fingerprint.releaseType != null -> evidence(SubtitleEvidenceState.UNKNOWN, "Source type unavailable")
+        }
 
         compareOptional(fingerprint.edition, release.edition)?.let { same ->
+            releaseEvidenceKnown = true
+            releasePoints += if (same) 14 else -32
             add(if (same) "Matching edition" else "Conflicting cut/edition", if (same) 10 else -28)
+            evidence(
+                if (same) SubtitleEvidenceState.MATCH else SubtitleEvidenceState.MISMATCH,
+                if (same) "Matching edition" else "Edition/cut differs",
+            )
         }
         val fpsCompatible = fpsCompatible(fingerprint.fps, candidate.fps ?: release.fps)
         when (fpsCompatible) {
-            true -> add("Compatible FPS", 10)
-            false -> add("Conflicting FPS family", -22)
-            null -> Unit
+            true -> {
+                releaseEvidenceKnown = true
+                releasePoints += 16
+                add("Compatible FPS", 10)
+                evidence(SubtitleEvidenceState.MATCH, "Compatible ${candidate.fps ?: release.fps} FPS")
+            }
+            false -> {
+                releaseEvidenceKnown = true
+                releasePoints -= 32
+                add("Conflicting FPS family", -22)
+                evidence(SubtitleEvidenceState.MISMATCH, "FPS differs")
+            }
+            null -> if (fingerprint.fps != null) evidence(SubtitleEvidenceState.UNKNOWN, "FPS unavailable")
         }
-        if (knownEqual(fingerprint.resolutionHeight, release.resolutionHeight)) add("Same resolution", 5)
-        if (knownEqual(fingerprint.codec, release.videoCodec)) add("Compatible video encode", 4)
-        if (fingerprint.repack == release.repack && (fingerprint.repack || release.repack)) add("Same REPACK family", 5)
-        if (fingerprint.proper == release.proper && (fingerprint.proper || release.proper)) add("Same PROPER family", 5)
+        val sameResolution = knownEqual(fingerprint.resolutionHeight, release.resolutionHeight)
+        when {
+            sameResolution -> {
+                releaseEvidenceKnown = true
+                releasePoints += 7
+                add("Same resolution", 5)
+                evidence(SubtitleEvidenceState.MATCH, "${fingerprint.resolutionHeight}p")
+            }
+            fingerprint.resolutionHeight != null && release.resolutionHeight != null -> {
+                releaseEvidenceKnown = true
+                releasePoints -= 3
+                evidence(SubtitleEvidenceState.MISMATCH, "Resolution differs")
+            }
+            fingerprint.resolutionHeight != null -> evidence(SubtitleEvidenceState.UNKNOWN, "Resolution unavailable")
+        }
+        val sameCodec = knownEqual(fingerprint.codec, release.videoCodec)
+        when {
+            sameCodec -> {
+                releaseEvidenceKnown = true
+                releasePoints += 6
+                add("Compatible video encode", 4)
+                evidence(SubtitleEvidenceState.MATCH, displayCodec(fingerprint.codec))
+            }
+            fingerprint.codec != null && release.videoCodec != null -> {
+                releaseEvidenceKnown = true
+                releasePoints -= 3
+                evidence(SubtitleEvidenceState.MISMATCH, "Video codec differs")
+            }
+            fingerprint.codec != null -> evidence(SubtitleEvidenceState.UNKNOWN, "Video codec unavailable")
+        }
+        if (fingerprint.repack == release.repack && (fingerprint.repack || release.repack)) {
+            releaseEvidenceKnown = true
+            releasePoints += 6
+            add("Same REPACK family", 5)
+        }
+        if (fingerprint.proper == release.proper && (fingerprint.proper || release.proper)) {
+            releaseEvidenceKnown = true
+            releasePoints += 6
+            add("Same PROPER family", 5)
+        }
 
-        val score = reasons.sumOf { it.points }.coerceIn(0, 100)
+        val releaseMatchScore = if (releaseEvidenceKnown) releasePoints.coerceIn(0, 100) else null
+        if (!releaseEvidenceKnown) {
+            evidence(SubtitleEvidenceState.UNKNOWN, "Release timing information unavailable")
+        }
+        val materialReleaseConflict = sourceConflict || fpsCompatible == false || hasEditionConflict(fingerprint, release)
         val tier = when {
             normalizedExact && identityKnown -> SubtitleMatchTier.EXACT_RELEASE
             identityKnown && sameGroup && !sourceConflict && fpsCompatible != false &&
                 !hasEditionConflict(fingerprint, release) -> SubtitleMatchTier.STRONG_RELEASE_MATCH
-            identityKnown && !sourceConflict && fpsCompatible != false && !hasEditionConflict(fingerprint, release) ->
+            identityKnown && releaseEvidenceKnown && !materialReleaseConflict &&
+                (sameSource || sameGroup || fpsCompatible == true) ->
                 SubtitleMatchTier.COMPATIBLE_RELEASE
-            identityKnown && !sourceConflict -> SubtitleMatchTier.GENERIC_MATCH
-            identityKnown -> SubtitleMatchTier.POOR_MATCH
+            identityKnown && materialReleaseConflict -> SubtitleMatchTier.POOR_MATCH
+            identityKnown -> SubtitleMatchTier.GENERIC_MATCH
             else -> SubtitleMatchTier.GENERIC_MATCH
         }
-        return RankedSubtitle(candidate, tier, score, publicQualityScore(candidate), reasons)
+        val syncScore = when {
+            normalizedExact && identityKnown -> 98
+            releaseMatchScore != null ->
+                ((contentIdentityScore * 0.35) + (releaseMatchScore * 0.65)).roundToInt().coerceIn(0, 97)
+            else -> (contentIdentityScore * 0.38).roundToInt().coerceIn(0, 38)
+        }
+        val quality = when (tier) {
+            SubtitleMatchTier.EXACT_FILE, SubtitleMatchTier.EXACT_RELEASE -> SubtitleMatchQuality.BEST
+            SubtitleMatchTier.STRONG_RELEASE_MATCH -> SubtitleMatchQuality.STRONG
+            SubtitleMatchTier.COMPATIBLE_RELEASE -> SubtitleMatchQuality.GOOD
+            SubtitleMatchTier.GENERIC_MATCH -> SubtitleMatchQuality.POSSIBLE
+            SubtitleMatchTier.POOR_MATCH, SubtitleMatchTier.REJECTED -> SubtitleMatchQuality.WEAK
+        }
+        val explanation = matchExplanation(
+            identityKnown = identityKnown,
+            requestedEpisode = requestedEpisode,
+            normalizedExact = normalizedExact,
+            sameGroup = sameGroup,
+            groupConflict = groupConflict,
+            sameSource = sameSource,
+            sourceConflict = sourceConflict,
+            activeSource = fingerprint.releaseType,
+            subtitleSource = release.sourceType,
+            fpsCompatible = fpsCompatible,
+            releaseEvidenceKnown = releaseEvidenceKnown,
+        )
+        return RankedSubtitle(
+            subtitle = candidate,
+            tier = tier,
+            subtitleMatchScore = syncScore,
+            subtitleQualityScore = publicQualityScore(candidate),
+            reasons = reasons,
+            contentIdentityScore = contentIdentityScore,
+            releaseMatchScore = releaseMatchScore,
+            syncConfidenceScore = syncScore,
+            matchQuality = quality,
+            matchExplanation = explanation,
+            evidence = evidence.distinct(),
+        )
     }
 
     fun publicQualityScore(candidate: SubtitleMetadata): Int {
@@ -366,10 +579,19 @@ class SubtitleIntelligence {
         subtitleMatchScore = 0,
         subtitleQualityScore = publicQualityScore(candidate),
         reasons = listOf(SubtitleRankingReason(reason, -100, limitation = true)),
+        contentIdentityScore = 0,
+        releaseMatchScore = null,
+        syncConfidenceScore = 0,
+        matchQuality = SubtitleMatchQuality.WEAK,
+        matchExplanation = reason,
+        evidence = listOf(SubtitleEvidence(SubtitleEvidenceState.MISMATCH, reason)),
     )
 
-    private fun smartComparator() = compareBy<RankedSubtitle> { it.tier.priority }
+    private fun smartComparator(preferredLanguage: String? = null) = compareBy<RankedSubtitle> { it.tier.priority }
         .thenByDescending { it.subtitleMatchScore }
+        .thenByDescending {
+            !preferredLanguage.isNullOrBlank() && subtitleLanguagesMatch(it.subtitle.language, preferredLanguage)
+        }
         .thenByDescending { it.subtitleQualityScore }
         .thenByDescending { it.subtitle.trustedUploader == true }
         .thenByDescending { it.subtitle.voteCount ?: -1 }
@@ -458,3 +680,49 @@ private fun fpsCompatible(left: Double?, right: Double?): Boolean? {
 
 private fun hasEditionConflict(fingerprint: MediaReleaseFingerprint, release: ParsedSubtitleRelease): Boolean =
     fingerprint.edition != null && release.edition != null && fingerprint.edition != release.edition
+
+private fun displayReleaseType(value: String?): String = when (value?.lowercase()) {
+    "web-dl" -> "WEB-DL"
+    "webrip" -> "WEBRip"
+    "bluray" -> "BluRay"
+    "hdtv" -> "HDTV"
+    "dvdrip" -> "DVDRip"
+    "remux" -> "Remux"
+    null -> "Unknown source"
+    else -> value.orEmpty()
+}
+
+private fun displayCodec(value: String?): String = when (value?.lowercase()) {
+    "h264" -> "H.264"
+    "hevc" -> "H.265/HEVC"
+    "av1" -> "AV1"
+    null -> "Unknown codec"
+    else -> value.orEmpty().uppercase()
+}
+
+private fun matchExplanation(
+    identityKnown: Boolean,
+    requestedEpisode: Int?,
+    normalizedExact: Boolean,
+    sameGroup: Boolean,
+    groupConflict: Boolean,
+    sameSource: Boolean,
+    sourceConflict: Boolean,
+    activeSource: String?,
+    subtitleSource: String?,
+    fpsCompatible: Boolean?,
+    releaseEvidenceKnown: Boolean,
+): String {
+    val identity = if (requestedEpisode != null) "Correct episode" else "Correct title"
+    return when {
+        normalizedExact -> "Exact release match"
+        !identityKnown -> "Content identity not confirmed"
+        fpsCompatible == false -> "$identity · FPS differs"
+        sourceConflict -> "$identity · ${displayReleaseType(subtitleSource)} subtitle for ${displayReleaseType(activeSource)} video"
+        sameSource && sameGroup -> "Same ${displayReleaseType(activeSource)} release and release group"
+        sameSource && groupConflict -> "${displayReleaseType(activeSource)} source · release group differs"
+        sameSource -> "$identity · same ${displayReleaseType(activeSource)} source"
+        !releaseEvidenceKnown -> "$identity · release match unknown"
+        else -> "$identity · release information incomplete"
+    }
+}

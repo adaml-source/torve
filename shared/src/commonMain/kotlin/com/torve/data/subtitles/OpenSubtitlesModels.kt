@@ -197,3 +197,25 @@ fun languageInfo(code: String): Pair<String, String> {
         else -> "🌐" to code.uppercase()
     }
 }
+
+fun subtitleLanguagesMatch(left: String?, right: String?): Boolean {
+    if (left.isNullOrBlank() || right.isNullOrBlank()) return false
+    return normalizeSubtitleLanguageCode(left) == normalizeSubtitleLanguageCode(right)
+}
+
+/** ISO-639-1 code accepted by OpenSubtitles for Torve's configured language values. */
+fun normalizeSubtitleLanguageCode(value: String?): String? {
+    val raw = value?.trim()?.takeIf(String::isNotBlank) ?: return null
+    return when (languageInfo(raw).second.lowercase()) {
+        "english" -> "en"; "german" -> "de"; "french" -> "fr"; "spanish" -> "es"
+        "italian" -> "it"; "portuguese" -> "pt"; "dutch" -> "nl"; "polish" -> "pl"
+        "russian" -> "ru"; "turkish" -> "tr"; "arabic" -> "ar"; "chinese" -> "zh"
+        "japanese" -> "ja"; "korean" -> "ko"; "czech" -> "cs"; "swedish" -> "sv"
+        "danish" -> "da"; "finnish" -> "fi"; "norwegian" -> "nb"; "hungarian" -> "hu"
+        "romanian" -> "ro"; "croatian" -> "hr"; "slovak" -> "sk"; "greek" -> "el"
+        "hebrew" -> "he"; "thai" -> "th"; "vietnamese" -> "vi"; "indonesian" -> "id"
+        "ukrainian" -> "uk"; "bulgarian" -> "bg"; "serbian" -> "sr"; "slovenian" -> "sl"
+        "catalan" -> "ca"; "albanian" -> "sq"
+        else -> raw.lowercase().take(2).takeIf { it.length == 2 }
+    }
+}

@@ -16,6 +16,7 @@ data class SubtitleDiscoveryRequest(
     val seasonNumber: Int? = null,
     val episodeNumber: Int? = null,
     val languages: Set<String> = emptySet(),
+    val preferredLanguage: String? = null,
     val fingerprint: MediaReleaseFingerprint,
     /** Authoritative catalog title (series title for episodes), never an episode title or resolver label. */
     val contentTitle: String? = null,
@@ -63,7 +64,9 @@ class SubtitleDiscoveryService(
 ) {
     suspend fun discover(request: SubtitleDiscoveryRequest): SubtitleDiscoveryResult = coroutineScope {
         val pageLimit = request.openSubtitlesPageLimit.coerceIn(1, MAX_PAGE_LIMIT)
-        val languageScope = request.languages.map(String::lowercase).sorted().joinToString(",")
+        val providerLanguageScope = request.languages.mapNotNull(::normalizeSubtitleLanguageCode).sorted().joinToString(",")
+        val preferredLanguageCode = normalizeSubtitleLanguageCode(request.preferredLanguage)
+        val languageScope = "$providerLanguageScope|preferred:${preferredLanguageCode.orEmpty()}"
         val catalogTitle = normalizeMediaTitle(request.contentTitle)
         val requestedFingerprint = request.fingerprint.copy(
             parsedTitle = catalogTitle ?: request.fingerprint.parsedTitle,
@@ -98,13 +101,29 @@ class SubtitleDiscoveryService(
             hashService.calculateForHttp(url, request.fingerprint.sizeBytes)
         }
         val openSubtitlesConfigured = openSubtitlesClient.isConfiguredAsync()
-        val languageParameter = languageScope.takeIf(String::isNotBlank)
+        val languageParameter = providerLanguageScope.takeIf(String::isNotBlank)
         val genericResults = if (openSubtitlesConfigured) async {
             searchOpenSubtitlesPages(
                 imdbId = request.imdbId,
                 seasonNumber = request.seasonNumber,
                 episodeNumber = request.episodeNumber,
                 languages = languageParameter,
+                pageLimit = pageLimit,
+            )
+        } else null
+        val preferredResults = if (
+            openSubtitlesConfigured &&
+            providerLanguageScope.isBlank() &&
+            !preferredLanguageCode.isNullOrBlank()
+        ) async {
+            // OpenSubtitles result pages are multilingual. Fetching the user's
+            // preferred language independently prevents valid preferred results
+            // from being crowded out before Torve's bounded pagination ends.
+            searchOpenSubtitlesPages(
+                imdbId = request.imdbId,
+                seasonNumber = request.seasonNumber,
+                episodeNumber = request.episodeNumber,
+                languages = preferredLanguageCode,
                 pageLimit = pageLimit,
             )
         } else null
@@ -169,6 +188,7 @@ class SubtitleDiscoveryService(
             OpenSubtitleBatch()
         }
         val releaseBatch = releaseResults?.await() ?: OpenSubtitleBatch()
+        val preferredBatch = preferredResults?.await() ?: OpenSubtitleBatch()
         val genericBatch = genericResults?.await() ?: OpenSubtitleBatch()
         val titleBatch = titleResults?.await() ?: OpenSubtitleBatch()
 
@@ -177,18 +197,20 @@ class SubtitleDiscoveryService(
         val openSubtitlesNeutral = (
             hashResults.subtitles.map { mapOpenSubtitlesResult(it, identityMatchedByRequest = true) } +
                 releaseBatch.subtitles.map { mapOpenSubtitlesResult(it, identityMatchedByRequest = true) } +
+                preferredBatch.subtitles.map { mapOpenSubtitlesResult(it, identityMatchedByRequest = true) } +
                 genericBatch.subtitles.map { mapOpenSubtitlesResult(it, identityMatchedByRequest = true) } +
                 titleBatch.subtitles.map { mapOpenSubtitlesResult(it, identityMatchedByRequest = false) }
             ).distinctBy { it.subtitleFileId }
         val addonSubtitles = addonResults.await()
         val providerNeutral = openSubtitlesNeutral + addonSubtitles.map { subtitle ->
+                val humanLabel = humanReadableSubtitleName(subtitle.label)
                 SubtitleMetadata(
                     subtitleId = subtitle.id,
                     subtitleFileId = null,
                     provider = subtitle.provider ?: "Stremio addon",
                     language = subtitle.lang,
-                    subtitleFilename = subtitle.label ?: subtitle.id,
-                    releaseName = subtitle.label ?: subtitle.id,
+                    subtitleFilename = humanLabel,
+                    releaseName = humanLabel,
                     fps = null,
                     rating = null,
                     voteCount = null,
@@ -220,10 +242,12 @@ class SubtitleDiscoveryService(
             requestedEpisode = request.episodeNumber,
             expectedImdbId = request.imdbId,
             isSeries = request.mediaType == MediaType.SERIES,
+            preferredLanguage = request.preferredLanguage,
         )
         val failures = listOfNotNull(
             hashResults.failure,
             releaseBatch.failure,
+            preferredBatch.failure,
             genericBatch.failure,
             titleBatch.failure,
         ).distinct()
@@ -343,8 +367,8 @@ private fun mapOpenSubtitlesResult(
     subtitleFileId = result.fileId,
     provider = "OpenSubtitles.com",
     language = result.language,
-    subtitleFilename = result.fileName,
-    releaseName = result.release.takeIf(String::isNotBlank) ?: result.fileName,
+    subtitleFilename = humanReadableSubtitleName(result.fileName),
+    releaseName = humanReadableSubtitleName(result.release) ?: humanReadableSubtitleName(result.fileName),
     fps = result.fps,
     rating = result.ratings,
     voteCount = result.voteCount,

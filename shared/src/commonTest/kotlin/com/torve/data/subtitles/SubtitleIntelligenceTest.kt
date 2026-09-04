@@ -23,6 +23,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertIs
 import kotlin.test.assertNotEquals
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class SubtitleIntelligenceTest {
@@ -227,6 +228,104 @@ class SubtitleIntelligenceTest {
 
         assertNotEquals(SubtitleMatchTier.REJECTED, ranked.tier)
         assertTrue(ranked.reasons.any { it.description.contains("identity is confirmed") })
+    }
+
+    @Test
+    fun opaqueProviderIdsAreNotParsedOrPresentedAsReleaseEvidence() {
+        val opaque = candidate("3279335").copy(
+            subtitleId = "3279335",
+            subtitleFileId = 3279335,
+            subtitleFilename = "3279335",
+            releaseName = "3279335",
+            seasonNumber = 7,
+            episodeNumber = 11,
+            identityMatchedByRequest = true,
+        )
+
+        val ranked = intelligence.score(active, opaque, 7, 11)
+
+        assertNull(humanReadableSubtitleName("3279335"))
+        assertNull(humanReadableSubtitleName("3279335, 3279075"))
+        assertNull(humanReadableSubtitleName("subtitle"))
+        assertNull(ranked.releaseMatchScore)
+        assertEquals(SubtitleMatchTier.GENERIC_MATCH, ranked.tier)
+        assertEquals(SubtitleMatchQuality.POSSIBLE, ranked.matchQuality)
+        assertTrue(ranked.matchExplanation.contains("release match unknown"))
+        assertNotEquals(16, ranked.subtitleMatchScore)
+    }
+
+    @Test
+    fun releaseSpecificEvidenceProducesMeaningfulDifferentiation() {
+        val exact = intelligence.score(
+            active,
+            candidate("The.Big.Bang.Theory.S07E11.1080p.BluRay.x264-DEMAND"),
+            7,
+            11,
+        )
+        val sameSource = intelligence.score(
+            active,
+            candidate("The.Big.Bang.Theory.S07E11.1080p.BluRay.x264"),
+            7,
+            11,
+        )
+        val unknown = intelligence.score(
+            active,
+            candidate("3279075").copy(
+                subtitleFilename = "3279075",
+                releaseName = "3279075",
+                seasonNumber = 7,
+                episodeNumber = 11,
+                identityMatchedByRequest = true,
+            ),
+            7,
+            11,
+        )
+
+        assertTrue(exact.subtitleMatchScore > sameSource.subtitleMatchScore)
+        assertTrue(sameSource.subtitleMatchScore > unknown.subtitleMatchScore)
+        assertEquals(SubtitleMatchQuality.BEST, exact.matchQuality)
+        assertEquals(SubtitleMatchQuality.POSSIBLE, unknown.matchQuality)
+        assertTrue(sameSource.evidence.any { it.state == SubtitleEvidenceState.MATCH })
+        assertTrue(unknown.evidence.any { it.state == SubtitleEvidenceState.UNKNOWN })
+    }
+
+    @Test
+    fun equalUnknownEvidenceRemainsTiedInsteadOfInventingPrecision() {
+        fun opaque(id: String) = candidate(id).copy(
+            subtitleFilename = id,
+            releaseName = id,
+            seasonNumber = 7,
+            episodeNumber = 11,
+            identityMatchedByRequest = true,
+            rating = null,
+            voteCount = null,
+            downloadCount = null,
+        )
+
+        val a = intelligence.score(active, opaque("3278630"), 7, 11)
+        val b = intelligence.score(active, opaque("3279075"), 7, 11)
+
+        assertEquals(a.subtitleMatchScore, b.subtitleMatchScore)
+        assertEquals(a.matchExplanation, b.matchExplanation)
+        assertNull(a.releaseMatchScore)
+        assertNull(b.releaseMatchScore)
+    }
+
+    @Test
+    fun preferredLanguageWinsOnlyAfterEquivalentReleaseEvidence() {
+        val spanish = candidate("The.Big.Bang.Theory.S07E11.1080p.BluRay.x264-DEMAND").copy(language = "es")
+        val english = candidate("The.Big.Bang.Theory.S07E11.1080p.BluRay.x264-DEMAND").copy(language = "en")
+
+        val ranked = intelligence.rank(
+            fingerprint = active,
+            candidates = listOf(spanish, english),
+            requestedSeason = 7,
+            requestedEpisode = 11,
+            preferredLanguage = "English",
+        )
+
+        assertEquals("en", ranked.first().subtitle.language)
+        assertEquals(ranked[0].subtitleMatchScore, ranked[1].subtitleMatchScore)
     }
 
     @Test

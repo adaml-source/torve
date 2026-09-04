@@ -11,6 +11,9 @@ import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
 import com.torve.android.test.TorveTestHostActivity
 import com.torve.data.subtitles.SubtitleMatchTier
+import com.torve.data.subtitles.SubtitleMatchQuality
+import com.torve.data.subtitles.SubtitleEvidence
+import com.torve.data.subtitles.SubtitleEvidenceState
 import androidx.test.espresso.Espresso
 import androidx.test.platform.app.InstrumentationRegistry
 import org.junit.Assert.assertTrue
@@ -59,6 +62,10 @@ class TvSubtitleSearchNavigationTest {
                 true
             }.getOrDefault(false)
         }
+        pressRemoteKey(KeyEvent.KEYCODE_DPAD_LEFT)
+        awaitFocused("Search more")
+        pressRemoteKey(KeyEvent.KEYCODE_DPAD_LEFT)
+        awaitFocused("Smart Match", substring = true)
         pressRemoteKey(KeyEvent.KEYCODE_DPAD_DOWN)
         composeRule.waitUntil(timeoutMillis = 15_000) {
             runCatching {
@@ -67,12 +74,17 @@ class TvSubtitleSearchNavigationTest {
             }.getOrDefault(false)
         }
         pressRemoteKey(KeyEvent.KEYCODE_DPAD_RIGHT)
-        composeRule.waitUntil(timeoutMillis = 15_000) {
-            runCatching {
-                composeRule.onNodeWithText("EN English").assertIsFocused()
-                true
-            }.getOrDefault(false)
-        }
+        awaitFocused("German", substring = true)
+        pressRemoteKey(KeyEvent.KEYCODE_DPAD_RIGHT)
+        awaitFocused("English", substring = true)
+        pressRemoteKey(KeyEvent.KEYCODE_DPAD_LEFT)
+        awaitFocused("German", substring = true)
+        pressRemoteKey(KeyEvent.KEYCODE_DPAD_LEFT)
+        awaitFocused("All languages", substring = true)
+        pressRemoteKey(KeyEvent.KEYCODE_DPAD_DOWN)
+        awaitFocused("EN  English")
+        pressRemoteKey(KeyEvent.KEYCODE_DPAD_UP)
+        awaitFocused("All languages", substring = true)
     }
 
     @Test
@@ -164,6 +176,109 @@ class TvSubtitleSearchNavigationTest {
         composeRule.waitUntil(timeoutMillis = 5_000) { loadMoreRequested }
     }
 
+    @Test
+    fun filtersLanguagesAndResultsHaveReversibleDpadPaths() {
+        composeRule.setContent {
+            MaterialTheme {
+                TvSubtitleSearchOverlay(results(), {}, {}, {})
+            }
+        }
+        awaitFocused("Smart Match", substring = true)
+
+        pressRemoteKey(KeyEvent.KEYCODE_DPAD_RIGHT)
+        awaitFocused("Search more")
+        pressRemoteKey(KeyEvent.KEYCODE_DPAD_RIGHT)
+        awaitFocused("Strong only")
+        pressRemoteKey(KeyEvent.KEYCODE_DPAD_LEFT)
+        awaitFocused("Search more")
+        pressRemoteKey(KeyEvent.KEYCODE_DPAD_LEFT)
+        awaitFocused("Smart Match", substring = true)
+
+        pressRemoteKey(KeyEvent.KEYCODE_DPAD_DOWN)
+        awaitFocused("All languages", substring = true)
+        pressRemoteKey(KeyEvent.KEYCODE_DPAD_DOWN)
+        awaitFocused("EN  English")
+        pressRemoteKey(KeyEvent.KEYCODE_DPAD_DOWN)
+        awaitFocused("DE  German")
+        pressRemoteKey(KeyEvent.KEYCODE_DPAD_UP)
+        awaitFocused("EN  English")
+        pressRemoteKey(KeyEvent.KEYCODE_DPAD_UP)
+        awaitFocused("All languages", substring = true)
+        pressRemoteKey(KeyEvent.KEYCODE_DPAD_UP)
+        awaitFocused("Smart Match", substring = true)
+    }
+
+    @Test
+    fun preferredLanguageChipReceivesInitialFocusWithoutSelectPress() {
+        composeRule.setContent {
+            MaterialTheme {
+                TvSubtitleSearchOverlay(
+                    state = results(),
+                    onSelect = {},
+                    onLoadMore = {},
+                    onDismiss = {},
+                    preferredLanguage = "English",
+                )
+            }
+        }
+
+        awaitFocused("English", substring = true)
+    }
+
+    @Test
+    fun asyncAppendRetainsFocusedResult() {
+        val uiState = androidx.compose.runtime.mutableStateOf<SubtitleFetchState>(results())
+        composeRule.setContent {
+            MaterialTheme {
+                TvSubtitleSearchOverlay(uiState.value, {}, {}, {})
+            }
+        }
+        awaitFocused("Smart Match", substring = true)
+        pressRemoteKey(KeyEvent.KEYCODE_DPAD_DOWN)
+        awaitFocused("All languages", substring = true)
+        pressRemoteKey(KeyEvent.KEYCODE_DPAD_DOWN)
+        awaitFocused("EN  English")
+
+        composeRule.runOnIdle {
+            val current = uiState.value as SubtitleFetchState.Results
+            uiState.value = current.copy(
+                subtitles = current.subtitles + current.subtitles.first().copy(
+                    flagEmoji = "FR",
+                    languageName = "French",
+                    languageCode = "fr",
+                    displayLabel = "Show.S01E02.1080p.WEB-DL-GROUP.fr.srt",
+                    directUrl = "https://subtitle.example/fr.srt",
+                ),
+            )
+        }
+
+        awaitFocused("EN  English")
+    }
+
+    @Test
+    fun rawProviderIdsAreNeverRenderedAsUserFacingMetadata() {
+        val numeric = results().let { base ->
+            base.copy(
+                subtitles = listOf(
+                    base.subtitles.first().copy(
+                        displayLabel = "3279335",
+                        releaseName = "3279335",
+                        osFileId = 3279335,
+                        matchQuality = SubtitleMatchQuality.POSSIBLE,
+                        matchExplanation = "Correct episode · release match unknown",
+                    ),
+                ),
+            )
+        }
+        composeRule.setContent {
+            MaterialTheme { TvSubtitleSearchOverlay(numeric, {}, {}, {}) }
+        }
+        composeRule.waitForIdle()
+
+        composeRule.onNodeWithText("3279335", substring = true).assertDoesNotExist()
+        composeRule.onNodeWithText("Correct episode · release match unknown").assertExists()
+    }
+
     private fun results(canLoadMore: Boolean = true) = SubtitleFetchState.Results(
         subtitles = listOf(
             SubtitleCandidate(
@@ -181,6 +296,19 @@ class TvSubtitleSearchNavigationTest {
                 matchScore = 98,
                 qualityScore = 91,
                 rankingReasons = listOf("+68 Normalized exact release"),
+                contentIdentityScore = 100,
+                releaseMatchScore = 100,
+                syncConfidenceScore = 98,
+                matchQuality = SubtitleMatchQuality.BEST,
+                matchExplanation = "Exact release match",
+                evidence = listOf(
+                    SubtitleEvidence(SubtitleEvidenceState.MATCH, "Exact S01E02"),
+                    SubtitleEvidence(SubtitleEvidenceState.MATCH, "Exact release name"),
+                ),
+                sourceType = "web-dl",
+                resolutionHeight = 1080,
+                videoCodec = "h264",
+                releaseGroup = "group",
             ),
             SubtitleCandidate(
                 flagEmoji = "DE",
@@ -197,6 +325,19 @@ class TvSubtitleSearchNavigationTest {
                 matchScore = 98,
                 qualityScore = 84,
                 rankingReasons = listOf("+68 Normalized exact release"),
+                contentIdentityScore = 100,
+                releaseMatchScore = 100,
+                syncConfidenceScore = 98,
+                matchQuality = SubtitleMatchQuality.BEST,
+                matchExplanation = "Exact release match",
+                evidence = listOf(
+                    SubtitleEvidence(SubtitleEvidenceState.MATCH, "Exact S01E02"),
+                    SubtitleEvidence(SubtitleEvidenceState.MATCH, "Exact release name"),
+                ),
+                sourceType = "web-dl",
+                resolutionHeight = 1080,
+                videoCodec = "h264",
+                releaseGroup = "group",
             ),
         ),
         matchingRelease = "Show.S01E02.1080p.WEB-DL-GROUP",
@@ -210,5 +351,15 @@ class TvSubtitleSearchNavigationTest {
     private fun pressRemoteKey(keyCode: Int) {
         InstrumentationRegistry.getInstrumentation().sendKeyDownUpSync(keyCode)
         composeRule.waitForIdle()
+    }
+
+    private fun awaitFocused(text: String, substring: Boolean = false) {
+        composeRule.waitUntil(timeoutMillis = 15_000) {
+            runCatching {
+                composeRule.onAllNodesWithText(text, substring = substring)
+                    .fetchSemanticsNodes()
+                    .any { it.config.getOrNull(SemanticsProperties.Focused) == true }
+            }.getOrDefault(false)
+        }
     }
 }

@@ -180,6 +180,7 @@ import com.torve.data.subtitles.SubtitleValidationResult
 import com.torve.data.subtitles.INITIAL_PAGE_LIMIT
 import com.torve.data.subtitles.MAX_PAGE_LIMIT
 import com.torve.data.subtitles.languageInfo
+import com.torve.data.subtitles.parseSubtitleRelease
 import com.torve.domain.player.ExternalSubtitle
 import com.torve.domain.player.NextEpisodeHelper
 import com.torve.domain.player.NextEpisodeInfo
@@ -2134,6 +2135,7 @@ fun PlayerScreen(
         showTrackDialog -> PlaybackUiMode.TrackSelection
         showAudioDelayDialog -> PlaybackUiMode.AudioDelay
         showSubtitleDelayDialog -> PlaybackUiMode.SubtitleDelay
+        showSubtitleSearch -> PlaybackUiMode.SubtitleSearch
         showPictureFormatPicker -> PlaybackUiMode.PictureFormat
         showEqualizerSheet -> PlaybackUiMode.Equalizer
         showDevicePicker -> PlaybackUiMode.DevicePicker
@@ -2689,6 +2691,7 @@ fun PlayerScreen(
         if (showSubtitleSearch && isTv) {
             TvSubtitleSearchOverlay(
                 state = subtitleFetchState,
+                preferredLanguage = settingsState.preferredSubtitleLanguage,
                 onSelect = { candidate ->
                     showSubtitleSearch = false
                     subtitleFetchState = SubtitleFetchState.Idle
@@ -2751,6 +2754,7 @@ fun PlayerScreen(
                             playbackUrl = currentUrl,
                             openSubtitlesPageLimit = (currentResults.openSubtitlesPageLimit + 3).coerceAtMost(MAX_PAGE_LIMIT),
                             forceRefresh = true,
+                            preferredSubtitleLanguage = settingsState.preferredSubtitleLanguage,
                         )
                     }
                 },
@@ -2825,6 +2829,7 @@ fun PlayerScreen(
                                     mediaType.equals("series", ignoreCase = true)
                                 ) title.ifBlank { currentTitle } else currentTitle.ifBlank { title },
                                 playbackUrl = currentUrl,
+                                preferredSubtitleLanguage = settingsState.preferredSubtitleLanguage,
                             )
                         }
                     },
@@ -4226,6 +4231,7 @@ private suspend fun discoverPlayerSubtitleState(
     playbackUrl: String,
     openSubtitlesPageLimit: Int = INITIAL_PAGE_LIMIT,
     forceRefresh: Boolean = false,
+    preferredSubtitleLanguage: String? = null,
 ): SubtitleFetchState {
     val discoveryService = org.koin.core.context.GlobalContext.get().get<SubtitleDiscoveryService>()
     var imdbId = showImdbId?.trim()?.takeIf(String::isNotBlank)
@@ -4261,6 +4267,7 @@ private suspend fun discoverPlayerSubtitleState(
                 mediaType = mediaType,
                 seasonNumber = seasonNumber,
                 episodeNumber = episodeNumber,
+                preferredLanguage = preferredSubtitleLanguage,
                 fingerprint = fingerprint,
                 contentTitle = catalogTitle,
                 playbackUrl = playbackUrl,
@@ -4283,7 +4290,9 @@ private suspend fun discoverPlayerSubtitleState(
             "SubtitleMatch",
             "candidate=${ranked.subtitle.subtitleFileId ?: ranked.subtitle.subtitleId ?: "unknown"} " +
                 "provider=${ranked.subtitle.provider} tier=${ranked.tier.displayLabel} " +
-                "match=${ranked.subtitleMatchScore} quality=${ranked.subtitleQualityScore} " +
+                "content=${ranked.contentIdentityScore} release=${ranked.releaseMatchScore ?: "unknown"} " +
+                "sync=${ranked.syncConfidenceScore} quality=${ranked.subtitleQualityScore} " +
+                "label=${ranked.matchQuality.displayLabel} explanation=${ranked.matchExplanation} " +
                 "reasons=${ranked.reasons.joinToString { "${it.description}:${it.points}" }}",
         )
     }
@@ -4305,6 +4314,7 @@ private suspend fun discoverPlayerSubtitleState(
 private fun toPlayerSubtitleCandidate(ranked: RankedSubtitle): SubtitleCandidate {
     val subtitle = ranked.subtitle
     val (flag, languageName) = languageInfo(subtitle.language)
+    val parsedRelease = parseSubtitleRelease(subtitle.releaseName ?: subtitle.subtitleFilename)
     return SubtitleCandidate(
         flagEmoji = flag,
         languageName = languageName,
@@ -4336,6 +4346,17 @@ private fun toPlayerSubtitleCandidate(ranked: RankedSubtitle): SubtitleCandidate
         rankingReasons = ranked.reasons.map { reason ->
             "${if (reason.points >= 0) "+" else ""}${reason.points} ${reason.description}"
         },
+        contentIdentityScore = ranked.contentIdentityScore,
+        releaseMatchScore = ranked.releaseMatchScore,
+        syncConfidenceScore = ranked.syncConfidenceScore,
+        matchQuality = ranked.matchQuality,
+        matchExplanation = ranked.matchExplanation,
+        evidence = ranked.evidence,
+        subtitleFormat = subtitle.format,
+        sourceType = parsedRelease.sourceType,
+        resolutionHeight = parsedRelease.resolutionHeight,
+        videoCodec = parsedRelease.videoCodec,
+        releaseGroup = parsedRelease.releaseGroup,
     )
 }
 
