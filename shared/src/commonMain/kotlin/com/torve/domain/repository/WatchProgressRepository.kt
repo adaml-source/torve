@@ -12,6 +12,10 @@ interface WatchProgressRepository {
     suspend fun getInProgress(limit: Long = 20): List<WatchProgress>
     suspend fun getProgress(mediaId: String): WatchProgress?
     suspend fun saveProgress(progress: WatchProgress)
+    /** Marks remote/local history complete from a validated final-content boundary while preserving resume position. */
+    suspend fun markWatchedAtMeaningfulContentEnd(progress: WatchProgress) {
+        saveProgress(progress)
+    }
     suspend fun getAllProgress(): List<WatchProgress>
     suspend fun deleteProgress(mediaId: String)
     suspend fun clearAllProgress()

@@ -65,6 +65,7 @@ import com.torve.data.metadata.TmdbApiClient
 import com.torve.data.network.HttpClientFactory
 import com.torve.data.progress.PreferencesRepositoryImpl
 import com.torve.data.progress.WatchProgressRepositoryImpl
+import com.torve.data.playback.PlaybackSegmentRepositoryImpl
 import com.torve.data.stats.WatchSessionRecorder
 import com.torve.data.stats.WatchStatsRepositoryImpl
 import com.torve.data.subscription.RebateCodeApi
@@ -99,6 +100,8 @@ import com.torve.domain.repository.StreamRepository
 import com.torve.domain.repository.SubscriptionRepository
 import com.torve.domain.repository.WatchHistoryRepository
 import com.torve.domain.repository.WatchProgressRepository
+import com.torve.domain.repository.PlaybackSegmentRepository
+import com.torve.domain.player.PlaybackSegmentEngine
 import com.torve.domain.repository.WatchlistRepository
 import com.torve.domain.stats.WatchStatsEngine
 import com.torve.domain.stats.WatchStatsRepository
@@ -373,6 +376,8 @@ val sharedModule = module {
     single { WatchStatsEngine() }
     single<WatchStatsRepository> { WatchStatsRepositoryImpl(get(), get(), get(), get(), get()) }
     single { WatchSessionRecorder(get(), currentUserId = { get<UserIdProvider>().currentUserId() }) }
+    single<PlaybackSegmentRepository> { PlaybackSegmentRepositoryImpl(get(), get()) }
+    single { PlaybackSegmentEngine(repository = get()) }
 
     // Preferences / Settings sync
     single<DeviceLocalSettingsRepository> { PreferencesRepositoryImpl(get(), get()) }

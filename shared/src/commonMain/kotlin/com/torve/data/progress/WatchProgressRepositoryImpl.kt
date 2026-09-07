@@ -251,6 +251,15 @@ class WatchProgressRepositoryImpl(
         Unit
     }
 
+    override suspend fun markWatchedAtMeaningfulContentEnd(progress: WatchProgress) {
+        if (progress.durationMs <= 0L) return
+        // Reuse the established history-sync path with a completion snapshot,
+        // then restore the truthful resume position. The second write cannot
+        // revoke remote watched state and avoids moving resume to EOF.
+        saveProgress(progress.copy(positionMs = progress.durationMs))
+        if (progress.positionMs < progress.durationMs) saveProgress(progress)
+    }
+
     override suspend fun clearAllProgress() = withContext(ioDispatcher) {
         database.torveQueries.clearAllProgress(userId = userIdProvider.currentUserId())
         _progressChanges.tryEmit(Unit)

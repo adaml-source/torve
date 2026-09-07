@@ -1333,3 +1333,38 @@ WHERE media_type = ? AND genre_id = ?;
 
 deleteAllCatalogTopItems:
 DELETE FROM catalog_top_items;
+
+-- Source-specific, versioned playback segment analysis cache.
+CREATE TABLE IF NOT EXISTS playback_segment_analysis (
+    canonical_episode_id TEXT NOT NULL,
+    media_fingerprint TEXT NOT NULL,
+    runtime_ms INTEGER NOT NULL,
+    analysis_version INTEGER NOT NULL,
+    detector_versions TEXT NOT NULL,
+    validation_count INTEGER NOT NULL DEFAULT 0,
+    segments_json TEXT NOT NULL,
+    analyzed_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    PRIMARY KEY (canonical_episode_id, media_fingerprint, analysis_version)
+);
+
+CREATE INDEX IF NOT EXISTS playback_segment_analysis_episode
+    ON playback_segment_analysis(canonical_episode_id, analysis_version, updated_at DESC);
+
+getPlaybackSegmentAnalysis:
+SELECT * FROM playback_segment_analysis
+WHERE canonical_episode_id = ? AND media_fingerprint = ? AND analysis_version = ?;
+
+getPlaybackSegmentAnalysesForEpisode:
+SELECT * FROM playback_segment_analysis
+WHERE canonical_episode_id = ? AND analysis_version = ?
+ORDER BY updated_at DESC;
+
+upsertPlaybackSegmentAnalysis:
+INSERT OR REPLACE INTO playback_segment_analysis (
+    canonical_episode_id, media_fingerprint, runtime_ms, analysis_version,
+    detector_versions, validation_count, segments_json, analyzed_at, updated_at
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
+
+deletePlaybackSegmentAnalysesBeforeVersion:
+DELETE FROM playback_segment_analysis WHERE analysis_version < ?;

@@ -48,6 +48,8 @@ import com.torve.domain.player.NextEpisodeInfo
 fun NextEpisodeOverlay(
     nextEpisodeInfo: NextEpisodeInfo,
     countdown: Int,
+    countdownActive: Boolean = true,
+    extraSceneRemains: Boolean = false,
     isResolving: Boolean,
     onPlayNow: () -> Unit,
     onCancel: () -> Unit,
@@ -92,6 +94,14 @@ fun NextEpisodeOverlay(
                     overflow = TextOverflow.Ellipsis,
                 )
                 Spacer(Modifier.height(12.dp))
+                if (extraSceneRemains) {
+                    Text(
+                        text = stringResource(R.string.player_extra_scene_remains),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = Amber,
+                    )
+                    Spacer(Modifier.height(8.dp))
+                }
                 Row(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalAlignment = Alignment.CenterVertically,
@@ -146,7 +156,7 @@ fun NextEpisodeOverlay(
                             color = if (cancelFocused) Color.White else Color.White.copy(alpha = 0.7f),
                         )
                     }
-                    if (!isResolving && countdown > 0) {
+                    if (!isResolving && countdownActive && countdown > 0) {
                         Text(
                             text = "${countdown}s",
                             style = MaterialTheme.typography.titleMedium,

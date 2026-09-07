@@ -186,8 +186,8 @@ import com.torve.domain.player.NextEpisodeHelper
 import com.torve.domain.player.NextEpisodeInfo
 import com.torve.domain.player.PlayerEngine
 import com.torve.domain.player.StartupPlaybackPolicy
-import com.torve.domain.player.SkipSegment
-import com.torve.domain.player.SkipSegmentDetector
+import com.torve.domain.player.PlaybackSegmentEngine
+import com.torve.domain.player.SegmentActionMode
 import com.torve.domain.player.PlayerListener
 import com.torve.domain.player.PlayerState
 import com.torve.domain.player.TrackDescription
@@ -254,6 +254,7 @@ fun PlayerScreen(
     networkMonitor: NetworkMonitor = koinInject(),
 ) {
     val context = LocalContext.current
+    val playbackSegmentEngine: PlaybackSegmentEngine = koinInject()
     val voiceInputUnavailableFallback = context.getString(R.string.voice_input_unavailable)
     val configuration = LocalConfiguration.current
     val isTv = remember(context) { DeviceFormFactor.isTv(context) }
@@ -465,10 +466,11 @@ fun PlayerScreen(
     var isResolvingNextEpisode by remember { mutableStateOf(false) }
     var completionDetected by remember { mutableStateOf(false) }
 
-    // Skip intro/credits segments
-    var skipSegments by remember { mutableStateOf<List<SkipSegment>>(emptyList()) }
-    var activeSkipSegment by remember { mutableStateOf<SkipSegment?>(null) }
-    var dismissedSkipSegments by remember { mutableStateOf<Set<String>>(emptySet()) }
+    // Source-specific structural timeline. Session intent lives in the state machine.
+    val segmentController = remember { PlaybackSegmentRuntimeController() }
+    val skipSegments = segmentController.segments
+    val activeSkipSegment = segmentController.activeSkipSegment
+    val segmentUiState = segmentController.uiState
 
     // Trakt scrobble state
     val channelsState by channelsViewModel.state.collectAsState()
@@ -663,6 +665,10 @@ fun PlayerScreen(
         val clampedTarget = targetMs.coerceIn(0L, maxPosition)
         if (userInitiated) {
             markUserSeekActivity(sourceDeltaMs)
+            segmentController.onManualSeek(currentPosition, clampedTarget)
+            if (clampedTarget < currentPosition && showNextEpisodeOverlay) {
+                showNextEpisodeOverlay = false
+            }
         }
         engine.seekTo(clampedTarget)
         if (showTvFeedback && isTv) {
@@ -1347,7 +1353,7 @@ fun PlayerScreen(
 
     // Discover the next episode early enough to warm source candidates, but keep
     // the interactive prompt out of the way until playback is genuinely ending.
-    LaunchedEffect(currentPosition, duration, completionDetected, activeSkipSegment) {
+    LaunchedEffect(currentPosition, duration, completionDetected, segmentUiState) {
         if (currentSeasonNumber == null || currentEpisodeNumber == null) return@LaunchedEffect
         if (duration <= 0 || nextEpisodeCancelled) return@LaunchedEffect
 
@@ -1367,16 +1373,17 @@ fun PlayerScreen(
         }
 
         if (nextEpisodeInfo == null || completionDetected) return@LaunchedEffect
-        val creditsDetected = activeSkipSegment?.type == com.torve.domain.player.SkipType.OUTRO
-        val promptWindowMs = when (prefs.nextEpisodeMode) {
-            NextEpisodeMode.AT_CREDITS -> if (creditsDetected) 30_000L else 10_000L
-            NextEpisodeMode.AT_END -> 3_000L
-            NextEpisodeMode.OFF -> 0L
+        val shouldPrompt = when (prefs.nextEpisodeMode) {
+            NextEpisodeMode.AT_CREDITS -> settingsState.playNextDuringCreditsMode != SegmentActionMode.OFF &&
+                (segmentUiState.showNextPrompt || (skipSegments.isEmpty() && remainingMs in 1..10_000L))
+            NextEpisodeMode.AT_END -> remainingMs in 1..3_000L
+            NextEpisodeMode.OFF -> false
         }
-        if (remainingMs in 1..promptWindowMs) {
+        if (shouldPrompt) {
             showNextEpisodeOverlay = true
             completionDetected = true
-            nextEpisodeCountdown = ((remainingMs + 999L) / 1_000L).toInt().coerceIn(1, 15)
+            nextEpisodeCountdown = if (segmentUiState.showNextPrompt) 15
+                else ((remainingMs + 999L) / 1_000L).toInt().coerceIn(1, 15)
         }
     }
 
@@ -1416,8 +1423,8 @@ fun PlayerScreen(
     }
 
     // Countdown timer for next episode overlay
-    LaunchedEffect(showNextEpisodeOverlay) {
-        if (!showNextEpisodeOverlay) return@LaunchedEffect
+    LaunchedEffect(showNextEpisodeOverlay, segmentUiState.allowNextCountdown) {
+        if (!showNextEpisodeOverlay || !segmentUiState.allowNextCountdown) return@LaunchedEffect
         val initialCountdown = nextEpisodeCountdown.coerceIn(1, 15)
         for (i in initialCountdown downTo 1) {
             nextEpisodeCountdown = i
@@ -1519,6 +1526,28 @@ fun PlayerScreen(
                         state.positionMs.toFloat() / state.durationMs
                     } else 0f
                 }
+
+                val segmentPreferences = settingsViewModel.state.value
+                segmentController.onPlaybackState(
+                    input = PlaybackSegmentRuntimeInput(
+                        durationMs = state.durationMs,
+                        positionMs = state.positionMs,
+                        mediaId = mediaId,
+                        mediaType = parsedMediaType,
+                        seasonNumber = currentSeasonNumber,
+                        episodeNumber = currentEpisodeNumber,
+                        currentUrl = currentUrl,
+                        title = currentTitle,
+                        posterUrl = posterUrl,
+                        backdropUrl = backdropUrl,
+                        chapters = engine.getMediaChapters(),
+                    ),
+                    settings = segmentPreferences.toPlaybackSegmentSettings(),
+                    engine = playbackSegmentEngine,
+                    watchProgressRepository = watchProgressRepo,
+                    scope = scope,
+                    onAutomaticSeek = engine::seekTo,
+                )
 
                 val nowMs = SystemClock.elapsedRealtime()
                 if (healthWindowStartedAtMs == 0L) {
@@ -2044,26 +2073,6 @@ fun PlayerScreen(
                 }
             } catch (_: Exception) { }
         }
-    }
-
-    // Detect skip segments when duration becomes available
-    LaunchedEffect(duration, currentEpisodeNumber) {
-        if (duration <= 0) return@LaunchedEffect
-        val isEpisode = mediaType == "tv" && currentSeasonNumber != null
-        skipSegments = SkipSegmentDetector.detectSegments(
-            isEpisode = isEpisode,
-            durationMs = duration,
-            episodeNumber = currentEpisodeNumber,
-        )
-        dismissedSkipSegments = emptySet()
-    }
-
-    // Check for active skip segment at current position
-    LaunchedEffect(currentPosition, skipSegments, dismissedSkipSegments) {
-        val segment = SkipSegmentDetector.findActiveSegment(skipSegments, currentPosition)
-        activeSkipSegment = if (segment != null && segment.type.name !in dismissedSkipSegments) {
-            segment
-        } else null
     }
 
     LaunchedEffect(showResumePrompt) {
@@ -2971,38 +2980,20 @@ fun PlayerScreen(
         }
 
         // Skip Intro/Credits button — mobile only (TV uses D-pad seek)
-        if (!isTv) activeSkipSegment?.let { segment ->
-            val skipFocus = remember(segment.type) { androidx.compose.ui.focus.FocusRequester() }
-            LaunchedEffect(segment.type) { runCatching { skipFocus.requestFocus() } }
-            Button(
-                onClick = {
-                    val deltaMs = segment.endMs - currentPosition
-                    performSeekTo(
-                        targetMs = segment.endMs,
-                        userInitiated = true,
-                        sourceDeltaMs = deltaMs,
-                        showTvFeedback = isTv && !showControls,
-                    )
-                    dismissedSkipSegments = dismissedSkipSegments + segment.type.name
-                    activeSkipSegment = null
+        Box(modifier = Modifier.align(Alignment.BottomEnd)) {
+            PlaybackSegmentOverlay(
+                activeSegment = activeSkipSegment,
+                segments = skipSegments,
+                positionMs = currentPosition,
+                focusCoordinator = focusCoordinator,
+                onSkip = { segment ->
+                    segmentController.stateMachine.manualSkipTarget(segment)?.let { target ->
+                        performSeekTo(targetMs = target, userInitiated = false)
+                        segmentController.dismissActiveAfterManualSkip()
+                    }
                 },
-                modifier = Modifier
-                    .align(Alignment.BottomEnd)
-                    .padding(end = 24.dp, bottom = 80.dp)
-                    .focusRequester(skipFocus)
-                    .focusable(),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = Color.White.copy(alpha = 0.9f),
-                    contentColor = Color.Black,
-                ),
-                shape = RoundedCornerShape(8.dp),
-            ) {
-                Text(
-                    text = segment.label,
-                    style = MaterialTheme.typography.labelLarge,
-                )
-            }
-        } // end if (!isTv)
+            )
+        }
 
         // Next Episode overlay — hide controls so the popup can be reached via D-pad
         LaunchedEffect(showNextEpisodeOverlay) {
@@ -3013,6 +3004,8 @@ fun PlayerScreen(
             NextEpisodeOverlay(
                 nextEpisodeInfo = nextEpisodeInfo!!,
                 countdown = nextEpisodeCountdown,
+                countdownActive = segmentUiState.allowNextCountdown,
+                extraSceneRemains = segmentUiState.extraSceneRemains,
                 isResolving = isResolvingNextEpisode,
                 onPlayNow = {
                     scope.launch {
@@ -3077,6 +3070,7 @@ fun PlayerScreen(
                 onCancel = {
                     showNextEpisodeOverlay = false
                     nextEpisodeCancelled = true
+                    segmentController.stateMachine.cancelNextPrompt()
                 },
             )
         }

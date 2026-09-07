@@ -2322,5 +2322,16 @@
     <string name="detail_library_request_available">Available in your library</string>
     <string name="detail_library_request_retry">Retry library request</string>
     <string name="detail_library_refresh">Refresh library status</string>
+    <string name="settings_skip_intros">Skip Intros</string>
+    <string name="settings_skip_recaps">Skip Recaps</string>
+    <string name="settings_play_next_credits">Play Next During Credits</string>
+    <string name="settings_protect_post_credit">Protect Post-Credit Scenes</string>
+    <string name="settings_smart_segment_detection">Smart Segment Detection</string>
+    <string name="segment_action_off">Off</string>
+    <string name="segment_action_button">Show Button</string>
+    <string name="segment_action_automatic">Automatic</string>
+    <string name="player_skip_intro">Skip Intro</string>
+    <string name="player_skip_recap">Skip Recap</string>
+    <string name="player_extra_scene_remains">Extra scene detected</string>
 </resources>
 

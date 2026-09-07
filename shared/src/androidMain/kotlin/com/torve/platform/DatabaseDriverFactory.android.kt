@@ -58,6 +58,7 @@ actual class DatabaseDriverFactory(private val context: Context) {
                         ON stream_resolve_memory(content_key, last_success_at DESC)""",
                 )
                 ensureWatchSessionTable(db)
+                ensurePlaybackSegmentAnalysisTable(db)
                 runCatching { db.execSQL("ALTER TABLE addon ADD COLUMN server_id TEXT") }
                 runCatching { db.execSQL("ALTER TABLE addon ADD COLUMN synced_at INTEGER") }
                 runCatching { db.execSQL("ALTER TABLE addon ADD COLUMN installed_from TEXT NOT NULL DEFAULT 'app'") }
@@ -466,5 +467,26 @@ actual class DatabaseDriverFactory(private val context: Context) {
         db.execSQL("CREATE INDEX IF NOT EXISTS idx_watch_session_episode_identity ON watch_session(show_id, season_number, episode_number)")
         db.execSQL("CREATE INDEX IF NOT EXISTS idx_watch_session_tmdb_id ON watch_session(tmdb_id)")
         db.execSQL("CREATE INDEX IF NOT EXISTS idx_watch_session_imdb_id ON watch_session(imdb_id)")
+    }
+
+    private fun ensurePlaybackSegmentAnalysisTable(db: SupportSQLiteDatabase) {
+        db.execSQL(
+            """CREATE TABLE IF NOT EXISTS playback_segment_analysis (
+                canonical_episode_id TEXT NOT NULL,
+                media_fingerprint TEXT NOT NULL,
+                runtime_ms INTEGER NOT NULL,
+                analysis_version INTEGER NOT NULL,
+                detector_versions TEXT NOT NULL,
+                validation_count INTEGER NOT NULL DEFAULT 0,
+                segments_json TEXT NOT NULL,
+                analyzed_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL,
+                PRIMARY KEY (canonical_episode_id, media_fingerprint, analysis_version)
+            )""",
+        )
+        db.execSQL(
+            """CREATE INDEX IF NOT EXISTS playback_segment_analysis_episode
+                ON playback_segment_analysis(canonical_episode_id, analysis_version, updated_at DESC)""",
+        )
     }
 }

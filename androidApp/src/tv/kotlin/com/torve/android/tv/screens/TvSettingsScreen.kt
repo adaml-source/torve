@@ -113,6 +113,7 @@ import com.torve.domain.model.StreamQuality
 import com.torve.domain.model.NextEpisodeMode
 import com.torve.domain.model.NextEpisodePreparationMode
 import com.torve.domain.player.LiveAudioOutputMode
+import com.torve.domain.player.SegmentActionMode
 import com.torve.presentation.channels.EpgState
 import com.torve.presentation.channels.userMessage
 import com.torve.presentation.addon.AddonViewModel
@@ -204,6 +205,18 @@ private sealed interface UpdateCheckState {
     data object UpToDate : UpdateCheckState
     data class UpdateAvailable(val update: AvailableAppUpdate) : UpdateCheckState
     data object Error : UpdateCheckState
+}
+
+private fun SegmentActionMode.next(): SegmentActionMode = when (this) {
+    SegmentActionMode.OFF -> SegmentActionMode.SHOW_BUTTON
+    SegmentActionMode.SHOW_BUTTON -> SegmentActionMode.AUTOMATIC
+    SegmentActionMode.AUTOMATIC -> SegmentActionMode.OFF
+}
+
+private fun SegmentActionMode.tvLabel(): String = when (this) {
+    SegmentActionMode.OFF -> "Off"
+    SegmentActionMode.SHOW_BUTTON -> "Show Button"
+    SegmentActionMode.AUTOMATIC -> "Automatic"
 }
 
 private sealed interface TvAboutOverlayState {
@@ -1852,6 +1865,11 @@ internal fun TvSettingsScreen(
             focusTargetType = "selector",
         )
     }
+    val skipIntroTarget = remember { TvSettingsFocusTarget("playback_skip_intro", TvSettingsCategory.PLAYBACK, 14, "selector") }
+    val skipRecapTarget = remember { TvSettingsFocusTarget("playback_skip_recap", TvSettingsCategory.PLAYBACK, 15, "selector") }
+    val playNextCreditsTarget = remember { TvSettingsFocusTarget("playback_play_next_credits", TvSettingsCategory.PLAYBACK, 16, "selector") }
+    val protectPostCreditTarget = remember { TvSettingsFocusTarget("playback_protect_post_credit", TvSettingsCategory.PLAYBACK, 17, "toggle") }
+    val smartSegmentsTarget = remember { TvSettingsFocusTarget("playback_smart_segments", TvSettingsCategory.PLAYBACK, 18, "toggle") }
     val minimumSourceSizeTarget = remember {
         TvSettingsFocusTarget(
             itemId = "playback_minimum_source_size",
@@ -6241,6 +6259,71 @@ internal fun TvSettingsScreen(
                     settingsViewModel.setNextEpisodePreparationMode(next)
                 },
                 rowType = TvSettingRowType.SELECTOR,
+            )
+        }
+
+        item(key = "skip_intro_mode") {
+            val requester = rememberRegisteredTvSettingsFocusRequester(settingsFocusController, skipIntroTarget, remember("skip_intro_mode") { FocusRequester() })
+            TvSettingCard(
+                title = stringResource(R.string.tv_settings_skip_intros),
+                subtitle = settingsState.skipIntroMode.tvLabel(),
+                modifier = Modifier.fillMaxWidth().focusProperties { left = railFocusRequester },
+                focusRequester = requester,
+                onFocused = { onSettingsRowFocused(skipIntroTarget, requester) },
+                onClick = { settingsViewModel.setSkipIntroMode(settingsState.skipIntroMode.next()) },
+                rowType = TvSettingRowType.SELECTOR,
+            )
+        }
+
+        item(key = "skip_recap_mode") {
+            val requester = rememberRegisteredTvSettingsFocusRequester(settingsFocusController, skipRecapTarget, remember("skip_recap_mode") { FocusRequester() })
+            TvSettingCard(
+                title = stringResource(R.string.tv_settings_skip_recaps),
+                subtitle = settingsState.skipRecapMode.tvLabel(),
+                modifier = Modifier.fillMaxWidth().focusProperties { left = railFocusRequester },
+                focusRequester = requester,
+                onFocused = { onSettingsRowFocused(skipRecapTarget, requester) },
+                onClick = { settingsViewModel.setSkipRecapMode(settingsState.skipRecapMode.next()) },
+                rowType = TvSettingRowType.SELECTOR,
+            )
+        }
+
+        item(key = "play_next_credits_mode") {
+            val requester = rememberRegisteredTvSettingsFocusRequester(settingsFocusController, playNextCreditsTarget, remember("play_next_credits_mode") { FocusRequester() })
+            TvSettingCard(
+                title = stringResource(R.string.tv_settings_play_next_credits),
+                subtitle = settingsState.playNextDuringCreditsMode.tvLabel(),
+                modifier = Modifier.fillMaxWidth().focusProperties { left = railFocusRequester },
+                focusRequester = requester,
+                onFocused = { onSettingsRowFocused(playNextCreditsTarget, requester) },
+                onClick = { settingsViewModel.setPlayNextDuringCreditsMode(settingsState.playNextDuringCreditsMode.next()) },
+                rowType = TvSettingRowType.SELECTOR,
+            )
+        }
+
+        item(key = "protect_post_credit") {
+            val requester = rememberRegisteredTvSettingsFocusRequester(settingsFocusController, protectPostCreditTarget, remember("protect_post_credit") { FocusRequester() })
+            TvSettingCard(
+                title = stringResource(R.string.tv_settings_protect_post_credit),
+                subtitle = if (settingsState.protectPostCreditScenes) "On" else "Off",
+                modifier = Modifier.fillMaxWidth().focusProperties { left = railFocusRequester },
+                focusRequester = requester,
+                onFocused = { onSettingsRowFocused(protectPostCreditTarget, requester) },
+                onClick = { settingsViewModel.setProtectPostCreditScenes(!settingsState.protectPostCreditScenes) },
+                rowType = TvSettingRowType.TOGGLE,
+            )
+        }
+
+        item(key = "smart_segment_detection") {
+            val requester = rememberRegisteredTvSettingsFocusRequester(settingsFocusController, smartSegmentsTarget, remember("smart_segment_detection") { FocusRequester() })
+            TvSettingCard(
+                title = stringResource(R.string.tv_settings_smart_segment_detection),
+                subtitle = if (settingsState.smartSegmentDetectionEnabled) "On" else "Off",
+                modifier = Modifier.fillMaxWidth().focusProperties { left = railFocusRequester },
+                focusRequester = requester,
+                onFocused = { onSettingsRowFocused(smartSegmentsTarget, requester) },
+                onClick = { settingsViewModel.setSmartSegmentDetectionEnabled(!settingsState.smartSegmentDetectionEnabled) },
+                rowType = TvSettingRowType.TOGGLE,
             )
         }
 

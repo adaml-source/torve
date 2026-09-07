@@ -32,6 +32,7 @@ enum class PlaybackFocusRegion {
     TopActions,
     TransportControls,
     Timeline,
+    SegmentAction,
     TrackSelectionOverlay,
     AudioDelayOverlay,
     SubtitleDelayOverlay,
@@ -73,10 +74,12 @@ class PlaybackFocusCoordinator {
     }
 
     fun unregisterRegion(region: PlaybackFocusRegion) {
+        val wasCurrent = currentRegion == region
         activeHandles.remove(region)
         // If the disappeared region was current, fall back to PlayerSurface
-        if (currentRegion == region) {
+        if (wasCurrent) {
             currentRegion = PlaybackFocusRegion.PlayerSurface
+            restoreFocusForCurrentMode()
         }
     }
 
@@ -140,8 +143,17 @@ class PlaybackFocusCoordinator {
                 FocusDirection.Up -> PlaybackFocusRegion.TransportControls
                 else -> null
             }
+            PlaybackFocusRegion.SegmentAction -> when (direction) {
+                FocusDirection.Up, FocusDirection.Left -> PlaybackFocusRegion.TransportControls
+                else -> null
+            }
             PlaybackFocusRegion.PlayerSurface -> when (direction) {
-                FocusDirection.Up, FocusDirection.Down -> PlaybackFocusRegion.TopActions
+                FocusDirection.Up -> PlaybackFocusRegion.TopActions
+                FocusDirection.Down -> if (isRegionActive(PlaybackFocusRegion.SegmentAction)) {
+                    PlaybackFocusRegion.SegmentAction
+                } else {
+                    PlaybackFocusRegion.TopActions
+                }
                 else -> null
             }
             // Modal overlays don't participate in inter-region navigation
@@ -168,6 +180,7 @@ class PlaybackFocusCoordinator {
                 PlaybackFocusRegion.TopActions,
                 PlaybackFocusRegion.TransportControls,
                 PlaybackFocusRegion.Timeline,
+                PlaybackFocusRegion.SegmentAction,
                 PlaybackFocusRegion.PlayerSurface,
             )
             is PlaybackUiMode.TrackSelection -> listOf(PlaybackFocusRegion.TrackSelectionOverlay)

@@ -50,6 +50,7 @@ import com.torve.domain.model.SourceLanguageMatchMode
 import com.torve.domain.model.UnknownSourceMetadataPolicy
 import com.torve.domain.model.canResolveStreams
 import com.torve.domain.player.DesktopPlaybackHotkeys
+import com.torve.domain.player.SegmentActionMode
 import com.torve.domain.repository.AddonRepository
 import com.torve.domain.repository.PreferencesRepository
 import com.torve.domain.repository.WatchHistoryRepository
@@ -185,6 +186,11 @@ class SettingsViewModel(
         const val KEY_NEXT_EPISODE_PRELOAD_BUFFER_SECONDS = "next_episode_preload_buffer_seconds"
         const val KEY_NEXT_EPISODE_PRELOAD_MAX_MB = "next_episode_preload_max_mb"
         const val KEY_NEXT_EPISODE_PRELOAD_WIFI_ONLY = "next_episode_preload_wifi_only"
+        const val KEY_SKIP_INTRO_MODE = "playback_skip_intro_mode"
+        const val KEY_SKIP_RECAP_MODE = "playback_skip_recap_mode"
+        const val KEY_PLAY_NEXT_CREDITS_MODE = "playback_play_next_credits_mode"
+        const val KEY_PROTECT_POST_CREDIT = "playback_protect_post_credit"
+        const val KEY_SMART_SEGMENT_DETECTION = "playback_smart_segment_detection"
         const val KEY_SOURCE_LANGUAGE_MATCH_MODE = "source_language_match_mode"
         const val KEY_UNKNOWN_SOURCE_SIZE_POLICY = "unknown_source_size_policy"
         const val KEY_UNKNOWN_SOURCE_LANGUAGE_POLICY = "unknown_source_language_policy"
@@ -480,6 +486,11 @@ class SettingsViewModel(
             val autoPlayEnabled = prefsRepo.getString(KEY_AUTO_PLAY_ENABLED)?.toBooleanStrictOrNull() ?: true
             val autoPlayNextEpisodeEnabled = prefsRepo.getString(KEY_AUTO_PLAY_NEXT_EPISODE)?.toBooleanStrictOrNull() ?: true
             val smartPlayback = loadSmartPlaybackSettings(autoPlayNextEpisodeEnabled)
+            val skipIntroMode = readSegmentActionMode(KEY_SKIP_INTRO_MODE, SegmentActionMode.SHOW_BUTTON)
+            val skipRecapMode = readSegmentActionMode(KEY_SKIP_RECAP_MODE, SegmentActionMode.SHOW_BUTTON)
+            val playNextCreditsMode = readSegmentActionMode(KEY_PLAY_NEXT_CREDITS_MODE, SegmentActionMode.SHOW_BUTTON)
+            val protectPostCredit = prefsRepo.getString(KEY_PROTECT_POST_CREDIT)?.toBooleanStrictOrNull() ?: true
+            val smartSegmentDetection = prefsRepo.getString(KEY_SMART_SEGMENT_DETECTION)?.toBooleanStrictOrNull() ?: true
             val autoSourceMode = prefsRepo.getString(KEY_AUTO_SOURCE_MODE)?.let {
                 try { AutoSourceMode.valueOf(it) } catch (_: Exception) { null }
             } ?: AutoSourceMode.BALANCED
@@ -601,6 +612,11 @@ class SettingsViewModel(
                     autoPlayEnabled = autoPlayEnabled,
                     autoPlayNextEpisodeEnabled = autoPlayNextEpisodeEnabled,
                     nextEpisodeMode = smartPlayback.nextEpisodeMode,
+                    skipIntroMode = skipIntroMode,
+                    skipRecapMode = skipRecapMode,
+                    playNextDuringCreditsMode = playNextCreditsMode,
+                    protectPostCreditScenes = protectPostCredit,
+                    smartSegmentDetectionEnabled = smartSegmentDetection,
                     nextEpisodePreparationMode = smartPlayback.preparationMode,
                     nextEpisodePreloadBufferSeconds = smartPlayback.preloadBufferSeconds,
                     nextEpisodePreloadMaxMb = smartPlayback.preloadMaxMb,
@@ -763,6 +779,9 @@ class SettingsViewModel(
                 runCatching { SourceFallbackPolicy.valueOf(it) }.getOrNull()
             } ?: SourceFallbackPolicy.ASK,
         )
+
+    private suspend fun readSegmentActionMode(key: String, fallback: SegmentActionMode): SegmentActionMode =
+        prefsRepo.getString(key)?.let { runCatching { SegmentActionMode.valueOf(it) }.getOrNull() } ?: fallback
 
     // -------------------------------------------------------------------------
     // Debrid
@@ -2339,6 +2358,31 @@ class SettingsViewModel(
             prefsRepo.setString(KEY_NEXT_EPISODE_MODE, mode.name)
             prefsRepo.setString(KEY_AUTO_PLAY_NEXT_EPISODE, (mode != NextEpisodeMode.OFF).toString())
         }
+    }
+
+    fun setSkipIntroMode(mode: SegmentActionMode) {
+        _state.update { it.copy(skipIntroMode = mode) }
+        scope.launch { prefsRepo.setString(KEY_SKIP_INTRO_MODE, mode.name) }
+    }
+
+    fun setSkipRecapMode(mode: SegmentActionMode) {
+        _state.update { it.copy(skipRecapMode = mode) }
+        scope.launch { prefsRepo.setString(KEY_SKIP_RECAP_MODE, mode.name) }
+    }
+
+    fun setPlayNextDuringCreditsMode(mode: SegmentActionMode) {
+        _state.update { it.copy(playNextDuringCreditsMode = mode) }
+        scope.launch { prefsRepo.setString(KEY_PLAY_NEXT_CREDITS_MODE, mode.name) }
+    }
+
+    fun setProtectPostCreditScenes(enabled: Boolean) {
+        _state.update { it.copy(protectPostCreditScenes = enabled) }
+        scope.launch { prefsRepo.setString(KEY_PROTECT_POST_CREDIT, enabled.toString()) }
+    }
+
+    fun setSmartSegmentDetectionEnabled(enabled: Boolean) {
+        _state.update { it.copy(smartSegmentDetectionEnabled = enabled) }
+        scope.launch { prefsRepo.setString(KEY_SMART_SEGMENT_DETECTION, enabled.toString()) }
     }
 
     fun setNextEpisodePreparationMode(mode: NextEpisodePreparationMode) {

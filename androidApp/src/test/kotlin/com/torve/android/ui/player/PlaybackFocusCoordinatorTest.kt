@@ -7,6 +7,19 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 
 class PlaybackFocusCoordinatorTest {
+    @Test
+    fun disappearingSegmentActionRestoresExistingPlaybackFocus() {
+        val coordinator = PlaybackFocusCoordinator()
+        var topRequested = false
+        coordinator.registerRegion(FocusRegionHandle(PlaybackFocusRegion.TopActions) { topRequested = true; true })
+        coordinator.registerRegion(FocusRegionHandle(PlaybackFocusRegion.SegmentAction) { true })
+        coordinator.reportFocusedRegion(PlaybackFocusRegion.SegmentAction, "intro")
+
+        coordinator.unregisterRegion(PlaybackFocusRegion.SegmentAction)
+
+        assertTrue(topRequested)
+        assertEquals(PlaybackFocusRegion.PlayerSurface, coordinator.currentRegion)
+    }
 
     @Test
     fun controlsVisible_uses_expected_region_graph() {

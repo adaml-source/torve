@@ -24,6 +24,7 @@ import com.torve.domain.model.SourceFallbackPolicy
 import com.torve.domain.model.SourceLanguageMatchMode
 import com.torve.domain.model.UnknownSourceMetadataPolicy
 import com.torve.domain.player.DesktopPlaybackHotkeys
+import com.torve.domain.player.SegmentActionMode
 
 enum class ThemeMode { SYSTEM, LIGHT, DARK }
 
@@ -110,6 +111,11 @@ data class SettingsUiState(
     val hdrMode: HdrMode = HdrMode.AUTO,
     val autoPlayNextEpisodeEnabled: Boolean = true,
     val nextEpisodeMode: NextEpisodeMode = NextEpisodeMode.AT_END,
+    val skipIntroMode: SegmentActionMode = SegmentActionMode.SHOW_BUTTON,
+    val skipRecapMode: SegmentActionMode = SegmentActionMode.SHOW_BUTTON,
+    val playNextDuringCreditsMode: SegmentActionMode = SegmentActionMode.SHOW_BUTTON,
+    val protectPostCreditScenes: Boolean = true,
+    val smartSegmentDetectionEnabled: Boolean = true,
     val nextEpisodePreparationMode: NextEpisodePreparationMode = NextEpisodePreparationMode.RESOLVE_ONLY,
     val nextEpisodePreloadBufferSeconds: Int = 30,
     val nextEpisodePreloadMaxMb: Int = 128,

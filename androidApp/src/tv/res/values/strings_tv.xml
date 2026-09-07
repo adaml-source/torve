@@ -547,4 +547,12 @@
     <string name="tv_live_audio_passthrough_desc">Send AC3/EAC3/DTS to AVR when supported</string>
     <string name="tv_live_audio_prefer_surround">Prefer Surround Tracks</string>
     <string name="tv_live_audio_prefer_surround_desc">Prioritize multichannel audio over stereo</string>
+    <string name="tv_settings_skip_intros">Skip Intros</string>
+    <string name="tv_settings_skip_recaps">Skip Recaps</string>
+    <string name="tv_settings_play_next_credits">Play Next During Credits</string>
+    <string name="tv_settings_protect_post_credit">Protect Post-Credit Scenes</string>
+    <string name="tv_settings_smart_segment_detection">Smart Segment Detection</string>
+    <string name="tv_segment_action_off">Off</string>
+    <string name="tv_segment_action_button">Show Button</string>
+    <string name="tv_segment_action_automatic">Automatic</string>
 </resources>

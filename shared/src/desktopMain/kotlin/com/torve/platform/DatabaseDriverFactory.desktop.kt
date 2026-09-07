@@ -164,6 +164,28 @@ private fun ensureDesktopIncrementalMigrations(driver: SqlDriver) {
     )
     driver.execute(
         null,
+        """CREATE TABLE IF NOT EXISTS playback_segment_analysis (
+            canonical_episode_id TEXT NOT NULL,
+            media_fingerprint TEXT NOT NULL,
+            runtime_ms INTEGER NOT NULL,
+            analysis_version INTEGER NOT NULL,
+            detector_versions TEXT NOT NULL,
+            validation_count INTEGER NOT NULL DEFAULT 0,
+            segments_json TEXT NOT NULL,
+            analyzed_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL,
+            PRIMARY KEY (canonical_episode_id, media_fingerprint, analysis_version)
+        )""",
+        0,
+    )
+    driver.execute(
+        null,
+        """CREATE INDEX IF NOT EXISTS playback_segment_analysis_episode
+            ON playback_segment_analysis(canonical_episode_id, analysis_version, updated_at DESC)""",
+        0,
+    )
+    driver.execute(
+        null,
         """CREATE TABLE IF NOT EXISTS stream_resolve_memory (
             content_key TEXT NOT NULL,
             stream_key TEXT NOT NULL,

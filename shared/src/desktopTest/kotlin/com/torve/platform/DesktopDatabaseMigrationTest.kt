@@ -21,6 +21,18 @@ class DesktopDatabaseMigrationTest {
     }
 
     @Test
+    fun versionTenDatabaseReceivesPlaybackSegmentCache() {
+        val driver = JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY)
+
+        TorveDatabase.Schema.migrate(driver, 10L, TorveDatabase.Schema.version)
+
+        assertTrue(TorveDatabase.Schema.version > 10L)
+        assertEquals(1L, countSchemaObject(driver, "table", "playback_segment_analysis"))
+        assertEquals(1L, countSchemaObject(driver, "index", "playback_segment_analysis_episode"))
+        driver.close()
+    }
+
+    @Test
     fun desktopConnectionsUseWalAndBusyTimeout() {
         val database = kotlin.io.path.createTempFile("torve-sqlite-config", ".db").toFile()
         val driver = JdbcSqliteDriver(

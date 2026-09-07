@@ -99,6 +99,7 @@ import com.torve.android.ui.subscription.NeedsVerificationToastEffect
 import com.torve.domain.model.CodecPreference
 import com.torve.domain.model.HdrMode
 import com.torve.domain.model.NextEpisodeMode
+import com.torve.domain.player.SegmentActionMode
 import com.torve.domain.model.NextEpisodePreparationMode
 import com.torve.domain.model.SourceFallbackPolicy
 import com.torve.domain.model.SourceLanguageMatchMode
@@ -1181,6 +1182,49 @@ fun SettingsScreen(
                     value = state.nextEpisodeMode.label,
                     choices = NextEpisodeMode.entries.map { it.name to it.label },
                     onSelected = { viewModel.setNextEpisodeMode(NextEpisodeMode.valueOf(it)) },
+                )
+
+                Spacer(Modifier.height(12.dp))
+
+                SettingsChoiceField(
+                    label = stringResource(R.string.settings_skip_intros),
+                    value = segmentActionModeLabel(state.skipIntroMode),
+                    choices = SegmentActionMode.entries.map { it.name to segmentActionModeLabel(it) },
+                    onSelected = { viewModel.setSkipIntroMode(SegmentActionMode.valueOf(it)) },
+                )
+
+                Spacer(Modifier.height(12.dp))
+
+                SettingsChoiceField(
+                    label = stringResource(R.string.settings_skip_recaps),
+                    value = segmentActionModeLabel(state.skipRecapMode),
+                    choices = SegmentActionMode.entries.map { it.name to segmentActionModeLabel(it) },
+                    onSelected = { viewModel.setSkipRecapMode(SegmentActionMode.valueOf(it)) },
+                )
+
+                Spacer(Modifier.height(12.dp))
+
+                SettingsChoiceField(
+                    label = stringResource(R.string.settings_play_next_credits),
+                    value = segmentActionModeLabel(state.playNextDuringCreditsMode),
+                    choices = SegmentActionMode.entries.map { it.name to segmentActionModeLabel(it) },
+                    onSelected = { viewModel.setPlayNextDuringCreditsMode(SegmentActionMode.valueOf(it)) },
+                )
+
+                Spacer(Modifier.height(12.dp))
+
+                PlaybackSettingToggle(
+                    label = stringResource(R.string.settings_protect_post_credit),
+                    checked = state.protectPostCreditScenes,
+                    onCheckedChange = viewModel::setProtectPostCreditScenes,
+                )
+
+                Spacer(Modifier.height(12.dp))
+
+                PlaybackSettingToggle(
+                    label = stringResource(R.string.settings_smart_segment_detection),
+                    checked = state.smartSegmentDetectionEnabled,
+                    onCheckedChange = viewModel::setSmartSegmentDetectionEnabled,
                 )
 
                 Spacer(Modifier.height(12.dp))
@@ -2381,6 +2425,37 @@ private fun SettingsTextField(
                     }
                 }
             },
+        )
+    }
+}
+
+@Composable
+private fun segmentActionModeLabel(mode: SegmentActionMode): String = when (mode) {
+    SegmentActionMode.OFF -> stringResource(R.string.segment_action_off)
+    SegmentActionMode.SHOW_BUTTON -> stringResource(R.string.segment_action_button)
+    SegmentActionMode.AUTOMATIC -> stringResource(R.string.segment_action_automatic)
+}
+
+@Composable
+private fun PlaybackSettingToggle(
+    label: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(label, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+        Switch(
+            checked = checked,
+            onCheckedChange = onCheckedChange,
+            colors = SwitchDefaults.colors(
+                checkedThumbColor = Amber,
+                checkedTrackColor = Amber.copy(alpha = 0.3f),
+                uncheckedThumbColor = Silver,
+                uncheckedTrackColor = Gunmetal,
+            ),
         )
     }
 }

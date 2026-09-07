@@ -90,7 +90,7 @@ internal fun MobilePlayerControlsOverlay(
     sliderPosition: Float,
     isSeeking: Boolean,
     seekPreviewPositionMs: Long,
-    skipSegments: List<com.torve.domain.player.SkipSegment>,
+    skipSegments: List<com.torve.domain.player.PlaybackSegment>,
     voiceOverlayMessage: String?,
     onBack: () -> Unit,
     onOpenPictureFormat: () -> Unit,

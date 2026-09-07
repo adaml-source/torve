@@ -81,6 +81,12 @@ interface PlayerEngine {
     fun seekRelative(deltaMs: Long)
     fun setSpeed(speed: Float)
 
+    /**
+     * Container-authored chapters available for the current media item.
+     * Engines without chapter enumeration support return an empty list.
+     */
+    fun getMediaChapters(): List<MediaChapter> = emptyList()
+
     // Track selection
     fun getSubtitleTracks(): List<TrackDescription>
     fun getAudioTracks(): List<TrackDescription>
