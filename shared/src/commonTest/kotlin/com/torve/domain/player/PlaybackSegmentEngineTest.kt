@@ -74,6 +74,72 @@ class PlaybackSegmentEngineTest {
     }
 
     @Test
+    fun minorRuntimeVarianceCanSurfaceManualMarkerButNeverAutomaticAction() = runTest {
+        val provider = provider(
+            ProviderMarker(
+                SegmentType.INTRO,
+                60_000,
+                90_000,
+                0.82,
+                "community",
+                1,
+                referenceRuntimeMs = RUNTIME - 4_000,
+            ),
+        )
+        val result = PlaybackSegmentEngine(MemoryRepository(), listOf(provider)).analyze(request())
+        val intro = result.segments.single()
+
+        assertTrue(intro.confidence >= PlaybackSegmentConfig().manualActionThreshold)
+        assertTrue(intro.confidence < PlaybackSegmentConfig().automaticActionThreshold)
+        assertNotNull(PlaybackSegmentStateMachine().manualSkipTarget(intro))
+        assertNull(PlaybackSegmentStateMachine().automaticSkipTarget(intro, SegmentActionMode.AUTOMATIC))
+    }
+
+    @Test
+    fun nearbySourceRuntimeSurfacesUnshiftedManualMarkerButNeverAutomaticAction() = runTest {
+        val provider = provider(
+            ProviderMarker(
+                SegmentType.INTRO,
+                60_000,
+                90_000,
+                0.82,
+                "community",
+                1,
+                referenceRuntimeMs = RUNTIME - 6_000,
+            ),
+        )
+
+        val intro = PlaybackSegmentEngine(MemoryRepository(), listOf(provider))
+            .analyze(request())
+            .segments
+            .single()
+
+        assertEquals(60_000, intro.startMs, "runtime delta must not be added to the marker")
+        assertEquals(90_000, intro.endMs)
+        assertTrue(intro.confidence >= PlaybackSegmentConfig().manualActionThreshold)
+        assertTrue(intro.confidence < PlaybackSegmentConfig().automaticActionThreshold)
+    }
+
+    @Test
+    fun providerWithoutReliableRuntimeCannotSurfaceMarker() = runTest {
+        val provider = provider(
+            ProviderMarker(
+                SegmentType.INTRO,
+                60_000,
+                90_000,
+                0.88,
+                "community",
+                1,
+                referenceRuntimeMs = RUNTIME,
+                referenceRuntimeReliable = false,
+            ),
+        )
+        val intro = PlaybackSegmentEngine(MemoryRepository(), listOf(provider)).analyze(request()).segments.single()
+
+        assertTrue(intro.confidence < PlaybackSegmentConfig().manualActionThreshold)
+    }
+
+    @Test
     fun providerMarkersAreClampedRejectedAndCannotManipulatePlayback() = runTest {
         val provider = provider(
             ProviderMarker(SegmentType.INTRO, -1, 20_000, 1.0, "bad", 1, RUNTIME, "source-a"),

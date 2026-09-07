@@ -3,6 +3,7 @@ package com.torve.domain.player
 import com.torve.domain.repository.CachedSegmentAnalysis
 import com.torve.domain.repository.PlaybackSegmentRepository
 import kotlinx.coroutines.async
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.datetime.Clock
@@ -15,7 +16,7 @@ class PlaybackSegmentEngine(
     private val providerTimeoutMs: Long = 1_500L,
 ) {
     companion object {
-        const val CURRENT_ANALYSIS_VERSION = 1
+        const val CURRENT_ANALYSIS_VERSION = 2
         private const val MAX_PROVIDER_MARKERS = 64
         private const val MAX_LOCAL_OBSERVATIONS = 20
     }
@@ -123,7 +124,13 @@ class PlaybackSegmentEngine(
         val providerResults = providers.map { provider ->
             async {
                 provider.id to withTimeoutOrNull(providerTimeoutMs) {
-                    runCatching { provider.getSegments(request) }.getOrDefault(emptyList())
+                    try {
+                        provider.getSegments(request)
+                    } catch (cancellation: CancellationException) {
+                        throw cancellation
+                    } catch (_: Exception) {
+                        emptyList()
+                    }
                 }
             }
         }.map { it.await() }
@@ -208,6 +215,11 @@ class PlaybackSegmentEngine(
                 alignmentConfidence = request.alignmentAnchors.map { it.confidence }.average().coerceIn(0.0, 1.0)
                 details = "perceptual-anchor-alignment"
             }
+            !marker.referenceRuntimeReliable -> {
+                aligned = marker.startMs to marker.endMs
+                alignmentConfidence = 0.52
+                details = "provider-runtime-unknown"
+            }
             isConstantSpeedConversion(marker.referenceRuntimeMs, current.runtimeMs) -> {
                 val ratio = current.runtimeMs.toDouble() / marker.referenceRuntimeMs.toDouble()
                 aligned = (marker.startMs * ratio).toLong() to (marker.endMs * ratio).toLong()
@@ -218,6 +230,22 @@ class PlaybackSegmentEngine(
                 aligned = marker.startMs to marker.endMs
                 alignmentConfidence = 0.88
                 details = "runtime-compatible"
+            }
+            abs(marker.referenceRuntimeMs - current.runtimeMs) <= config.minorRuntimeVarianceMs -> {
+                // A few seconds of mux/container tail variance can leave structural
+                // timestamps unchanged. Keep this manual-only: the difference may
+                // still be a logo before the intro rather than padding at EOF.
+                aligned = marker.startMs to marker.endMs
+                alignmentConfidence = 0.78
+                details = "minor-runtime-variance"
+            }
+            abs(marker.referenceRuntimeMs - current.runtimeMs) <= config.manualSourceVariantVarianceMs -> {
+                // A nearby release may differ by logos or tail padding. Do not
+                // shift its markers without anchors, and keep the result barely
+                // inside the manual-only confidence band.
+                aligned = marker.startMs to marker.endMs
+                alignmentConfidence = 0.76
+                details = "nearby-source-runtime-manual-only"
             }
             else -> {
                 // Retain only as weak learning evidence. It stays below the manual threshold.

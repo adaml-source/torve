@@ -8,6 +8,7 @@ import androidx.compose.runtime.setValue
 import com.torve.android.BuildConfig
 import com.torve.data.addon.SourceContinuationSessionStore
 import com.torve.domain.model.MediaType
+import com.torve.domain.model.NextEpisodeMode
 import com.torve.domain.model.WatchProgress
 import com.torve.domain.player.MediaIdentityFactory
 import com.torve.domain.player.MediaChapter
@@ -34,12 +35,52 @@ internal data class PlaybackSegmentRuntimeInput(
     val mediaType: MediaType,
     val seasonNumber: Int?,
     val episodeNumber: Int?,
+    val showTmdbId: Int?,
+    val showImdbId: String?,
     val currentUrl: String,
     val title: String,
     val posterUrl: String,
     val backdropUrl: String,
     val chapters: List<MediaChapter> = emptyList(),
 )
+
+internal fun playbackSegmentRuntimeInput(
+    durationMs: Long,
+    positionMs: Long,
+    mediaId: String,
+    mediaType: MediaType,
+    seasonNumber: Int?,
+    episodeNumber: Int?,
+    showTmdbId: Int?,
+    resolvedTmdbId: Int,
+    showImdbId: String?,
+    currentUrl: String,
+    title: String,
+    posterUrl: String,
+    backdropUrl: String,
+    chapters: List<MediaChapter>,
+): PlaybackSegmentRuntimeInput = PlaybackSegmentRuntimeInput(
+    durationMs = durationMs,
+    positionMs = positionMs,
+    mediaId = mediaId,
+    mediaType = mediaType,
+    seasonNumber = seasonNumber,
+    episodeNumber = episodeNumber,
+    showTmdbId = showTmdbId?.takeIf { it > 0 } ?: resolvedTmdbId.takeIf { it > 0 },
+    showImdbId = showImdbId?.takeIf { it.isNotBlank() } ?: mediaId.extractImdbIdForSegments(),
+    currentUrl = currentUrl,
+    title = title,
+    posterUrl = posterUrl,
+    backdropUrl = backdropUrl,
+    chapters = chapters,
+)
+
+private fun String.extractImdbIdForSegments(): String? =
+    Regex("(?:^|[^A-Za-z0-9])(tt[0-9]{5,12})(?:$|[^0-9])", RegexOption.IGNORE_CASE)
+        .find(this)
+        ?.groupValues
+        ?.getOrNull(1)
+        ?.lowercase()
 
 @Stable
 internal class PlaybackSegmentRuntimeController {
@@ -148,13 +189,22 @@ internal class PlaybackSegmentRuntimeController {
                 PlaybackSegmentRequest(
                     media = identity,
                     seasonId = input.seasonNumber?.let { "${input.mediaId}:s$it" },
+                    showTmdbId = input.showTmdbId,
+                    showImdbId = input.showImdbId,
+                    seasonNumber = input.seasonNumber,
+                    episodeNumber = input.episodeNumber,
                     chapters = input.chapters,
                 ),
             )
             segments = analysis.segments
-            if (BuildConfig.DEBUG) {
-                Log.d("PlaybackSegments", "episode=$episodeKey cache=${analysis.fromCache} segments=${segments.size} diagnostics=${analysis.diagnostics.joinToString()}")
+            val markerSummary = segments.joinToString(limit = 8) {
+                "${it.type}:${it.startMs}-${it.endMs}@${"%.2f".format(it.confidence)}"
             }
+            Log.i(
+                "PlaybackSegments",
+                "season=${input.seasonNumber} episode=${input.episodeNumber} cache=${analysis.fromCache} " +
+                    "segments=[$markerSummary] diagnostics=${analysis.diagnostics.joinToString()}",
+            )
         }
     }
 
@@ -170,3 +220,26 @@ internal fun SettingsUiState.toPlaybackSegmentSettings() = PlaybackSegmentSettin
     playNextMode = playNextDuringCreditsMode,
     protectPostCreditScenes = protectPostCreditScenes,
 )
+
+/** Keeps detected-credit prompts independent from the legacy countdown timing choice. */
+internal fun shouldShowNextEpisodePrompt(
+    detectedCreditsPrompt: Boolean,
+    hasSegments: Boolean,
+    remainingMs: Long,
+    nextEpisodeMode: NextEpisodeMode,
+    creditsActionMode: SegmentActionMode,
+): Boolean {
+    if (nextEpisodeMode == NextEpisodeMode.OFF) return false
+    if (detectedCreditsPrompt) return true
+    return when (nextEpisodeMode) {
+        NextEpisodeMode.AT_CREDITS -> creditsActionMode != SegmentActionMode.OFF &&
+            !hasSegments && remainingMs in 1..10_000L
+        NextEpisodeMode.AT_END -> remainingMs in 1..3_000L
+        NextEpisodeMode.OFF -> false
+    }
+}
+
+internal fun allowDetectedCreditsCountdown(
+    segmentAllowsCountdown: Boolean,
+    nextEpisodeMode: NextEpisodeMode,
+): Boolean = segmentAllowsCountdown && nextEpisodeMode == NextEpisodeMode.AT_CREDITS

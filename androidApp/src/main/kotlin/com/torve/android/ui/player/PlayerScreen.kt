@@ -157,11 +157,9 @@ import com.torve.data.trakt.TraktHistoryMovie
 import com.torve.data.trakt.TraktHistorySeasonEntry
 import com.torve.data.trakt.TraktHistoryShow
 import com.torve.data.trakt.TraktIds
-import com.torve.domain.model.ContentWarmupTrigger
 import com.torve.domain.model.DebridServiceType
 import com.torve.domain.model.MediaType
 import com.torve.domain.model.NextEpisodeMode
-import com.torve.domain.model.NextEpisodePreparationMode
 import com.torve.domain.model.Season
 import com.torve.domain.model.SourceAccelerationContext
 import com.torve.domain.model.SourceAccelerationRequest
@@ -182,7 +180,6 @@ import com.torve.data.subtitles.MAX_PAGE_LIMIT
 import com.torve.data.subtitles.languageInfo
 import com.torve.data.subtitles.parseSubtitleRelease
 import com.torve.domain.player.ExternalSubtitle
-import com.torve.domain.player.NextEpisodeHelper
 import com.torve.domain.player.NextEpisodeInfo
 import com.torve.domain.player.PlayerEngine
 import com.torve.domain.player.StartupPlaybackPolicy
@@ -206,7 +203,6 @@ import com.torve.presentation.player.TraktScrobbler
 import com.torve.presentation.settings.SettingsViewModel
 import com.torve.presentation.streampicker.StreamFallbackOrdering
 import com.torve.platform.NetworkMonitor
-import com.torve.platform.NetworkType
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -1323,108 +1319,58 @@ fun PlayerScreen(
         pendingSubtitleAutoSelect = false
     }
 
-    // Load season data for next-episode calculation (TV shows only)
-    LaunchedEffect(showTmdbId, currentSeasonNumber) {
-        if (showTmdbId == null || showTmdbId <= 0 || mediaType != "tv") return@LaunchedEffect
-        if (currentSeasonNumber == null) return@LaunchedEffect
-
-        try {
-            val detail = metadataRepo.getDetail("tv", showTmdbId)
-            val validSeasons = detail.seasons
-                .filter { it.seasonNumber > 0 }
-                .sortedBy { it.seasonNumber }
-
-            // Only load current season and next season to avoid excess API calls
-            val seasonsToLoad = validSeasons.filter {
-                it.seasonNumber == currentSeasonNumber || it.seasonNumber == currentSeasonNumber!! + 1
-            }
-            val loaded = seasonsToLoad.map { season ->
-                try {
-                    metadataRepo.getSeasonDetail(showTmdbId, season.seasonNumber)
-                } catch (_: Exception) {
-                    season
-                }
-            }
-            loadedSeasons = loaded
-        } catch (cancellationException: kotlinx.coroutines.CancellationException) {
-            throw cancellationException
-        } catch (_: Exception) { }
-    }
+    // Load only the current and following season for next-episode calculation.
+    PlaybackSeasonLoadEffect(
+        input = PlaybackSeasonLoadInput(showTmdbId, currentSeasonNumber, mediaType),
+        metadataRepository = metadataRepo,
+        onLoaded = { loadedSeasons = it },
+    )
 
     // Discover the next episode early enough to warm source candidates, but keep
     // the interactive prompt out of the way until playback is genuinely ending.
-    LaunchedEffect(currentPosition, duration, completionDetected, segmentUiState) {
-        if (currentSeasonNumber == null || currentEpisodeNumber == null) return@LaunchedEffect
-        if (duration <= 0 || nextEpisodeCancelled) return@LaunchedEffect
-
-        val prefs = settingsViewModel.buildStreamPreferences()
-        if (prefs.nextEpisodeMode == NextEpisodeMode.OFF) return@LaunchedEffect
-
-        val remainingMs = duration - currentPosition
-        val progressPercent = currentPosition.toFloat() / duration
-
-        val shouldPrepare = progressPercent >= 0.75f || remainingMs in 1..10 * 60_000L
-        if (shouldPrepare && nextEpisodeInfo == null) {
-            nextEpisodeInfo = NextEpisodeHelper.getNextEpisode(
-                currentSeason = currentSeasonNumber!!,
-                currentEpisode = currentEpisodeNumber!!,
-                seasons = loadedSeasons,
-            )
-        }
-
-        if (nextEpisodeInfo == null || completionDetected) return@LaunchedEffect
-        val shouldPrompt = when (prefs.nextEpisodeMode) {
-            NextEpisodeMode.AT_CREDITS -> settingsState.playNextDuringCreditsMode != SegmentActionMode.OFF &&
-                (segmentUiState.showNextPrompt || (skipSegments.isEmpty() && remainingMs in 1..10_000L))
-            NextEpisodeMode.AT_END -> remainingMs in 1..3_000L
-            NextEpisodeMode.OFF -> false
-        }
-        if (shouldPrompt) {
+    PlaybackNextEpisodePromptEffect(
+        input = PlaybackNextEpisodePromptInput(
+            currentSeasonNumber = currentSeasonNumber,
+            currentEpisodeNumber = currentEpisodeNumber,
+            currentPositionMs = currentPosition,
+            durationMs = duration,
+            completionDetected = completionDetected,
+            nextEpisodeCancelled = nextEpisodeCancelled,
+            nextEpisodeInfo = nextEpisodeInfo,
+            loadedSeasons = loadedSeasons,
+            segmentUiState = segmentUiState,
+            hasSegments = skipSegments.isNotEmpty(),
+            settingsState = settingsState,
+        ),
+        settingsViewModel = settingsViewModel,
+        onNextEpisodeResolved = { nextEpisodeInfo = it },
+        onShowPrompt = { countdown ->
             showNextEpisodeOverlay = true
             completionDetected = true
-            nextEpisodeCountdown = if (segmentUiState.showNextPrompt) 15
-                else ((remainingMs + 999L) / 1_000L).toInt().coerceIn(1, 15)
-        }
-    }
+            nextEpisodeCountdown = countdown
+        },
+    )
 
-    LaunchedEffect(nextEpisodeInfo?.seasonNumber, nextEpisodeInfo?.episodeNumber, showImdbId) {
-        val nextEp = nextEpisodeInfo ?: return@LaunchedEffect
-        val imdbId = showImdbId?.takeIf { it.isNotBlank() } ?: return@LaunchedEffect
-        val prefs = settingsViewModel.buildStreamPreferences()
-        if (prefs.nextEpisodeMode == NextEpisodeMode.OFF ||
-            prefs.nextEpisodePreparationMode == NextEpisodePreparationMode.OFF
-        ) return@LaunchedEffect
-        if (prefs.nextEpisodePreloadWifiOnly &&
-            networkMonitor.currentNetworkType() !in setOf(NetworkType.WIFI, NetworkType.ETHERNET)
-        ) return@LaunchedEffect
-
-        try {
-            val addons = try { addonRepo.getInstalledAddons() } catch (_: Exception) { emptyList() }
-            val debridAccounts = settingsViewModel.getDebridAccounts()
-            val request = SourceAccelerationRequest(
-                mediaType = MediaType.SERIES,
-                imdbId = imdbId,
-                contentId = showTmdbId?.let { "tmdb:$it" },
-                title = title,
-                seasonNumber = nextEp.seasonNumber,
-                episodeNumber = nextEp.episodeNumber,
-                context = SourceAccelerationContext(
-                    addons = addons,
-                    debridAccounts = debridAccounts,
-                    preferences = prefs,
-                    startupFetchPolicy = StreamFetchPolicy.PLAYBACK_STARTUP,
-                ),
-            )
-            streamRepo.warmupStartupCandidates(
-                request = request,
-                trigger = ContentWarmupTrigger.NEXT_EPISODE_AUTOPLAY,
-            )
-        } catch (_: Exception) { }
-    }
+    PlaybackNextEpisodeWarmupEffect(
+        input = PlaybackNextEpisodeWarmupInput(
+            nextEpisodeInfo = nextEpisodeInfo,
+            showImdbId = showImdbId,
+            showTmdbId = showTmdbId,
+            seriesTitle = title,
+        ),
+        streamRepository = streamRepo,
+        addonRepository = addonRepo,
+        settingsViewModel = settingsViewModel,
+        networkMonitor = networkMonitor,
+    )
 
     // Countdown timer for next episode overlay
-    LaunchedEffect(showNextEpisodeOverlay, segmentUiState.allowNextCountdown) {
-        if (!showNextEpisodeOverlay || !segmentUiState.allowNextCountdown) return@LaunchedEffect
+    val allowCreditsCountdown = allowDetectedCreditsCountdown(
+        segmentAllowsCountdown = segmentUiState.allowNextCountdown,
+        nextEpisodeMode = settingsState.nextEpisodeMode,
+    )
+    LaunchedEffect(showNextEpisodeOverlay, allowCreditsCountdown) {
+        if (!showNextEpisodeOverlay || !allowCreditsCountdown) return@LaunchedEffect
         val initialCountdown = nextEpisodeCountdown.coerceIn(1, 15)
         for (i in initialCountdown downTo 1) {
             nextEpisodeCountdown = i
@@ -1529,13 +1475,16 @@ fun PlayerScreen(
 
                 val segmentPreferences = settingsViewModel.state.value
                 segmentController.onPlaybackState(
-                    input = PlaybackSegmentRuntimeInput(
+                    input = playbackSegmentRuntimeInput(
                         durationMs = state.durationMs,
                         positionMs = state.positionMs,
                         mediaId = mediaId,
                         mediaType = parsedMediaType,
                         seasonNumber = currentSeasonNumber,
                         episodeNumber = currentEpisodeNumber,
+                        showTmdbId = showTmdbId,
+                        resolvedTmdbId = tmdbId,
+                        showImdbId = showImdbId,
                         currentUrl = currentUrl,
                         title = currentTitle,
                         posterUrl = posterUrl,
@@ -3004,7 +2953,7 @@ fun PlayerScreen(
             NextEpisodeOverlay(
                 nextEpisodeInfo = nextEpisodeInfo!!,
                 countdown = nextEpisodeCountdown,
-                countdownActive = segmentUiState.allowNextCountdown,
+                countdownActive = allowCreditsCountdown,
                 extraSceneRemains = segmentUiState.extraSceneRemains,
                 isResolving = isResolvingNextEpisode,
                 onPlayNow = {

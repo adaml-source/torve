@@ -10,6 +10,10 @@ data class PlaybackSegmentConfig(
     val boundaryAgreementMs: Long = 2_500L,
     val maximumProviderSegmentMs: Long = 15L * 60_000L,
     val durationToleranceMs: Long = 1_500L,
+    /** Small container/encoder tail variance. This permits manual actions only. */
+    val minorRuntimeVarianceMs: Long = 5_000L,
+    /** A nearby release runtime can support a manual prompt, never automatic action. */
+    val manualSourceVariantVarianceMs: Long = 30_000L,
     val trustedBoundaryPaddingMs: Long = 350L,
     val highBoundaryPaddingMs: Long = 750L,
     val mediumBoundaryPaddingMs: Long = 1_500L,

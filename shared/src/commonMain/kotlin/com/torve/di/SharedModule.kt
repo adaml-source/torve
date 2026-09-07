@@ -102,6 +102,7 @@ import com.torve.domain.repository.WatchHistoryRepository
 import com.torve.domain.repository.WatchProgressRepository
 import com.torve.domain.repository.PlaybackSegmentRepository
 import com.torve.domain.player.PlaybackSegmentEngine
+import com.torve.data.playback.IntroDbSegmentMarkerProvider
 import com.torve.domain.repository.WatchlistRepository
 import com.torve.domain.stats.WatchStatsEngine
 import com.torve.domain.stats.WatchStatsRepository
@@ -377,7 +378,8 @@ val sharedModule = module {
     single<WatchStatsRepository> { WatchStatsRepositoryImpl(get(), get(), get(), get(), get()) }
     single { WatchSessionRecorder(get(), currentUserId = { get<UserIdProvider>().currentUserId() }) }
     single<PlaybackSegmentRepository> { PlaybackSegmentRepositoryImpl(get(), get()) }
-    single { PlaybackSegmentEngine(repository = get()) }
+    single { IntroDbSegmentMarkerProvider(httpClient = get()) }
+    single { PlaybackSegmentEngine(repository = get(), providers = listOf(get<IntroDbSegmentMarkerProvider>())) }
 
     // Preferences / Settings sync
     single<DeviceLocalSettingsRepository> { PreferencesRepositoryImpl(get(), get()) }

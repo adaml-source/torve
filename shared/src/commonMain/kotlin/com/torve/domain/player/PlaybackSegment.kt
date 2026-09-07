@@ -106,6 +106,11 @@ data class TimelineAlignmentAnchor(
 data class PlaybackSegmentRequest(
     val media: MediaIdentity,
     val seasonId: String? = null,
+    /** Canonical show IDs used only for provider lookup; never derived from a stream URL. */
+    val showTmdbId: Int? = null,
+    val showImdbId: String? = null,
+    val seasonNumber: Int? = null,
+    val episodeNumber: Int? = null,
     val chapters: List<MediaChapter> = emptyList(),
     val subtitleCues: List<SubtitleCueObservation> = emptyList(),
     val audioMatches: List<AudioMatchObservation> = emptyList(),
@@ -162,6 +167,8 @@ data class ProviderMarker(
     val providerVersion: Int,
     val referenceRuntimeMs: Long,
     val referenceFingerprint: String? = null,
+    /** False when the provider did not supply a trustworthy source-runtime boundary. */
+    val referenceRuntimeReliable: Boolean = true,
 )
 
 interface SegmentMarkerProvider {
