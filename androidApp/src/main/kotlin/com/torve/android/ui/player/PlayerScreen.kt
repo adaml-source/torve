@@ -2086,50 +2086,22 @@ fun PlayerScreen(
         playerRootFocusRequester.requestFocus()
     }
 
-    // Derive the coordinator uiMode from existing boolean state.
-    // This is the single source of truth for focus topology.
-    val derivedUiMode = when {
-        showResumePrompt -> PlaybackUiMode.ResumePrompt
-        showTrackDialog -> PlaybackUiMode.TrackSelection
-        showAudioDelayDialog -> PlaybackUiMode.AudioDelay
-        showSubtitleDelayDialog -> PlaybackUiMode.SubtitleDelay
-        showSubtitleSearch -> PlaybackUiMode.SubtitleSearch
-        showPictureFormatPicker -> PlaybackUiMode.PictureFormat
-        showEqualizerSheet -> PlaybackUiMode.Equalizer
-        showDevicePicker -> PlaybackUiMode.DevicePicker
-        showNextEpisodeOverlay -> PlaybackUiMode.NextEpisode
-        showControls -> PlaybackUiMode.ControlsVisible
-        else -> PlaybackUiMode.ChromeHidden
-    }
-    LaunchedEffect(derivedUiMode) {
-        focusCoordinator.uiMode = derivedUiMode
-    }
-
-    // State-driven focus restoration: when uiMode changes, restore focus
-    // through the coordinator. Only targets currently-registered active regions.
-    LaunchedEffect(derivedUiMode, topMenuFocusTick) {
-        withFrameNanos { }
-        when (derivedUiMode) {
-            is PlaybackUiMode.ChromeHidden -> {
-                // A focused control is removed when chrome auto-hides. Some
-                // Fire OS versions briefly leave the window without a focus
-                // owner, so retry across frames until the persistent surface
-                // owns remote input again.
-                repeat(4) {
-                    runCatching { playerRootFocusRequester.requestFocus() }
-                    withFrameNanos { }
-                }
-            }
-            is PlaybackUiMode.ControlsVisible -> {
-                val restored = focusCoordinator.restoreFocusForCurrentMode()
-                if (isTv && !restored) {
-                    runCatching { playerRootFocusRequester.requestFocus() }
-                }
-            }
-            // Modal overlays handle their own initial focus internally.
-            else -> Unit
-        }
-    }
+    PlaybackFocusModeEffect(
+        showResumePrompt = showResumePrompt,
+        showTrackDialog = showTrackDialog,
+        showAudioDelayDialog = showAudioDelayDialog,
+        showSubtitleDelayDialog = showSubtitleDelayDialog,
+        showSubtitleSearch = showSubtitleSearch,
+        showPictureFormatPicker = showPictureFormatPicker,
+        showEqualizerSheet = showEqualizerSheet,
+        showDevicePicker = showDevicePicker,
+        showNextEpisodeOverlay = showNextEpisodeOverlay,
+        showControls = showControls,
+        topMenuFocusTick = topMenuFocusTick,
+        isTv = isTv,
+        coordinator = focusCoordinator,
+        playerSurfaceFocusRequester = playerRootFocusRequester,
+    )
 
     val handoffTargets = syncCoordinator.targetDevices()
         .filter { it.deviceType.contains("tv", ignoreCase = true) }
@@ -2347,10 +2319,26 @@ fun PlayerScreen(
         },
     )
 
+    val playerModalVisible = errorMessage != null ||
+        showTrackDialog ||
+        showAudioDelayDialog ||
+        showSubtitleDelayDialog ||
+        showPictureFormatPicker ||
+        showEqualizerSheet ||
+        showDevicePicker ||
+        showResumePrompt ||
+        showNextEpisodeOverlay ||
+        showSubtitleSearch
+
     Box(
         modifier = Modifier
             .fillMaxSize()
             .focusRequester(playerRootFocusRequester)
+            .onFocusChanged {
+                if (it.isFocused) {
+                    focusCoordinator.reportFocusedRegion(PlaybackFocusRegion.PlayerSurface)
+                }
+            }
             .focusable()
             .onPreviewKeyEvent { keyEvent ->
                 // Subtitle search intercepts Back before the player's own handler.
@@ -2394,17 +2382,6 @@ fun PlayerScreen(
                 if (keyEvent.type != KeyEventType.KeyDown) {
                     return@onPreviewKeyEvent false
                 }
-                val playerModalVisible = errorMessage != null ||
-                    showTrackDialog ||
-                    showAudioDelayDialog ||
-                    showSubtitleDelayDialog ||
-                    showPictureFormatPicker ||
-                    showEqualizerSheet ||
-                    showDevicePicker ||
-                    showResumePrompt ||
-                    showNextEpisodeOverlay ||
-                    showSubtitleSearch
-
                 // The remote Menu key must always expose the full, focusable playback
                 // controls for movies and episodes. Keep modal ownership intact so Menu
                 // cannot steal focus from a dialog that is already on screen.
@@ -2417,6 +2394,19 @@ fun PlayerScreen(
                 }
 
                 if (playerModalVisible && keyEvent.key != Key.Back) {
+                    return@onPreviewKeyEvent false
+                }
+
+                // The root owns hidden-chrome shortcuts, but a visible segment
+                // action must receive OK/Enter itself or the button cannot click.
+                if (
+                    segmentActionOwnsActivationKey(
+                        isTv = isTv,
+                        currentRegion = focusCoordinator.currentRegion,
+                        key = keyEvent.key,
+                    )
+                ) {
+                    controlsInteractionTick++
                     return@onPreviewKeyEvent false
                 }
 
@@ -2935,6 +2925,11 @@ fun PlayerScreen(
                 segments = skipSegments,
                 positionMs = currentPosition,
                 focusCoordinator = focusCoordinator,
+                autoFocus = shouldAutoFocusSegmentAction(
+                    isTv = isTv,
+                    currentRegion = focusCoordinator.currentRegion,
+                    blockingOverlayVisible = playerModalVisible,
+                ),
                 onSkip = { segment ->
                     segmentController.stateMachine.manualSkipTarget(segment)?.let { target ->
                         performSeekTo(targetMs = target, userInitiated = false)

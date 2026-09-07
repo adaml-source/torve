@@ -1,5 +1,6 @@
 package com.torve.android.ui.player
 
+import androidx.compose.ui.input.key.Key
 import org.junit.Test
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -49,6 +50,65 @@ class PlaybackFocusCoordinatorTest {
             coordinator.resolveDirectionalMove(FocusDirection.Up),
         )
         assertNull(coordinator.resolveDirectionalMove(FocusDirection.Down))
+
+        coordinator.registerRegion(FocusRegionHandle(PlaybackFocusRegion.SegmentAction) { true })
+        coordinator.reportFocusedRegion(PlaybackFocusRegion.PlayerSurface)
+        assertEquals(
+            PlaybackFocusRegion.SegmentAction,
+            coordinator.resolveDirectionalMove(FocusDirection.Down),
+        )
+    }
+
+    @Test
+    fun focusedSegmentActionOwnsRemoteActivationKeys() {
+        for (key in listOf(Key.DirectionCenter, Key.Enter, Key.NumPadEnter)) {
+            assertTrue(
+                segmentActionOwnsActivationKey(
+                    isTv = true,
+                    currentRegion = PlaybackFocusRegion.SegmentAction,
+                    key = key,
+                ),
+            )
+        }
+        assertFalse(
+            segmentActionOwnsActivationKey(
+                isTv = true,
+                currentRegion = PlaybackFocusRegion.PlayerSurface,
+                key = Key.DirectionCenter,
+            ),
+        )
+        assertFalse(
+            segmentActionOwnsActivationKey(
+                isTv = false,
+                currentRegion = PlaybackFocusRegion.SegmentAction,
+                key = Key.DirectionCenter,
+            ),
+        )
+    }
+
+    @Test
+    fun segmentActionAutoFocusOnlyTakesUnobstructedTvPlaybackFocus() {
+        assertTrue(
+            shouldAutoFocusSegmentAction(
+                isTv = true,
+                currentRegion = PlaybackFocusRegion.PlayerSurface,
+                blockingOverlayVisible = false,
+            ),
+        )
+        assertFalse(
+            shouldAutoFocusSegmentAction(
+                isTv = true,
+                currentRegion = PlaybackFocusRegion.TransportControls,
+                blockingOverlayVisible = false,
+            ),
+        )
+        assertFalse(
+            shouldAutoFocusSegmentAction(
+                isTv = true,
+                currentRegion = PlaybackFocusRegion.PlayerSurface,
+                blockingOverlayVisible = true,
+            ),
+        )
     }
 
     @Test

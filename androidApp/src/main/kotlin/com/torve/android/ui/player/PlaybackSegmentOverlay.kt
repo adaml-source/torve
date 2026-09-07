@@ -10,18 +10,41 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import com.torve.android.BuildConfig
 import com.torve.android.R
 import com.torve.domain.player.PlaybackSegment
 import com.torve.domain.player.SegmentType
+
+internal fun segmentActionOwnsActivationKey(
+    isTv: Boolean,
+    currentRegion: PlaybackFocusRegion,
+    key: androidx.compose.ui.input.key.Key,
+): Boolean = isTv &&
+    currentRegion == PlaybackFocusRegion.SegmentAction &&
+    key in setOf(
+        androidx.compose.ui.input.key.Key.DirectionCenter,
+        androidx.compose.ui.input.key.Key.Enter,
+        androidx.compose.ui.input.key.Key.NumPadEnter,
+    )
+
+internal fun shouldAutoFocusSegmentAction(
+    isTv: Boolean,
+    currentRegion: PlaybackFocusRegion,
+    blockingOverlayVisible: Boolean,
+): Boolean = isTv &&
+    currentRegion == PlaybackFocusRegion.PlayerSurface &&
+    !blockingOverlayVisible
 
 @Composable
 internal fun PlaybackSegmentOverlay(
@@ -29,18 +52,30 @@ internal fun PlaybackSegmentOverlay(
     segments: List<PlaybackSegment>,
     positionMs: Long,
     focusCoordinator: PlaybackFocusCoordinator,
+    autoFocus: Boolean,
     onSkip: (PlaybackSegment) -> Unit,
 ) {
     activeSegment?.let { segment ->
         val requester = remember(segment.id) { FocusRequester() }
         RegisterFocusRegion(focusCoordinator, PlaybackFocusRegion.SegmentAction) {
-            runCatching { requester.requestFocus() }.isSuccess
+            runCatching { requester.requestFocus(); true }.getOrDefault(false)
+        }
+        LaunchedEffect(segment.id, autoFocus) {
+            if (autoFocus) {
+                // Wait until the conditional button has a focus target in the
+                // committed tree. A second frame covers slower Fire TV layouts.
+                repeat(2) {
+                    withFrameNanos { }
+                    if (runCatching { requester.requestFocus(); true }.getOrDefault(false)) return@LaunchedEffect
+                }
+            }
         }
         Button(
             onClick = { onSkip(segment) },
             modifier = Modifier
                 .padding(end = 24.dp, bottom = 80.dp)
                 .focusRequester(requester)
+                .testTag(PLAYBACK_SEGMENT_ACTION_TEST_TAG)
                 .onFocusChanged {
                     if (it.isFocused) focusCoordinator.reportFocusedRegion(PlaybackFocusRegion.SegmentAction, segment.id)
                 }
@@ -82,6 +117,8 @@ internal fun PlaybackSegmentOverlay(
         }
     }
 }
+
+internal const val PLAYBACK_SEGMENT_ACTION_TEST_TAG = "playback_segment_action"
 
 private fun debugTime(ms: Long): String {
     val seconds = (ms / 1_000L).coerceAtLeast(0L)
