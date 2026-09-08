@@ -169,6 +169,8 @@ data class ProviderMarker(
     val referenceFingerprint: String? = null,
     /** False when the provider did not supply a trustworthy source-runtime boundary. */
     val referenceRuntimeReliable: Boolean = true,
+    /** The provider explicitly declares that this segment continues to media EOF. */
+    val endsAtMediaEnd: Boolean = false,
 )
 
 interface SegmentMarkerProvider {

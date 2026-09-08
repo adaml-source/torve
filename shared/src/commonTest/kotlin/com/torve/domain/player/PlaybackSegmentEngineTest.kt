@@ -140,6 +140,77 @@ class PlaybackSegmentEngineTest {
     }
 
     @Test
+    fun eofAnchoredCreditsWithoutSourceRuntimeSurfaceManualPromptWithoutCountdown() = runTest {
+        val provider = provider(
+            ProviderMarker(
+                type = SegmentType.CREDITS,
+                startMs = 1_162_000,
+                endMs = RUNTIME,
+                confidence = 0.79,
+                providerId = "theintrodb-v3",
+                providerVersion = 1,
+                referenceRuntimeMs = RUNTIME,
+                referenceRuntimeReliable = false,
+                endsAtMediaEnd = true,
+            ),
+        )
+
+        val credits = PlaybackSegmentEngine(MemoryRepository(), listOf(provider))
+            .analyze(request())
+            .segments
+            .single()
+        val state = PlaybackSegmentStateMachine().update(
+            positionMs = credits.startMs,
+            durationMs = RUNTIME,
+            segments = listOf(credits),
+            settings = PlaybackSegmentSettings(playNextMode = SegmentActionMode.AUTOMATIC),
+        )
+
+        assertTrue(credits.confidence >= PlaybackSegmentConfig().manualActionThreshold)
+        assertTrue(credits.confidence < PlaybackSegmentConfig().automaticActionThreshold)
+        assertTrue(state.showNextPrompt)
+        assertFalse(state.allowNextCountdown)
+    }
+
+    @Test
+    fun conflictingEofCreditProvidersChooseLaterBoundaryAndRemainManualOnly() = runTest {
+        val earlier = provider(
+            ProviderMarker(
+                SegmentType.CREDITS,
+                1_117_000,
+                RUNTIME,
+                0.82,
+                "introdb-community",
+                1,
+                referenceRuntimeMs = RUNTIME,
+            ),
+        )
+        val later = provider(
+            ProviderMarker(
+                SegmentType.CREDITS,
+                1_162_000,
+                RUNTIME,
+                0.79,
+                "theintrodb-v3",
+                1,
+                referenceRuntimeMs = RUNTIME,
+                referenceRuntimeReliable = false,
+                endsAtMediaEnd = true,
+            ),
+        )
+
+        val credits = PlaybackSegmentEngine(MemoryRepository(), listOf(earlier, later))
+            .analyze(request())
+            .segments
+            .single()
+
+        assertEquals(1_162_000L, credits.startMs)
+        assertTrue(credits.confidence >= PlaybackSegmentConfig().manualActionThreshold)
+        assertTrue(credits.confidence < PlaybackSegmentConfig().automaticActionThreshold)
+        assertEquals(SegmentEvidenceSource.CONSENSUS, credits.source)
+    }
+
+    @Test
     fun providerMarkersAreClampedRejectedAndCannotManipulatePlayback() = runTest {
         val provider = provider(
             ProviderMarker(SegmentType.INTRO, -1, 20_000, 1.0, "bad", 1, RUNTIME, "source-a"),

@@ -16,7 +16,7 @@ class PlaybackSegmentEngine(
     private val providerTimeoutMs: Long = 1_500L,
 ) {
     companion object {
-        const val CURRENT_ANALYSIS_VERSION = 2
+        const val CURRENT_ANALYSIS_VERSION = 3
         private const val MAX_PROVIDER_MARKERS = 64
         private const val MAX_LOCAL_OBSERVATIONS = 20
     }
@@ -215,6 +215,15 @@ class PlaybackSegmentEngine(
                 alignmentConfidence = request.alignmentAnchors.map { it.confidence }.average().coerceIn(0.0, 1.0)
                 details = "perceptual-anchor-alignment"
             }
+            marker.endsAtMediaEnd && !marker.referenceRuntimeReliable &&
+                marker.type in setOf(SegmentType.CREDITS, SegmentType.FINAL_CREDITS) -> {
+                // The start belongs to an unknown release, but the provider has
+                // explicitly anchored the segment to EOF. This can surface a
+                // manual prompt and can never reach the automatic threshold alone.
+                aligned = marker.startMs to current.runtimeMs
+                alignmentConfidence = config.eofAnchoredUnknownRuntimeConfidence
+                details = "provider-eof-anchor-manual-only"
+            }
             !marker.referenceRuntimeReliable -> {
                 aligned = marker.startMs to marker.endMs
                 alignmentConfidence = 0.52
@@ -285,7 +294,8 @@ class PlaybackSegmentEngine(
         evidence.sortedBy { it.evidence.startMs }.forEach { item ->
             val cluster = clusters.firstOrNull { existing ->
                 existing.first().type == item.type && existing.any { candidate ->
-                    boundariesAgree(candidate.evidence, item.evidence)
+                    boundariesAgree(candidate.evidence, item.evidence) ||
+                        eofCreditReleaseVariants(candidate, item, media.runtimeMs)
                 }
             }
             if (cluster == null) clusters += mutableListOf(item) else cluster += item
@@ -301,10 +311,11 @@ class PlaybackSegmentEngine(
             val ends = independent.map { it.evidence.endMs }
             val disagreement = (starts.maxOrNull()!! - starts.minOrNull()!! > config.boundaryAgreementMs) ||
                 (ends.maxOrNull()!! - ends.minOrNull()!! > config.boundaryAgreementMs)
-            if (disagreement) confidence *= 0.68
+            if (disagreement) confidence *= config.materialBoundaryDisagreementPenalty
             val type = cluster.first().type
             val start = when (type) {
-                SegmentType.CREDITS, SegmentType.FINAL_CREDITS -> weightedQuantile(starts, 0.65)
+                SegmentType.CREDITS, SegmentType.FINAL_CREDITS ->
+                    if (disagreement) starts.max() else weightedQuantile(starts, 0.65)
                 else -> weightedMedian(starts)
             }
             val end = when (type) {
@@ -381,6 +392,19 @@ class PlaybackSegmentEngine(
     private fun boundariesAgree(a: SegmentEvidence, b: SegmentEvidence): Boolean =
         abs(a.startMs - b.startMs) <= config.boundaryAgreementMs * 2 &&
             abs(a.endMs - b.endMs) <= config.boundaryAgreementMs * 2
+
+    private fun eofCreditReleaseVariants(
+        first: TypedEvidence,
+        second: TypedEvidence,
+        runtimeMs: Long,
+    ): Boolean {
+        if (first.type !in setOf(SegmentType.CREDITS, SegmentType.FINAL_CREDITS)) return false
+        if (second.type != first.type) return false
+        val firstEndsAtEof = runtimeMs - first.evidence.endMs in 0..config.minorRuntimeVarianceMs
+        val secondEndsAtEof = runtimeMs - second.evidence.endMs in 0..config.minorRuntimeVarianceMs
+        return firstEndsAtEof && secondEndsAtEof &&
+            abs(first.evidence.startMs - second.evidence.startMs) <= config.creditSourceVariantClusteringMs
+    }
 
     private fun typeForChapter(evidence: SegmentEvidence): SegmentType {
         val label = evidence.details.orEmpty()

@@ -16,13 +16,15 @@ The former `SkipSegmentDetector` generated an intro at the start of most episode
 
 1. exact fingerprint cache and locally validated markers;
 2. validated embedded chapters enumerated from mpv container metadata;
-3. bounded external `SegmentMarkerProvider` implementations, currently the read-only IntroDB community aggregate;
+3. bounded external `SegmentMarkerProvider` implementations for the independent IntroDB and TheIntroDB community feeds;
 4. optional subtitle, audio, and sampled-visual detectors;
 5. season consensus as a prior.
 
 Providers and optional detectors fail independently. All remote timestamps are validated before fusion. Analysis failure returns an empty timeline and cannot stop playback.
 
-IntroDB is queried by canonical show IMDb ID plus season and episode with a 1.2-second budget. Responses are capped at 64 KiB and identity, count, confidence, ordering, and runtime bounds are validated. Its accepted outro end supplies the release-runtime anchor. Exact and near-exact runtimes can show a manual action; variants within 30 seconds retain the original timestamps at barely manual confidence and never enable automatic action. Torve never adds the runtime delta to all markers. Larger or unanchored differences stay below the manual-action threshold. Results are cached under the exact Torve source fingerprint. Intro data is provided by IntroDB (`introdb.app`).
+IntroDB is queried by canonical show IMDb ID plus season and episode. TheIntroDB v3 is queried independently using the canonical TMDB show ID where available, with IMDb as a fallback, and can return multiple intro, recap, credits, and preview segments. Each request has a 1.2-second budget. Responses are capped at 64 KiB and identity, ordering, count, and runtime bounds are validated.
+
+An explicit provider runtime remains the preferred source-alignment anchor. If TheIntroDB declares that credits continue to media EOF but omits its reference runtime, Torve may surface the marker at the medium manual-action threshold. That evidence cannot start an automatic countdown by itself. Exact and near-exact runtimes can show a manual action; nearby variants retain original timestamps and never enable automatic action. Torve never adds a runtime delta to all markers. Larger unanchored differences stay below the manual threshold. Results are cached under the exact Torve source fingerprint and algorithm version. No provider SDK or new dependency is included; both integrations use the existing Ktor client.
 
 Audio and visual APIs accept compact observations rather than raw media, keeping decoding platform-specific and optional. Audio matches are track-scoped. Visual analysis is designed for sampled observations around candidate windows. Subtitle analysis recognizes localized recap phrases and treats subtitle disappearance as supporting evidence only.
 

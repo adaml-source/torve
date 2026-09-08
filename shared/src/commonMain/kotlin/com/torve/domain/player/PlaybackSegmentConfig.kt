@@ -8,12 +8,17 @@ data class PlaybackSegmentConfig(
     val mediumThreshold: Double = 0.62,
     val lowThreshold: Double = 0.35,
     val boundaryAgreementMs: Long = 2_500L,
+    /** EOF credit markers this far apart may be release variants of one boundary. */
+    val creditSourceVariantClusteringMs: Long = 90_000L,
+    val materialBoundaryDisagreementPenalty: Double = 0.70,
     val maximumProviderSegmentMs: Long = 15L * 60_000L,
     val durationToleranceMs: Long = 1_500L,
     /** Small container/encoder tail variance. This permits manual actions only. */
     val minorRuntimeVarianceMs: Long = 5_000L,
     /** A nearby release runtime can support a manual prompt, never automatic action. */
     val manualSourceVariantVarianceMs: Long = 30_000L,
+    /** EOF-anchored credits without a source runtime may only support manual interaction. */
+    val eofAnchoredUnknownRuntimeConfidence: Double = 0.80,
     val trustedBoundaryPaddingMs: Long = 350L,
     val highBoundaryPaddingMs: Long = 750L,
     val mediumBoundaryPaddingMs: Long = 1_500L,
