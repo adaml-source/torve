@@ -188,6 +188,8 @@ private fun TvNavRailFocusHarness(
             activeRoute = selectedRoute,
             isExpanded = true,
             railFocusRequester = railFocusRequester,
+            preferredEntryRoute = TvRoutes.MOVIES,
+            preferredEntryRequestNonce = 1,
             onRailFocusChanged = {},
             onMoveToContent = { route ->
                 selectedRoute = route
