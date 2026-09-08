@@ -12,6 +12,7 @@ import com.torve.data.trakt.TraktHistoryEpisodeEntry
 import com.torve.data.trakt.TraktHistorySeasonEntry
 import com.torve.data.trakt.TraktHistoryShow
 import com.torve.data.trakt.TraktIds
+import com.torve.data.trakt.shouldApplyRemoteProgress
 import com.torve.data.trakt.api.TraktAuthorizedApi
 import com.torve.data.trakt.repo.TraktSyncRepository
 import com.torve.db.TorveDatabase
@@ -267,72 +268,99 @@ class WatchProgressRepositoryImpl(
     }
 
     override suspend fun syncFromTrakt() = withContext(ioDispatcher) {
-        try {
-            val playbackItems = traktApi.getPlaybackProgress()
-            if (playbackItems.isEmpty()) return@withContext
+        val playbackItems = traktApi.getPlaybackProgress()
+        if (playbackItems.isEmpty()) return@withContext
 
-            val userId = userIdProvider.currentUserId()
-            val localIds = database.torveQueries.getAllProgress(userId = userId).executeAsList()
-                .map { it.media_id }
-                .toSet()
+        val userId = userIdProvider.currentUserId()
+        val localById = database.torveQueries.getAllProgress(userId = userId).executeAsList()
+            .associateBy { it.media_id }
+        val episodeRuntimeCache = mutableMapOf<Pair<Int, Int>, Map<Int, Long>>()
 
-            for (item in playbackItems) {
-                val media = if (item.type == "movie") item.movie else item.show
-                val ids = media?.ids ?: continue
-                val tmdbId = ids.tmdb ?: continue
-                val mediaId = tmdbId.toString()
+        for (item in playbackItems) {
+            val media = if (item.type == "movie") item.movie else item.show
+            val ids = media?.ids ?: continue
+            val tmdbId = ids.tmdb ?: continue
+            val mediaId = tmdbId.toString()
+            val isMovie = item.type == "movie"
+            if (item.progress <= 0.0 || item.progress >= 100.0) continue
 
-                if (mediaId in localIds) continue
+            val updatedAt = runCatching {
+                Instant.parse(item.pausedAt).toEpochMilliseconds()
+            }.getOrNull() ?: continue
+            val local = localById[mediaId]
+            if (!shouldApplyRemoteProgress(local?.updated_at, updatedAt)) continue
 
-                // Estimate position/duration from Trakt progress percentage
-                // Use a standard duration estimate (120min for movies, 45min for episodes)
-                val isMovie = item.type == "movie"
-                val estimatedDurationMs = if (isMovie) 120L * 60 * 1000 else 45L * 60 * 1000
-                val positionMs = (item.progress / 100.0 * estimatedDurationMs).toLong()
-
-                val updatedAt = try {
-                    Instant.parse(item.pausedAt).toEpochMilliseconds()
-                } catch (_: Exception) {
-                    Clock.System.now().toEpochMilliseconds()
+            var posterUrl: String? = local?.poster_url
+            var backdropUrl: String? = local?.backdrop_url
+            var durationMs = local?.duration_ms?.takeIf { it > 0L }
+            runCatching {
+                if (isMovie) {
+                    val detail = tmdbClient.getMovieDetail(tmdbId)
+                    posterUrl = TmdbMappers.posterUrl(detail.posterPath) ?: posterUrl
+                    backdropUrl = TmdbMappers.backdropUrl(detail.backdropPath) ?: backdropUrl
+                    durationMs = detail.runtime?.takeIf { it > 0 }?.toLong()?.times(60_000L)
+                        ?: durationMs
+                } else {
+                    val detail = tmdbClient.getTvDetail(tmdbId)
+                    posterUrl = TmdbMappers.posterUrl(detail.posterPath) ?: posterUrl
+                    backdropUrl = TmdbMappers.backdropUrl(detail.backdropPath) ?: backdropUrl
+                    durationMs = resolveEpisodeRuntimeMs(
+                        tmdbId = tmdbId,
+                        seasonNumber = item.episode?.season,
+                        episodeNumber = item.episode?.number,
+                        showFallbackRuntimes = detail.episodeRunTime,
+                        cache = episodeRuntimeCache,
+                    ) ?: durationMs
                 }
-
-                // Fetch poster from TMDB
-                var posterUrl: String? = null
-                var backdropUrl: String? = null
-                try {
-                    if (isMovie) {
-                        val detail = tmdbClient.getMovieDetail(tmdbId)
-                        posterUrl = TmdbMappers.posterUrl(detail.posterPath)
-                        backdropUrl = TmdbMappers.backdropUrl(detail.backdropPath)
-                    } else {
-                        val detail = tmdbClient.getTvDetail(tmdbId)
-                        posterUrl = TmdbMappers.posterUrl(detail.posterPath)
-                        backdropUrl = TmdbMappers.backdropUrl(detail.backdropPath)
-                    }
-                } catch (_: Exception) { /* non-critical */ }
-
-                val mediaType = if (isMovie) "movie" else "series"
-                database.torveQueries.upsertProgress(
-                    user_id = userId,
-                    media_id = mediaId,
-                    media_type = mediaType,
-                    title = media.title,
-                    poster_url = posterUrl,
-                    backdrop_url = backdropUrl,
-                    position_ms = positionMs,
-                    duration_ms = estimatedDurationMs,
-                    season_number = item.episode?.season?.toLong(),
-                    episode_number = item.episode?.number?.toLong(),
-                    show_title = if (!isMovie) media.title else null,
-                    updated_at = updatedAt,
-                )
             }
-            _progressChanges.tryEmit(Unit)
-        } catch (_: Exception) {
-            // Non-critical — don't block UI
+
+            val resolvedDurationMs = durationMs ?: if (isMovie) {
+                DEFAULT_IMPORTED_MOVIE_DURATION_MS
+            } else {
+                DEFAULT_IMPORTED_EPISODE_DURATION_MS
+            }
+            val positionMs = (item.progress.coerceIn(0.0, 100.0) / 100.0 * resolvedDurationMs)
+                .toLong()
+            database.torveQueries.upsertProgress(
+                user_id = userId,
+                media_id = mediaId,
+                media_type = if (isMovie) "movie" else "series",
+                title = media.title.ifBlank { local?.title.orEmpty() },
+                poster_url = posterUrl,
+                backdrop_url = backdropUrl,
+                position_ms = positionMs,
+                duration_ms = resolvedDurationMs,
+                season_number = item.episode?.season?.toLong(),
+                episode_number = item.episode?.number?.toLong(),
+                show_title = if (!isMovie) media.title.ifBlank { local?.show_title } else null,
+                updated_at = updatedAt,
+            )
         }
+        _progressChanges.tryEmit(Unit)
     }
 
+    private suspend fun resolveEpisodeRuntimeMs(
+        tmdbId: Int,
+        seasonNumber: Int?,
+        episodeNumber: Int?,
+        showFallbackRuntimes: List<Int>,
+        cache: MutableMap<Pair<Int, Int>, Map<Int, Long>>,
+    ): Long? {
+        val season = seasonNumber?.takeIf { it >= 0 }
+        val episode = episodeNumber?.takeIf { it > 0 }
+        if (season != null && episode != null) {
+            val runtimes = cache.getOrPut(tmdbId to season) {
+                runCatching {
+                    tmdbClient.getTvSeasonDetail(tmdbId, season).episodes.mapNotNull { value ->
+                        val runtime = value.runtime?.takeIf { it > 0 } ?: return@mapNotNull null
+                        value.episodeNumber to runtime.toLong().times(60_000L)
+                    }.toMap()
+                }.getOrDefault(emptyMap())
+            }
+            runtimes[episode]?.let { return it }
+        }
+        return showFallbackRuntimes.firstOrNull { it > 0 }?.toLong()?.times(60_000L)
+    }
     private suspend fun resolveImdbId(
         mediaId: String,
         mediaType: MediaType,
@@ -345,5 +373,10 @@ class WatchProgressRepositoryImpl(
                 MediaType.SERIES -> tmdbClient.getTvDetail(tmdbId).externalIds?.imdbId
             }
         }.getOrNull()
+    }
+
+    private companion object {
+        const val DEFAULT_IMPORTED_EPISODE_DURATION_MS = 45L * 60L * 1_000L
+        const val DEFAULT_IMPORTED_MOVIE_DURATION_MS = 120L * 60L * 1_000L
     }
 }

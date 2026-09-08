@@ -272,6 +272,45 @@ data class TraktPlaybackEpisode(
     val ids: TraktIds? = null,
 )
 
+/**
+ * Response shape for `GET /sync/watched/shows?extended=progress`.
+ *
+ * Trakt stopped returning season progress by default in July 2026. Keep this
+ * model separate from history events: history is a list of plays, while this
+ * is the authoritative watched set used to rebuild episode state on a new
+ * device.
+ */
+@Serializable
+data class TraktWatchedShowResponse(
+    val plays: Int = 0,
+    @SerialName("last_watched_at") val lastWatchedAt: String = "",
+    @SerialName("last_updated_at") val lastUpdatedAt: String = "",
+    @SerialName("reset_at") val resetAt: String? = null,
+    val show: TraktWatchedShowMedia? = null,
+    val seasons: List<TraktWatchedSeason> = emptyList(),
+)
+
+@Serializable
+data class TraktWatchedShowMedia(
+    val title: String = "",
+    val year: Int? = null,
+    val runtime: Int? = null,
+    val ids: TraktIds? = null,
+)
+
+@Serializable
+data class TraktWatchedSeason(
+    val number: Int = 0,
+    val episodes: List<TraktWatchedEpisode> = emptyList(),
+)
+
+@Serializable
+data class TraktWatchedEpisode(
+    val number: Int = 0,
+    val plays: Int = 0,
+    @SerialName("last_watched_at") val lastWatchedAt: String = "",
+)
+
 // Public rating (no auth required — just trakt-api-key header)
 @Serializable
 data class TraktPublicRating(

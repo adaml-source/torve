@@ -16,6 +16,7 @@ import com.torve.data.trakt.TraktRatingResponse
 import com.torve.data.trakt.TraktServerException
 import com.torve.data.trakt.TraktWatchlistBody
 import com.torve.data.trakt.TraktWatchlistItemResponse
+import com.torve.data.trakt.TraktWatchedShowResponse
 import com.torve.data.trakt.TraktTokens
 import com.torve.data.trakt.auth.TraktTokenStore
 import kotlinx.coroutines.sync.Mutex
@@ -46,6 +47,9 @@ class TraktAuthorizedApi(
 
     suspend fun getHistory(limit: Int = 100): List<TraktHistoryResponse> =
         executeWithRefresh { token -> traktClient.getHistory(token, limit) }
+
+    suspend fun getWatchedShows(): List<TraktWatchedShowResponse> =
+        executeWithRefresh { token -> traktClient.getWatchedShows(token) }
 
     suspend fun getPlaybackProgress(): List<TraktPlaybackResponse> =
         executeWithRefresh { token -> traktClient.getPlaybackProgress(token) }

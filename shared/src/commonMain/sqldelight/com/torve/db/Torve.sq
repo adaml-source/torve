@@ -981,6 +981,12 @@ DELETE FROM watch_history WHERE user_id = :userId AND id = :historyId;
 clearAllHistory:
 DELETE FROM watch_history WHERE user_id = :userId;
 
+clearImportedTraktSeriesHistory:
+DELETE FROM watch_history
+WHERE user_id = :userId
+  AND media_type = 'series'
+  AND id LIKE 'trakt_%';
+
 clearAllHistoryForAllUsers:
 DELETE FROM watch_history;
 

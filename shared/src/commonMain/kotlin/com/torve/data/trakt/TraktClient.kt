@@ -42,6 +42,8 @@ class TraktClient(
         // (which surfaces as 429 / Cloudflare error 1015).
         private const val USER_AGENT = "Torve/1.0 (+https://torve.app)"
         private const val PUBLIC_AUTH_SCOPE = "public"
+        internal const val WATCHED_SHOW_PAGE_SIZE = 100
+        internal const val MAX_WATCHED_SHOW_PAGES = 100
     }
 
     var clientId: String = DEFAULT_PUBLIC_CLIENT_ID
@@ -324,6 +326,39 @@ class TraktClient(
             path = "/sync/watched/$mediaType",
             accessToken = accessToken,
         ).also { ensureSuccess(it) }.body
+    }
+
+    /**
+     * Loads the complete watched-show set. `extended=progress` is required by
+     * Trakt for season/episode rows, and the endpoint has required pagination
+     * since July 2026. We stop at the advertised final page when available and
+     * otherwise continue until Trakt returns an empty page.
+     */
+    suspend fun getWatchedShows(accessToken: String): List<TraktWatchedShowResponse> {
+        val watched = mutableListOf<TraktWatchedShowResponse>()
+        for (page in 1..MAX_WATCHED_SHOW_PAGES) {
+            val response = getRaw(
+                path = "/sync/watched/shows",
+                accessToken = accessToken,
+                query = listOf(
+                    "page" to page.toString(),
+                    "limit" to WATCHED_SHOW_PAGE_SIZE.toString(),
+                    "extended" to "progress",
+                ),
+            )
+            val pageItems: List<TraktWatchedShowResponse> = decodeTraktBody(response)
+            if (pageItems.isEmpty()) break
+            watched += pageItems
+
+            val pageCount = response.headers.entries
+                .firstOrNull { (name, _) -> name.equals("X-Pagination-Page-Count", ignoreCase = true) }
+                ?.value
+                ?.substringBefore(',')
+                ?.trim()
+                ?.toIntOrNull()
+            if (pageCount != null && page >= pageCount) break
+        }
+        return watched
     }
 
     suspend fun addToHistory(accessToken: String, body: TraktHistoryBody) {

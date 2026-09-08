@@ -14,6 +14,11 @@ import com.torve.data.trakt.TraktHistoryEpisodeEntry
 import com.torve.data.trakt.TraktHistorySeasonEntry
 import com.torve.data.trakt.TraktHistoryShow
 import com.torve.data.trakt.TraktIds
+import com.torve.data.trakt.TraktWatchedShowResponse
+import com.torve.data.trakt.episodeMarkers
+import com.torve.data.trakt.latestEpisodeMarker
+import com.torve.data.trakt.shouldApplyRemoteProgress
+import com.torve.data.trakt.traktWatchedHistoryId
 import com.torve.data.trakt.api.TraktAuthorizedApi
 import com.torve.data.trakt.repo.TraktSyncRepository
 import com.torve.db.TorveDatabase
@@ -156,17 +161,15 @@ class WatchHistoryRepositoryImpl(
     }
 
     override suspend fun syncFromTrakt() = withContext(ioDispatcher) {
-        try {
-            val historyItems = traktApi.getHistory(limit = 100)
-            if (historyItems.isEmpty()) return@withContext
+        val historyItems = traktApi.getHistory(limit = 100)
 
-            val userId = userIdProvider.currentUserId()
-            val localIds = queries.getAllHistory(userId = userId).executeAsList()
-                .map { it.id }
-                .toSet()
-            val episodeRuntimeCache = mutableMapOf<Pair<Int, Int>, Map<Int, Long>>()
+        val userId = userIdProvider.currentUserId()
+        val localIds = queries.getAllHistory(userId = userId).executeAsList()
+            .map { it.id }
+            .toSet()
+        val episodeRuntimeCache = mutableMapOf<Pair<Int, Int>, Map<Int, Long>>()
 
-            for (item in historyItems) {
+        for (item in historyItems) {
                 val traktId = "trakt_${item.id}"
                 val alreadyImported = traktId in localIds
 
@@ -247,9 +250,73 @@ class WatchHistoryRepositoryImpl(
                     importDiscriminator = item.id.takeIf { it > 0L }?.toString() ?: watchedAt.toString(),
                     runtimeMs = runtimeMs,
                 )
+        }
+
+        // `/sync/history` is event based and intentionally bounded above.
+        // It cannot rebuild a long-running show's complete watched state.
+        // The paginated watched endpoint supplies the authoritative set.
+        val watchedShows = traktApi.getWatchedShows()
+        importWatchedSeriesState(userId, watchedShows)
+    }
+
+    private fun importWatchedSeriesState(
+        userId: String,
+        watchedShows: List<TraktWatchedShowResponse>,
+    ) {
+        queries.transaction {
+            // These rows are a materialized view of Trakt's authoritative
+            // watched set. Rebuild it after a complete successful fetch so
+            // removals and progress resets also propagate to this device.
+            queries.clearImportedTraktSeriesHistory(userId = userId)
+
+            for (watchedShow in watchedShows) {
+                val show = watchedShow.show ?: continue
+                val ids = show.ids ?: continue
+                val tmdbId = ids.tmdb ?: continue
+                val mediaId = tmdbId.toString()
+                val markers = watchedShow.episodeMarkers()
+                for (marker in markers) {
+                    queries.insertHistory(
+                        user_id = userId,
+                        id = traktWatchedHistoryId(
+                            showIdentity = ids.trakt?.toString() ?: mediaId,
+                            season = marker.season,
+                            episode = marker.episode,
+                        ),
+                        media_id = mediaId,
+                        media_type = "series",
+                        title = show.title,
+                        poster_url = null,
+                        backdrop_url = null,
+                        watched_at = marker.watchedAtMs,
+                        duration_watched_ms = 0,
+                        season_number = marker.season.toLong(),
+                        episode_number = marker.episode.toLong(),
+                        show_title = show.title,
+                    )
+                }
+
+                val latest = watchedShow.latestEpisodeMarker() ?: continue
+                val local = queries.getProgress(userId = userId, mediaId = mediaId).executeAsOneOrNull()
+                if (!shouldApplyRemoteProgress(local?.updated_at, latest.watchedAtMs)) continue
+                val durationMs = local?.duration_ms?.takeIf { it > 0L }
+                    ?: show.runtime?.takeIf { it > 0 }?.toLong()?.times(60_000L)
+                    ?: DEFAULT_IMPORTED_EPISODE_DURATION_MS
+                queries.upsertProgress(
+                    user_id = userId,
+                    media_id = mediaId,
+                    media_type = "series",
+                    title = show.title.ifBlank { local?.title.orEmpty() },
+                    poster_url = local?.poster_url,
+                    backdrop_url = local?.backdrop_url,
+                    position_ms = durationMs,
+                    duration_ms = durationMs,
+                    season_number = latest.season.toLong(),
+                    episode_number = latest.episode.toLong(),
+                    show_title = show.title.ifBlank { local?.show_title },
+                    updated_at = latest.watchedAtMs,
+                )
             }
-        } catch (_: Exception) {
-            // Non-critical
         }
     }
 
@@ -309,5 +376,9 @@ class WatchHistoryRepositoryImpl(
             .firstOrNull { it > 0 }
             ?.toLong()
             ?.times(60_000L)
+    }
+
+    private companion object {
+        const val DEFAULT_IMPORTED_EPISODE_DURATION_MS = 45L * 60L * 1_000L
     }
 }
