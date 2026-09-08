@@ -14,6 +14,8 @@ Torve is licensed under `AGPL-3.0-or-later`.
 
 See [LICENSE](LICENSE).
 
+Playback skip timestamps may include read-only data from [SkipDB](https://skipdb.tv), used under the [ODbL 1.0 and service-provider reciprocity terms](https://skipdb.tv/license).
+
 ## Platform Build Matrix
 
 | Area | Purpose | Local check |

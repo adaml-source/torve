@@ -16,21 +16,27 @@ The former `SkipSegmentDetector` generated an intro at the start of most episode
 
 1. exact fingerprint cache and locally validated markers;
 2. validated embedded chapters enumerated from mpv container metadata;
-3. bounded external `SegmentMarkerProvider` implementations for the independent IntroDB and TheIntroDB community feeds;
+3. bounded external `SegmentMarkerProvider` implementations for the SkipDB, IntroDB, and TheIntroDB community feeds;
 4. optional subtitle, audio, and sampled-visual detectors;
 5. season consensus as a prior.
 
 Providers and optional detectors fail independently. All remote timestamps are validated before fusion. Analysis failure returns an empty timeline and cannot stop playback.
 
-IntroDB is queried by canonical show IMDb ID plus season and episode. TheIntroDB v3 is queried independently using the canonical TMDB show ID where available, with IMDb as a fallback, and can return multiple intro, recap, credits, and preview segments. Each request has a 1.2-second budget. Responses are capped at 64 KiB and identity, ordering, count, and runtime bounds are validated.
+SkipDB is queried by canonical show IMDb ID, season, episode, and the current stream duration with conservative adjustment enabled. Its exact-runtime result is the strongest single community release signal, while a conservatively shifted result remains manual-only without corroboration. Duration-agnostic and out-of-range matches stay below the action threshold. An exact runtime is never represented as an exact source fingerprint. Torve intentionally ignores SkipDB's season intro-length estimate because a structural prior alone is insufficient for a safe skip.
 
-An explicit provider runtime remains the preferred source-alignment anchor. If TheIntroDB declares that credits continue to media EOF but omits its reference runtime, Torve may surface the marker at the medium manual-action threshold. That evidence cannot start an automatic countdown by itself. Exact and near-exact runtimes can show a manual action; nearby variants retain original timestamps and never enable automatic action. Torve never adds a runtime delta to all markers. Larger unanchored differences stay below the manual threshold. Results are cached under the exact Torve source fingerprint and algorithm version. No provider SDK or new dependency is included; both integrations use the existing Ktor client.
+IntroDB is queried by canonical show IMDb ID plus season and episode. TheIntroDB v3 is queried independently using the canonical TMDB show ID where available, with IMDb as a fallback, and can return multiple intro, recap, credits, and preview segments. Each provider request has a 1.2-second budget. Responses are capped at 64 KiB and identity, ordering, count, confidence, provider-match semantics, and runtime bounds are validated.
+
+An explicit provider runtime remains the preferred source-alignment anchor. If TheIntroDB declares that credits continue to media EOF but omits its reference runtime, Torve may surface the marker at the medium manual-action threshold. That evidence cannot start an automatic countdown by itself. Exact and near-exact runtimes can show a manual action; nearby variants retain original timestamps and never enable automatic action. SkipDB-adjusted timestamps are already on the current stream timeline and are never shifted twice. Torve never adds a runtime delta to all markers. Larger unanchored differences stay below the manual threshold. Results are cached under the exact Torve source fingerprint and algorithm version. No provider SDK or new dependency is included; all integrations use the existing Ktor client.
 
 Audio and visual APIs accept compact observations rather than raw media, keeping decoding platform-specific and optional. Audio matches are track-scoped. Visual analysis is designed for sampled observations around candidate windows. Subtitle analysis recognizes localized recap phrases and treats subtitle disappearance as supporting evidence only.
 
 ## Confidence and conflict handling
 
 Confidence thresholds and boundary tolerances live in `PlaybackSegmentConfig`. Fusion first collapses correlated observations by evidence family, then combines independent families. Close boundaries reinforce one another. Material disagreement lowers confidence and disables automatic actions. Intro/recap end boundaries resolve toward the earlier value; credits boundaries resolve toward the later value.
+
+There is no first-wins or globally authoritative provider. SkipDB exact-runtime evidence is weighted above an unqualified community timestamp because it accounts for the active stream duration. Agreement between independent providers remains stronger than any single community result, and disagreement invokes the conservative boundary rules.
+
+SkipDB segment data is used read-only with attribution under the ODbL 1.0 and service-provider reciprocity terms: https://skipdb.tv/license. Torve does not seed or augment a private global marker database from SkipDB; it only caches responses for the exact playback source and analysis version.
 
 Manual buttons require medium confidence. Automatic skipping and automatic next playback require very-high confidence, validated boundaries, an enabled user preference, and no contrary seek intent. Credit text over active dialogue or scene motion is represented as a credits overlay on content and cannot trigger Play Next.
 

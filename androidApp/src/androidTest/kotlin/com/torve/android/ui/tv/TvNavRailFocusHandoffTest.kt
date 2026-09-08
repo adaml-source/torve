@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -112,17 +113,62 @@ class TvNavRailFocusHandoffTest {
         assertEquals(1, moveToContentCalls)
         assertEquals(0, confirmCalls)
     }
+
+    @Test
+    fun lateJellyfinActivation_keepsCurrentContentFocus() {
+        var moveToContentCalls = 0
+        var enableJellyfin: (() -> Unit)? = null
+        val moviesLabel = composeRule.activity.getString(R.string.nav_movies)
+
+        composeRule.setContent {
+            TvNavRailFocusHarness(
+                onMoveToContent = { moveToContentCalls++ },
+                onConfirm = {},
+                jellyfinInitiallyEnabled = false,
+                onEnableJellyfinReady = { enableJellyfin = it },
+            )
+        }
+
+        composeRule.waitUntil(timeoutMillis = 5_000) {
+            runCatching {
+                composeRule.onNodeWithText(moviesLabel).assertIsFocused()
+                true
+            }.getOrDefault(false)
+        }
+        composeRule.onNodeWithText(moviesLabel).performKeyInput {
+            pressKey(Key.DirectionRight)
+        }
+        composeRule.waitUntil(timeoutMillis = 5_000) {
+            runCatching {
+                composeRule.onNodeWithTag("content").assertIsFocused()
+                true
+            }.getOrDefault(false)
+        }
+
+        composeRule.runOnUiThread { requireNotNull(enableJellyfin).invoke() }
+        composeRule.waitForIdle()
+
+        composeRule.onNodeWithTag("content").assertIsFocused()
+        assertEquals(1, moveToContentCalls)
+    }
 }
 
 @Composable
 private fun TvNavRailFocusHarness(
     onMoveToContent: () -> Unit,
     onConfirm: () -> Unit,
+    jellyfinInitiallyEnabled: Boolean = true,
+    onEnableJellyfinReady: ((() -> Unit) -> Unit)? = null,
 ) {
     val railFocusRequester = remember { FocusRequester() }
     val contentFocusRequester = remember { FocusRequester() }
     var selectedRoute by remember { mutableStateOf(TvRoutes.MOVIES) }
     var highlightedRoute by remember { mutableStateOf(TvRoutes.MOVIES) }
+    var jellyfinEnabled by remember { mutableStateOf(jellyfinInitiallyEnabled) }
+
+    SideEffect {
+        onEnableJellyfinReady?.invoke { jellyfinEnabled = true }
+    }
 
     LaunchedEffect(Unit) {
         runCatching { railFocusRequester.requestFocus() }
@@ -135,6 +181,9 @@ private fun TvNavRailFocusHarness(
     ) {
         TvNavRail(
             destinations = tvTopDestinations,
+            enabledRoutes = tvTopDestinations
+                .map { it.route }
+                .filterTo(linkedSetOf()) { it != TvRoutes.JELLYFIN || jellyfinEnabled },
             selectedRoute = highlightedRoute,
             activeRoute = selectedRoute,
             isExpanded = true,

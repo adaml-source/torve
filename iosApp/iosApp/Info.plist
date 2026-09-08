@@ -17,9 +17,9 @@
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
-    <string>1.3.11</string>
+    <string>1.3.12</string>
     <key>CFBundleVersion</key>
-    <string>138</string>
+    <string>139</string>
     <key>LSRequiresIPhoneOS</key>
     <true/>
     <key>UILaunchScreen</key>

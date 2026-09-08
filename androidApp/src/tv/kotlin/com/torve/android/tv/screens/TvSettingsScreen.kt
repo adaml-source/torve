@@ -2306,22 +2306,18 @@ internal fun TvSettingsScreen(
                 if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
                 val totalItems = settingsListState.layoutInfo.totalItemsCount
                 if (totalItems == 0) return@onPreviewKeyEvent false
-                if (
-                    !categoryPaneHasFocus &&
-                    (event.key == Key.DirectionLeft || event.key == Key.DirectionRight)
-                ) {
+                if (event.key == Key.DirectionLeft || event.key == Key.DirectionRight) {
                     val targetCategory = adjacentTvSettingsCategory(
                         categoryOrder = categoryOrder,
                         currentCategory = selectedCategory,
                         direction = if (event.key == Key.DirectionLeft) -1 else 1,
-                        focusedTargetType = settingsFocusController.focusedTarget()?.focusTargetType,
                     )
                     if (targetCategory != null) {
                         settingsFocusController.beginCategorySwitch(targetCategory)
                         focusMoveNonce += 1
                         pendingFocusMove = TvSettingsFocusMoveRequest(
                             nonce = focusMoveNonce,
-                            target = TvSettingsFocusMoveTarget.CATEGORY_DETAIL,
+                            target = TvSettingsFocusMoveTarget.CATEGORY_CHIP,
                             category = targetCategory,
                         )
                         return@onPreviewKeyEvent true
@@ -2417,14 +2413,11 @@ internal fun TvSettingsScreen(
                                     }
                                     Key.DirectionLeft,
                                     Key.DirectionRight -> {
-                                        val currentIndex = categoryOrder.indexOf(category)
-                                        if (currentIndex < 0 || categoryOrder.isEmpty()) return@onPreviewKeyEvent false
-                                        val step = if (event.key == Key.DirectionLeft) -1 else 1
-                                        val targetIndex = currentIndex + step
-                                        if (targetIndex !in categoryOrder.indices) {
-                                            return@onPreviewKeyEvent false
-                                        }
-                                        val targetCategory = categoryOrder[targetIndex]
+                                        val targetCategory = adjacentTvSettingsCategory(
+                                            categoryOrder = categoryOrder,
+                                            currentCategory = category,
+                                            direction = if (event.key == Key.DirectionLeft) -1 else 1,
+                                        ) ?: return@onPreviewKeyEvent false
                                         settingsFocusController.beginCategorySwitch(targetCategory)
                                         focusMoveNonce += 1
                                         pendingFocusMove = TvSettingsFocusMoveRequest(

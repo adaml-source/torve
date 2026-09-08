@@ -16,7 +16,7 @@ class PlaybackSegmentEngine(
     private val providerTimeoutMs: Long = 1_500L,
 ) {
     companion object {
-        const val CURRENT_ANALYSIS_VERSION = 3
+        const val CURRENT_ANALYSIS_VERSION = 4
         private const val MAX_PROVIDER_MARKERS = 64
         private const val MAX_LOCAL_OBSERVATIONS = 20
     }
@@ -214,6 +214,29 @@ class PlaybackSegmentEngine(
                 aligned = alignWithAnchors(marker.startMs, marker.endMs, request.alignmentAnchors)
                 alignmentConfidence = request.alignmentAnchors.map { it.confidence }.average().coerceIn(0.0, 1.0)
                 details = "perceptual-anchor-alignment"
+            }
+            marker.timelineMatch == ProviderTimelineMatch.EXACT_RUNTIME -> {
+                aligned = marker.startMs to marker.endMs
+                alignmentConfidence = config.providerExactRuntimeAlignmentConfidence
+                details = "provider-exact-runtime"
+            }
+            marker.timelineMatch == ProviderTimelineMatch.CONSERVATIVE_RUNTIME_MATCH -> {
+                // The provider has already moved the boundary onto the requested
+                // stream timeline. Applying Torve's runtime delta again would
+                // double-shift it and can cut real content.
+                aligned = marker.startMs to marker.endMs
+                alignmentConfidence = config.providerConservativeShiftAlignmentConfidence
+                details = "provider-conservative-duration-shift"
+            }
+            marker.timelineMatch == ProviderTimelineMatch.AGNOSTIC -> {
+                aligned = marker.startMs to marker.endMs
+                alignmentConfidence = config.providerAgnosticAlignmentConfidence
+                details = "provider-duration-agnostic"
+            }
+            marker.timelineMatch == ProviderTimelineMatch.OUT_OF_RANGE -> {
+                aligned = marker.startMs to marker.endMs
+                alignmentConfidence = config.providerOutOfRangeAlignmentConfidence
+                details = "provider-duration-out-of-range"
             }
             marker.endsAtMediaEnd && !marker.referenceRuntimeReliable &&
                 marker.type in setOf(SegmentType.CREDITS, SegmentType.FINAL_CREDITS) -> {

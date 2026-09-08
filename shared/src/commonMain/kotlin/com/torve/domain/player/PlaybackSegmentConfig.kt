@@ -19,6 +19,12 @@ data class PlaybackSegmentConfig(
     val manualSourceVariantVarianceMs: Long = 30_000L,
     /** EOF-anchored credits without a source runtime may only support manual interaction. */
     val eofAnchoredUnknownRuntimeConfidence: Double = 0.80,
+    /** An exact runtime match is stronger than an unqualified community marker, but is not an exact file match. */
+    val providerExactRuntimeAlignmentConfidence: Double = 0.87,
+    /** A provider-side conservative shift is useful for a manual action and requires corroboration for automation. */
+    val providerConservativeShiftAlignmentConfidence: Double = 0.78,
+    val providerAgnosticAlignmentConfidence: Double = 0.52,
+    val providerOutOfRangeAlignmentConfidence: Double = 0.30,
     val trustedBoundaryPaddingMs: Long = 350L,
     val highBoundaryPaddingMs: Long = 750L,
     val mediumBoundaryPaddingMs: Long = 1_500L,

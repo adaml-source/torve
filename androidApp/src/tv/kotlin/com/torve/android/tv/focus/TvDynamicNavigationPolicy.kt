@@ -1,18 +1,13 @@
 package com.torve.android.tv.focus
 
 /**
- * Optional rail destinations attach only while the rail owns focus. This keeps
- * asynchronous account/settings hydration from modifying the focus graph while
- * the user is navigating a content surface.
+ * Keeps the rail's composition and item positions stable while optional
+ * integrations hydrate. Availability changes only whether the reserved item is
+ * focusable; it never inserts a node ahead of an existing focused item.
  */
-internal fun deferredOptionalDestinationVisibility(
-    configured: Boolean,
-    currentlyVisible: Boolean,
-    railOwnsFocus: Boolean,
-): Boolean = when {
-    !configured -> false
-    currentlyVisible -> true
-    railOwnsFocus -> true
-    else -> false
-}
-
+internal fun availableNavigationRoutes(
+    allRoutes: List<String>,
+    optionalRoute: String,
+    optionalRouteAvailable: Boolean,
+): Set<String> = allRoutes
+    .filterTo(linkedSetOf()) { route -> route != optionalRoute || optionalRouteAvailable }

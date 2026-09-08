@@ -19,22 +19,22 @@ class TvSettingsFocusStateMachineTest {
 
         assertEquals(
             TvSettingsCategory.APPEARANCE,
-            adjacentTvSettingsCategory(order, TvSettingsCategory.PLAYBACK, 1, "action"),
+            adjacentTvSettingsCategory(order, TvSettingsCategory.PLAYBACK, 1),
         )
         assertEquals(
             TvSettingsCategory.ACCOUNT,
-            adjacentTvSettingsCategory(order, TvSettingsCategory.PLAYBACK, -1, "toggle"),
+            adjacentTvSettingsCategory(order, TvSettingsCategory.PLAYBACK, -1),
         )
-        assertNull(adjacentTvSettingsCategory(order, TvSettingsCategory.ACCOUNT, -1, "action"))
-        assertNull(adjacentTvSettingsCategory(order, TvSettingsCategory.ABOUT, 1, "action"))
+        assertEquals(TvSettingsCategory.ABOUT, adjacentTvSettingsCategory(order, TvSettingsCategory.ACCOUNT, -1))
+        assertEquals(TvSettingsCategory.ACCOUNT, adjacentTvSettingsCategory(order, TvSettingsCategory.ABOUT, 1))
     }
 
     @Test
-    fun horizontalInputsKeepTheirOwnLeftAndRightBehavior() {
+    fun horizontalNavigationSwitchesCategoriesFromSelectorsAndInputs() {
         val order = listOf(TvSettingsCategory.PLAYBACK, TvSettingsCategory.APPEARANCE)
 
-        assertNull(adjacentTvSettingsCategory(order, TvSettingsCategory.PLAYBACK, 1, "selector"))
-        assertNull(adjacentTvSettingsCategory(order, TvSettingsCategory.PLAYBACK, 1, "input"))
+        assertEquals(TvSettingsCategory.APPEARANCE, adjacentTvSettingsCategory(order, TvSettingsCategory.PLAYBACK, 1))
+        assertEquals(TvSettingsCategory.APPEARANCE, adjacentTvSettingsCategory(order, TvSettingsCategory.PLAYBACK, -1))
     }
 
     @Test
@@ -153,10 +153,10 @@ class TvSettingsFocusStateMachineTest {
         val order = TvSettingsCategory.entries
         order.forEachIndexed { index, category ->
             if (index > 0) {
-                assertEquals(order[index - 1], adjacentTvSettingsCategory(order, category, -1, "action"))
+                assertEquals(order[index - 1], adjacentTvSettingsCategory(order, category, -1))
             }
             if (index < order.lastIndex) {
-                assertEquals(order[index + 1], adjacentTvSettingsCategory(order, category, 1, "navigation"))
+                assertEquals(order[index + 1], adjacentTvSettingsCategory(order, category, 1))
             }
         }
     }

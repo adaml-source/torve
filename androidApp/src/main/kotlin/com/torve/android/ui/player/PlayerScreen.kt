@@ -2813,6 +2813,7 @@ fun PlayerScreen(
                 RegisterFocusRegion(focusCoordinator, PlaybackFocusRegion.AudioDelayOverlay) { true }
                 TvAudioDelayOverlay(
                     currentDelayMs = audioDelayMs,
+                    onPreviewDelay = { engine.setAudioDelay(it) },
                     onSave = { newDelay ->
                         audioDelayMs = newDelay
                         engine.setAudioDelay(newDelay)
@@ -2824,6 +2825,7 @@ fun PlayerScreen(
                         engine.setAudioDelay(0)
                     },
                     onDismiss = {
+                        engine.setAudioDelay(audioDelayMs) // restore to last saved value
                         showAudioDelayDialog = false
                         topMenuFocusTick++
                     },

@@ -79,14 +79,14 @@ android {
     val baseVersionCode = providers.gradleProperty("torveUpdaterFixtureBaseVersionCode")
         .orNull
         ?.toIntOrNull()
-        ?: 138
+        ?: 139
 
     defaultConfig {
         applicationId = "com.torve.app"
         minSdk = 24
         targetSdk = 36
         versionCode = baseVersionCode
-        versionName = "1.3.11"
+        versionName = "1.3.12"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         multiDexEnabled = true
         multiDexKeepProguard = file("multidex-config.pro")

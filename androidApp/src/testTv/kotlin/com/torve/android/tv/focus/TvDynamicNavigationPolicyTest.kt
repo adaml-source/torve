@@ -1,43 +1,40 @@
 package com.torve.android.tv.focus
 
-import org.junit.Assert.assertFalse
-import org.junit.Assert.assertTrue
+import org.junit.Assert.assertEquals
 import org.junit.Test
 
 class TvDynamicNavigationPolicyTest {
 
     @Test
-    fun lateOptionalDestinationWaitsUntilTheRailOwnsFocus() {
-        assertFalse(
-            deferredOptionalDestinationVisibility(
-                configured = true,
-                currentlyVisible = false,
-                railOwnsFocus = false,
+    fun lateOptionalDestinationChangesAvailabilityWithoutChangingRailSlots() {
+        val stableSlots = listOf("home", "jellyfin", "library", "settings")
+
+        assertEquals(
+            linkedSetOf("home", "library", "settings"),
+            availableNavigationRoutes(
+                allRoutes = stableSlots,
+                optionalRoute = "jellyfin",
+                optionalRouteAvailable = false,
             ),
         )
-        assertTrue(
-            deferredOptionalDestinationVisibility(
-                configured = true,
-                currentlyVisible = false,
-                railOwnsFocus = true,
+        assertEquals(
+            stableSlots.toSet(),
+            availableNavigationRoutes(
+                allRoutes = stableSlots,
+                optionalRoute = "jellyfin",
+                optionalRouteAvailable = true,
             ),
         )
     }
 
     @Test
-    fun visibleDestinationStaysStableAndRemovalIsImmediate() {
-        assertTrue(
-            deferredOptionalDestinationVisibility(
-                configured = true,
-                currentlyVisible = true,
-                railOwnsFocus = false,
-            ),
-        )
-        assertFalse(
-            deferredOptionalDestinationVisibility(
-                configured = false,
-                currentlyVisible = true,
-                railOwnsFocus = false,
+    fun missingOptionalRouteDoesNotRemoveOrdinaryDestinations() {
+        assertEquals(
+            linkedSetOf("home", "library", "settings"),
+            availableNavigationRoutes(
+                allRoutes = listOf("home", "library", "settings"),
+                optionalRoute = "jellyfin",
+                optionalRouteAvailable = false,
             ),
         )
     }

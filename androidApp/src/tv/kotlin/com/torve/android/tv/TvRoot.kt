@@ -102,7 +102,7 @@ import com.torve.android.tv.focus.TvFocusOrigin
 import com.torve.android.tv.focus.TvScreenFocusHandle
 import com.torve.android.tv.focus.TvSettingsItemIds
 import com.torve.android.tv.focus.TvSettingsEntryRestoreInputs
-import com.torve.android.tv.focus.deferredOptionalDestinationVisibility
+import com.torve.android.tv.focus.availableNavigationRoutes
 import com.torve.android.tv.focus.didPlaybackReturnFocusReachContent
 import com.torve.android.tv.focus.playbackReturnFocusRoute
 import com.torve.android.tv.focus.rememberTvSettingsFocusStateMachine
@@ -567,27 +567,16 @@ fun TvRoot(
 
     var isRailExpanded by rememberSaveable { mutableStateOf(false) }
     var isRailFocused by rememberSaveable { mutableStateOf(false) }
-    // Account settings can finish hydrating while the user is already deep in
-    // a content rail. Defer insertion of optional destinations until the user
-    // returns to the navigation rail so the focus graph cannot mutate under
-    // the currently focused poster/action.
-    var jellyfinDestinationVisible by remember { mutableStateOf(jellyfinConfigured) }
-    LaunchedEffect(jellyfinConfigured, isRailFocused) {
-        jellyfinDestinationVisible = deferredOptionalDestinationVisibility(
-            configured = jellyfinConfigured,
-            currentlyVisible = jellyfinDestinationVisible,
-            railOwnsFocus = isRailFocused,
+    // Keep every rail slot composed from startup. Jellyfin becomes focusable in
+    // its reserved slot after settings hydrate, so Settings and the current
+    // content focus never move when the integration appears late.
+    val visibleTopDestinations = tvTopDestinations
+    val topLevelRoutes = remember(jellyfinConfigured) {
+        availableNavigationRoutes(
+            allRoutes = tvTopDestinations.map { it.route },
+            optionalRoute = TvRoutes.JELLYFIN,
+            optionalRouteAvailable = jellyfinConfigured,
         )
-    }
-    val visibleTopDestinations = remember(jellyfinDestinationVisible) {
-        if (jellyfinDestinationVisible) {
-            tvTopDestinations
-        } else {
-            tvTopDestinations.filterNot { it.route == TvRoutes.JELLYFIN }
-        }
-    }
-    val topLevelRoutes = remember(visibleTopDestinations) {
-        visibleTopDestinations.map { it.route }.toSet()
     }
     // TV navigation is now a permanent slim rail. Keep the legacy state false
     // for callers that still accept it, but never expand the rail on focus.
@@ -2421,6 +2410,7 @@ fun TvRoot(
             // if the composable is removed, focusSearch crashes on Left press.
             TvNavRail(
                     destinations = visibleTopDestinations,
+                    enabledRoutes = topLevelRoutes,
                     selectedRoute = highlightedTopRoute,
                     activeRoute = selectedTopRoute,
                     isExpanded = false,

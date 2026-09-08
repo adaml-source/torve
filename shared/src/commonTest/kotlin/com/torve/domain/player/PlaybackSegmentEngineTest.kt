@@ -140,6 +140,70 @@ class PlaybackSegmentEngineTest {
     }
 
     @Test
+    fun providerExactRuntimeIsStrongManualEvidenceButNotAnExactSource() = runTest {
+        val provider = provider(
+            ProviderMarker(
+                SegmentType.INTRO,
+                60_000,
+                90_000,
+                1.0,
+                "skipdb-v1",
+                1,
+                referenceRuntimeMs = RUNTIME,
+                referenceRuntimeReliable = true,
+                timelineMatch = ProviderTimelineMatch.EXACT_RUNTIME,
+            ),
+        )
+
+        val intro = PlaybackSegmentEngine(MemoryRepository(), listOf(provider)).analyze(request()).segments.single()
+
+        assertEquals(PlaybackSegmentConfig().providerExactRuntimeAlignmentConfidence, intro.confidence)
+        assertTrue(intro.confidence >= PlaybackSegmentConfig().manualActionThreshold)
+        assertTrue(intro.confidence < PlaybackSegmentConfig().automaticActionThreshold)
+        assertEquals(SegmentEvidenceSource.COMMUNITY_DATABASE, intro.source)
+        assertEquals("provider-exact-runtime", intro.evidence.single().details)
+    }
+
+    @Test
+    fun providerConservativeShiftIsNotShiftedTwiceAndOutOfRangeDoesNotSurface() = runTest {
+        val shifted = provider(
+            ProviderMarker(
+                SegmentType.INTRO,
+                55_000,
+                85_000,
+                0.90,
+                "skipdb-v1",
+                1,
+                referenceRuntimeMs = RUNTIME,
+                timelineMatch = ProviderTimelineMatch.CONSERVATIVE_RUNTIME_MATCH,
+            ),
+        )
+        val outOfRange = provider(
+            ProviderMarker(
+                SegmentType.RECAP,
+                10_000,
+                40_000,
+                1.0,
+                "skipdb-v1",
+                1,
+                referenceRuntimeMs = RUNTIME,
+                timelineMatch = ProviderTimelineMatch.OUT_OF_RANGE,
+            ),
+        )
+
+        val segments = PlaybackSegmentEngine(MemoryRepository(), listOf(shifted, outOfRange))
+            .analyze(request())
+            .segments
+
+        val intro = segments.single { it.type == SegmentType.INTRO }
+        val recap = segments.single { it.type == SegmentType.RECAP }
+        assertEquals(55_000L, intro.startMs)
+        assertEquals(85_000L, intro.endMs)
+        assertTrue(intro.confidence >= PlaybackSegmentConfig().manualActionThreshold)
+        assertTrue(recap.confidence < PlaybackSegmentConfig().manualActionThreshold)
+    }
+
+    @Test
     fun eofAnchoredCreditsWithoutSourceRuntimeSurfaceManualPromptWithoutCountdown() = runTest {
         val provider = provider(
             ProviderMarker(

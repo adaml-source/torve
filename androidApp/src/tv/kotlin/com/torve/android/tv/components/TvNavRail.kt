@@ -33,6 +33,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
@@ -72,6 +73,7 @@ private val RAIL_ITEM_HEIGHT = 50.dp
 @Composable
 fun TvNavRail(
     destinations: List<TvTopDestination>,
+    enabledRoutes: Set<String> = destinations.mapTo(linkedSetOf()) { it.route },
     selectedRoute: String,
     activeRoute: String = selectedRoute,
     isExpanded: Boolean,
@@ -87,23 +89,25 @@ fun TvNavRail(
     navigateOnFocus: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
-    // Stable map: existing routes keep their FocusRequester so focus isn't lost
-    // when destinations grow (e.g. Jellyfin added after async settings load).
+    // Every destination owns a stable slot and requester. Optional destinations
+    // become focusable in place instead of being inserted into the focus graph.
     val itemRequesters = remember { mutableMapOf<String, FocusRequester>() }
     destinations.forEach { dest -> itemRequesters.getOrPut(dest.route) { FocusRequester() } }
     val orderedRoutes = destinations.map { it.route }
+    val availableRoutes = orderedRoutes.filter { it in enabledRoutes }
 
     fun neighborRoute(route: String, delta: Int): String? {
-        val size = orderedRoutes.size
+        val size = availableRoutes.size
         if (size <= 0) return null
-        val index = orderedRoutes.indexOf(route).takeIf { it >= 0 } ?: 0
+        val index = availableRoutes.indexOf(route).takeIf { it >= 0 } ?: 0
         val neighborIndex = ((index + delta) % size + size) % size
-        return orderedRoutes[neighborIndex]
+        return availableRoutes[neighborIndex]
     }
 
     val currentActiveRoute by rememberUpdatedState(activeRoute)
     val currentSelectedRoute by rememberUpdatedState(selectedRoute)
     val currentPreferredEntryRoute by rememberUpdatedState(preferredEntryRoute)
+    val currentEnabledRoutes by rememberUpdatedState(enabledRoutes)
     var railHasFocus by remember { mutableStateOf(false) }
 
     Box(
@@ -139,9 +143,11 @@ fun TvNavRail(
                 }
                 .focusProperties {
                     enter = {
-                        currentPreferredEntryRoute?.let(itemRequesters::get)
-                            ?: itemRequesters[currentActiveRoute]
-                            ?: itemRequesters[currentSelectedRoute]
+                        currentPreferredEntryRoute
+                            ?.takeIf { it in currentEnabledRoutes }
+                            ?.let(itemRequesters::get)
+                            ?: currentActiveRoute.takeIf { it in currentEnabledRoutes }?.let(itemRequesters::get)
+                            ?: currentSelectedRoute.takeIf { it in currentEnabledRoutes }?.let(itemRequesters::get)
                             ?: FocusRequester.Default
                     }
                 }
@@ -154,6 +160,7 @@ fun TvNavRail(
 
             destinations.forEach { destination ->
                 key(destination.route) {
+                    val enabled = destination.route in enabledRoutes
                     val currentRequester = itemRequesters.getValue(destination.route)
                     val upRequester = neighborRoute(destination.route, -1)
                         ?.let { itemRequesters[it] }
@@ -165,9 +172,12 @@ fun TvNavRail(
                     TvNavRailItem(
                         destination = destination,
                         selected = isCurrentRoute,
+                        enabled = enabled,
                         modifier = Modifier
                             .focusRequester(currentRequester)
+                            .alpha(if (enabled) 1f else 0f)
                             .focusProperties {
+                                canFocus = enabled
                                 up = upRequester
                                 down = downRequester
                                 left = currentRequester
@@ -175,6 +185,7 @@ fun TvNavRail(
                         onMoveRight = { onMoveToContent(destination.route) },
                         onClick = { onMoveToContent(destination.route) },
                         onItemFocused = {
+                            if (!enabled) return@TvNavRailItem
                             val preferredRoute = currentPreferredEntryRoute
                             if (preferredRoute != null) {
                                 if (destination.route == preferredRoute) {
@@ -199,10 +210,12 @@ fun TvNavRail(
     var prevRailHasFocus by remember { mutableStateOf(false) }
     LaunchedEffect(railHasFocus) {
         if (railHasFocus && !prevRailHasFocus) {
-            val preferred = currentPreferredEntryRoute?.let(itemRequesters::get)
-                ?: itemRequesters[currentActiveRoute]
-                ?: itemRequesters[currentSelectedRoute]
-            val fallback = orderedRoutes.firstOrNull()?.let { itemRequesters[it] }
+            val preferred = currentPreferredEntryRoute
+                ?.takeIf { it in currentEnabledRoutes }
+                ?.let(itemRequesters::get)
+                ?: currentActiveRoute.takeIf { it in currentEnabledRoutes }?.let(itemRequesters::get)
+                ?: currentSelectedRoute.takeIf { it in currentEnabledRoutes }?.let(itemRequesters::get)
+            val fallback = availableRoutes.firstOrNull()?.let { itemRequesters[it] }
             runCatching {
                 when {
                     preferred != null -> preferred.requestFocus()
@@ -215,6 +228,7 @@ fun TvNavRail(
 
     LaunchedEffect(preferredEntryRoute, preferredEntryRequestNonce) {
         val route = preferredEntryRoute ?: return@LaunchedEffect
+        if (route !in enabledRoutes) return@LaunchedEffect
         val requester = itemRequesters[route] ?: return@LaunchedEffect
         runCatching { requester.requestFocus() }
         delay(16)
@@ -228,6 +242,7 @@ fun TvNavRail(
 private fun TvNavRailItem(
     destination: TvTopDestination,
     selected: Boolean,
+    enabled: Boolean,
     onMoveRight: () -> Unit,
     onClick: () -> Unit,
     onItemFocused: () -> Unit,
@@ -299,6 +314,7 @@ private fun TvNavRailItem(
                 if (it.isFocused && !wasFocused) onItemFocused()
             }
             .onPreviewKeyEvent { event ->
+                if (!enabled) return@onPreviewKeyEvent false
                 when {
                     event.key == Key.DirectionRight && event.type == KeyEventType.KeyDown -> {
                         onMoveRight()
@@ -322,6 +338,7 @@ private fun TvNavRailItem(
                 }
             }
             .clickable(
+                enabled = enabled,
                 indication = null,
                 interactionSource = remember { MutableInteractionSource() },
                 onClick = onClick,

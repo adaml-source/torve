@@ -171,7 +171,21 @@ data class ProviderMarker(
     val referenceRuntimeReliable: Boolean = true,
     /** The provider explicitly declares that this segment continues to media EOF. */
     val endsAtMediaEnd: Boolean = false,
+    /**
+     * Release-timeline reconciliation already performed by the provider. This is
+     * distinct from an exact media fingerprint: matching duration alone never
+     * proves that two encoded files contain the same cut.
+     */
+    val timelineMatch: ProviderTimelineMatch = ProviderTimelineMatch.UNSPECIFIED,
 )
+
+enum class ProviderTimelineMatch {
+    UNSPECIFIED,
+    EXACT_RUNTIME,
+    CONSERVATIVE_RUNTIME_MATCH,
+    AGNOSTIC,
+    OUT_OF_RANGE,
+}
 
 interface SegmentMarkerProvider {
     val id: String

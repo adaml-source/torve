@@ -103,6 +103,7 @@ import com.torve.domain.repository.WatchProgressRepository
 import com.torve.domain.repository.PlaybackSegmentRepository
 import com.torve.domain.player.PlaybackSegmentEngine
 import com.torve.data.playback.IntroDbSegmentMarkerProvider
+import com.torve.data.playback.SkipDbSegmentMarkerProvider
 import com.torve.data.playback.TheIntroDbSegmentMarkerProvider
 import com.torve.domain.repository.WatchlistRepository
 import com.torve.domain.stats.WatchStatsEngine
@@ -380,11 +381,13 @@ val sharedModule = module {
     single { WatchSessionRecorder(get(), currentUserId = { get<UserIdProvider>().currentUserId() }) }
     single<PlaybackSegmentRepository> { PlaybackSegmentRepositoryImpl(get(), get()) }
     single { IntroDbSegmentMarkerProvider(httpClient = get()) }
+    single { SkipDbSegmentMarkerProvider(httpClient = get()) }
     single { TheIntroDbSegmentMarkerProvider(httpClient = get()) }
     single {
         PlaybackSegmentEngine(
             repository = get(),
             providers = listOf(
+                get<SkipDbSegmentMarkerProvider>(),
                 get<IntroDbSegmentMarkerProvider>(),
                 get<TheIntroDbSegmentMarkerProvider>(),
             ),

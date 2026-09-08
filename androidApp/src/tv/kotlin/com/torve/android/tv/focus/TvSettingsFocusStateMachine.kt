@@ -23,13 +23,13 @@ internal fun adjacentTvSettingsCategory(
     categoryOrder: List<TvSettingsCategory>,
     currentCategory: TvSettingsCategory,
     direction: Int,
-    focusedTargetType: String?,
 ): TvSettingsCategory? {
     if (direction !in setOf(-1, 1)) return null
-    if (focusedTargetType == "selector" || focusedTargetType == "input") return null
+    if (categoryOrder.size < 2) return null
     val currentIndex = categoryOrder.indexOf(currentCategory)
     if (currentIndex < 0) return null
-    return categoryOrder.getOrNull(currentIndex + direction)
+    val targetIndex = (currentIndex + direction + categoryOrder.size) % categoryOrder.size
+    return categoryOrder[targetIndex]
 }
 
 internal object TvSettingsItemIds {

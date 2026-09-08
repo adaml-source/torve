@@ -33,6 +33,7 @@ import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -241,6 +242,7 @@ fun TvTrackSelectionOverlay(
 @Composable
 fun TvAudioDelayOverlay(
     currentDelayMs: Int,
+    onPreviewDelay: (Int) -> Unit,
     onSave: (Int) -> Unit,
     onReset: () -> Unit,
     onDismiss: () -> Unit,
@@ -259,27 +261,22 @@ fun TvAudioDelayOverlay(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(Obsidian.copy(alpha = 0.95f)),
-        contentAlignment = Alignment.Center,
+            .padding(horizontal = 36.dp, vertical = 30.dp),
+        contentAlignment = Alignment.BottomEnd,
     ) {
         Column(
             modifier = Modifier
-                .fillMaxWidth(0.76f)
-                .clip(RoundedCornerShape(18.dp))
-                .background(Charcoal)
-                .padding(horizontal = 28.dp, vertical = 24.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp),
+                .fillMaxWidth(0.46f)
+                .widthIn(min = 360.dp, max = 560.dp)
+                .border(1.dp, Silver.copy(alpha = 0.22f), RoundedCornerShape(16.dp))
+                .clip(RoundedCornerShape(16.dp))
+                .background(Charcoal.copy(alpha = 0.94f))
+                .padding(horizontal = 18.dp, vertical = 14.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            Text(
-                text = stringResource(R.string.player_audio_delay),
-                style = MaterialTheme.typography.headlineSmall,
-                color = Snow,
-                fontWeight = FontWeight.Bold,
-            )
-            Text(
-                text = "Left/Right adjusts by 100 ms. Save applies and closes.",
-                style = MaterialTheme.typography.bodySmall,
-                color = Silver,
+            DelayOverlayHeading(
+                title = stringResource(R.string.player_audio_delay),
+                value = delayLabel,
             )
             TvDpadSlider(
                 value = localDelay,
@@ -290,6 +287,7 @@ fun TvAudioDelayOverlay(
                 focusRequester = sliderFocusRequester,
                 onValueChange = { value ->
                     localDelay = value
+                    onPreviewDelay(value)
                 },
                 onCenterClick = {
                     onSave(localDelay)
@@ -319,11 +317,6 @@ fun TvAudioDelayOverlay(
                     onClick = onDismiss,
                 )
             }
-            Text(
-                text = "Use positive values if audio is ahead, negative if audio is behind.",
-                style = MaterialTheme.typography.bodySmall,
-                color = Silver,
-            )
         }
     }
 }
@@ -349,27 +342,22 @@ fun TvSubtitleDelayOverlay(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(Obsidian.copy(alpha = 0.95f)),
-        contentAlignment = Alignment.Center,
+            .padding(horizontal = 36.dp, vertical = 30.dp),
+        contentAlignment = Alignment.BottomEnd,
     ) {
         Column(
             modifier = Modifier
-                .fillMaxWidth(0.76f)
-                .clip(RoundedCornerShape(18.dp))
-                .background(Charcoal)
-                .padding(horizontal = 28.dp, vertical = 24.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp),
+                .fillMaxWidth(0.46f)
+                .widthIn(min = 360.dp, max = 560.dp)
+                .border(1.dp, Silver.copy(alpha = 0.22f), RoundedCornerShape(16.dp))
+                .clip(RoundedCornerShape(16.dp))
+                .background(Charcoal.copy(alpha = 0.94f))
+                .padding(horizontal = 18.dp, vertical = 14.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            Text(
-                text = "Subtitle Delay",
-                style = MaterialTheme.typography.headlineSmall,
-                color = Snow,
-                fontWeight = FontWeight.Bold,
-            )
-            Text(
-                text = "Left/Right adjusts by 100 ms. Positive = subtitles appear later.",
-                style = MaterialTheme.typography.bodySmall,
-                color = Silver,
+            DelayOverlayHeading(
+                title = "Subtitle Delay",
+                value = delayLabel,
             )
             TvDpadSlider(
                 value = localDelay,
@@ -1561,6 +1549,31 @@ fun TvSubtitleSearchOverlay(
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun DelayOverlayHeading(
+    title: String,
+    value: String,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = title,
+            style = MaterialTheme.typography.titleMedium,
+            color = Snow,
+            fontWeight = FontWeight.Bold,
+        )
+        Text(
+            text = value,
+            style = MaterialTheme.typography.titleMedium,
+            color = Amber,
+            fontWeight = FontWeight.Bold,
+        )
     }
 }
 
