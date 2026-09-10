@@ -56,6 +56,7 @@ class TvSportsFocusStateMachineTest {
             state.targetForRestore(emptyList()),
         )
         assertEquals("sports_refresh", TvSportsTopAction.REFRESH.actionId)
+        assertEquals("sports_limit", TvSportsTopAction.LIMIT.actionId)
     }
 
     @Test

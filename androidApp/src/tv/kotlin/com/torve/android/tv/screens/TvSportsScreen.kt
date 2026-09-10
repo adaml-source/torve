@@ -122,6 +122,7 @@ private val SPORTS_PRIMARY_BUCKETS = listOf(
 )
 
 private const val SPORTS_SCREEN_ID = "tv_sports"
+private const val SPORTS_RESULT_LIMIT_KEY = "tv_sports_result_limit"
 private const val SPORTS_ROW_TOP_ACTIONS = "top_actions"
 private const val SPORTS_ROW_CATEGORIES = "categories"
 private const val SPORTS_ROW_EVENTS = "events"
@@ -221,6 +222,19 @@ internal fun TvSportsScreen(
     val pageState by NzbBrowseStateHolder.flow(pageKey).collectAsState()
     val savedOnce = remember { NzbBrowseStateHolder.get(pageKey) }
     var query by remember { mutableStateOf(savedOnce.query) }
+    var resultLimit by remember { mutableIntStateOf(SPORTS_DEFAULT_RESULT_LIMIT) }
+    var resultLimitReady by remember { mutableStateOf(false) }
+    LaunchedEffect(prefsRepo) {
+        resultLimit = withContext(Dispatchers.IO) {
+            runCatching {
+                normalizeSportsResultLimit(
+                    prefsRepo.getString(SPORTS_RESULT_LIMIT_KEY)?.toIntOrNull()
+                        ?: SPORTS_DEFAULT_RESULT_LIMIT,
+                )
+            }.getOrDefault(SPORTS_DEFAULT_RESULT_LIMIT)
+        }
+        resultLimitReady = true
+    }
     val savedMode = savedOnce.selectedSportBucket ?: SPORTS_FILTER_ALL
     var selectedBucket by remember {
         mutableStateOf(
@@ -244,12 +258,17 @@ internal fun TvSportsScreen(
         forceAll: Boolean = false,
         replaceInFlight: Boolean = false,
         requestedModeOverride: String? = null,
+        requestedMaxItemsOverride: Int? = null,
         jumpToNewestOnSuccess: Boolean = false,
     ) {
         val q = query
         val requestedMode = requestedModeOverride
             ?: if (forceAll) SPORTS_FILTER_ALL else selectedSportsMode
-        val plan = tvSportsRefreshPlan(requestedMode, q)
+        val plan = tvSportsRefreshPlan(
+            requestedMode,
+            q,
+            requestedMaxItemsOverride ?: resultLimit,
+        )
         val fetchJobKey = tvSportsRefreshJobKey(pageKey, plan.scopeId)
         if (NzbBrowseStateHolder.isFetching(fetchJobKey) && !replaceInFlight) return
         NzbBrowseStateHolder.startFetch(fetchJobKey) {
@@ -371,8 +390,8 @@ internal fun TvSportsScreen(
         }
     }
 
-    LaunchedEffect(indexerUrl, indexerKey) {
-        if (!configured) return@LaunchedEffect
+    LaunchedEffect(indexerUrl, indexerKey, resultLimitReady) {
+        if (!configured || !resultLimitReady) return@LaunchedEffect
         var restoredFromCache = false
         if (NzbBrowseStateHolder.get(pageKey).items.isEmpty()) {
             val restored = withContext(Dispatchers.IO) {
@@ -429,8 +448,8 @@ internal fun TvSportsScreen(
         val bucket: SportBucket,
         val display: SportsReleaseDisplay,
     )
-    val classified: List<ClassifiedItem> = remember(pageState.items) {
-        pageState.items.map { item ->
+    val classified: List<ClassifiedItem> = remember(pageState.items, resultLimit) {
+        pageState.items.take(resultLimit).map { item ->
             val bucket = SportBucket.classify(item.title)
             ClassifiedItem(
                 item = item,
@@ -452,26 +471,30 @@ internal fun TvSportsScreen(
             .take(14)
     }
     val dateModes = remember(availableEventDates) { availableEventDates.map(::sportsDateMode) }
-    val selectedChipIndex = remember(selectedSportsMode, dateModes) {
+    val selectedCategoryChipIndex = remember(selectedSportsMode) {
+        val bucketIndex = SPORTS_PRIMARY_BUCKETS.indexOfFirst { it.name == selectedSportsMode }
+        if (bucketIndex >= 0) bucketIndex + 1 else 0
+    }
+    val chipListState = rememberLazyListState(initialFirstVisibleItemIndex = selectedCategoryChipIndex)
+    LaunchedEffect(selectedCategoryChipIndex) {
+        val selectedIsVisible = chipListState.layoutInfo.visibleItemsInfo.any {
+            it.index == selectedCategoryChipIndex
+        }
+        if (!selectedIsVisible) chipListState.animateScrollToItem(selectedCategoryChipIndex)
+    }
+    val selectedDateChipIndex = remember(selectedSportsMode, dateModes) {
         when (selectedSportsMode) {
-            SPORTS_FILTER_ALL -> 0
-            SPORTS_FILTER_TODAY -> 1
-            SPORTS_FILTER_RECENT -> 2
-            else -> {
-                val dateIndex = dateModes.indexOf(selectedSportsMode)
-                if (dateIndex >= 0) {
-                    3 + dateIndex
-                } else {
-                    val bucketIndex = SPORTS_PRIMARY_BUCKETS.indexOfFirst { it.name == selectedSportsMode }
-                    if (bucketIndex >= 0) 3 + dateModes.size + bucketIndex else 0
-                }
-            }
+            SPORTS_FILTER_TODAY -> 0
+            SPORTS_FILTER_RECENT -> 1
+            else -> dateModes.indexOf(selectedSportsMode).takeIf { it >= 0 }?.plus(2) ?: 0
         }
     }
-    val chipListState = rememberLazyListState(initialFirstVisibleItemIndex = selectedChipIndex)
-    LaunchedEffect(selectedChipIndex) {
-        val selectedIsVisible = chipListState.layoutInfo.visibleItemsInfo.any { it.index == selectedChipIndex }
-        if (!selectedIsVisible) chipListState.animateScrollToItem(selectedChipIndex)
+    val dateChipListState = rememberLazyListState(initialFirstVisibleItemIndex = selectedDateChipIndex)
+    LaunchedEffect(selectedDateChipIndex) {
+        val selectedIsVisible = dateChipListState.layoutInfo.visibleItemsInfo.any {
+            it.index == selectedDateChipIndex
+        }
+        if (!selectedIsVisible) dateChipListState.animateScrollToItem(selectedDateChipIndex)
     }
     val visible: List<ClassifiedItem> = remember(classified, selectedBucket, selectedSportsMode, currentSportsDate) {
         when (selectedSportsMode) {
@@ -498,13 +521,16 @@ internal fun TvSportsScreen(
     val firstChipRequester = categoryRequesters.getValue(SPORTS_FILTER_ALL)
     val refreshFocusRequester = remember { FocusRequester() }
     val searchFocusRequester = remember { FocusRequester() }
+    val limitFocusRequester = remember { FocusRequester() }
     val retryFocusRequester = remember { FocusRequester() }
     val focusRestoreController = rememberTvModalFocusRestoreController(SPORTS_SCREEN_ID)
     val refreshTarget = remember { sportsTopActionTarget(TvSportsTopAction.REFRESH) }
     val searchTarget = remember { sportsTopActionTarget(TvSportsTopAction.SEARCH) }
+    val limitTarget = remember { sportsTopActionTarget(TvSportsTopAction.LIMIT) }
     val retryTarget = remember { sportsTopActionTarget(TvSportsTopAction.RETRY) }
     rememberRegisteredTvFocusRequester(focusRestoreController, refreshTarget, refreshFocusRequester)
     rememberRegisteredTvFocusRequester(focusRestoreController, searchTarget, searchFocusRequester)
+    rememberRegisteredTvFocusRequester(focusRestoreController, limitTarget, limitFocusRequester)
     val visibleEventIds = remember(visible, configured) {
         if (configured) visible.map { it.item.sportsStableId() } else emptyList()
     }
@@ -515,6 +541,7 @@ internal fun TvSportsScreen(
         buildSet {
             add(refreshTarget)
             add(searchTarget)
+            add(limitTarget)
             add(retryTarget)
             categoryIds.forEachIndexed { index, id -> add(sportsCategoryTarget(id, index)) }
             addAll(visibleEventTargets)
@@ -595,12 +622,17 @@ internal fun TvSportsScreen(
         }
     }
     val selectedCategoryRequester = categoryRequesters[selectedSportsMode] ?: firstChipRequester
+    val categoryRowIds = remember {
+        listOf(SPORTS_FILTER_ALL) + SPORTS_PRIMARY_BUCKETS.map(SportBucket::name)
+    }
     val composedCategoryIds = categoryIds.filterIndexed { index, categoryId ->
-        focusRestoreController.activeRequesterFor(sportsCategoryTarget(categoryId, index)) != null
+        categoryId in categoryRowIds &&
+            focusRestoreController.activeRequesterFor(sportsCategoryTarget(categoryId, index)) != null
     }.toSet()
     val categoryRowEntryTarget = resolveSportsCategoryEntry(
         categoryIds = categoryIds,
-        selectedCategoryId = selectedSportsMode,
+        selectedCategoryId = selectedSportsMode.takeIf(categoryRowIds::contains)
+            ?: SPORTS_FILTER_ALL,
         composedCategoryIds = composedCategoryIds,
     )
     val activeCategoryEntryRequester = categoryRowEntryTarget?.let { entry ->
@@ -621,13 +653,14 @@ internal fun TvSportsScreen(
     val categoryDownRequester = resultEntryTarget?.let { entry ->
         focusRestoreController.activeRequesterFor(sportsEventTarget(entry.eventId, entry.index))
     }
-    val selectedRefreshScope = tvSportsRefreshPlan(selectedSportsMode, query).scopeId
+    val selectedRefreshScope = tvSportsRefreshPlan(selectedSportsMode, query, resultLimit).scopeId
     val selectedScopeRefreshing = selectedRefreshScope in pageState.activeRefreshScopes
     val selectedScopeProgress = pageState.refreshProgressByScope[selectedRefreshScope]
     val selectedScopeError = pageState.refreshErrorsByScope[selectedRefreshScope]
     val availableTopActions = buildSet {
         add(TvSportsTopAction.REFRESH)
         add(TvSportsTopAction.SEARCH)
+        add(TvSportsTopAction.LIMIT)
         if (selectedScopeError != null || pageState.errorText != null) add(TvSportsTopAction.RETRY)
     }
     LaunchedEffect(availableTopActions, isActive) {
@@ -766,6 +799,7 @@ internal fun TvSportsScreen(
                         .focusRequester(searchFocusRequester)
                         .focusProperties {
                             left = refreshFocusRequester
+                            right = limitFocusRequester
                             activeCategoryEntryRequester?.let { down = it }
                         }
                         .onFocusChanged {
@@ -784,6 +818,7 @@ internal fun TvSportsScreen(
                         .focusRequester(searchFocusRequester)
                         .focusProperties {
                             left = refreshFocusRequester
+                            right = limitFocusRequester
                             activeCategoryEntryRequester?.let { down = it }
                         },
                     onClick = {
@@ -797,10 +832,114 @@ internal fun TvSportsScreen(
                     },
                 )
             }
+            TvSportsSearchChip(
+                label = "Limit $resultLimit ›",
+                modifier = Modifier
+                    .focusRequester(limitFocusRequester)
+                    .focusProperties {
+                        left = searchFocusRequester
+                        activeCategoryEntryRequester?.let { down = it }
+                    },
+                onClick = {
+                    val nextLimit = nextSportsResultLimit(resultLimit)
+                    resultLimit = nextLimit
+                    scope.launch(Dispatchers.IO) {
+                        prefsRepo.setString(SPORTS_RESULT_LIMIT_KEY, nextLimit.toString())
+                    }
+                    if (configured) {
+                        startFetch(
+                            replaceInFlight = true,
+                            requestedMaxItemsOverride = nextLimit,
+                            jumpToNewestOnSuccess = true,
+                        )
+                    }
+                },
+                onFocused = {
+                    sportsFocusState.markTopActionFocused(TvSportsTopAction.LIMIT)
+                    focusRestoreController.markFocused(limitTarget)
+                    onContentFocused(limitFocusRequester)
+                },
+            )
+            LazyRow(
+                state = dateChipListState,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                contentPadding = PaddingValues(end = TV_FILTER_ROW_NESTED_END_GUTTER),
+                modifier = Modifier.weight(1f),
+            ) {
+                item(key = "date_today") {
+                    val target = remember { sportsCategoryTarget(SPORTS_FILTER_TODAY, 1) }
+                    val requester = rememberRegisteredTvFocusRequester(
+                        focusRestoreController,
+                        target,
+                        categoryRequesters.getValue(SPORTS_FILTER_TODAY),
+                    )
+                    val todayCount = classified.count {
+                        sportsEventDate(it.item.title) == currentSportsDate
+                    }
+                    TvBucketChip(
+                        label = "Today · $todayCount",
+                        selected = selectedSportsMode == SPORTS_FILTER_TODAY,
+                        onClick = { selectSportsCategory(SPORTS_FILTER_TODAY, null) },
+                        focusRequester = requester,
+                        leftFocusRequester = limitFocusRequester,
+                        downFocusRequester = activeCategoryEntryRequester,
+                        onFocused = {
+                            sportsFocusState.markCategoryFocused(SPORTS_FILTER_TODAY)
+                            focusRestoreController.markFocused(target)
+                            onContentFocused(requester)
+                        },
+                    )
+                }
+                item(key = "date_recent") {
+                    val target = remember { sportsCategoryTarget(SPORTS_FILTER_RECENT, 2) }
+                    val requester = rememberRegisteredTvFocusRequester(
+                        focusRestoreController,
+                        target,
+                        categoryRequesters.getValue(SPORTS_FILTER_RECENT),
+                    )
+                    TvBucketChip(
+                        label = "Recent · ${classified.take(80).size}",
+                        selected = selectedSportsMode == SPORTS_FILTER_RECENT,
+                        onClick = { selectSportsCategory(SPORTS_FILTER_RECENT, null) },
+                        focusRequester = requester,
+                        downFocusRequester = activeCategoryEntryRequester,
+                        onFocused = {
+                            sportsFocusState.markCategoryFocused(SPORTS_FILTER_RECENT)
+                            focusRestoreController.markFocused(target)
+                            onContentFocused(requester)
+                        },
+                    )
+                }
+                items(availableEventDates, key = { date -> "date_$date" }) { date ->
+                    val mode = sportsDateMode(date)
+                    val categoryIndex = 3 + availableEventDates.indexOf(date)
+                    val target = remember(mode, categoryIndex) {
+                        sportsCategoryTarget(mode, categoryIndex)
+                    }
+                    val requester = rememberRegisteredTvFocusRequester(
+                        focusRestoreController,
+                        target,
+                        categoryRequesters.getValue(mode),
+                    )
+                    val count = classified.count { sportsEventDate(it.item.title) == date }
+                    TvBucketChip(
+                        label = "${sportsDateChipLabel(date)} · $count",
+                        selected = selectedSportsMode == mode,
+                        onClick = { selectSportsCategory(mode, null) },
+                        focusRequester = requester,
+                        downFocusRequester = activeCategoryEntryRequester,
+                        onFocused = {
+                            sportsFocusState.markCategoryFocused(mode)
+                            focusRestoreController.markFocused(target)
+                            onContentFocused(requester)
+                        },
+                    )
+                }
+            }
         }
 
-        // Bucket filter pills — first focusable row; LEFT off the
-        // first pill returns to the nav rail.
+        // Sport-only category pills. Date scopes live beside Search above so
+        // this row stays compact; LEFT off the first pill returns to the rail.
         Box(modifier = Modifier.fillMaxWidth()) {
             LazyRow(
                 state = chipListState,
@@ -830,78 +969,11 @@ internal fun TvSportsScreen(
                     },
                 )
             }
-            item(key = "bucket_today") {
-                val target = remember { sportsCategoryTarget(SPORTS_FILTER_TODAY, 1) }
-                val requester = rememberRegisteredTvFocusRequester(
-                    focusRestoreController,
-                    target,
-                    categoryRequesters.getValue(SPORTS_FILTER_TODAY),
-                )
-                val todayCount = classified.count {
-                    sportsEventDate(it.item.title) == currentSportsDate
-                }
-                TvBucketChip(
-                    label = "Today $todayCount",
-                    selected = selectedSportsMode == SPORTS_FILTER_TODAY,
-                    onClick = { selectSportsCategory(SPORTS_FILTER_TODAY, null) },
-                    focusRequester = requester,
-                    upFocusRequester = refreshFocusRequester,
-                    downFocusRequester = categoryDownRequester,
-                    onFocused = {
-                        sportsFocusState.markCategoryFocused(SPORTS_FILTER_TODAY)
-                        focusRestoreController.markFocused(target)
-                        onContentFocused(requester)
-                    },
-                )
-            }
-            item(key = "bucket_recent") {
-                val target = remember { sportsCategoryTarget(SPORTS_FILTER_RECENT, 2) }
-                val requester = rememberRegisteredTvFocusRequester(
-                    focusRestoreController,
-                    target,
-                    categoryRequesters.getValue(SPORTS_FILTER_RECENT),
-                )
-                TvBucketChip(
-                    label = "Recent ${classified.take(80).size}",
-                    selected = selectedSportsMode == SPORTS_FILTER_RECENT,
-                    onClick = { selectSportsCategory(SPORTS_FILTER_RECENT, null) },
-                    focusRequester = requester,
-                    upFocusRequester = refreshFocusRequester,
-                    downFocusRequester = categoryDownRequester,
-                    onFocused = {
-                        sportsFocusState.markCategoryFocused(SPORTS_FILTER_RECENT)
-                        focusRestoreController.markFocused(target)
-                        onContentFocused(requester)
-                    },
-                )
-            }
-            items(availableEventDates, key = { date -> "date_$date" }) { date ->
-                val mode = sportsDateMode(date)
-                val categoryIndex = 3 + availableEventDates.indexOf(date)
-                val target = remember(mode, categoryIndex) { sportsCategoryTarget(mode, categoryIndex) }
-                val requester = rememberRegisteredTvFocusRequester(
-                    focusRestoreController,
-                    target,
-                    categoryRequesters.getValue(mode),
-                )
-                val count = classified.count { sportsEventDate(it.item.title) == date }
-                TvBucketChip(
-                    label = "${sportsDateChipLabel(date)} · $count",
-                    selected = selectedSportsMode == mode,
-                    onClick = { selectSportsCategory(mode, null) },
-                    focusRequester = requester,
-                    upFocusRequester = refreshFocusRequester,
-                    downFocusRequester = categoryDownRequester,
-                    onFocused = {
-                        sportsFocusState.markCategoryFocused(mode)
-                        focusRestoreController.markFocused(target)
-                        onContentFocused(requester)
-                    },
-                )
-            }
             items(SPORTS_PRIMARY_BUCKETS, key = { it.name }) { bucket ->
                 val categoryIndex = 3 + availableEventDates.size + SPORTS_PRIMARY_BUCKETS.indexOf(bucket)
-                val target = remember(bucket) { sportsCategoryTarget(bucket.name, categoryIndex) }
+                val target = remember(bucket, categoryIndex) {
+                    sportsCategoryTarget(bucket.name, categoryIndex)
+                }
                 val requester = rememberRegisteredTvFocusRequester(
                     focusRestoreController,
                     target,

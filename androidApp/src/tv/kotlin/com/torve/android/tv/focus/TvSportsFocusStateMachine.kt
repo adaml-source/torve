@@ -14,6 +14,7 @@ internal enum class TvSportsFocusRegion {
 internal enum class TvSportsTopAction(val actionId: String) {
     REFRESH("sports_refresh"),
     SEARCH("sports_search"),
+    LIMIT("sports_limit"),
     RETRY("sports_retry"),
 }
 

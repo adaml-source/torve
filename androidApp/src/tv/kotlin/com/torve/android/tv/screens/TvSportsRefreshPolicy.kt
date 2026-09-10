@@ -14,7 +14,8 @@ internal const val SPORTS_FILTER_RECENT = "recent"
 internal const val SPORTS_FILTER_DATE_PREFIX = "date:"
 
 private const val SPORTS_RECENT_WINDOW_DAYS = 14
-private const val SPORTS_RECENT_WINDOW_MAX_ITEMS = 2_000
+internal const val SPORTS_DEFAULT_RESULT_LIMIT = 200
+internal val SPORTS_RESULT_LIMIT_OPTIONS = listOf(200, 500, 1_000, 2_000)
 
 internal enum class TvSportsRefreshKind {
     ALL,
@@ -52,8 +53,10 @@ internal fun tvSportsRefreshJobKey(pageKey: String, scopeId: String): String =
 internal fun tvSportsRefreshPlan(
     selectedMode: String,
     userQuery: String,
+    requestedMaxItems: Int = SPORTS_DEFAULT_RESULT_LIMIT,
 ): TvSportsRefreshPlan {
     val normalizedQuery = userQuery.trim().takeIf { it.isNotEmpty() }
+    val maxItems = normalizeSportsResultLimit(requestedMaxItems)
     return when (selectedMode) {
         SPORTS_FILTER_ALL -> TvSportsRefreshPlan(
             scopeId = SPORTS_FILTER_ALL,
@@ -62,21 +65,21 @@ internal fun tvSportsRefreshPlan(
             // Keep free-text search capable of finding older events. The rolling
             // window is for the unfiltered feed, where the newest events matter.
             maxAgeDays = SPORTS_RECENT_WINDOW_DAYS.takeIf { normalizedQuery == null },
-            maxItems = SPORTS_RECENT_WINDOW_MAX_ITEMS,
+            maxItems = maxItems,
         )
         SPORTS_FILTER_TODAY -> TvSportsRefreshPlan(
             scopeId = SPORTS_FILTER_TODAY,
             kind = TvSportsRefreshKind.TODAY,
             remoteQuery = normalizedQuery,
             maxAgeDays = 1,
-            maxItems = 100,
+            maxItems = maxItems,
         )
         SPORTS_FILTER_RECENT -> TvSportsRefreshPlan(
             scopeId = SPORTS_FILTER_RECENT,
             kind = TvSportsRefreshKind.RECENT,
             remoteQuery = normalizedQuery,
             maxAgeDays = SPORTS_RECENT_WINDOW_DAYS,
-            maxItems = 500,
+            maxItems = maxItems,
         )
         else -> {
             sportsDateFromMode(selectedMode)?.let {
@@ -85,11 +88,11 @@ internal fun tvSportsRefreshPlan(
                     kind = TvSportsRefreshKind.DATE,
                     remoteQuery = normalizedQuery,
                     maxAgeDays = SPORTS_RECENT_WINDOW_DAYS,
-                    maxItems = SPORTS_RECENT_WINDOW_MAX_ITEMS,
+                    maxItems = maxItems,
                 )
             }
             val bucket = SportBucket.entries.firstOrNull { it.name == selectedMode }
-                ?: return tvSportsRefreshPlan(SPORTS_FILTER_ALL, userQuery)
+                ?: return tvSportsRefreshPlan(SPORTS_FILTER_ALL, userQuery, maxItems)
             val bucketQuery = sportsRemoteQuery(bucket)
             TvSportsRefreshPlan(
                 scopeId = bucket.name,
@@ -98,6 +101,7 @@ internal fun tvSportsRefreshPlan(
                 remoteQuery = listOfNotNull(normalizedQuery, bucketQuery)
                     .joinToString(" ")
                     .takeIf { it.isNotBlank() },
+                maxItems = maxItems,
             )
         }
     }
@@ -109,7 +113,10 @@ internal fun mergeTvSportsRefresh(
     plan: TvSportsRefreshPlan,
 ): List<NewznabItem> {
     if (plan.kind == TvSportsRefreshKind.ALL || plan.kind == TvSportsRefreshKind.DATE) {
-        return fetched.sortedForSports().distinctBy(NewznabItem::sportsStableId)
+        return fetched
+            .sortedForSports()
+            .distinctBy(NewznabItem::sportsStableId)
+            .take(plan.maxItems)
     }
 
     val retained = if (plan.kind == TvSportsRefreshKind.BUCKET && plan.bucket != null) {
@@ -125,7 +132,15 @@ internal fun mergeTvSportsRefresh(
     return (scopedFetched + retained)
         .distinctBy(NewznabItem::sportsStableId)
         .sortedForSports()
-        .take(SPORTS_RECENT_WINDOW_MAX_ITEMS)
+        .take(plan.maxItems)
+}
+
+internal fun normalizeSportsResultLimit(value: Int): Int =
+    value.takeIf(SPORTS_RESULT_LIMIT_OPTIONS::contains) ?: SPORTS_DEFAULT_RESULT_LIMIT
+
+internal fun nextSportsResultLimit(value: Int): Int {
+    val currentIndex = SPORTS_RESULT_LIMIT_OPTIONS.indexOf(normalizeSportsResultLimit(value))
+    return SPORTS_RESULT_LIMIT_OPTIONS[(currentIndex + 1) % SPORTS_RESULT_LIMIT_OPTIONS.size]
 }
 
 internal fun sportsDateMode(date: LocalDate): String = "$SPORTS_FILTER_DATE_PREFIX$date"

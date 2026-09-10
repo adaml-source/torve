@@ -17,7 +17,7 @@ class TvSportsRefreshPolicyTest {
 
         assertEquals(TvSportsRefreshKind.ALL, all.kind)
         assertEquals(14, all.maxAgeDays)
-        assertEquals(2_000, all.maxItems)
+        assertEquals(200, all.maxItems)
         assertEquals(TvSportsRefreshKind.BUCKET, football.kind)
         assertEquals(SportBucket.AMERICAN_FOOTBALL, football.bucket)
         assertEquals("NFL", football.remoteQuery)
@@ -31,9 +31,9 @@ class TvSportsRefreshPolicyTest {
         val recent = tvSportsRefreshPlan(SPORTS_FILTER_RECENT, "")
 
         assertEquals(1, today.maxAgeDays)
-        assertEquals(100, today.maxItems)
+        assertEquals(200, today.maxItems)
         assertEquals(14, recent.maxAgeDays)
-        assertEquals(500, recent.maxItems)
+        assertEquals(200, recent.maxItems)
         assertTrue(today.kind != TvSportsRefreshKind.ALL)
         assertTrue(recent.kind != TvSportsRefreshKind.ALL)
     }
@@ -43,7 +43,18 @@ class TvSportsRefreshPolicyTest {
         val search = tvSportsRefreshPlan(SPORTS_FILTER_ALL, "Wimbledon")
 
         assertEquals(null, search.maxAgeDays)
-        assertEquals(2_000, search.maxItems)
+        assertEquals(200, search.maxItems)
+    }
+
+    @Test
+    fun resultLimitDefaultsToTwoHundredAndCyclesThroughExplicitOptions() {
+        assertEquals(listOf(200, 500, 1_000, 2_000), SPORTS_RESULT_LIMIT_OPTIONS)
+        assertEquals(200, normalizeSportsResultLimit(37))
+        assertEquals(500, nextSportsResultLimit(200))
+        assertEquals(1_000, nextSportsResultLimit(500))
+        assertEquals(2_000, nextSportsResultLimit(1_000))
+        assertEquals(200, nextSportsResultLimit(2_000))
+        assertEquals(1_000, tvSportsRefreshPlan(SPORTS_FILTER_ALL, "", 1_000).maxItems)
     }
 
     @Test
@@ -98,6 +109,22 @@ class TvSportsRefreshPolicyTest {
         )
 
         assertEquals(listOf("newer-event", "older-event"), merged.mapNotNull { it.guid })
+    }
+
+    @Test
+    fun fullRefreshCutsOldestItemsFromTheBottom() {
+        val newest = item("newest", "NFL.2026.09.10.Newest")
+        val middle = item("middle", "NFL.2026.09.09.Middle")
+        val oldest = item("oldest", "NFL.2026.09.08.Oldest")
+        val plan = tvSportsRefreshPlan(SPORTS_FILTER_ALL, "").copy(maxItems = 2)
+
+        val merged = mergeTvSportsRefresh(
+            existing = emptyList(),
+            fetched = listOf(oldest, newest, middle),
+            plan = plan,
+        )
+
+        assertEquals(listOf("newest", "middle"), merged.mapNotNull { it.guid })
     }
 
     @Test
