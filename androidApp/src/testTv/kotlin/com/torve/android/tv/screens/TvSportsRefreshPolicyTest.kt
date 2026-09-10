@@ -2,6 +2,7 @@ package com.torve.android.tv.screens
 
 import com.torve.data.usenet.NewznabItem
 import com.torve.domain.sports.SportBucket
+import java.time.LocalDate
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -15,6 +16,8 @@ class TvSportsRefreshPolicyTest {
         val basketball = tvSportsRefreshPlan(SportBucket.BASKETBALL.name, "")
 
         assertEquals(TvSportsRefreshKind.ALL, all.kind)
+        assertEquals(14, all.maxAgeDays)
+        assertEquals(2_000, all.maxItems)
         assertEquals(TvSportsRefreshKind.BUCKET, football.kind)
         assertEquals(SportBucket.AMERICAN_FOOTBALL, football.bucket)
         assertEquals("NFL", football.remoteQuery)
@@ -29,9 +32,18 @@ class TvSportsRefreshPolicyTest {
 
         assertEquals(1, today.maxAgeDays)
         assertEquals(100, today.maxItems)
-        assertEquals(80, recent.maxItems)
+        assertEquals(14, recent.maxAgeDays)
+        assertEquals(500, recent.maxItems)
         assertTrue(today.kind != TvSportsRefreshKind.ALL)
         assertTrue(recent.kind != TvSportsRefreshKind.ALL)
+    }
+
+    @Test
+    fun textSearchIsNotRestrictedToTheRecentFeedWindow() {
+        val search = tvSportsRefreshPlan(SPORTS_FILTER_ALL, "Wimbledon")
+
+        assertEquals(null, search.maxAgeDays)
+        assertEquals(2_000, search.maxItems)
     }
 
     @Test
@@ -64,6 +76,38 @@ class TvSportsRefreshPolicyTest {
         assertTrue(merged.any { it.guid == "new-football" })
         assertTrue(merged.any { it.guid == "basketball" })
         assertTrue(merged.any { it.guid == "tennis" })
+    }
+
+    @Test
+    fun fullRefreshRanksByEventDateBeforeUploadDate() {
+        val olderEventUploadedToday = item(
+            guid = "older-event",
+            title = "MLS.2026.09.05.Team.One.vs.Team.Two",
+            pubDate = "Thu, 10 Sep 2026 08:00:00 +0000",
+        )
+        val newerEventUploadedYesterday = item(
+            guid = "newer-event",
+            title = "NFL.2026.09.09.Seattle.Seahawks.vs.New.England.Patriots",
+            pubDate = "Wed, 09 Sep 2026 23:00:00 +0000",
+        )
+
+        val merged = mergeTvSportsRefresh(
+            existing = emptyList(),
+            fetched = listOf(olderEventUploadedToday, newerEventUploadedYesterday),
+            plan = tvSportsRefreshPlan(SPORTS_FILTER_ALL, ""),
+        )
+
+        assertEquals(listOf("newer-event", "older-event"), merged.mapNotNull { it.guid })
+    }
+
+    @Test
+    fun specificDateModesRoundTripAndParseReleaseSeparators() {
+        val date = LocalDate.of(2026, 9, 9)
+
+        assertEquals(date, sportsDateFromMode(sportsDateMode(date)))
+        assertEquals(date, sportsEventDate("NFL.2026.09.09.Seahawks.vs.Patriots"))
+        assertEquals(date, sportsEventDate("NFL 2026 09 09 Seahawks vs Patriots"))
+        assertEquals(date, sportsEventDate("NFL-2026-09-09-Seahawks-vs-Patriots"))
     }
 
     @Test
@@ -107,10 +151,14 @@ class TvSportsRefreshPolicyTest {
         )
     }
 
-    private fun item(guid: String, title: String) = NewznabItem(
+    private fun item(
+        guid: String,
+        title: String,
+        pubDate: String = "Thu, 27 Aug 2026 10:00:00 +0000",
+    ) = NewznabItem(
         title = title,
         nzbUrl = "https://example.invalid/$guid",
         guid = guid,
-        pubDate = "Thu, 27 Aug 2026 10:00:00 +0000",
+        pubDate = pubDate,
     )
 }

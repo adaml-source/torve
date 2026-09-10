@@ -136,16 +136,17 @@ class NewznabClient(
         val seen = LinkedHashMap<String, NewznabItem>()
         var offset = 0
         val maxPages = (maxItems + pageSize - 1) / pageSize + 1
-        repeat(maxPages) {
+        var pagesFetched = 0
+        while (pagesFetched < maxPages && seen.size < maxItems) {
             val page = fetchPage(offset, pageSize)
-            if (page.isEmpty()) return@repeat
+            if (page.isEmpty()) break
             page.forEach { item ->
                 val key = item.guid ?: item.nzbUrl
                 if (key !in seen) seen[key] = item
             }
             offset += pageSize
+            pagesFetched++
             onProgress?.invoke(seen.size.coerceAtMost(maxItems), maxItems)
-            if (seen.size >= maxItems) return@repeat
         }
         return seen.values.toList().sortedByPubDateDesc().take(maxItems)
     }

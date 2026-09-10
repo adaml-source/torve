@@ -2,17 +2,25 @@ package com.torve.android.tv.screens
 
 import com.torve.data.usenet.NewznabItem
 import com.torve.domain.sports.SportBucket
+import java.time.LocalDate
+import java.time.ZoneOffset
 import java.time.ZonedDateTime
 import java.time.format.DateTimeFormatter
+import java.util.Locale
 
 internal const val SPORTS_FILTER_ALL = "all"
 internal const val SPORTS_FILTER_TODAY = "today"
 internal const val SPORTS_FILTER_RECENT = "recent"
+internal const val SPORTS_FILTER_DATE_PREFIX = "date:"
+
+private const val SPORTS_RECENT_WINDOW_DAYS = 14
+private const val SPORTS_RECENT_WINDOW_MAX_ITEMS = 2_000
 
 internal enum class TvSportsRefreshKind {
     ALL,
     TODAY,
     RECENT,
+    DATE,
     BUCKET,
 }
 
@@ -51,6 +59,10 @@ internal fun tvSportsRefreshPlan(
             scopeId = SPORTS_FILTER_ALL,
             kind = TvSportsRefreshKind.ALL,
             remoteQuery = normalizedQuery,
+            // Keep free-text search capable of finding older events. The rolling
+            // window is for the unfiltered feed, where the newest events matter.
+            maxAgeDays = SPORTS_RECENT_WINDOW_DAYS.takeIf { normalizedQuery == null },
+            maxItems = SPORTS_RECENT_WINDOW_MAX_ITEMS,
         )
         SPORTS_FILTER_TODAY -> TvSportsRefreshPlan(
             scopeId = SPORTS_FILTER_TODAY,
@@ -63,9 +75,19 @@ internal fun tvSportsRefreshPlan(
             scopeId = SPORTS_FILTER_RECENT,
             kind = TvSportsRefreshKind.RECENT,
             remoteQuery = normalizedQuery,
-            maxItems = 80,
+            maxAgeDays = SPORTS_RECENT_WINDOW_DAYS,
+            maxItems = 500,
         )
         else -> {
+            sportsDateFromMode(selectedMode)?.let {
+                return TvSportsRefreshPlan(
+                    scopeId = selectedMode,
+                    kind = TvSportsRefreshKind.DATE,
+                    remoteQuery = normalizedQuery,
+                    maxAgeDays = SPORTS_RECENT_WINDOW_DAYS,
+                    maxItems = SPORTS_RECENT_WINDOW_MAX_ITEMS,
+                )
+            }
             val bucket = SportBucket.entries.firstOrNull { it.name == selectedMode }
                 ?: return tvSportsRefreshPlan(SPORTS_FILTER_ALL, userQuery)
             val bucketQuery = sportsRemoteQuery(bucket)
@@ -86,7 +108,9 @@ internal fun mergeTvSportsRefresh(
     fetched: List<NewznabItem>,
     plan: TvSportsRefreshPlan,
 ): List<NewznabItem> {
-    if (plan.kind == TvSportsRefreshKind.ALL) return fetched.distinctBy(NewznabItem::sportsStableId)
+    if (plan.kind == TvSportsRefreshKind.ALL || plan.kind == TvSportsRefreshKind.DATE) {
+        return fetched.sortedForSports().distinctBy(NewznabItem::sportsStableId)
+    }
 
     val retained = if (plan.kind == TvSportsRefreshKind.BUCKET && plan.bucket != null) {
         existing.filterNot { SportBucket.classify(it.title) == plan.bucket }
@@ -100,9 +124,41 @@ internal fun mergeTvSportsRefresh(
     }
     return (scopedFetched + retained)
         .distinctBy(NewznabItem::sportsStableId)
-        .sortedByDescending(NewznabItem::sportsPublishedAtMillis)
-        .take(400)
+        .sortedForSports()
+        .take(SPORTS_RECENT_WINDOW_MAX_ITEMS)
 }
+
+internal fun sportsDateMode(date: LocalDate): String = "$SPORTS_FILTER_DATE_PREFIX$date"
+
+internal fun sportsDateFromMode(mode: String): LocalDate? = mode
+    .takeIf { it.startsWith(SPORTS_FILTER_DATE_PREFIX) }
+    ?.removePrefix(SPORTS_FILTER_DATE_PREFIX)
+    ?.let { runCatching { LocalDate.parse(it) }.getOrNull() }
+
+internal fun sportsEventDate(title: String): LocalDate? {
+    val match = SPORTS_EVENT_DATE_REGEX.find(title) ?: return null
+    val year = match.groupValues[1].toIntOrNull() ?: return null
+    val month = match.groupValues[2].toIntOrNull() ?: return null
+    val day = match.groupValues[3].toIntOrNull() ?: return null
+    return runCatching { LocalDate.of(year, month, day) }.getOrNull()
+}
+
+internal fun sportsDateChipLabel(date: LocalDate): String =
+    date.format(DateTimeFormatter.ofPattern("MMM d", Locale.ENGLISH))
+
+private fun List<NewznabItem>.sortedForSports(): List<NewznabItem> =
+    sortedWith(
+        compareByDescending<NewznabItem> { item ->
+            item.sportsRecencyAtMillis()
+        }.thenByDescending { item -> item.sportsPublishedAtMillis() },
+    )
+
+private fun NewznabItem.sportsRecencyAtMillis(): Long =
+    sportsEventDate(title)
+        ?.atStartOfDay()
+        ?.toInstant(ZoneOffset.UTC)
+        ?.toEpochMilli()
+        ?: sportsPublishedAtMillis()
 
 internal fun sportsRemoteQuery(bucket: SportBucket): String = when (bucket) {
     SportBucket.F1 -> "Formula 1"
@@ -127,3 +183,5 @@ internal fun NewznabItem.sportsStableId(): String = guid?.takeIf { it.isNotBlank
 private fun NewznabItem.sportsPublishedAtMillis(): Long = runCatching {
     ZonedDateTime.parse(pubDate, DateTimeFormatter.RFC_1123_DATE_TIME).toInstant().toEpochMilli()
 }.getOrDefault(Long.MIN_VALUE)
+
+private val SPORTS_EVENT_DATE_REGEX = Regex("\\b(20\\d{2})[._ -](\\d{2})[._ -](\\d{2})\\b")

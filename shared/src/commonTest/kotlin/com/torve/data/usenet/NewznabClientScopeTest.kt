@@ -32,5 +32,30 @@ class NewznabClientScopeTest {
             client.close()
         }
     }
-}
 
+    @Test
+    fun paginationStopsAfterTheProviderReturnsAnEmptyPage() = runTest {
+        var requestCount = 0
+        val client = HttpClient(
+            MockEngine {
+                requestCount++
+                respond("<rss><channel></channel></rss>", HttpStatusCode.OK)
+            },
+        )
+
+        try {
+            val results = NewznabClient(client).browseAllPages(
+                baseUrl = "https://indexer.example",
+                apiKey = "test-key",
+                category = "5060",
+                maxItems = 2_000,
+                maxAgeDays = 14,
+            )
+
+            assertEquals(emptyList(), results)
+            assertEquals(1, requestCount)
+        } finally {
+            client.close()
+        }
+    }
+}
