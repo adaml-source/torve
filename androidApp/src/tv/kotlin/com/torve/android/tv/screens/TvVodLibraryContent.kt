@@ -10,6 +10,8 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -58,7 +60,9 @@ import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -970,6 +974,8 @@ private fun TvVodSearchAndFilters(
     ) {
         val context = LocalContext.current
         val view = LocalView.current
+        val keyboardController = LocalSoftwareKeyboardController.current
+        val inputRequester = remember { FocusRequester() }
         var focused by remember { mutableStateOf(false) }
         var editMode by remember { mutableStateOf(false) }
         val borderColor by animateColorAsState(
@@ -982,17 +988,30 @@ private fun TvVodSearchAndFilters(
         )
         fun showKeyboard() {
             val imm = context.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
-            imm.showSoftInput(view, InputMethodManager.SHOW_IMPLICIT)
+            keyboardController?.show()
+            view.post {
+                // Fire OS 8 / Android 12 can retain the read-only input connection
+                // after D-pad activation. Restart it only after the editable state
+                // has been composed, then ask the platform IME again as a fallback.
+                imm.restartInput(view)
+                imm.showSoftInput(view, InputMethodManager.SHOW_IMPLICIT)
+            }
         }
         fun hideKeyboard() {
+            keyboardController?.hide()
             val imm = context.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
             imm.hideSoftInputFromWindow(view.windowToken, 0)
         }
 
         LaunchedEffect(editMode) {
             if (editMode) {
-                kotlinx.coroutines.delay(50)
+                runCatching { inputRequester.requestFocus() }
+                androidx.compose.runtime.withFrameNanos { }
                 showKeyboard()
+                // Some Fire TV IMEs bind one frame later than Compose's text input
+                // session. A second request is harmless and covers that race.
+                kotlinx.coroutines.delay(120)
+                if (editMode) showKeyboard()
             }
         }
 
@@ -1003,11 +1022,19 @@ private fun TvVodSearchAndFilters(
             },
             readOnly = !editMode,
             singleLine = true,
+            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+            keyboardActions = KeyboardActions(
+                onSearch = {
+                    editMode = false
+                    hideKeyboard()
+                },
+            ),
             textStyle = MaterialTheme.typography.bodyMedium.copy(color = Snow, fontSize = 14.sp),
             modifier = Modifier
                 .fillMaxWidth()
                 .height(38.dp)
                 .focusRequester(searchRequester)
+                .focusRequester(inputRequester)
                 .focusProperties {
                     headerFocusRequester?.let { up = it }
                     down = firstYearFilterRequester
