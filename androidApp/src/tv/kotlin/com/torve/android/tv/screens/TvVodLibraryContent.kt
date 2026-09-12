@@ -978,6 +978,7 @@ private fun TvVodSearchAndFilters(
         val inputRequester = remember { FocusRequester() }
         var focused by remember { mutableStateOf(false) }
         var editMode by remember { mutableStateOf(false) }
+        var restoreSearchFocus by remember { mutableStateOf(false) }
         val borderColor by animateColorAsState(
             targetValue = when {
                 editMode -> AmberLight
@@ -990,10 +991,8 @@ private fun TvVodSearchAndFilters(
             val imm = context.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
             keyboardController?.show()
             view.post {
-                // Fire OS 8 / Android 12 can retain the read-only input connection
-                // after D-pad activation. Restart it only after the editable state
-                // has been composed, then ask the platform IME again as a fallback.
-                imm.restartInput(view)
+                // Compose owns the input connection; this platform request is a
+                // fallback for Fire TV IMEs that bind one frame later.
                 imm.showSoftInput(view, InputMethodManager.SHOW_IMPLICIT)
             }
         }
@@ -1012,29 +1011,24 @@ private fun TvVodSearchAndFilters(
                 // session. A second request is harmless and covers that race.
                 kotlinx.coroutines.delay(120)
                 if (editMode) showKeyboard()
+            } else if (restoreSearchFocus) {
+                androidx.compose.runtime.withFrameNanos { }
+                runCatching { searchRequester.requestFocus() }
+                restoreSearchFocus = false
             }
         }
 
-        BasicTextField(
-            value = query,
-            onValueChange = { value ->
-                if (editMode) onQueryChange(value)
-            },
-            readOnly = !editMode,
-            singleLine = true,
-            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-            keyboardActions = KeyboardActions(
-                onSearch = {
-                    editMode = false
-                    hideKeyboard()
-                },
-            ),
-            textStyle = MaterialTheme.typography.bodyMedium.copy(color = Snow, fontSize = 14.sp),
+        BackHandler(enabled = editMode) {
+            restoreSearchFocus = true
+            editMode = false
+            hideKeyboard()
+        }
+
+        Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(38.dp)
                 .focusRequester(searchRequester)
-                .focusRequester(inputRequester)
                 .focusProperties {
                     headerFocusRequester?.let { up = it }
                     down = firstYearFilterRequester
@@ -1043,8 +1037,9 @@ private fun TvVodSearchAndFilters(
                 .background(Charcoal.copy(alpha = if (focused) 0.42f else 0.24f))
                 .border(1.dp, borderColor, RoundedCornerShape(10.dp))
                 .onFocusChanged {
-                    focused = it.isFocused
-                    if (!it.isFocused && editMode) {
+                    focused = it.hasFocus
+                    if (!it.hasFocus && editMode) {
+                        restoreSearchFocus = false
                         editMode = false
                         hideKeyboard()
                     }
@@ -1054,6 +1049,7 @@ private fun TvVodSearchAndFilters(
                     when (event.key) {
                         Key.DirectionUp -> {
                             if (editMode) {
+                                restoreSearchFocus = false
                                 editMode = false
                                 hideKeyboard()
                             }
@@ -1065,6 +1061,7 @@ private fun TvVodSearchAndFilters(
 
                         Key.DirectionDown -> {
                             if (editMode) {
+                                restoreSearchFocus = false
                                 editMode = false
                                 hideKeyboard()
                             }
@@ -1083,6 +1080,7 @@ private fun TvVodSearchAndFilters(
 
                         Key.Back -> {
                             if (editMode) {
+                                restoreSearchFocus = true
                                 editMode = false
                                 hideKeyboard()
                                 true
@@ -1095,25 +1093,54 @@ private fun TvVodSearchAndFilters(
                     }
                 }
                 .clickable(
+                    enabled = !editMode,
                     interactionSource = remember { MutableInteractionSource() },
                     indication = null,
                     onClick = { editMode = true },
                 )
                 .padding(horizontal = 12.dp, vertical = 9.dp),
-            decorationBox = { innerTextField ->
-                Box(contentAlignment = Alignment.CenterStart) {
-                    if (query.isBlank()) {
-                        Text(
-                            text = if (editMode) "Type to search" else "Search VOD",
-                            color = Silver.copy(alpha = 0.58f),
-                            style = MaterialTheme.typography.bodyMedium,
-                            maxLines = 1,
-                        )
-                    }
-                    innerTextField()
-                }
-            },
-        )
+            contentAlignment = Alignment.CenterStart,
+        ) {
+            if (editMode) {
+                BasicTextField(
+                    value = query,
+                    onValueChange = onQueryChange,
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                    keyboardActions = KeyboardActions(
+                        onSearch = {
+                            restoreSearchFocus = true
+                            editMode = false
+                            hideKeyboard()
+                        },
+                    ),
+                    textStyle = MaterialTheme.typography.bodyMedium.copy(color = Snow, fontSize = 14.sp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .focusRequester(inputRequester),
+                    decorationBox = { innerTextField ->
+                        Box(contentAlignment = Alignment.CenterStart) {
+                            if (query.isBlank()) {
+                                Text(
+                                    text = "Type to search",
+                                    color = Silver.copy(alpha = 0.58f),
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    maxLines = 1,
+                                )
+                            }
+                            innerTextField()
+                        }
+                    },
+                )
+            } else {
+                Text(
+                    text = query.ifBlank { "Search VOD" },
+                    color = if (query.isBlank()) Silver.copy(alpha = 0.58f) else Snow,
+                    style = MaterialTheme.typography.bodyMedium.copy(fontSize = 14.sp),
+                    maxLines = 1,
+                )
+            }
+        }
 
         Row(
             modifier = Modifier.fillMaxWidth(),

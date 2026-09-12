@@ -45,14 +45,15 @@ class TvProviderCatalogModelTest {
 
     @Test
     fun vodSearchStartsAnEditableInputSessionBeforeShowingTheFireTvKeyboard() {
-        val source = readSource("screens/TvVodLibraryContent.kt")
+        val source = readSource("screens/TvVodLibraryContent.kt").replace("\r\n", "\n")
 
         assertTrue("LocalSoftwareKeyboardController.current" in source)
         assertTrue("inputRequester.requestFocus()" in source)
         assertTrue("withFrameNanos" in source)
-        assertTrue("imm.restartInput(view)" in source)
         assertTrue("keyboardController?.show()" in source)
         assertTrue("imeAction = ImeAction.Search" in source)
+        assertTrue("if (editMode) {\n                BasicTextField(" in source)
+        assertFalse("readOnly = !editMode" in source)
     }
 
     @Test
