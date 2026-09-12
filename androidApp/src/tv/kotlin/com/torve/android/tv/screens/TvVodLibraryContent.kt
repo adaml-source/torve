@@ -1093,10 +1093,11 @@ private fun TvVodSearchAndFilters(
                     }
                 }
                 .clickable(
-                    enabled = !editMode,
                     interactionSource = remember { MutableInteractionSource() },
                     indication = null,
-                    onClick = { editMode = true },
+                    onClick = {
+                        if (!editMode) editMode = true
+                    },
                 )
                 .padding(horizontal = 12.dp, vertical = 9.dp),
             contentAlignment = Alignment.CenterStart,
