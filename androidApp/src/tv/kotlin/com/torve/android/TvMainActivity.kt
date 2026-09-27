@@ -8,6 +8,7 @@ import android.os.Looper
 import android.view.KeyEvent
 import android.widget.Toast
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -30,8 +31,10 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
@@ -42,6 +45,9 @@ import com.torve.android.deeplink.TorveAppLinkParser
 import com.torve.android.tv.TvRoot
 import com.torve.android.ui.player.ActivePlaybackState
 import com.torve.android.ui.system.configureTorveEdgeToEdge
+import com.torve.android.ui.theme.AmberLight
+import com.torve.android.ui.theme.Obsidian
+import com.torve.android.ui.theme.Snow
 import com.torve.android.ui.theme.TorveTheme
 import com.torve.data.auth.AuthEvent
 import com.torve.data.auth.AuthClient
@@ -350,20 +356,49 @@ private fun TvAppControlDialog(
                     horizontalArrangement = Arrangement.spacedBy(14.dp, Alignment.End),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Button(onClick = onExit) {
-                        Text(stringResource(R.string.tv_app_control_exit))
-                    }
-                    Button(onClick = onRestart) {
-                        Text(stringResource(R.string.tv_app_control_restart))
-                    }
-                    Button(
+                    TvAppControlButton(
+                        text = stringResource(R.string.tv_app_control_exit),
+                        onClick = onExit,
+                    )
+                    TvAppControlButton(
+                        text = stringResource(R.string.tv_app_control_restart),
+                        onClick = onRestart,
+                    )
+                    TvAppControlButton(
+                        text = stringResource(R.string.common_cancel),
                         onClick = onDismiss,
                         modifier = Modifier.focusRequester(cancelFocusRequester),
-                    ) {
-                        Text(stringResource(R.string.common_cancel))
-                    }
+                    )
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun TvAppControlButton(
+    text: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    var focused by remember { mutableStateOf(false) }
+    val shape = RoundedCornerShape(14.dp)
+    Button(
+        onClick = onClick,
+        modifier = modifier
+            .onFocusChanged { focused = it.isFocused }
+            .scale(if (focused) 1.08f else 1f)
+            .border(
+                width = if (focused) 3.dp else 1.dp,
+                color = if (focused) Snow else MaterialTheme.colorScheme.outlineVariant,
+                shape = shape,
+            ),
+        shape = shape,
+        colors = androidx.compose.material3.ButtonDefaults.buttonColors(
+            containerColor = if (focused) AmberLight else MaterialTheme.colorScheme.surfaceVariant,
+            contentColor = if (focused) Obsidian else MaterialTheme.colorScheme.onSurfaceVariant,
+        ),
+    ) {
+        Text(text)
     }
 }

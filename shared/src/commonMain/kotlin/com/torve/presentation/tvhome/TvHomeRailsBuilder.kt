@@ -91,26 +91,62 @@ object TvHomeRailsBuilder {
      */
     fun providerBanner(rows: List<ProviderHealthEntry>): TvProviderBanner? {
         if (rows.isEmpty()) return null
-        val red = rows.count { it.status == ProviderHealthStatus.RED }
-        val yellow = rows.count { it.status == ProviderHealthStatus.YELLOW }
+        val redRows = rows.filter { it.status == ProviderHealthStatus.RED }
+        val yellowRows = rows.filter { it.status == ProviderHealthStatus.YELLOW }
         return when {
-            red > 0 -> TvProviderBanner(
+            redRows.isNotEmpty() -> TvProviderBanner(
                 tone = TvProviderBannerTone.ERROR,
-                title = if (red == 1) "1 provider needs attention" else "$red providers need attention",
-                description = "Browsing keeps working. Open Settings to fix or transfer credentials.",
-                redCount = red,
-                yellowCount = yellow,
+                title = buildProviderTitle(
+                    rows = redRows,
+                    singular = "1 provider needs attention",
+                    plural = "providers need attention",
+                ),
+                description = buildProviderDescription(redRows),
+                redCount = redRows.size,
+                yellowCount = yellowRows.size,
             )
-            yellow > 0 -> TvProviderBanner(
+            yellowRows.isNotEmpty() -> TvProviderBanner(
                 tone = TvProviderBannerTone.WARNING,
-                title = if (yellow == 1) "1 provider degraded" else "$yellow providers degraded",
-                description = "Some sources may be slower or partially configured.",
+                title = buildProviderTitle(
+                    rows = yellowRows,
+                    singular = "1 provider degraded",
+                    plural = "providers degraded",
+                ),
+                description = buildProviderDescription(yellowRows),
                 redCount = 0,
-                yellowCount = yellow,
+                yellowCount = yellowRows.size,
             )
             else -> null
         }
     }
+
+    private fun buildProviderTitle(
+        rows: List<ProviderHealthEntry>,
+        singular: String,
+        plural: String,
+    ): String {
+        val countLabel = if (rows.size == 1) singular else "${rows.size} $plural"
+        return "$countLabel: ${rows.joinToString(", ") { it.bannerLabel() }}"
+    }
+
+    private fun buildProviderDescription(rows: List<ProviderHealthEntry>): String {
+        val details = rows.joinToString(" • ") { row ->
+            val reason = row.message
+                ?.trim()
+                ?.trimEnd('.')
+                ?.takeIf { it.isNotEmpty() }
+                ?: "No current health details"
+            "${row.bannerLabel()}: $reason"
+        }
+        return "$details. Press OK to recheck in Settings > About > Provider health."
+    }
+
+    private fun ProviderHealthEntry.bannerLabel(): String =
+        if (providerKey == "automation:admin") {
+            "ARR stack (Sonarr/Radarr/etc.)"
+        } else {
+            label
+        }
 
     /**
      * On-Now / Live-TV rail: every [EnrichedChannel] that has a

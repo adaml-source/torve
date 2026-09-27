@@ -37,7 +37,7 @@ class AutomationStackProviderHealthChecker(
             } else {
                 runCatching { repository.apiKey(instance) }.getOrNull().orEmpty()
             }
-            if (instance.serviceType != AutomationServiceType.TDARR && apiKey.isBlank()) {
+            val health = if (instance.serviceType != AutomationServiceType.TDARR && apiKey.isBlank()) {
                 InstanceHealth.MISSING_CREDENTIAL
             } else {
                 when (runCatching { adminClient.testConnection(instance, apiKey) }
@@ -48,13 +48,19 @@ class AutomationStackProviderHealthChecker(
                     AutomationConnectionResult.Unsupported -> InstanceHealth.UNSUPPORTED
                 }
             }
+            instance.serviceType to health
         }
-        val connected = results.count { it == InstanceHealth.CONNECTED }
+        val connected = results.count { (_, health) -> health == InstanceHealth.CONNECTED }
         val total = results.size
-        val incomplete = results.count {
-            it == InstanceHealth.MISSING_CREDENTIAL || it == InstanceHealth.UNSUPPORTED
+        val incomplete = results.count { (_, health) ->
+            health == InstanceHealth.MISSING_CREDENTIAL || health == InstanceHealth.UNSUPPORTED
         }
         val failed = total - connected - incomplete
+        val attentionServices = results
+            .filter { (_, health) -> health != InstanceHealth.CONNECTED }
+            .map { (service, _) -> service.displayLabel() }
+            .distinct()
+            .joinToString(", ")
 
         return when {
             connected == total -> base().copy(
@@ -63,17 +69,17 @@ class AutomationStackProviderHealthChecker(
             )
             connected > 0 -> base().copy(
                 status = ProviderHealthStatus.YELLOW,
-                message = "$connected of $total automation services connected; ${total - connected} need attention",
+                message = "$connected of $total ARR services connected; check $attentionServices",
                 nextAction = "Review setup",
             )
             failed > 0 -> base().copy(
                 status = ProviderHealthStatus.RED,
-                message = "No configured automation service is reachable",
+                message = "ARR services unreachable or unauthorized: $attentionServices",
                 nextAction = "Check connections",
             )
             else -> base().copy(
                 status = ProviderHealthStatus.YELLOW,
-                message = "$incomplete automation ${if (incomplete == 1) "connection needs" else "connections need"} setup",
+                message = "ARR services need setup: $attentionServices",
                 nextAction = "Finish setup",
             )
         }
@@ -82,9 +88,17 @@ class AutomationStackProviderHealthChecker(
     private fun base() = ProviderHealthEntry(
         category = ProviderHealthCategory.REQUEST_MANAGER,
         providerKey = providerKey,
-        label = "Automation stack",
+        label = "ARR automation stack",
         status = ProviderHealthStatus.UNKNOWN,
     )
+
+    private fun AutomationServiceType.displayLabel(): String = when (this) {
+        AutomationServiceType.SONARR -> "Sonarr"
+        AutomationServiceType.RADARR -> "Radarr"
+        AutomationServiceType.PROWLARR -> "Prowlarr"
+        AutomationServiceType.BAZARR -> "Bazarr"
+        AutomationServiceType.TDARR -> "Tdarr"
+    }
 
     private enum class InstanceHealth {
         CONNECTED,

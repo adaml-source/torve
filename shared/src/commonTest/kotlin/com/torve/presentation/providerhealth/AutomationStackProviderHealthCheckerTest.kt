@@ -58,6 +58,8 @@ class AutomationStackProviderHealthCheckerTest {
 
         assertEquals(ProviderHealthStatus.YELLOW, entry.status)
         val output = entry.message.orEmpty()
+        assertEquals("ARR automation stack", entry.label)
+        assertEquals("1 of 2 ARR services connected; check Radarr", output)
         assertFalse(output.contains(secret))
         assertFalse(output.contains("Private NAS"))
         assertFalse(output.contains("private-host"))
@@ -72,6 +74,7 @@ class AutomationStackProviderHealthCheckerTest {
         ).check()
 
         assertEquals(ProviderHealthStatus.RED, entry.status)
+        assertEquals("ARR services unreachable or unauthorized: Sonarr", entry.message)
         assertEquals("Check connections", entry.nextAction)
     }
 

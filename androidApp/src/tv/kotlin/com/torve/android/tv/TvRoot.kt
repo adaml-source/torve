@@ -2730,6 +2730,7 @@ fun TvRoot(
                                 }
                             },
                             onProviderBannerAction = {
+                                settingsFocusStateMachine.selectedCategory = TvSettingsCategory.ABOUT
                                 navController.navigate(TvRoutes.SETTINGS)
                             },
                             onFirstContentRequester = { registerFirstContentFocus(TvRoutes.HOME, it) },

@@ -185,6 +185,34 @@ class TvHomeRailsBuilderTest {
         assertTrue(banner?.title?.contains("2 providers") == true)
     }
 
+    @Test
+    fun `providerBanner names failing providers and includes their reasons`() {
+        val rows = listOf(
+            ProviderHealthEntry(
+                category = ProviderHealthCategory.DEBRID,
+                providerKey = "debrid:real-debrid",
+                label = "Real-Debrid",
+                status = ProviderHealthStatus.RED,
+                message = "Authorization expired",
+            ),
+            ProviderHealthEntry(
+                category = ProviderHealthCategory.REQUEST_MANAGER,
+                providerKey = "automation:admin",
+                label = "Automation stack",
+                status = ProviderHealthStatus.RED,
+                message = "ARR services unreachable or unauthorized: Sonarr, Radarr",
+            ),
+        )
+
+        val banner = TvHomeRailsBuilder.providerBanner(rows)
+
+        assertTrue(banner?.title?.contains("Real-Debrid") == true)
+        assertTrue(banner?.title?.contains("ARR stack (Sonarr/Radarr/etc.)") == true)
+        assertTrue(banner?.description?.contains("Authorization expired") == true)
+        assertTrue(banner?.description?.contains("Sonarr, Radarr") == true)
+        assertTrue(banner?.description?.contains("Settings > About > Provider health") == true)
+    }
+
     // ── onNow ───────────────────────────────────────────────────────
 
     private fun ch(name: String, currentProgramme: EpgProgramme?): EnrichedChannel =
