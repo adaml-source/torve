@@ -104,6 +104,7 @@ import com.torve.android.tv.focus.TvSettingsFocusStateMachine
 import com.torve.android.tv.focus.TvSettingsFocusTarget
 import com.torve.android.tv.focus.TvSettingsItemIds
 import com.torve.android.tv.focus.adjacentTvSettingsCategory
+import com.torve.android.tv.focus.hasAdjacentTvSettingsControl
 import com.torve.android.tv.focus.rememberRegisteredTvSettingsFocusRequester
 import com.torve.android.tv.premium.TvEntitledFeature
 import com.torve.android.tv.premium.TvPremiumAccess
@@ -2307,10 +2308,16 @@ internal fun TvSettingsScreen(
                 val totalItems = settingsListState.layoutInfo.totalItemsCount
                 if (totalItems == 0) return@onPreviewKeyEvent false
                 if (event.key == Key.DirectionLeft || event.key == Key.DirectionRight) {
+                    val direction = if (event.key == Key.DirectionLeft) -1 else 1
+                    if (hasAdjacentTvSettingsControl(settingsFocusController.focusedItemId, direction)) {
+                        // Let the focused card handle movement within a horizontal
+                        // control group before the page-level category shortcut.
+                        return@onPreviewKeyEvent false
+                    }
                     val targetCategory = adjacentTvSettingsCategory(
                         categoryOrder = categoryOrder,
                         currentCategory = selectedCategory,
-                        direction = if (event.key == Key.DirectionLeft) -1 else 1,
+                        direction = direction,
                     )
                     if (targetCategory != null) {
                         settingsFocusController.beginCategorySwitch(targetCategory)
@@ -5683,7 +5690,7 @@ internal fun TvSettingsScreen(
             item(key = "channel_mgr_actions") {
                 val showAllTarget = remember {
                     TvSettingsFocusTarget(
-                        itemId = "settings/library/channel_manager/show_all",
+                        itemId = TvSettingsItemIds.LIBRARY_CHANNEL_MANAGER_SHOW_ALL,
                         category = TvSettingsCategory.LIBRARY,
                         listIndex = 41,
                         focusTargetType = "action",
@@ -5691,12 +5698,20 @@ internal fun TvSettingsScreen(
                 }
                 val hideAllTarget = remember {
                     TvSettingsFocusTarget(
-                        itemId = "settings/library/channel_manager/hide_all",
+                        itemId = TvSettingsItemIds.LIBRARY_CHANNEL_MANAGER_HIDE_ALL,
                         category = TvSettingsCategory.LIBRARY,
                         listIndex = 42,
                         focusTargetType = "dangerous",
                     )
                 }
+                val registeredShowAllRequester = rememberSettingsRowRequester(
+                    target = showAllTarget,
+                    externalRequester = channelManagerShowAllRequester,
+                )
+                val registeredHideAllRequester = rememberSettingsRowRequester(
+                    target = hideAllTarget,
+                    externalRequester = channelManagerHideAllRequester,
+                )
                 Row(
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                     modifier = Modifier.padding(bottom = 4.dp).focusGroup(),
@@ -5720,8 +5735,8 @@ internal fun TvSettingsScreen(
                                     else -> false
                                 }
                             },
-                        focusRequester = channelManagerShowAllRequester,
-                        onFocused = { onSettingsRowFocused(showAllTarget, channelManagerShowAllRequester) },
+                        focusRequester = registeredShowAllRequester,
+                        onFocused = { onSettingsRowFocused(showAllTarget, registeredShowAllRequester) },
                         onClick = { channelsViewModel.showAllCategories() },
                         rowType = TvSettingRowType.ACTION,
                     )
@@ -5745,8 +5760,8 @@ internal fun TvSettingsScreen(
                                     else -> false
                                 }
                             },
-                        focusRequester = channelManagerHideAllRequester,
-                        onFocused = { onSettingsRowFocused(hideAllTarget, channelManagerHideAllRequester) },
+                        focusRequester = registeredHideAllRequester,
+                        onFocused = { onSettingsRowFocused(hideAllTarget, registeredHideAllRequester) },
                         onFocusLost = { confirmHideAllChannelGroups = false },
                         onClick = {
                             if (confirmHideAllChannelGroups) {

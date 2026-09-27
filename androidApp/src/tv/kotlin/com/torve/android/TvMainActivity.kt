@@ -8,10 +8,34 @@ import android.os.Looper
 import android.view.KeyEvent
 import android.widget.Toast
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Button
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.appcompat.app.AppCompatActivity
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import com.torve.android.deeplink.TorveAppLink
 import com.torve.android.deeplink.TorveAppLinkParser
@@ -39,7 +63,7 @@ class TvMainActivity : AppCompatActivity() {
     companion object {
         private const val DIRECTIONAL_REPEAT_THROTTLE_MS = 90L
         private const val DIRECTIONAL_REPEAT_THROTTLE_AFTER_COUNT = 2
-        private const val BACKGROUND_PLAYBACK_LONG_BACK_MS = 650L
+        private const val APP_CONTROL_LONG_BACK_MS = 650L
     }
 
     private val handler = Handler(Looper.getMainLooper())
@@ -50,19 +74,20 @@ class TvMainActivity : AppCompatActivity() {
     private var pendingAppLink by mutableStateOf<TorveAppLink?>(null)
     private var lastDirectionalRepeatKeyCode = 0
     private var lastDirectionalRepeatAtMs = 0L
-    private var backgroundPlaybackBackHeld = false
-    private var backgroundPlaybackLongBackTriggered = false
-    private val backgroundPlaybackLongBack = Runnable {
-        if (backgroundPlaybackBackHeld && hasBackgroundPlayback()) {
-            backgroundPlaybackLongBackTriggered = true
-            ActivePlaybackState.requestReturnToPlayer()
+    private var appControlBackHeld = false
+    private var appControlLongBackTriggered = false
+    private var showAppControlDialog by mutableStateOf(false)
+    private val appControlLongBack = Runnable {
+        if (appControlBackHeld) {
+            appControlLongBackTriggered = true
+            showAppControlDialog = true
         }
     }
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
         if (handleFullScreenPlaybackMenu(event)) return true
         if (handleBackgroundPlaybackMenu(event)) return true
-        if (handleBackgroundPlaybackBack(event)) return true
+        if (handleAppControlBack(event)) return true
         if (shouldThrottleDirectionalRepeat(event)) return true
         return try {
             super.dispatchKeyEvent(event)
@@ -100,47 +125,42 @@ class TvMainActivity : AppCompatActivity() {
     }
 
     @SuppressLint("GestureBackNavigation")
-    private fun handleBackgroundPlaybackBack(event: KeyEvent): Boolean {
+    private fun handleAppControlBack(event: KeyEvent): Boolean {
         // This TV-only shortcut needs the physical key's DOWN/repeat/UP
         // sequence to distinguish long Back. Short Back is still delegated
         // to onBackPressedDispatcher below.
         if (event.keyCode != KeyEvent.KEYCODE_BACK) return false
-        // Once this Activity accepts the initial DOWN, keep ownership through
-        // every repeat and the matching UP. The long-press navigation can make
-        // the full-screen player visible before the user releases the button;
-        // passing those trailing repeats through would immediately exit again.
-        if (!backgroundPlaybackBackHeld && !hasBackgroundPlayback()) {
-            cancelBackgroundPlaybackLongBack()
-            return false
-        }
-
         return when (event.action) {
             KeyEvent.ACTION_DOWN -> {
                 if (event.repeatCount == 0) {
-                    backgroundPlaybackBackHeld = true
-                    backgroundPlaybackLongBackTriggered = false
-                    handler.removeCallbacks(backgroundPlaybackLongBack)
-                    handler.postDelayed(backgroundPlaybackLongBack, BACKGROUND_PLAYBACK_LONG_BACK_MS)
-                } else if (event.isLongPress && !backgroundPlaybackLongBackTriggered) {
-                    handler.removeCallbacks(backgroundPlaybackLongBack)
-                    backgroundPlaybackLongBack.run()
+                    appControlBackHeld = true
+                    appControlLongBackTriggered = false
+                    handler.removeCallbacks(appControlLongBack)
+                    handler.postDelayed(appControlLongBack, APP_CONTROL_LONG_BACK_MS)
+                } else if (event.isLongPress && !appControlLongBackTriggered) {
+                    handler.removeCallbacks(appControlLongBack)
+                    appControlLongBack.run()
                 }
                 true
             }
 
             KeyEvent.ACTION_UP -> {
-                val returnWasTriggered = backgroundPlaybackLongBackTriggered
-                cancelBackgroundPlaybackLongBack()
-                if (!returnWasTriggered) {
-                    // Preserve ordinary short-Back behavior while waiting long
-                    // enough to distinguish the explicit return shortcut.
-                    onBackPressedDispatcher.onBackPressed()
+                val dialogWasTriggered = appControlLongBackTriggered
+                cancelAppControlLongBack()
+                if (!dialogWasTriggered) {
+                    if (showAppControlDialog) {
+                        showAppControlDialog = false
+                    } else {
+                        // Preserve ordinary short-Back behavior while waiting long
+                        // enough to distinguish the explicit app-control shortcut.
+                        onBackPressedDispatcher.onBackPressed()
+                    }
                 }
                 true
             }
 
             else -> {
-                cancelBackgroundPlaybackLongBack()
+                cancelAppControlLongBack()
                 true
             }
         }
@@ -149,10 +169,22 @@ class TvMainActivity : AppCompatActivity() {
     private fun hasBackgroundPlayback(): Boolean =
         ActivePlaybackState.session != null && !ActivePlaybackState.isFullScreenPlayerVisible
 
-    private fun cancelBackgroundPlaybackLongBack() {
-        handler.removeCallbacks(backgroundPlaybackLongBack)
-        backgroundPlaybackBackHeld = false
-        backgroundPlaybackLongBackTriggered = false
+    private fun cancelAppControlLongBack() {
+        handler.removeCallbacks(appControlLongBack)
+        appControlBackHeld = false
+        appControlLongBackTriggered = false
+    }
+
+    private fun exitTorve() {
+        ActivePlaybackState.stopAndClear()
+        showAppControlDialog = false
+        finishAndRemoveTask()
+    }
+
+    private fun restartTorve() {
+        ActivePlaybackState.stopAndClear()
+        showAppControlDialog = false
+        startActivity(Intent.makeRestartActivityTask(componentName))
     }
 
     private fun shouldThrottleDirectionalRepeat(event: KeyEvent): Boolean {
@@ -256,6 +288,13 @@ class TvMainActivity : AppCompatActivity() {
                     appLink = pendingAppLink,
                     onAppLinkConsumed = { pendingAppLink = null },
                 )
+                if (showAppControlDialog) {
+                    TvAppControlDialog(
+                        onDismiss = { showAppControlDialog = false },
+                        onExit = ::exitTorve,
+                        onRestart = ::restartTorve,
+                    )
+                }
             }
         }
         com.torve.android.debug.AnrDebugLogger.log("STARTUP setContent END")
@@ -268,8 +307,63 @@ class TvMainActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
-        cancelBackgroundPlaybackLongBack()
+        cancelAppControlLongBack()
         activityScope.cancel()
         super.onDestroy()
+    }
+}
+
+@Composable
+private fun TvAppControlDialog(
+    onDismiss: () -> Unit,
+    onExit: () -> Unit,
+    onRestart: () -> Unit,
+) {
+    val cancelFocusRequester = remember { FocusRequester() }
+    LaunchedEffect(Unit) {
+        kotlinx.coroutines.delay(80)
+        runCatching { cancelFocusRequester.requestFocus() }
+    }
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false),
+    ) {
+        Surface(
+            modifier = Modifier.widthIn(min = 520.dp, max = 720.dp),
+            shape = RoundedCornerShape(24.dp),
+            color = MaterialTheme.colorScheme.surface,
+            tonalElevation = 10.dp,
+        ) {
+            Column(modifier = Modifier.padding(32.dp)) {
+                Text(
+                    text = stringResource(R.string.tv_app_control_title),
+                    style = MaterialTheme.typography.headlineSmall,
+                )
+                Spacer(Modifier.height(12.dp))
+                Text(
+                    text = stringResource(R.string.tv_app_control_message),
+                    style = MaterialTheme.typography.bodyLarge,
+                )
+                Spacer(Modifier.height(28.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(14.dp, Alignment.End),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Button(onClick = onExit) {
+                        Text(stringResource(R.string.tv_app_control_exit))
+                    }
+                    Button(onClick = onRestart) {
+                        Text(stringResource(R.string.tv_app_control_restart))
+                    }
+                    Button(
+                        onClick = onDismiss,
+                        modifier = Modifier.focusRequester(cancelFocusRequester),
+                    ) {
+                        Text(stringResource(R.string.common_cancel))
+                    }
+                }
+            }
+        }
     }
 }

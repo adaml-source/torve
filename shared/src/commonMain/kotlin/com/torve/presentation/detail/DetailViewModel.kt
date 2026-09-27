@@ -907,7 +907,7 @@ class DetailViewModel(
      * Updates [DetailUiState.nextEpisode] — the single source of truth for both
      * the play button label and the playback target.
      */
-    private suspend fun resolveNextEpisode() {
+    private suspend fun resolveNextEpisode(preserveSelectedSeason: Boolean = false) {
         val item = _state.value.mediaItem ?: return
         if (item.type != MediaType.SERIES) {
             _state.update { it.copy(nextEpisode = null) }
@@ -930,6 +930,7 @@ class DetailViewModel(
                     progressPercent = inProgress.progressPercent,
                     mode = NextEpisodeMode.RESUME_IN_PROGRESS,
                 ),
+                preserveSelectedSeason = preserveSelectedSeason,
             )
             return
         }
@@ -947,6 +948,7 @@ class DetailViewModel(
                     episode = episode,
                     mode = NextEpisodeMode.PLAY_FIRST_UNWATCHED,
                 ),
+                preserveSelectedSeason = preserveSelectedSeason,
             )
             return
         }
@@ -960,19 +962,25 @@ class DetailViewModel(
                     episode = 1,
                     mode = NextEpisodeMode.PLAY_FROM_START,
                 ),
+                preserveSelectedSeason = preserveSelectedSeason,
             )
         }
     }
 
     /** Keep the play target and the visible season/episode selector aligned. */
-    private fun applyPreferredEpisode(next: NextEpisodeInfo) {
+    private fun applyPreferredEpisode(
+        next: NextEpisodeInfo,
+        preserveSelectedSeason: Boolean = false,
+    ) {
         val item = _state.value.mediaItem ?: return
-        val seasonNeedsLoading = _state.value.selectedSeason != next.season ||
-            _state.value.seasonDetail?.seasonNumber != next.season
+        val seasonNeedsLoading = !preserveSelectedSeason && (
+            _state.value.selectedSeason != next.season ||
+                _state.value.seasonDetail?.seasonNumber != next.season
+            )
         _state.update {
             it.copy(
                 nextEpisode = next,
-                selectedSeason = next.season,
+                selectedSeason = if (preserveSelectedSeason) it.selectedSeason else next.season,
                 streamContextSeason = next.season,
                 streamContextEpisode = next.episode,
             )
@@ -2916,7 +2924,10 @@ class DetailViewModel(
                     newWatched.add(episodeKey(seasonNumber, ep))
                 }
                 _state.update { it.copy(watchedEpisodes = newWatched) }
-                resolveNextEpisode()
+                // Keep the season action that initiated this mutation attached
+                // and focused. The primary Play target still advances through
+                // streamContextSeason/streamContextEpisode.
+                resolveNextEpisode(preserveSelectedSeason = true)
             } catch (_: Exception) { }
         }
     }

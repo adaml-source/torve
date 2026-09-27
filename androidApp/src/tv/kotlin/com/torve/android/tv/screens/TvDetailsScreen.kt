@@ -284,6 +284,7 @@ fun TvDetailsScreen(
     var lastHandledPlaybackFocusRestoreRequestId by rememberSaveable(type, id) {
         mutableLongStateOf(0L)
     }
+    var playActionHasFocus by remember(type, id) { mutableStateOf(false) }
     var initialPlayFocusAssigned by rememberSaveable(type, id) { mutableStateOf(false) }
     var restorePlayFocusAfterSourceDismiss by remember { mutableStateOf(false) }
     val showCinematicSourceLoading = state.shouldShowCinematicSourceLoading(
@@ -422,7 +423,6 @@ fun TvDetailsScreen(
             return@LaunchedEffect
         }
         val item = state.mediaItem ?: return@LaunchedEffect
-        lastHandledPlaybackFocusRestoreRequestId = playbackFocusRestoreRequestId
         val restoreTarget = resolveTvDetailsPlaybackReturnTarget(
             isSeries = item.type == MediaType.SERIES,
             originSeason = playbackFocusRestoreSeason ?: playbackOriginSeason,
@@ -430,11 +430,19 @@ fun TvDetailsScreen(
         )
         if (restoreTarget is TvDetailsPlaybackReturnTarget.PrimaryAction) {
             listState.scrollToItem(0)
-            withFrameNanos { }
-            runCatching { playFocusRequester.requestFocus() }
+            repeat(24) {
+                withFrameNanos { }
+                runCatching { playFocusRequester.requestFocus() }
+                kotlinx.coroutines.delay(32)
+                if (playActionHasFocus) {
+                    lastHandledPlaybackFocusRestoreRequestId = playbackFocusRestoreRequestId
+                    return@LaunchedEffect
+                }
+            }
             return@LaunchedEffect
         }
 
+        lastHandledPlaybackFocusRestoreRequestId = playbackFocusRestoreRequestId
         val episodeTarget = restoreTarget as TvDetailsPlaybackReturnTarget.Episode
         val episodeIdentity = episodeTarget.season to episodeTarget.episode
         pendingEpisodeFocusRestore = episodeIdentity
@@ -914,6 +922,7 @@ fun TvDetailsScreen(
                                 isPrimary = true,
                                 modifier = Modifier
                                     .focusRequester(playFocusRequester)
+                                    .onFocusChanged { playActionHasFocus = it.isFocused }
                                     .focusProperties { left = railFocusRequester },
                                 enabled = !isBusy,
                                 onFocused = {

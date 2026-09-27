@@ -335,6 +335,10 @@
     <string name="tv_settings_manage_channels_sub">Show or hide channel groups by country</string>
     <string name="tv_settings_show_all">Show All</string>
     <string name="tv_settings_hide_all">Hide All</string>
+    <string name="tv_app_control_title">Torve controls</string>
+    <string name="tv_app_control_message">Exit Torve or restart the app?</string>
+    <string name="tv_app_control_exit">Exit Torve</string>
+    <string name="tv_app_control_restart">Restart Torve</string>
     <string name="tv_settings_channels_visible">%1$d / %2$d visible</string>
     <string name="tv_settings_no_categories">No channel groups loaded &#8212; select a playlist first</string>
 

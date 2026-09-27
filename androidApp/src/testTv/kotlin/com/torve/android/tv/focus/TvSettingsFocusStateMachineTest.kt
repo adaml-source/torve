@@ -38,6 +38,26 @@ class TvSettingsFocusStateMachineTest {
     }
 
     @Test
+    fun horizontalChannelManagerActionsTakeFocusBeforeCategoryShortcut() {
+        assertEquals(
+            true,
+            hasAdjacentTvSettingsControl(TvSettingsItemIds.LIBRARY_CHANNEL_MANAGER_SHOW_ALL, 1),
+        )
+        assertEquals(
+            true,
+            hasAdjacentTvSettingsControl(TvSettingsItemIds.LIBRARY_CHANNEL_MANAGER_HIDE_ALL, -1),
+        )
+        assertEquals(
+            false,
+            hasAdjacentTvSettingsControl(TvSettingsItemIds.LIBRARY_CHANNEL_MANAGER_SHOW_ALL, -1),
+        )
+        assertEquals(
+            false,
+            hasAdjacentTvSettingsControl(TvSettingsItemIds.LIBRARY_CHANNEL_MANAGER_HIDE_ALL, 1),
+        )
+    }
+
+    @Test
     fun categorySwitchClearsStaleFocusBeforeNewDefaultIsRequested() {
         val controller = TvSettingsFocusStateMachine(TvSettingsCategory.ABOUT)
         register(controller, "about-check", TvSettingsCategory.ABOUT, 3)

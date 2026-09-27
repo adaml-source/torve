@@ -190,7 +190,13 @@ fun TvEpisodePicker(
             return@LaunchedEffect
         }
         val requester = episodeRequesters[episodeNumber] ?: return@LaunchedEffect
-        runCatching { requester.requestFocus() }
+        // Navigation can finish composing the Details route a frame before it
+        // is allowed to own focus. Retry until the parent clears the restore
+        // request from the episode card's onFocusChanged callback.
+        repeat(24) {
+            runCatching { requester.requestFocus() }
+            kotlinx.coroutines.delay(32)
+        }
     }
     androidx.compose.runtime.LaunchedEffect(autoFocusFirstSeason) {
         if (autoFocusFirstSeason) {

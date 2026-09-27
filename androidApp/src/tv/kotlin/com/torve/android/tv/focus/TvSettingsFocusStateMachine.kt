@@ -79,6 +79,8 @@ internal object TvSettingsItemIds {
     const val LIBRARY_REFRESH_CHANNELS = "settings/library/refresh_channels"
     const val LIBRARY_REFRESH_EPG = "settings/library/refresh_epg"
     const val LIBRARY_MANAGE_CHANNELS = "settings/library/manage_channels"
+    const val LIBRARY_CHANNEL_MANAGER_SHOW_ALL = "settings/library/channel_manager/show_all"
+    const val LIBRARY_CHANNEL_MANAGER_HIDE_ALL = "settings/library/channel_manager/hide_all"
     const val CONNECTIONS_AUTOMATION = "settings/connections/automation"
     const val CONNECTIONS_PAIRING = "settings/connections/pairing"
     const val CONNECTIONS_TRAKT = "settings/connections/trakt"
@@ -115,6 +117,15 @@ internal object TvSettingsItemIds {
     const val ABOUT_REPORT_ISSUE = "settings/about/report_issue"
     const val ABOUT_TERMS = "settings/about/terms"
     const val ABOUT_LEGAL = "settings/about/legal"
+}
+
+internal fun hasAdjacentTvSettingsControl(
+    focusedItemId: String?,
+    direction: Int,
+): Boolean = when {
+    direction == 1 && focusedItemId == TvSettingsItemIds.LIBRARY_CHANNEL_MANAGER_SHOW_ALL -> true
+    direction == -1 && focusedItemId == TvSettingsItemIds.LIBRARY_CHANNEL_MANAGER_HIDE_ALL -> true
+    else -> false
 }
 
 internal data class TvSettingsFocusTarget(
