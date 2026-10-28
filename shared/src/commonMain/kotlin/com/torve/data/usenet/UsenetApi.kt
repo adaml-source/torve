@@ -99,14 +99,14 @@ class UsenetApi(
 
     // ── Integrations ────────────────────────────────────────────────────
 
-    suspend fun testIntegration(baseUrl: String, apiKey: String): NzbdavTestResponseDto {
+    suspend fun testIntegration(baseUrl: String, apiKey: String, connection: com.torve.data.usenet.model.UsenetBackendConnectionDto = com.torve.data.usenet.model.UsenetBackendConnectionDto()): NzbdavTestResponseDto {
         val token = requireAccessToken()
         val trustHeaders = ClientTrustHeaders.capture()
         val response = httpClient.post("${baseUrl()}/integrations/nzbdav/test") {
             bearerAuth(token)
             appendTorveContext(trustHeaders)
             contentType(ContentType.Application.Json)
-            setBody(NzbdavTestRequestDto(baseUrl = baseUrl, apiKey = apiKey))
+            setBody(NzbdavTestRequestDto(baseUrl = baseUrl, apiKey = apiKey, connection = connection))
         }
         if (!response.status.isSuccess()) {
             throwApiException(response, "integration_test_failed", "NzbDAV test")
@@ -123,6 +123,7 @@ class UsenetApi(
         baseUrl: String,
         apiKey: String,
         enabled: Boolean = true,
+        connection: com.torve.data.usenet.model.UsenetBackendConnectionDto = com.torve.data.usenet.model.UsenetBackendConnectionDto(),
     ): NzbdavStatusResponseDto {
         val token = requireAccessToken()
         val trustHeaders = ClientTrustHeaders.capture()
@@ -130,7 +131,7 @@ class UsenetApi(
             bearerAuth(token)
             appendTorveContext(trustHeaders)
             contentType(ContentType.Application.Json)
-            setBody(NzbdavConfigRequestDto(baseUrl = baseUrl, apiKey = apiKey, enabled = enabled))
+            setBody(NzbdavConfigRequestDto(baseUrl = baseUrl, apiKey = apiKey, enabled = enabled, connection = connection))
         }
         if (!response.status.isSuccess()) {
             throwApiException(response, "integration_save_failed", "NzbDAV save")

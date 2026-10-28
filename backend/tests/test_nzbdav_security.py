@@ -15,7 +15,7 @@ import pytest
 
 from app.nzbdav.client import NzbdavClient, validate_base_url
 from app.nzbdav.failures import FailureCode, UpstreamError
-from app.nzbdav.release_cache import release_cache
+from app.nzbdav.release_cache import release_cache, connection_scope
 from app.nzbdav.resolve_service import resolve_service
 from app.nzbdav.warm_service import WarmCandidateInput
 from tests._nzbdav_common import (
@@ -105,7 +105,7 @@ def test_no_raw_upstream_url_in_resolve_ready(client, db, nzbdav_user):
         "stream_id": "sid-sec1",
         "upstream_url": "https://super-secret-upstream.example/raw.mp4?token=hidden",
         "user_id": str(nzbdav_user.id),
-    })
+    }, scope=f"{connection_scope(account_store.get_for_user(db, nzbdav_user.id))}:tmdb:sec")
     r = client.post(
         "/resolver/usenet/resolve",
         json={
@@ -134,7 +134,7 @@ def test_resolver_requires_registered_device_header(client, db, nzbdav_user):
         "stream_id": "sid-nodevice",
         "upstream_url": "https://upstream.example.com/raw.mp4",
         "user_id": str(nzbdav_user.id),
-    })
+    }, scope=f"{connection_scope(account_store.get_for_user(db, nzbdav_user.id))}:tmdb:nodevice")
     r = client.post(
         "/resolver/usenet/resolve",
         json={
@@ -155,7 +155,7 @@ def test_no_secret_in_logs(client, db, nzbdav_user, monkeypatch, caplog):
     secret = "VERY-SPECIFIC-SECRET-VALUE-XYZ"
 
     class _FakeOk:
-        def __init__(self, *, base_url, api_key):
+        def __init__(self, *, base_url, api_key, **kwargs):
             pass
 
         async def __aenter__(self):

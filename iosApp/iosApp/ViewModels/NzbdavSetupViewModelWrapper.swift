@@ -33,6 +33,13 @@ final class NzbdavSetupViewModelWrapper: ObservableObject {
 
     func updateBaseUrl(_ value: String) { viewModel.updateBaseUrl(value: value) }
     func updateApiKey(_ value: String) { viewModel.updateApiKey(value: value) }
+    func updateBackendType(_ value: String) { viewModel.updateBackendType(value: value) }
+    func updateWebdavUrl(_ value: String) { viewModel.updateWebdavUrl(value: value) }
+    func updateWebdavUsername(_ value: String) { viewModel.updateWebdavUsername(value: value) }
+    func updateWebdavPassword(_ value: String) { viewModel.updateWebdavPassword(value: value) }
+    func updateCategory(_ value: String) { viewModel.updateCategory(value: value) }
+    func updateApiPath(_ value: String) { viewModel.updateApiPath(value: value) }
+    func updateContentPath(_ value: String) { viewModel.updateContentPath(value: value) }
     func setEnabled(_ enabled: Bool) { viewModel.setEnabled(enabled: enabled) }
     func clearLastTestResult() { viewModel.clearLastTestResult() }
 

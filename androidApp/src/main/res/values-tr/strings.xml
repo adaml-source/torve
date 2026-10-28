@@ -1765,8 +1765,8 @@
     <string name="usenet_playback_link_expired">Oynatma bağlantısının süresi doldu, yenileniyor</string>
 
     <!-- NzbDAV integration card -->
-    <string name="integrations_nzbdav_title">NzbDAV</string>
-    <string name="integrations_nzbdav_desc">Torve, Usenet kaynaklarını yayınlamak için NzbDAV örneğinizi kullanır. Bağlantı Torve arka ucu tarafından yönetilir.</string>
+    <string name="integrations_nzbdav_title">Usenet akışı</string>
+    <string name="integrations_nzbdav_desc">InfiniDysk, NzbDavEx, AltMount, Decypharr veya NZBDav bağlayın. NNTP hesaplarınızı bu sunucuda yapılandırın. Torve API ve WebDAV kullanır; TorBox isteğe bağlıdır.</string>
     <string name="integrations_nzbdav_base_url">Temel URL</string>
     <string name="integrations_nzbdav_api_key">API anahtarı</string>
     <string name="integrations_nzbdav_test">Bağlantıyı test et</string>

@@ -129,6 +129,7 @@ class Settings(BaseSettings):
 
     # NzbDAV upstream streaming integration
     NZBDAV_ALLOW_PRIVATE_HOSTS: bool = False
+    NZBDAV_HANDOFF_TTL_SECONDS: int = 21600  # six-hour playback session
     NZBDAV_HANDOFF_SECRET: str = ""          # auto-generated if empty
     NZBDAV_HANDOFF_DIRECT_REDIRECT: bool = False
     NZBDAV_WARM_CONCURRENCY_PER_USER: int = 4

@@ -1340,6 +1340,7 @@ private fun IntegrationsSection(
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
         PandaSection(onOpenPandaSetup = onOpenPandaSetup)
+        DesktopUsenetSettings()
         TraktSection(settingsState, settingsViewModel)
         SimklSection(settingsState, settingsViewModel)
         AiSection(settingsState, settingsViewModel, accountSessionCoordinator)

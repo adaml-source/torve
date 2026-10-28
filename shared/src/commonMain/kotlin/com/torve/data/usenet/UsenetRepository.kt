@@ -29,7 +29,9 @@ interface UsenetRepository {
     // ── Integration config ──────────────────────────────────────────────
 
     /** Ask the backend to verify a candidate NzbDAV credential pair. */
-    suspend fun testNzbdavIntegration(baseUrl: String, apiKey: String): NzbdavTestResponseDto
+    suspend fun testNzbdavIntegration(baseUrl: String, apiKey: String,
+        connection: com.torve.data.usenet.model.UsenetBackendConnectionDto = com.torve.data.usenet.model.UsenetBackendConnectionDto(),
+    ): NzbdavTestResponseDto
 
     /**
      * Persist the credential pair on the backend and mirror it into the
@@ -43,6 +45,7 @@ interface UsenetRepository {
         apiKey: String,
         enabled: Boolean = true,
         storageMode: IntegrationStorageMode = IntegrationStorageMode.ACCOUNT,
+        connection: com.torve.data.usenet.model.UsenetBackendConnectionDto = com.torve.data.usenet.model.UsenetBackendConnectionDto(),
     ): NzbdavStatusResponseDto
 
     /** Current backend-owned integration status, for the Settings card. */
@@ -115,21 +118,25 @@ class UsenetRepositoryImpl(
     override suspend fun testNzbdavIntegration(
         baseUrl: String,
         apiKey: String,
-    ): NzbdavTestResponseDto = api.testIntegration(baseUrl, apiKey)
+        connection: com.torve.data.usenet.model.UsenetBackendConnectionDto,
+    ): NzbdavTestResponseDto = api.testIntegration(baseUrl, apiKey, connection)
 
     override suspend fun saveNzbdavIntegration(
         baseUrl: String,
         apiKey: String,
         enabled: Boolean,
         storageMode: IntegrationStorageMode,
+        connection: com.torve.data.usenet.model.UsenetBackendConnectionDto,
     ): NzbdavStatusResponseDto {
-        val status = api.saveIntegration(baseUrl = baseUrl, apiKey = apiKey, enabled = enabled)
+        val status = api.saveIntegration(baseUrl = baseUrl, apiKey = apiKey, enabled = enabled, connection = connection)
         // Local mirror — lets the settings screen pre-fill on next open
         // without a blocking GET /status. Backend remains authoritative.
         secretStore.setStorageMode(IntegrationSecretKey.NZBDAV_BASE_URL, storageMode)
         secretStore.setStorageMode(IntegrationSecretKey.NZBDAV_API_KEY, storageMode)
         secretStore.put(IntegrationSecretKey.NZBDAV_BASE_URL, baseUrl)
         secretStore.put(IntegrationSecretKey.NZBDAV_API_KEY, apiKey)
+        secretStore.setStorageMode(IntegrationSecretKey.NZBDAV_CONNECTION, storageMode)
+        secretStore.put(IntegrationSecretKey.NZBDAV_CONNECTION, kotlinx.serialization.json.Json.encodeToString(com.torve.data.usenet.model.UsenetBackendConnectionDto.serializer(), connection))
         return status
     }
 
@@ -137,6 +144,7 @@ class UsenetRepositoryImpl(
 
     override suspend fun deleteNzbdavIntegration() {
         api.deleteIntegration()
+        secretStore.remove(IntegrationSecretKey.NZBDAV_CONNECTION)
         secretStore.remove(IntegrationSecretKey.NZBDAV_BASE_URL)
         secretStore.remove(IntegrationSecretKey.NZBDAV_API_KEY)
     }

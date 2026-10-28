@@ -31,7 +31,7 @@ from app.nzbdav.failures import (
     default_fallback_suggestions,
 )
 from app.nzbdav.handoff import mint as mint_handoff
-from app.nzbdav.release_cache import release_cache
+from app.nzbdav.release_cache import release_cache, connection_scope
 from app.nzbdav.warm_service import (
     WarmCandidateInput,
     warm_service,
@@ -89,8 +89,12 @@ class NzbdavResolveService:
         candidate: WarmCandidateInput,
         device_id: uuid.UUID | None = None,
     ) -> ResolveResult:
+        cfg = account_store.get_for_user(db, user_id)
+        if cfg is None or not cfg.is_enabled:
+            return ResolveResult(simplified_state=st.SIMPLIFIED_FAILED, failure_code=FailureCode.AUTH_INVALID.value)
+        scope = connection_scope(cfg)
         # 1. Dead-release cache
-        dead = release_cache.get_dead_release(candidate.hash_key)
+        dead = release_cache.get_dead_release(candidate.hash_key, scope=scope)
         if dead is not None:
             telemetry.cache_hit(
                 cache="dead_release", hash_key=candidate.hash_key
@@ -103,7 +107,7 @@ class NzbdavResolveService:
             )
 
         # 2. Warm-success cache — fast-path to ready
-        cached = release_cache.get_warm_success(candidate.hash_key)
+        cached = release_cache.get_warm_success(candidate.hash_key, scope=f"{scope}:{content_id}")
         if cached is not None:
             telemetry.cache_hit(
                 cache="warm_success", hash_key=candidate.hash_key
@@ -122,6 +126,7 @@ class NzbdavResolveService:
                 WarmJob.user_id == user_id,
                 WarmJob.content_id == content_id,
                 WarmJob.hash_key == candidate.hash_key,
+                WarmJob.created_at >= cfg.updated_at,
             )
             .order_by(WarmJob.created_at.desc())
             .first()
@@ -131,7 +136,7 @@ class NzbdavResolveService:
             if simplified == st.SIMPLIFIED_READY:
                 # Success state persisted but cache evicted — fall through
                 # to starting a new warm if we don't have a cached URL.
-                cached = release_cache.get_warm_success(candidate.hash_key)
+                cached = release_cache.get_warm_success(candidate.hash_key, scope=f"{scope}:{content_id}")
                 if cached is not None:
                     return _build_ready_result(
                         user_id=user_id,
@@ -178,7 +183,7 @@ class NzbdavResolveService:
             )
         r = warm_results[0]
         if r.simplified_state == st.SIMPLIFIED_READY:
-            cached = release_cache.get_warm_success(candidate.hash_key)
+            cached = release_cache.get_warm_success(candidate.hash_key, scope=f"{scope}:{content_id}")
             if cached is not None:
                 return _build_ready_result(
                     user_id=user_id,
@@ -214,12 +219,16 @@ def _build_ready_result(
     content_id: str,
     cached: dict,
 ) -> ResolveResult:
-    stream_id = cached.get("stream_id") or str(uuid.uuid4())
+    stream_id = str(uuid.uuid4())
+    release_cache.register_stream(stream_id, {**cached, "content_id": content_id,
+                                             "user_id": str(user_id),
+                                             "device_id": str(device_id) if device_id else None})
     token = mint_handoff(
         user_id=str(user_id),
         stream_id=stream_id,
         device_id=str(device_id) if device_id else None,
         content_id=content_id,
+        ttl_seconds=settings.NZBDAV_HANDOFF_TTL_SECONDS,
     )
     # The public handoff URL is always /resolver/usenet/handoff/{token}.
     # The settings.APP_PUBLIC_API_URL builds an absolute form when

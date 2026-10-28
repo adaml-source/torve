@@ -1765,8 +1765,8 @@
     <string name="usenet_playback_link_expired">Link de reprodução expirado, atualizando</string>
 
     <!-- NzbDAV integration card -->
-    <string name="integrations_nzbdav_title">NzbDAV</string>
-    <string name="integrations_nzbdav_desc">O Torve usa sua instância NzbDAV para transmitir fontes Usenet. A conexão é gerenciada pelo backend do Torve.</string>
+    <string name="integrations_nzbdav_title">Streaming Usenet</string>
+    <string name="integrations_nzbdav_desc">Liga InfiniDysk, NzbDavEx, AltMount, Decypharr ou NZBDav. Configura as contas NNTP nesse servidor. O Torve usa a API e WebDAV; o TorBox é opcional.</string>
     <string name="integrations_nzbdav_base_url">URL base</string>
     <string name="integrations_nzbdav_api_key">Chave de API</string>
     <string name="integrations_nzbdav_test">Testar conexão</string>

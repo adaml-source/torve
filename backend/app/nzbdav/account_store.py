@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 
 from app.crypto import decrypt_secret, encrypt_secret
 from app.models import NzbdavConfig
+from app.nzbdav.backends import BackendConnection
 
 _log = logging.getLogger(__name__)
 
@@ -36,6 +37,11 @@ class NzbdavAccountStore:
     def get_decrypted_api_key(self, cfg: NzbdavConfig) -> str:
         return decrypt_secret(cfg.api_key_encrypted)
 
+    def get_connection(self, cfg: NzbdavConfig) -> BackendConnection:
+        if not cfg.connection_options_encrypted:
+            return BackendConnection()
+        return BackendConnection.model_validate_json(decrypt_secret(cfg.connection_options_encrypted))
+
     def save(
         self,
         db: Session,
@@ -46,6 +52,7 @@ class NzbdavAccountStore:
         version_string: str | None = None,
         capabilities: dict | None = None,
         is_enabled: bool = True,
+        connection: BackendConnection | None = None,
     ) -> NzbdavConfig:
         """Upsert a user's NzbDAV configuration."""
         cfg = self.get_for_user(db, user_id)
@@ -72,6 +79,8 @@ class NzbdavAccountStore:
             cfg.last_healthy_at = now
             cfg.version_string = version_string
             cfg.capabilities = capabilities
+        if connection is not None:
+            cfg.connection_options_encrypted = encrypt_secret(connection.model_dump_json())
         db.commit()
         db.refresh(cfg)
         return cfg

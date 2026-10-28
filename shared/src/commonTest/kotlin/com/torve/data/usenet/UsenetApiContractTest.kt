@@ -94,6 +94,32 @@ class UsenetApiContractTest {
         }
     }
 
+    @Test
+    fun streamingBackendProfilesSerializeOnBothConfigurationRoutes() = runTest {
+        com.torve.data.usenet.model.UsenetStreamingBackend.entries.forEach { backend ->
+            val bodies = mutableListOf<String>()
+            val api = api(MockEngine { request ->
+                bodies += (request.body as io.ktor.http.content.TextContent).text
+                respondJson(if (request.url.encodedPath.endsWith("/test")) """{"ok":true}""" else """{"configured":true}""")
+            })
+            val connection = com.torve.data.usenet.model.UsenetBackendConnectionDto(
+                backendType = backend.wireValue, webdavUsername = "dav-user", webdavPassword = "dav-secret",
+                webdavUrl = "https://dav.example/root", category = "movies", contentPath = "/content/{category}/{name}",
+            )
+            api.testIntegration("https://stream.example", "api-key", connection)
+            api.saveIntegration("https://stream.example", "api-key", connection = connection)
+            assertEquals(2, bodies.size)
+            bodies.forEach { body ->
+                val parsed = Json.parseToJsonElement(body) as kotlinx.serialization.json.JsonObject
+                val profile = parsed["connection"] as kotlinx.serialization.json.JsonObject
+                val decoded = Json.decodeFromJsonElement(com.torve.data.usenet.model.UsenetBackendConnectionDto.serializer(), profile)
+                assertEquals(backend.wireValue, decoded.backendType)
+                assertEquals("dav-secret", decoded.webdavPassword)
+                assertFalse(body.contains("nntp_password"))
+            }
+        }
+    }
+
     private fun api(engine: MockEngine): UsenetApi {
         return UsenetApi(
             httpClient = HttpClient(engine) {

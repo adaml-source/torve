@@ -35,6 +35,7 @@ from app.nzbdav import state as st
 from app.nzbdav import telemetry
 from app.nzbdav.account_store import account_store
 from app.nzbdav.client import NzbdavClient, validate_base_url
+from app.nzbdav.backends import BackendConnection
 from app.nzbdav.failures import (
     FailureCode,
     UpstreamError,
@@ -82,6 +83,7 @@ class ResolvedStream(BaseModel):
 class ConfigTestRequest(BaseModel):
     base_url: str = Field(min_length=1, max_length=2000)
     api_key: str = Field(min_length=1, max_length=500)
+    connection: BackendConnection = Field(default_factory=BackendConnection)
 
 
 class ConfigTestResponse(BaseModel):
@@ -91,8 +93,10 @@ class ConfigTestResponse(BaseModel):
 
 
 class ConfigSaveRequest(BaseModel):
+    enabled: bool = True
     base_url: str = Field(min_length=1, max_length=2000)
     api_key: str = Field(min_length=1, max_length=500)
+    connection: BackendConnection = Field(default_factory=BackendConnection)
 
 
 class ConfigStatusResponse(BaseModel):
@@ -232,19 +236,19 @@ async def test_config(
         return ConfigTestResponse(
             ok=False, degraded=True, reason=exc.code.value,
         )
-    async with NzbdavClient(
-        base_url=body.base_url, api_key=body.api_key
-    ) as client:
-        try:
+    try:
+        async with NzbdavClient(
+            base_url=body.base_url, api_key=body.api_key, connection=body.connection
+        ) as client:
             result = await client.test_connection()
-        except UpstreamError as exc:
-            telemetry.config_test(
-                latency_ms=int((time.monotonic() - start) * 1000),
-                outcome=exc.code.value, user_id=uid,
-            )
-            return ConfigTestResponse(
-                ok=False, degraded=True, reason=exc.code.value,
-            )
+    except UpstreamError as exc:
+        telemetry.config_test(
+            latency_ms=int((time.monotonic() - start) * 1000),
+            outcome=exc.code.value, user_id=uid,
+        )
+        return ConfigTestResponse(
+            ok=False, degraded=True, reason=exc.code.value,
+        )
     degraded, reason = _assess_version(result.version_string)
     telemetry.config_test(
         latency_ms=int((time.monotonic() - start) * 1000),
@@ -271,19 +275,19 @@ async def save_config(
         )
     version_string: str | None = None
     capabilities: dict | None = None
-    async with NzbdavClient(
-        base_url=body.base_url, api_key=body.api_key
-    ) as client:
-        try:
+    try:
+        async with NzbdavClient(
+            base_url=body.base_url, api_key=body.api_key, connection=body.connection
+        ) as client:
             result = await client.test_connection()
             version_string = result.version_string
             capabilities = result.capabilities
-        except UpstreamError as exc:
-            raise HTTPException(
-                status_code=400,
-                detail={"code": exc.code.value,
-                        "message": "failed_to_validate_upstream"},
-            )
+    except UpstreamError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail={"code": exc.code.value,
+                    "message": "failed_to_validate_upstream"},
+        )
     cfg = account_store.save(
         db,
         user_id=uid,
@@ -291,7 +295,8 @@ async def save_config(
         api_key_plaintext=body.api_key,
         version_string=version_string,
         capabilities=capabilities,
-        is_enabled=True,
+        is_enabled=body.enabled,
+        connection=body.connection,
     )
     degraded, reason = _assess_version(cfg.version_string)
     return ConfigStatusResponse(
@@ -572,10 +577,11 @@ def cancel_endpoint(
     return CancelResponse(cancelled=cancelled)
 
 
-@resolver_router.get("/handoff/{token}")
+@resolver_router.api_route("/handoff/{token}", methods=["GET", "HEAD"])
 async def handoff_endpoint(
     token: str,
     request: Request,
+    db: Session = Depends(get_db),
 ) -> Response:
     """Resolve a handoff token -> 302 redirect or inline proxy stream.
 
@@ -595,16 +601,7 @@ async def handoff_endpoint(
         )
         raise HTTPException(status_code=401, detail="invalid_handoff")
 
-    # Look up the cached upstream URL by matching stream_id against any
-    # entry in warm_success. We scan because the cache is keyed on
-    # hash_key, not stream_id — acceptable for this sprint's scale.
-    found: dict | None = None
-    with release_cache.warm_success._lock:  # type: ignore[attr-defined]
-        for entry in list(release_cache.warm_success._data.values()):  # type: ignore[attr-defined]
-            payload = entry.value
-            if isinstance(payload, dict) and payload.get("stream_id") == claims.stream_id:
-                found = payload
-                break
+    found = release_cache.streams.get(claims.stream_id)
     if found is None or not isinstance(found.get("upstream_url"), str):
         telemetry.handoff(
             kind="verify", outcome="not_found", user_id=claims.user_id,
@@ -630,13 +627,29 @@ async def handoff_endpoint(
 
     upstream_url: str = found["upstream_url"]
 
-    if settings.NZBDAV_HANDOFF_DIRECT_REDIRECT:
+    auth = None
+    config_id = found.get("config_id")
+    if config_id:
+        cfg = account_store.get_for_user(db, uuid.UUID(claims.user_id))
+        if (cfg is None or not cfg.is_enabled or str(cfg.id) != config_id
+                or cfg.updated_at.isoformat() != found.get("config_revision")):
+            raise HTTPException(status_code=401, detail="integration_changed")
+        try:
+            upstream = NzbdavClient(base_url=cfg.base_url,
+                                    api_key=account_store.get_decrypted_api_key(cfg),
+                                    connection=account_store.get_connection(cfg))
+            upstream.validate_stream_url(upstream_url)
+            auth = upstream.webdav_auth
+        except UpstreamError:
+            raise HTTPException(status_code=502, detail="upstream_unreachable")
+
+    if settings.NZBDAV_HANDOFF_DIRECT_REDIRECT and auth is None:
         telemetry.handoff(kind="redirect", outcome="ok", user_id=claims.user_id)
         return RedirectResponse(url=upstream_url, status_code=302)
 
     # Proxy path: stream bytes through with Range forwarding.
     try:
-        return await _proxy_stream(upstream_url, request, claims.user_id)
+        return await _proxy_stream(upstream_url, request, claims.user_id, auth=auth)
     except UpstreamError as exc:
         telemetry.handoff(
             kind="proxy", outcome=exc.code.value, user_id=claims.user_id
@@ -645,8 +658,8 @@ async def handoff_endpoint(
 
 
 async def _proxy_stream(
-    upstream_url: str, request: Request, user_id: str
-) -> StreamingResponse:
+    upstream_url: str, request: Request, user_id: str, *, auth: httpx.Auth | None = None
+) -> Response:
     """Stream the upstream URL through Torve with Range/If-Range forwarding."""
     # Forward only safe, range-related headers.
     forwarded: dict[str, str] = {}
@@ -656,9 +669,9 @@ async def _proxy_stream(
             forwarded[name.capitalize()] = val
 
     timeout = httpx.Timeout(connect=10.0, read=30.0, write=10.0, pool=10.0)
-    client = httpx.AsyncClient(trust_env=False, timeout=timeout, follow_redirects=True)
+    client = httpx.AsyncClient(trust_env=False, timeout=timeout, follow_redirects=False, auth=auth)
     try:
-        req = client.build_request("GET", upstream_url, headers=forwarded)
+        req = client.build_request(request.method, upstream_url, headers=forwarded)
         resp = await client.send(req, stream=True)
     except httpx.TimeoutException as exc:
         await client.aclose()
@@ -668,6 +681,23 @@ async def _proxy_stream(
         raise UpstreamError(
             FailureCode.UPSTREAM_UNREACHABLE, detail=f"proxy_{type(exc).__name__}",
         ) from exc
+
+    if 300 <= resp.status_code < 400:
+        await resp.aclose()
+        await client.aclose()
+        raise UpstreamError(FailureCode.UPSTREAM_UNREACHABLE, detail="stream_redirect_rejected")
+
+    if resp.status_code == 416:
+        content_range = resp.headers.get("content-range")
+        await resp.aclose()
+        await client.aclose()
+        return Response(status_code=416, headers={"Content-Range": content_range} if content_range else {})
+    if resp.status_code not in (200, 206):
+        from app.nzbdav.failures import classify_http_status
+        code = classify_http_status(resp.status_code) or FailureCode.UNKNOWN_UPSTREAM_ERROR
+        await resp.aclose()
+        await client.aclose()
+        raise UpstreamError(code, detail="stream_request_rejected")
 
     passthrough = {}
     for hname in (

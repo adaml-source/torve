@@ -283,6 +283,34 @@ class NzbdavSetupViewModelTest {
         assertEquals("https://nzbdav.example.com", vm.state.value.baseUrl)
     }
 
+    @Test
+    fun everyStreamingBackendUsesSharedTestAndSaveContract() = runTest(dispatcher) {
+        val repo = FakeUsenetRepository()
+        val vm = NzbdavSetupViewModel(repo, FakeSecretStore())
+        advanceUntilIdle()
+        vm.updateBaseUrl("https://stream.example")
+        vm.updateApiKey("api-secret")
+        com.torve.data.usenet.model.UsenetStreamingBackend.entries.forEach { backend ->
+            vm.updateBackendType(backend.wireValue)
+            vm.updateWebdavUsername("dav-user")
+            vm.updateWebdavPassword("dav-secret")
+            vm.updateCategory("movies")
+            vm.test()
+            advanceUntilIdle()
+            assertEquals(backend.wireValue, repo.lastTestConnection?.backendType)
+            assertEquals("dav-secret", repo.lastTestConnection?.webdavPassword)
+            vm.save()
+            advanceUntilIdle()
+            assertEquals(backend.wireValue, repo.lastSavedConnection?.backendType)
+            assertFalse(vm.state.value.connection.toString().contains("dav-secret"))
+        }
+        vm.updateApiPath("/custom/api")
+        vm.updateBackendType(vm.state.value.connection.backendType)
+        assertEquals("/custom/api", vm.state.value.connection.apiPath)
+        vm.updateBackendType("unsupported")
+        assertEquals("/custom/api", vm.state.value.connection.apiPath)
+    }
+
     // ── fixtures ────────────────────────────────────────────────────────
 
     private class FakeUsenetRepository(
@@ -293,17 +321,24 @@ class NzbdavSetupViewModelTest {
         private val statusThrow: Boolean = false,
         private val testException: Exception? = null,
     ) : UsenetRepository {
+        var lastTestConnection: com.torve.data.usenet.model.UsenetBackendConnectionDto? = null
+        var lastSavedConnection: com.torve.data.usenet.model.UsenetBackendConnectionDto? = null
         var saveCalls = 0; private set
         var deleteCalls = 0; private set
 
-        override suspend fun testNzbdavIntegration(baseUrl: String, apiKey: String): NzbdavTestResponseDto {
+        override suspend fun testNzbdavIntegration(baseUrl: String, apiKey: String,
+        connection: com.torve.data.usenet.model.UsenetBackendConnectionDto,
+    ): NzbdavTestResponseDto {
+            lastTestConnection = connection
             testException?.let { throw it }
             return testResponse ?: NzbdavTestResponseDto(ok = true)
         }
 
         override suspend fun saveNzbdavIntegration(
             baseUrl: String, apiKey: String, enabled: Boolean, storageMode: IntegrationStorageMode,
-        ): NzbdavStatusResponseDto {
+        connection: com.torve.data.usenet.model.UsenetBackendConnectionDto,
+    ): NzbdavStatusResponseDto {
+            lastSavedConnection = connection
             saveCalls += 1
             return savedStatus ?: statusResponse
         }

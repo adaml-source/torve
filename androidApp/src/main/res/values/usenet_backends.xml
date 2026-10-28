@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="usenet_webdav_username">WebDAV username</string>
+    <string name="usenet_webdav_password">WebDAV password</string>
+    <string name="usenet_webdav_url">WebDAV URL (optional override)</string>
+    <string name="usenet_advanced">Advanced connection settings</string>
+    <string name="usenet_category">Download category (optional)</string>
+    <string name="usenet_api_path">API path (optional override)</string>
+    <string name="usenet_content_path">Content path template (optional override)</string>
+</resources>
