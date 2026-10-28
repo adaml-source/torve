@@ -8,6 +8,9 @@
       var stable = ((manifest.channels || {}).stable || {});
       updateWindows(stable.windows || null);
       updateFireTv(stable.fire_tv || stable.android_tv || null);
+      updateAndroid(stable.android_mobile || null, 'androidMobile');
+      updateAndroid(stable.android_tv || null, 'googleTv');
+      updateAndroid(stable.amazon_mobile || null, 'amazonMobile');
     })
     .catch(function () {});
 
@@ -24,6 +27,13 @@
     setLink('fireTvShaBtn', entry.sha256_url);
     setCopy('fireTvDownloadCopy', 'Fire TV uses the direct APK sideload path. This is the ' + entry.version + ' TV build listed in the public release manifest.');
     setCopy('fireTvReleaseVersion', 'Official Torve Fire TV release · ' + entry.version);
+  }
+
+  function updateAndroid(entry, key) {
+    if (!isAvailable(entry)) return;
+    setLink(key + 'DownloadBtn', entry.url);
+    setLink(key + 'ShaBtn', entry.sha256_url);
+    setCopy(key + 'DownloadCopy', 'Direct APK ' + entry.version + ' · build ' + entry.version_code + '.');
   }
 
   function isAvailable(entry) {
