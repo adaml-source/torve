@@ -83,7 +83,7 @@ android {
     val baseVersionCode = providers.gradleProperty("torveUpdaterFixtureBaseVersionCode")
         .orNull
         ?.toIntOrNull()
-        ?: 205
+        ?: 206
 
     defaultConfig {
         applicationId = "com.torve.app"

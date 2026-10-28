@@ -261,12 +261,6 @@ fun TvDetailsScreen(
     var episodesFocusHandled by rememberSaveable(type, id, focusEpisodes) { mutableStateOf(false) }
     val streamSortPreferences = remember(context) { context.getSharedPreferences("tv_prefs", Context.MODE_PRIVATE) }
     var tvStreamSortMode by rememberSaveable { mutableStateOf(streamSortPreferences.readTvStreamSortMode()) }
-    var presetOverride by remember { mutableStateOf<Triple<String, FocusRequester, () -> Unit>?>(null) }
-    var presetFocusReturn by remember { mutableStateOf<FocusRequester?>(null) }
-    LaunchedEffect(presetFocusReturn) {
-        presetFocusReturn?.let { withFrameNanos { }; runCatching { it.requestFocus() } }
-        presetFocusReturn = null
-    }
     val languagePicker = com.torve.android.ui.detail.rememberSourceLanguagePicker(state.streams,
         enabled = state.showStreamPicker && !state.isResolving && state.preparing == null,
         sessionKey = "$type:$id:${state.streamContextSeason}:${state.streamContextEpisode}",
@@ -1686,8 +1680,7 @@ fun TvDetailsScreen(
     } // end LazyColumn
 
     if (state.showStreamPicker && state.streams.isNotEmpty() && state.preparing == null &&
-        !state.isResolving && !showCinematicSourceLoading && presetOverride == null) {
-        val preferences = settingsViewModel.buildStreamPreferences()
+        !state.isResolving && !showCinematicSourceLoading) {
         com.torve.android.tv.components.TvStreamBrowser(
             title = listOfNotNull(mediaItem?.title, state.streamContextSeason?.let { season ->
                 state.streamContextEpisode?.let { episode -> "S%02dE%02d".format(season, episode) }
@@ -1701,23 +1694,18 @@ fun TvDetailsScreen(
                 stream.usenetCandidateIdOrNull()?.let { state.usenetCandidates[it] }) },
             onRefresh = { detailViewModel.refreshStreams(season = state.streamContextSeason, episode = state.streamContextEpisode) },
             onDismiss = { detailViewModel.dismissStreamPicker(); queueSourceOriginFocusRestore() },
-            onSelect = { stream, requester ->
-                val policy = com.torve.data.addon.StreamAutoSelectionPolicy.evaluate(stream, preferences,
-                    com.torve.data.addon.StreamSelectionContext(durationMs = (state.seasonDetail?.episodes?.firstOrNull {
-                        it.episodeNumber == state.streamContextEpisode }?.runtime ?: state.mediaItem?.runtime)?.times(60_000L)))
-                val startPlayback: () -> Unit = {
-                    languagePicker.select(stream) {}
+            onSelect = { stream, _ ->
+                // An explicit source choice starts resolution immediately. Saved
+                // playback preferences apply to automatic selection, not this tap.
+                languagePicker.select(stream) { selected ->
                     TvNotificationQueue.post(
-                        message = context.getString(if (stream.isUsenetStream()) R.string.stream_preparing_title else R.string.stream_resolving),
+                        message = context.getString(if (selected.isUsenetStream()) R.string.stream_preparing_title else R.string.stream_resolving),
                         type = NotificationType.INFO,
-                        tag = if (stream.isUsenetStream()) TV_USENET_PREPARING_NOTIFICATION_TAG else TV_STREAM_RESOLVING_NOTIFICATION_TAG,
+                        tag = if (selected.isUsenetStream()) TV_USENET_PREPARING_NOTIFICATION_TAG else TV_STREAM_RESOLVING_NOTIFICATION_TAG,
                         durationMs = null)
-                    if (stream.accelerationProvenanceKind == CandidateProvenanceKind.USENET_NZBDAV) detailViewModel.selectUsenetSource(stream)
-                    else detailViewModel.resolveStream(stream, provider = settingsViewModel.getDebridProvider(), apiKey = settingsViewModel.getDebridApiKey())
+                    if (selected.accelerationProvenanceKind == CandidateProvenanceKind.USENET_NZBDAV) detailViewModel.selectUsenetSource(selected)
+                    else detailViewModel.resolveStream(selected, provider = settingsViewModel.getDebridProvider(), apiKey = settingsViewModel.getDebridApiKey())
                 }
-                if (!policy.eligible && preferences.sourceFallbackPolicy == com.torve.domain.model.SourceFallbackPolicy.ASK)
-                    presetOverride = Triple(policy.explanation ?: context.getString(R.string.tv_source_override), requester, startPlayback)
-                else startPlayback()
             },
         )
     }
@@ -1749,18 +1737,6 @@ fun TvDetailsScreen(
             mediaType = mediaItem?.type,
             modifier = Modifier.fillMaxSize().zIndex(70f),
         )
-    }
-
-    presetOverride?.let { choice ->
-        com.torve.android.tv.components.TvWorkflowDialog(localizedUiText("Use this source once?"), {
-            presetOverride = null; presetFocusReturn = choice.second
-        }, null) {
-            Text(choice.first, color = Silver, style = MaterialTheme.typography.titleMedium)
-            Text(localizedUiText("Your saved preset stays the same. You can try this source or return to the source list."), color = Silver)
-            com.torve.android.tv.components.TvWorkflowAction(localizedUiText("Play this source"), {
-                presetOverride = null; choice.third()
-            })
-        }
     }
 
     // â"€â"€ Source picker (Prompt 11C) â"€â"€
