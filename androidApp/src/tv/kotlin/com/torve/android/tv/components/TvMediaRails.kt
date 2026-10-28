@@ -1821,7 +1821,10 @@ private fun TvPosterCard(
                 .clip(cardShape),
         ) {
             val (posterImageUrl, artworkFailed) = com.torve.android.ui.community.stableArtwork(item, expanded, preferTitleless = expanded)
-            if (posterImageUrl.isNullOrBlank()) {
+            val personId = item.id.takeIf { it.startsWith("person:") }?.substringAfter(':')?.toIntOrNull()
+            if (personId != null) {
+                TvPersonPortrait(personId, item.title, item.posterUrl, Modifier.fillMaxSize())
+            } else if (posterImageUrl.isNullOrBlank()) {
                 Box(
                     modifier = Modifier
                         .fillMaxSize()

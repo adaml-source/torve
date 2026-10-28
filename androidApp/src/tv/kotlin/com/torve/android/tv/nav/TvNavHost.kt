@@ -38,6 +38,7 @@ import com.torve.android.tv.screens.TvLivePlayerScreen
 import com.torve.android.tv.screens.TvPandaSetupScreen
 import com.torve.android.tv.screens.TvRatingsSettingsScreen
 import com.torve.android.tv.screens.TvSeeAllScreen
+import com.torve.android.tv.screens.TvPersonScreen
 import com.torve.android.tv.screens.TvVodSeriesDetailsArgs
 import com.torve.android.tv.screens.TvVodSeriesDetailsScreen
 import com.torve.android.tv.screens.stats.TvWatchStatsScreen
@@ -279,8 +280,10 @@ internal fun TvNavHost(
                     onBack = { navController.popBackStack() }, onMediaClick = { navController.navigateToTvDetails(it) })
             }
         composable("tv_person/{personId}", arguments = listOf(navArgument("personId") { type = NavType.IntType })) { entry ->
-            com.torve.android.ui.detail.PersonScreen(entry.arguments?.getInt("personId") ?: 0,
-                onBack = { navController.popBackStack() }, onMediaClick = { navController.navigateToTvDetails(it) })
+            TvPersonScreen(entry.arguments?.getInt("personId") ?: 0,
+                onBack = { navController.popBackStack() }, onMediaClick = { navController.navigateToTvDetails(it) },
+                railFocusRequester = latestRailFocusRequester,
+                onContentFocused = { latestOnContentFocused("tv_person", it) })
         }
         composable(TvRoutes.SUB_NAV_START) { /* nothing */ }
 
@@ -487,7 +490,14 @@ internal fun TvNavHost(
             val railKey = backStackEntry.arguments?.getString("railKey") ?: ""
             val mediaType = backStackEntry.arguments?.getString("mediaType") ?: "movie"
             val title = backStackEntry.arguments?.getString("title") ?: ""
-            TvSeeAllScreen(
+            val personId = railKey.takeIf { it.startsWith("person_credits_") }
+                ?.removePrefix("person_credits_")?.toIntOrNull()
+            if (personId != null) TvPersonScreen(personId, latestOnSeeAllBack,
+                onMediaClick = { latestOnBeforeDetailsNavigateFromSeeAll(); navController.navigateToTvDetails(it) },
+                railFocusRequester = latestRailFocusRequester, initialName = title,
+                onFirstContentRequester = { latestOnFirstContentRequester(TvRoutes.SEE_ALL, it) },
+                onContentFocused = { latestOnContentFocused(TvRoutes.SEE_ALL, it) })
+            else TvSeeAllScreen(
                 railKey = railKey,
                 mediaType = mediaType,
                 title = title,
