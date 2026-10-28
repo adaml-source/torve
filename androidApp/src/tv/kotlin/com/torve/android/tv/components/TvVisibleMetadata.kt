@@ -191,7 +191,6 @@ internal fun RememberFocusedTvPreviewDetails(item: MediaItem?, screen: String) {
         val key = identity ?: return@LaunchedEffect
         if (System.currentTimeMillis() - (checked[key] ?: 0) < 30_000) return@LaunchedEffect
         if (!withCachedTvBrowsePreviewEnrichment(original).needsTvPreviewDetails()) return@LaunchedEffect
-        delay(160)
         val prefs = context.getSharedPreferences("tv_focused_preview_v1", Context.MODE_PRIVATE)
         val storageKey = "$owner:${state.appLanguage}".hashCode().toString()
         val retained = withContext(Dispatchers.IO) {
@@ -202,6 +201,9 @@ internal fun RememberFocusedTvPreviewDetails(item: MediaItem?, screen: String) {
             (original.tvPreviewTmdbId() != null && it.tvPreviewTmdbId() == original.tvPreviewTmdbId())) }.forEach(::cacheTvBrowsePreviewEnrichedItem)
         var current = withCachedTvBrowsePreviewEnrichment(original)
         if (!current.needsTvPreviewDetails()) return@LaunchedEffect
+        // Disk-cached details are available without a focus dwell. Debounce
+        // only the network work when the remote passes quickly through rows.
+        delay(160)
         android.util.Log.i("TvPreview", "start screen=$screen type=${current.type} id=${current.id} tmdb=${state.tmdbCatalogueEnabled || state.tmdbEnrichmentEnabled} synopsis=${!current.overview.isNullOrBlank()} logo=${!current.logoUrl.isNullOrBlank()} cast=${current.cast.size}")
         var partial: MediaItem? = null
         suspend fun publish(value: MediaItem) {

@@ -219,18 +219,8 @@ fun TvFocusDetailsPanel(
     val settingsViewModel: SettingsViewModel = koinInject()
     val settingsState by settingsViewModel.state.collectAsState()
     var lastResolvedLogoUrl by remember { mutableStateOf<String?>(null) }
-    val requestedItem = focusedItem
-    val requestedItemKey = requestedItem?.let { "${it.type}:${it.tmdbId ?: it.id}" }
-    var displayedFocusedItem by remember { mutableStateOf(focusedItem) }
-
-    LaunchedEffect(requestedItemKey) {
-        if (requestedItem == null) {
-            displayedFocusedItem = null
-            return@LaunchedEffect
-        }
-        delay(220L)
-        displayedFocusedItem = requestedItem
-    }
+    // Render focus and cached data immediately; only background lookups debounce.
+    val displayedFocusedItem = focusedItem
 
     LaunchedEffect(displayedFocusedItem?.logoUrl) {
         val resolved = displayedFocusedItem?.logoUrl?.takeIf { it.isNotBlank() } ?: return@LaunchedEffect
@@ -381,21 +371,8 @@ fun TvBrowsePreviewPanel(
         targetValue = if (focused) Amber.copy(alpha = 0.92f) else Steel.copy(alpha = 0.34f),
         label = "browsePreviewBorder",
     )
-    val requestedSourceItem = focusedItem
-    val requestedSourceKey = requestedSourceItem?.let { tvBrowsePreviewEnrichedItemKey(it) }
-    var debouncedSourceItem by remember { mutableStateOf(focusedItem) }
     val resolvedLogoLookupKeys = remember { mutableStateMapOf<String, Boolean>() }
-
-    LaunchedEffect(requestedSourceKey) {
-        if (requestedSourceItem == null) {
-            debouncedSourceItem = null
-            return@LaunchedEffect
-        }
-        delay(240L)
-        debouncedSourceItem = requestedSourceItem
-    }
-
-    val sourceItem = debouncedSourceItem
+    val sourceItem = focusedItem
     val sourceKey = sourceItem?.let { tvBrowsePreviewEnrichedItemKey(it) }
     val item = sourceItem?.let(::withCachedTvBrowsePreviewEnrichment)
     val artworkLookupPending = item != null &&

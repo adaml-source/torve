@@ -163,7 +163,6 @@ private fun TvContentRail.progressFor(item: MediaItem): Float? {
 }
 
 private const val TV_CARD_WATCHED_THRESHOLD = 0.9f
-private const val TV_MEDIA_FOCUS_PREVIEW_DELAY_MS = 80L
 
 private fun MediaItem.upcomingScheduleMetadata(): String? {
     if (!id.startsWith("trakt-calendar:")) return null
@@ -380,14 +379,23 @@ internal fun TvMediaRails(
     // consume custom spacing and allow scroll anchors to land inside a card.
     val activeRowIndex = rails.indexOfFirst { it.key == activeExclusiveRowKey }.takeIf { it >= 0 }
         ?: rails.indexOfFirst { it.key == focusMemory.lastFocusedRowKey }.takeIf { it >= 0 } ?: 0
-    val priorityItems = listOf(activeRowIndex, activeRowIndex + 1).flatMap { index ->
+    val nearbyRowIndices = listOf(activeRowIndex, activeRowIndex + 1, activeRowIndex - 1)
+    // Warm the remembered destination in either direction before the remaining
+    // visible posters. Vertical focus should not start its artwork request.
+    val previewDestinations = nearbyRowIndices.mapNotNull { index ->
+        val row = rails.getOrNull(index) ?: return@mapNotNull null
+        val selected = focusMemory.lastFocusedIndexByRow[row.key] ?: 0
+        row.items.getOrNull(selected.coerceIn(0, (row.items.size - 1).coerceAtLeast(0)))
+    }
+    val priorityItems = (previewDestinations + nearbyRowIndices.flatMap { index ->
         val row = rails.getOrNull(index) ?: return@flatMap emptyList()
         val first = rowListStateByKey[row.key]?.firstVisibleItemIndex ?: 0
         row.items.drop(first).take(if (index == activeRowIndex) 12 else 4)
-    }
+    }).distinctBy { it.tvRailItemKey() }
     val visibleItems = rememberTvVisibleMetadata(priorityItems, screenId, expandingPosters, needsDetails = expandingPosters)
-    DisposableEffect(visibleItems.map { it.posterUrl to it.backdropUrl }) {
-        val cancel = TvImagePrefetcher.prefetchMediaItems(context, screenId, visibleItems, maxImages = 20)
+    DisposableEffect(visibleItems.map { listOf(it.posterUrl, it.backdropUrl, it.titlelessBackdropUrl, it.logoUrl) }) {
+        val cancel = TvImagePrefetcher.prefetchMediaItems(context, screenId, visibleItems,
+            maxImages = 20, heroCandidateCount = previewDestinations.size)
         onDispose { cancel() }
     }
     val renderedRowIndices = if (effectiveFocusExclusive && !stablePreviewRows) rails.indices.filter { index ->
@@ -443,10 +451,7 @@ internal fun TvMediaRails(
     val currentOnMediaFocused by rememberUpdatedState(onMediaFocused)
     LaunchedEffect(pendingMediaFocusItem) {
         val item = pendingMediaFocusItem ?: return@LaunchedEffect
-        kotlinx.coroutines.delay(TV_MEDIA_FOCUS_PREVIEW_DELAY_MS)
-        if (pendingMediaFocusItem == item) {
-            currentOnMediaFocused?.invoke(item)
-        }
+        currentOnMediaFocused?.invoke(item)
     }
 
     fun queueMediaFocus(item: MediaItem) {
@@ -487,9 +492,10 @@ internal fun TvMediaRails(
         rowFocusJob = coroutineScope.launch {
             try {
             if (stablePreviewRows) {
-                // One scroll owns the move. Every destination has its final
-                // height before focus transfers, including the remembered card.
-                columnListState.animateScrollToItem(columnIndex(destinationIndex), 0)
+                // Align immediately, then transfer focus on the next layout.
+                // Waiting for an animated scroll kept the destination collapsed
+                // throughout the animation and made every preview feel late.
+                columnListState.scrollToItem(columnIndex(destinationIndex), 0)
                 repeat(8) {
                     withFrameNanos { }
                     val requester = requesterMap["${targetRow.key}:$targetIndex"]

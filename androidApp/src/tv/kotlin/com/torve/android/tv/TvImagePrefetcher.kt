@@ -45,11 +45,13 @@ internal object TvImagePrefetcher {
         items: List<MediaItem>,
         maxImages: Int = 48,
         includeHeroCandidates: Boolean = true,
+        heroCandidateCount: Int = 2,
     ): () -> Unit {
         val images = sequence {
             if (includeHeroCandidates) {
-                items.take(2).forEach { item ->
-                    item.backdropUrl?.takeIf { it.isNotBlank() }?.let { url ->
+                items.take(heroCandidateCount.coerceIn(0, 3)).forEach { item ->
+                    (item.titlelessBackdropUrl?.takeIf { it.isNotBlank() } ?: item.backdropUrl)
+                        ?.takeIf { it.isNotBlank() }?.let { url ->
                         yield(PrefetchImage(url, HERO_PREFETCH_WIDTH_PX, HERO_PREFETCH_HEIGHT_PX))
                     }
                     item.logoUrl?.takeIf { it.isNotBlank() }?.let { url ->
