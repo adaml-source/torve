@@ -9,6 +9,16 @@ import kotlin.test.assertTrue
 class ChannelCatalogSnapshotsTest {
 
     @Test
+    fun reads_during_an_active_writer_never_delete_its_stage() {
+        for (active in listOf(null, 100L, 200L)) {
+            val plan = planChannelCatalogRecovery(active, 200L, writeInProgress = true)
+            assertEquals(active, plan.fallbackActiveGeneration)
+            assertNull(plan.staleGenerationToDelete)
+            assertFalse(plan.clearStagedGeneration)
+        }
+    }
+
+    @Test
     fun crash_during_refresh_keeps_previous_active_generation() {
         val plan = planChannelCatalogRecovery(
             activeGeneration = 100L,

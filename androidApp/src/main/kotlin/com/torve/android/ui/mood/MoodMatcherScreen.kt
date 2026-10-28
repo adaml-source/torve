@@ -1,5 +1,7 @@
 package com.torve.android.ui.mood
 
+import com.torve.android.ui.community.parityLabel as localizedUiText
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -141,7 +143,7 @@ fun MoodMatcherScreen(
                                 )
                                 Spacer(Modifier.height(4.dp))
                                 Text(
-                                    text = mood.label,
+                                    text = localizedUiText(mood.label),
                                     style = MaterialTheme.typography.labelLarge,
                                     color = if (isSelected) Amber else Snow,
                                     fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
@@ -153,7 +155,7 @@ fun MoodMatcherScreen(
                 }
                 Spacer(Modifier.height(8.dp))
                 Text(
-                    text = "Powered by ${settingsState.aiProvider.name} — each suggestion uses one API call",
+                    text = localizedUiText("Powered by ${settingsState.aiProvider.name} — each suggestion uses one API call"),
                     style = MaterialTheme.typography.labelSmall,
                     color = Silver,
                 )

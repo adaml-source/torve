@@ -5,6 +5,7 @@ import com.torve.domain.model.DebridServiceType
 import com.torve.domain.providerhealth.ProviderHealthCategory
 import com.torve.domain.providerhealth.ProviderHealthEntry
 import com.torve.domain.providerhealth.ProviderHealthStatus
+import kotlinx.coroutines.CancellationException
 
 /**
  * Wraps [DebridClient.verifyApiKey] for one debrid provider.
@@ -27,19 +28,31 @@ class DebridProviderHealthChecker(
         DebridServiceType.TORBOX -> "TorBox"
     }
 
+    private suspend fun credential(): String? = apiKeySource()?.trim()?.takeIf {
+        it.isNotBlank() && !it.contains("redact", ignoreCase = true) && !it.all { c -> c == '*' || c == '•' }
+    }
+
+    /** Cached success cannot attest to the current credentials after an app restart or restore. */
+    suspend fun configurationState(): ProviderHealthEntry = if (credential() == null) {
+        notConnected()
+    } else base().copy(message = "Saved credentials. Check connection to verify.", nextAction = "Check connection")
+
+    private fun notConnected() = base().copy(
+        status = ProviderHealthStatus.UNCONFIGURED,
+        message = "Not connected. Connect $label in Panda setup.",
+        nextAction = "Set up $label via Panda",
+    )
+
     override suspend fun check(): ProviderHealthEntry {
-        val key = apiKeySource()?.takeIf { it.isNotBlank() }
+        val key = credential()
         if (key == null) {
-            return base().copy(
-                status = ProviderHealthStatus.UNCONFIGURED,
-                message = "Not connected. Connect $label in Panda setup.",
-                nextAction = "Set up $label via Panda",
-            )
+            return notConnected()
         }
         val result = runCatching { debridClient.verifyApiKey(provider, key) }.getOrElse { t ->
+            if (t is CancellationException) throw t
             return base().copy(
                 status = ProviderHealthStatus.RED,
-                message = "Couldn't reach $label: ${t.message ?: t::class.simpleName}",
+                message = "Could not check $label. Try again.",
                 nextAction = "Retry",
             )
         }
@@ -54,10 +67,11 @@ class DebridProviderHealthChecker(
         // before reporting RED. OAuth access tokens expire; a successful refresh
         // means the session is still valid and should be surfaced as GREEN.
         if (provider == DebridServiceType.REAL_DEBRID) {
-            val refreshed = runCatching { debridClient.rdTokenRefresher?.refresh() }.getOrNull()
+            val refreshed = try { debridClient.rdTokenRefresher?.refresh() }
+                catch (e: Exception) { if (e is CancellationException) throw e else null }
             if (refreshed != null) {
-                val refreshResult = runCatching { debridClient.verifyApiKey(provider, refreshed) }.getOrNull()
-                if (refreshResult?.success == true) {
+                val refreshResult = debridClient.verifyApiKey(provider, refreshed)
+                if (refreshResult.success) {
                     return base().copy(
                         status = ProviderHealthStatus.GREEN,
                         message = "$label is connected.",
@@ -68,8 +82,8 @@ class DebridProviderHealthChecker(
         }
         return base().copy(
             status = ProviderHealthStatus.RED,
-            message = "session expired — reconnect in Settings → Integrations",
-            nextAction = "Re-enter API key",
+            message = "$label could not be verified. Open Panda setup to check or reconnect this provider.",
+            nextAction = "Open Panda setup",
         )
     }
 

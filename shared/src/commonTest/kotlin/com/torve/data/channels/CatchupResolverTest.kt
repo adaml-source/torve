@@ -62,4 +62,31 @@ class CatchupResolverTest {
         assertEquals(7, channel.catchupDays)
         assertTrue(resolver.canCatchup(channel))
     }
+
+    @Test
+    fun xtreamReplay_shiftedProgrammeBuildsAForwardArchiveWindow() {
+        val channel = Channel(
+            name = "Channel",
+            url = "https://iptv.example.com/live/user123/pass456/98765.ts",
+            catchupType = "xc",
+            catchupDays = 7,
+            playlistId = "pl-1",
+        )
+        val original = EpgProgramme(
+            channelId = "channel",
+            startTime = 1_711_722_000_000L,
+            endTime = 1_711_725_600_000L,
+            title = "Replay",
+        )
+
+        val shiftedUrl = resolver.resolve(
+            channel = channel,
+            programme = original.copy(startTime = original.startTime + 60_000L),
+        )
+
+        assertEquals(
+            "https://iptv.example.com/timeshift/user123/pass456/59/2024-03-29:14-21/98765.ts",
+            shiftedUrl,
+        )
+    }
 }

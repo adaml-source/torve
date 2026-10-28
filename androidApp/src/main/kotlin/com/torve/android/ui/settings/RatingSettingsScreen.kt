@@ -1,5 +1,7 @@
 package com.torve.android.ui.settings
 
+import com.torve.android.ui.community.parityLabel as localizedUiText
+
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -50,6 +52,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -94,6 +97,8 @@ fun RatingSettingsScreen(
 ) {
     val state by viewModel.state.collectAsState()
     val prefs = state.ratingPrefs
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val posterRatingsEnabled = com.torve.android.tv.settings.rememberTvPosterRatingsPreference()
     val defaultCardStyle = resolveCardStyle(
         presets = state.cardStylePresets,
         presetId = null,
@@ -116,7 +121,7 @@ fun RatingSettingsScreen(
             Text(
                 stringResource(R.string.ratings_title),
                 style = MaterialTheme.typography.titleLarge,
-                color = Snow,
+                color = MaterialTheme.colorScheme.onSurface,
                 fontWeight = FontWeight.Bold,
                 modifier = Modifier.padding(start = 8.dp),
             )
@@ -134,13 +139,21 @@ fun RatingSettingsScreen(
                     colors = CardDefaults.cardColors(containerColor = Charcoal),
                 ) {
                     Column(Modifier.padding(16.dp)) {
+                        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                            Text(stringResource(R.string.tv_ratings_show_on_posters), color = MaterialTheme.colorScheme.onSurface,
+                                fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                            Switch(checked = posterRatingsEnabled,
+                                onCheckedChange = { com.torve.android.tv.settings.setTvPosterRatingsEnabled(context, it) },
+                                modifier = Modifier.testTag("mobile_poster_ratings_toggle"))
+                        }
+                        Spacer(Modifier.height(8.dp))
                         Row(
                             Modifier.fillMaxWidth(),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             Column(Modifier.weight(1f)) {
-                                Text(stringResource(R.string.ratings_show_detail), color = Snow, fontWeight = FontWeight.SemiBold)
-                                Text(stringResource(R.string.ratings_show_detail_desc), color = Silver, fontSize = 12.sp)
+                                Text(stringResource(R.string.ratings_show_detail), color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.SemiBold)
+                                Text(stringResource(R.string.ratings_show_detail_desc), color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
                             }
                             Switch(
                                 checked = prefs.showRatingsOnDetailPage,
@@ -157,8 +170,8 @@ fun RatingSettingsScreen(
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             Column(Modifier.weight(1f)) {
-                                Text(stringResource(R.string.ratings_torve_detail), color = Snow, fontWeight = FontWeight.SemiBold)
-                                Text(stringResource(R.string.ratings_torve_detail_desc), color = Silver, fontSize = 12.sp)
+                                Text(stringResource(R.string.ratings_torve_detail), color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.SemiBold)
+                                Text(stringResource(R.string.ratings_torve_detail_desc), color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
                             }
                             Switch(
                                 checked = prefs.showTorveScoreOnDetailPage,
@@ -175,8 +188,8 @@ fun RatingSettingsScreen(
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             Column(Modifier.weight(1f)) {
-                                Text(stringResource(R.string.ratings_torve_cards), color = Snow, fontWeight = FontWeight.SemiBold)
-                                Text(stringResource(R.string.ratings_torve_cards_desc), color = Silver, fontSize = 12.sp)
+                                Text(stringResource(R.string.ratings_torve_cards), color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.SemiBold)
+                                Text(stringResource(R.string.ratings_torve_cards_desc), color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
                             }
                             Switch(
                                 checked = prefs.showTorveScoreOnCards,
@@ -193,8 +206,8 @@ fun RatingSettingsScreen(
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             Column(Modifier.weight(1f)) {
-                                Text(stringResource(R.string.ratings_landscape), color = Snow, fontWeight = FontWeight.SemiBold)
-                                Text(stringResource(R.string.ratings_landscape_desc), color = Silver, fontSize = 12.sp)
+                                Text(stringResource(R.string.ratings_landscape), color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.SemiBold)
+                                Text(stringResource(R.string.ratings_landscape_desc), color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
                             }
                             Switch(
                                 checked = prefs.allowRatingsOnLandscapeCards,
@@ -220,8 +233,8 @@ fun RatingSettingsScreen(
                     colors = CardDefaults.cardColors(containerColor = Charcoal),
                 ) {
                     Column(Modifier.padding(16.dp)) {
-                        Text(stringResource(R.string.ratings_torve_weights), color = Snow, fontWeight = FontWeight.SemiBold)
-                        Text(stringResource(R.string.ratings_weights_desc), color = Silver, fontSize = 12.sp)
+                        Text(stringResource(R.string.ratings_torve_weights), color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.SemiBold)
+                        Text(stringResource(R.string.ratings_weights_desc), color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
                         Spacer(Modifier.height(10.dp))
                         prefs.torveWeights.entries.forEach { (source, weight) ->
                             Row(
@@ -229,7 +242,7 @@ fun RatingSettingsScreen(
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically,
                             ) {
-                                Text(source.displayName, color = Snow, fontSize = 13.sp)
+                                Text(source.displayName, color = MaterialTheme.colorScheme.onSurface, fontSize = 13.sp)
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     Text("$weight", color = Amber, fontWeight = FontWeight.Bold, fontSize = 13.sp)
                                     IconButton(
@@ -242,7 +255,7 @@ fun RatingSettingsScreen(
                                     ) {
                                         Icon(
                                             Icons.Rounded.Close,
-                                            contentDescription = "Remove ${source.displayName}",
+                                            contentDescription = localizedUiText("Remove ${source.displayName}"),
                                             tint = Steel,
                                             modifier = Modifier.size(16.dp),
                                         )
@@ -315,8 +328,8 @@ fun RatingSettingsScreen(
                     colors = CardDefaults.cardColors(containerColor = Charcoal),
                 ) {
                     Column(Modifier.padding(16.dp)) {
-                        Text(stringResource(R.string.ratings_pill_position), color = Snow, fontWeight = FontWeight.SemiBold)
-                        Text(stringResource(R.string.ratings_pill_position_desc), color = Silver, fontSize = 12.sp)
+                        Text(stringResource(R.string.ratings_pill_position), color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.SemiBold)
+                        Text(stringResource(R.string.ratings_pill_position_desc), color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
                         Spacer(Modifier.height(12.dp))
                         PillPositionPicker(
                             selected = prefs.pillPosition,
@@ -338,7 +351,7 @@ fun RatingSettingsScreen(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.SpaceBetween,
                         ) {
-                            Text(stringResource(R.string.ratings_max_on_card), color = Snow, fontWeight = FontWeight.SemiBold)
+                            Text(stringResource(R.string.ratings_max_on_card), color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.SemiBold)
                             Text(
                                 "${prefs.maxRatingsOnCard}",
                                 color = Amber,
@@ -346,7 +359,7 @@ fun RatingSettingsScreen(
                                 fontSize = 16.sp,
                             )
                         }
-                        Text(stringResource(R.string.ratings_max_on_card_desc), color = Silver, fontSize = 12.sp)
+                        Text(stringResource(R.string.ratings_max_on_card_desc), color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
                         Spacer(Modifier.height(4.dp))
                         Slider(
                             value = prefs.maxRatingsOnCard.toFloat(),
@@ -365,8 +378,8 @@ fun RatingSettingsScreen(
                             Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween,
                         ) {
-                            Text("1", color = Silver, fontSize = 10.sp)
-                            Text("9", color = Silver, fontSize = 10.sp)
+                            Text("1", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 10.sp)
+                            Text("9", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 10.sp)
                         }
                     }
                 }
@@ -379,7 +392,7 @@ fun RatingSettingsScreen(
                     colors = CardDefaults.cardColors(containerColor = Charcoal),
                 ) {
                     Column(Modifier.padding(16.dp)) {
-                        Text(stringResource(R.string.ratings_pill_style), color = Snow, fontWeight = FontWeight.SemiBold)
+                        Text(stringResource(R.string.ratings_pill_style), color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.SemiBold)
                         Spacer(Modifier.height(8.dp))
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             RatingPillStyle.entries.forEach { style ->
@@ -395,7 +408,7 @@ fun RatingSettingsScreen(
                                     colors = FilterChipDefaults.filterChipColors(
                                         selectedContainerColor = Amber,
                                         selectedLabelColor = Obsidian,
-                                        containerColor = Gunmetal,
+                                        containerColor = MaterialTheme.colorScheme.surface,
                                         labelColor = Snow,
                                     ),
                                 )
@@ -412,8 +425,8 @@ fun RatingSettingsScreen(
                     colors = CardDefaults.cardColors(containerColor = Charcoal),
                 ) {
                     Column(Modifier.padding(16.dp)) {
-                        Text(stringResource(R.string.ratings_preview), color = Snow, fontWeight = FontWeight.SemiBold)
-                        Text(stringResource(R.string.ratings_preview_desc), color = Silver, fontSize = 12.sp)
+                        Text(stringResource(R.string.ratings_preview), color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.SemiBold)
+                        Text(stringResource(R.string.ratings_preview_desc), color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
                     }
                 }
             }
@@ -426,7 +439,7 @@ fun RatingSettingsScreen(
                 Text(
                     stringResource(R.string.ratings_sources_desc),
                     style = MaterialTheme.typography.bodySmall,
-                    color = Silver,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(horizontal = 4.dp),
                 )
             }
@@ -562,7 +575,10 @@ fun RatingSettingsScreen(
             item {
                 Spacer(Modifier.height(8.dp))
                 TextButton(
-                    onClick = { viewModel.updateRatingPrefs(RatingDisplayPrefs()) },
+                    onClick = {
+                        viewModel.updateRatingPrefs(RatingDisplayPrefs())
+                        com.torve.android.tv.settings.setTvPosterRatingsEnabled(context, true)
+                    },
                     modifier = Modifier.fillMaxWidth(),
                 ) {
                     Text(stringResource(R.string.ratings_reset_defaults), color = Amber)
@@ -586,11 +602,11 @@ private fun PillPositionPicker(
             FilterChip(
                 selected = selected == position,
                 onClick = { onSelect(position) },
-                label = { Text(label) },
+                label = { Text(localizedUiText(label)) },
                 colors = FilterChipDefaults.filterChipColors(
                     selectedContainerColor = Amber,
                     selectedLabelColor = Obsidian,
-                    containerColor = Gunmetal,
+                    containerColor = MaterialTheme.colorScheme.surface,
                     labelColor = Snow,
                 ),
             )
@@ -664,7 +680,7 @@ private fun RatingPreviewCard(
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = Gunmetal),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
         border = if (selected) androidx.compose.foundation.BorderStroke(1.dp, Amber) else null,
     ) {
         Column(

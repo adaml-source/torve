@@ -1,13 +1,19 @@
 package com.torve.android.tv.components
 
+import com.torve.android.tv.components.tvSettingsLabel as localizedUiText
+
 import android.content.Context
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
@@ -21,6 +27,7 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -30,6 +37,7 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
@@ -46,6 +54,9 @@ import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.saveable.listSaver
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
@@ -68,6 +79,7 @@ import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
@@ -80,7 +92,7 @@ import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
-import androidx.compose.ui.window.Popup
+import com.torve.android.remote.TorveRemotePopup as Popup
 import androidx.compose.ui.window.PopupProperties
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
@@ -90,28 +102,27 @@ import com.torve.android.R
 import com.torve.android.tv.TV_PAGE_CONTENT_GUTTER
 import com.torve.android.tv.TV_ROW_END_GUTTER
 import com.torve.android.tv.TvImagePrefetcher
+import com.torve.android.tv.settings.rememberTvPosterRatingsPreference
 import com.torve.android.tv.focus.TvFocusTargetId
 import com.torve.android.tv.focus.rememberRegisteredTvFocusRequester
 import com.torve.android.tv.focus.rememberTvModalFocusRestoreController
 import com.torve.android.tv.focus.TvScreenFocusHandle
 import com.torve.android.ui.home.ALL_STREAMING_SERVICES
+import com.torve.android.ui.home.StreamingProviderBrandArtwork
 import com.torve.android.ui.theme.Amber
 import com.torve.android.ui.theme.AmberLight
 import com.torve.android.ui.theme.Charcoal
+import com.torve.android.ui.theme.Graphite
 import com.torve.android.ui.theme.Obsidian
 import com.torve.android.ui.theme.Silver
 import com.torve.android.ui.theme.Snow
 import com.torve.android.ui.theme.Steel
-import com.torve.android.ui.components.PreferredRatingPills
 import com.torve.domain.model.MediaItem
-import com.torve.domain.model.RatingDisplayPrefs
-import com.torve.domain.model.RatingSource
 import com.torve.domain.model.allowsTmdbRatingProvider
-import com.torve.domain.model.bestDisplayRating
-import com.torve.domain.model.withFallbackTmdbScore
 import com.torve.presentation.seeall.SeeAllViewModel
 import com.torve.presentation.settings.SettingsViewModel
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Job
 import org.koin.compose.koinInject
 
 enum class TvCardStyle { POSTER, BACKDROP, SERVICE }
@@ -138,6 +149,10 @@ data class TvContentRail(
     val items: List<MediaItem>,
     val cardStyle: TvCardStyle = TvCardStyle.POSTER,
     val progressByMediaId: Map<String, Float> = emptyMap(),
+    val seeAllItems: List<MediaItem>? = null,
+    val showSeeAllCard: Boolean = true,
+    val allowCrossRailDuplicates: Boolean = false,
+    val remainingEpisodesByMediaId: Map<String, Int> = emptyMap(),
 )
 
 private fun TvContentRail.progressFor(item: MediaItem): Float? {
@@ -148,6 +163,7 @@ private fun TvContentRail.progressFor(item: MediaItem): Float? {
 }
 
 private const val TV_CARD_WATCHED_THRESHOLD = 0.9f
+private const val TV_MEDIA_FOCUS_PREVIEW_DELAY_MS = 80L
 
 private fun MediaItem.upcomingScheduleMetadata(): String? {
     if (!id.startsWith("trakt-calendar:")) return null
@@ -166,7 +182,7 @@ private fun MediaItem.upcomingScheduleMetadata(): String? {
     }
 }
 
-private data class TvMediaContextMenuState(
+internal data class TvMediaContextMenuState(
     val item: MediaItem,
     val progress: Float?,
     val anchorBounds: Rect?,
@@ -183,8 +199,8 @@ fun List<TvContentRail>.dedupeAcrossRails(minItemsPerRail: Int = 20): List<TvCon
     return mapNotNull { rail ->
         val localSeen = mutableSetOf<String>()
         val filtered = rail.items.filter { item ->
-            val key = item.tmdbId?.let { "${item.type}:$it" } ?: "${item.type}:${item.id}"
-            key !in seen && localSeen.add(key)
+            val key = item.tvRailItemKey()
+            (rail.allowCrossRailDuplicates || key !in seen) && localSeen.add(key)
         }
         val allowsSparse = rail.key.startsWith("continue_watching") ||
             rail.key.startsWith("watchlist") ||
@@ -195,7 +211,7 @@ fun List<TvContentRail>.dedupeAcrossRails(minItemsPerRail: Int = 20): List<TvCon
             rail.key.startsWith("popular_directors")
         val result = if (!allowsSparse && filtered.size < minItemsPerRail) emptyList() else filtered
         result.forEach { item ->
-            val key = item.tmdbId?.let { "${item.type}:$it" } ?: "${item.type}:${item.id}"
+            val key = item.tvRailItemKey()
             seen.add(key)
         }
         if (result.isEmpty()) null else rail.copy(items = result)
@@ -215,11 +231,66 @@ private fun canShowSeeAllForRail(railKey: String): Boolean =
 class TvFocusMemory {
     var lastFocusedRowKey: String? by mutableStateOf(null)
     val lastFocusedIndexByRow = mutableStateMapOf<String, Int>()
+    val lastFocusedItemKeyByRow = mutableStateMapOf<String, String>()
+
+    companion object {
+        // Keep identities across tab disposal, never the now-detached requesters.
+        internal val Saver = listSaver<TvFocusMemory, String>(
+            save = { memory ->
+                buildList {
+                    add(memory.lastFocusedRowKey.orEmpty())
+                    (memory.lastFocusedIndexByRow.keys + memory.lastFocusedItemKeyByRow.keys).forEach { row ->
+                        add(row)
+                        add((memory.lastFocusedIndexByRow[row] ?: 0).toString())
+                        add(memory.lastFocusedItemKeyByRow[row].orEmpty())
+                    }
+                }
+            },
+            restore = { saved ->
+                TvFocusMemory().apply {
+                    lastFocusedRowKey = saved.first().takeIf { it.isNotEmpty() }
+                    saved.drop(1).chunked(3).forEach { (row, index, item) ->
+                        lastFocusedIndexByRow[row] = index.toInt()
+                        if (item.isNotEmpty()) lastFocusedItemKeyByRow[row] = item
+                    }
+                }
+            },
+        )
+    }
 }
 
 @Composable
-fun rememberTvFocusMemory(): TvFocusMemory = remember { TvFocusMemory() }
+fun rememberTvFocusMemory(): TvFocusMemory = rememberSaveable(saver = TvFocusMemory.Saver) { TvFocusMemory() }
 
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+private fun androidx.compose.foundation.lazy.LazyListScope.tvLeadingContentItem(
+    pinned: Boolean,
+    content: @Composable () -> Unit,
+) {
+    if (pinned) {
+        stickyHeader {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(
+                        Brush.verticalGradient(
+                            colors = listOf(
+                                Obsidian.copy(alpha = 0.68f),
+                                Graphite.copy(alpha = 0.32f),
+                                Obsidian.copy(alpha = 0.10f),
+                            ),
+                        ),
+                    ),
+            ) {
+                content()
+            }
+        }
+    } else {
+        item { content() }
+    }
+}
+
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 internal fun TvMediaRails(
     rails: List<TvContentRail>,
@@ -234,12 +305,14 @@ internal fun TvMediaRails(
     loading: Boolean = false,
     emptyMessage: String = "",
     onMediaFocused: ((MediaItem) -> Unit)? = null,
+    onRailMediaClick: ((railKey: String, item: MediaItem) -> Boolean)? = null,
     onSeeAll: ((railKey: String, title: String) -> Unit)? = null,
     heroOverlay: (@Composable () -> Unit)? = null,
     heroOverlayFocusRequester: FocusRequester? = null,
     leadingContent: (@Composable () -> Unit)? = null,
     leadingContentFocusRequester: FocusRequester? = null,
     leadingContentVisible: Boolean = true,
+    pinLeadingContent: Boolean = false,
     focusExclusive: Boolean = false,
     shouldAutoFocus: Boolean = true,
     browseLayout: TvBrowseLayout = TvBrowseLayout.INFO_PANEL,
@@ -251,6 +324,14 @@ internal fun TvMediaRails(
     sourceAwareRatings: Boolean = false,
     showSeeAllCards: Boolean = true,
     presentationMode: TvRailsPresentationMode = TvRailsPresentationMode.Plain,
+    forcePosterTitles: Boolean = false,
+    compactPosterTitles: Boolean = false,
+    compactRailTitleSpacing: Boolean = false,
+    posterColumns: Int? = null,
+    entryFocusRequester: FocusRequester? = null,
+    onExpandedRowFocused: (Boolean) -> Unit = {},
+    compactPreviewRows: Boolean = false,
+    onExitUp: (() -> Unit)? = null,
 ) {
     val catalogHeroMode = presentationMode == TvRailsPresentationMode.CatalogHero
     val libraryHeroMode = presentationMode == TvRailsPresentationMode.LibraryHero
@@ -259,19 +340,17 @@ internal fun TvMediaRails(
     val ratingPrefs = settingsState.ratingPrefs
     val tvCardRatingPrefs = remember(ratingPrefs) { ratingPrefs.tvExternalCardRatingPrefs() }
     val showTmdbRating = tvCardRatingPrefs.allowsTmdbRatingProvider()
+    val showPosterRatings = rememberTvPosterRatingsPreference()
+    val previewPolicy = com.torve.android.tv.settings.rememberTvFocusPreviewPolicy(settingsState.personalDataUserId)
+    val previewPage = com.torve.android.tv.settings.tvFocusPreviewPage(screenId)
+    val expandingPosters = rails.any { it.cardStyle != TvCardStyle.SERVICE && it.items.any(MediaItem::isTvPreviewTitle) && previewPolicy.enabled(previewPage, it.key) }
     val context = LocalContext.current
     val tvPrefs = remember { context.getSharedPreferences("tv_prefs", Context.MODE_PRIVATE) }
     val showTitlesOnCards = tvPrefs.getBoolean("tv_show_poster_titles", true) &&
         browseLayout == TvBrowseLayout.POSTER_ONLY
-
-    LaunchedEffect(rails) {
-        if (rails.isNotEmpty()) {
-            TvImagePrefetcher.prefetchRails(
-                context = context,
-                screenName = screenId,
-                rails = rails,
-                maxItems = 36,
-            )
+    val prefetchSignature = remember(rails) {
+        rails.take(4).joinToString("|") { rail ->
+            "${rail.key}:${rail.items.take(8).joinToString(",") { item -> item.id }}"
         }
     }
 
@@ -284,12 +363,95 @@ internal fun TvMediaRails(
     val coroutineScope = rememberCoroutineScope()
     val allowInactivePeekRows = true
     val effectiveFocusExclusive = focusExclusive && (libraryHeroMode || catalogHeroMode)
-    val signature = remember(rails) { rails.joinToString("|") { r -> "${r.key}:${r.items.size}:${r.items.take(5).joinToString(",") { it.id }}" } }
+    // Real rows keep their height and lazy-list identity during vertical moves.
+    // Replacing the previous row with a decorative peek moved the anchor twice.
+    val stablePreviewRows = effectiveFocusExclusive && expandingPosters
+    // The outer list suppresses native scrolling while focus-frame geometry
+    // positions its rows. Ordinary replay/service rows still need horizontal
+    // bring-into-view; capture their native policy before the outer override.
+    val ordinaryRowBringIntoViewSpec = androidx.compose.foundation.gestures.LocalBringIntoViewSpec.current
+    val signature = remember(rails) { rails.joinToString("|") { r -> "${r.key}:${r.items.joinToString(",") { it.tvRailItemKey() }}" } }
     var contextMenuState by remember { mutableStateOf<TvMediaContextMenuState?>(null) }
     var activeExclusiveRowKey by remember(screenId) {
         mutableStateOf(focusMemory.lastFocusedRowKey)
     }
+    var transitioningFromRowKey by remember(screenId) { mutableStateOf<String?>(null) }
+    // Only visible rows belong to the vertical list. Empty lazy items still
+    // consume custom spacing and allow scroll anchors to land inside a card.
+    val activeRowIndex = rails.indexOfFirst { it.key == activeExclusiveRowKey }.takeIf { it >= 0 }
+        ?: rails.indexOfFirst { it.key == focusMemory.lastFocusedRowKey }.takeIf { it >= 0 } ?: 0
+    val priorityItems = listOf(activeRowIndex, activeRowIndex + 1).flatMap { index ->
+        val row = rails.getOrNull(index) ?: return@flatMap emptyList()
+        val first = rowListStateByKey[row.key]?.firstVisibleItemIndex ?: 0
+        row.items.drop(first).take(if (index == activeRowIndex) 12 else 4)
+    }
+    val visibleItems = rememberTvVisibleMetadata(priorityItems, screenId, expandingPosters, needsDetails = expandingPosters)
+    DisposableEffect(visibleItems.map { it.posterUrl to it.backdropUrl }) {
+        val cancel = TvImagePrefetcher.prefetchMediaItems(context, screenId, visibleItems, maxImages = 20)
+        onDispose { cancel() }
+    }
+    val renderedRowIndices = if (effectiveFocusExclusive && !stablePreviewRows) rails.indices.filter { index ->
+        index == activeRowIndex || index == activeRowIndex + 1 || rails[index].key == transitioningFromRowKey
+    } else rails.indices.toList()
+    fun columnIndex(rowIndex: Int): Int {
+        if (!effectiveFocusExclusive || stablePreviewRows) return railListItemOffset + rowIndex
+        val active = rails.indexOfFirst { it.key == activeExclusiveRowKey }.coerceAtLeast(0)
+        val visible = rails.indices.filter { it == active || it == active + 1 || rails[it].key == transitioningFromRowKey }
+        return railListItemOffset + visible.indexOf(rowIndex).coerceAtLeast(0)
+    }
+    val visibleRowSignature = renderedRowIndices.map { rails[it].key }
+    remember(visibleRowSignature, activeRowIndex, effectiveFocusExclusive, stablePreviewRows) {
+        if (effectiveFocusExclusive && !stablePreviewRows) columnListState.requestScrollToItem(columnIndex(activeRowIndex), 0)
+        Unit
+    }
+
     var contentFocusSignal by remember(screenId) { mutableIntStateOf(0) }
+    var pendingMediaFocusItem by remember(screenId) { mutableStateOf<MediaItem?>(null) }
+    var leadingContentHasFocus by remember(screenId) { mutableStateOf(false) }
+    var leadingContentEntryPending by remember(screenId) { mutableStateOf(false) }
+    var focusedRowIndex by remember(screenId) { mutableStateOf<Int?>(null) }
+    var focusedCardKey by remember(screenId) { mutableStateOf<String?>(null) }
+    var focusedSeeAllRowKey by remember(screenId) { mutableStateOf<String?>(null) }
+    var navigationSignal by remember(screenId) { mutableIntStateOf(0) }
+    var rowFocusJob by remember(screenId) { mutableStateOf<Job?>(null) }
+    val previewRowIndex = if (transitioningFromRowKey != null) activeRowIndex else focusedRowIndex
+    val expandedRowFocused = (focusedCardKey != null || focusedSeeAllRowKey != null || transitioningFromRowKey != null) && previewRowIndex?.let { index ->
+        rails.getOrNull(index)?.let { it.cardStyle != TvCardStyle.SERVICE && it.items.any(MediaItem::isTvPreviewTitle) && previewPolicy.enabled(previewPage, it.key) }
+    } == true
+    LaunchedEffect(expandedRowFocused) { onExpandedRowFocused(expandedRowFocused) }
+    // A grid toolbar is not a second place to present the selected film. Keep
+    // its hero hidden while the active row uses an expanded landscape preview.
+    val suppressHeroForPreview = expandedRowFocused || (compactPreviewRows &&
+        rails.getOrNull(activeRowIndex)?.let { previewPolicy.enabled(previewPage, it.key) } == true)
+    var previewMenuRow by remember { mutableStateOf<String?>(null) }
+    val focusedTitleItem = focusedCardKey?.let { key ->
+        val index = key.substringAfterLast(':').toIntOrNull() ?: return@let null
+        rails.getOrNull(focusedRowIndex ?: return@let null)?.items?.getOrNull(index)
+    }
+    RememberFocusedTvImdb(focusedTitleItem, screenId)
+    RememberFocusedTvPreviewDetails(focusedTitleItem?.takeIf { expandedRowFocused }, screenId)
+    // Capture the real owner before lazy children are replaced by new data.
+    val focusBeforeRailsUpdate = remember(signature) {
+        modalFocusRestoreController.focusedTarget.takeIf { focusedCardKey != null }
+    }
+    val navigationSignalBeforeRailsUpdate = remember(signature) { navigationSignal }
+
+    // Each entry, restoration and remote row transition below owns both its
+    // scroll and its focus request. A separate alignment effect would cancel
+    // the transition's scroll coroutine before it can focus the expanded row.
+
+    val currentOnMediaFocused by rememberUpdatedState(onMediaFocused)
+    LaunchedEffect(pendingMediaFocusItem) {
+        val item = pendingMediaFocusItem ?: return@LaunchedEffect
+        kotlinx.coroutines.delay(TV_MEDIA_FOCUS_PREVIEW_DELAY_MS)
+        if (pendingMediaFocusItem == item) {
+            currentOnMediaFocused?.invoke(item)
+        }
+    }
+
+    fun queueMediaFocus(item: MediaItem) {
+        if (onMediaFocused != null) pendingMediaFocusItem = item
+    }
 
     LaunchedEffect(signature, effectiveFocusExclusive) {
         if (!effectiveFocusExclusive) return@LaunchedEffect
@@ -303,35 +465,82 @@ internal fun TvMediaRails(
 
     fun moveExclusiveRowFocus(fromRowIndex: Int, delta: Int) {
         if (!effectiveFocusExclusive) return
-        val targetRow = rails.getOrNull(fromRowIndex + delta) ?: return
+        val destinationIndex = (if (stablePreviewRows && rowFocusJob?.isActive == true) activeRowIndex else fromRowIndex) + delta
+        val targetRow = rails.getOrNull(destinationIndex) ?: return
+        leadingContentEntryPending = false
+        val beforeFocusSignal = contentFocusSignal
+        val sourceRowKey = modalFocusRestoreController.focusedTarget?.rowKey
+            ?: transitioningFromRowKey ?: activeExclusiveRowKey
+        rowFocusJob?.cancel()
+        // Keep the old focused node alive until the expanded destination has
+        // been measured and aligned. Disposing it early lets lazy focus fallback
+        // select the clipped preview card before the scroll has finished.
+        transitioningFromRowKey = sourceRowKey?.takeUnless { it == targetRow.key }
         activeExclusiveRowKey = targetRow.key
         focusMemory.lastFocusedRowKey = targetRow.key
         val targetIndex = focusMemory.lastFocusedIndexByRow[targetRow.key]
             ?.coerceIn(0, (targetRow.items.size - 1).coerceAtLeast(0))
             ?: 0
         targetRow.items.getOrNull(targetIndex)?.let { item ->
-            onMediaFocused?.invoke(item)
+            queueMediaFocus(item)
         }
-        coroutineScope.launch {
+        rowFocusJob = coroutineScope.launch {
+            try {
+            if (stablePreviewRows) {
+                // One scroll owns the move. Every destination has its final
+                // height before focus transfers, including the remembered card.
+                columnListState.animateScrollToItem(columnIndex(destinationIndex), 0)
+                repeat(8) {
+                    withFrameNanos { }
+                    val requester = requesterMap["${targetRow.key}:$targetIndex"]
+                        ?: requesterMap["${targetRow.key}:0"]
+                    if (requester != null && runCatching { requester.requestFocus(); true }.getOrDefault(false)) return@launch
+                }
+                return@launch
+            }
             runCatching {
                 columnListState.scrollToItem(
-                    index = railListItemOffset + fromRowIndex + delta,
+                    index = columnIndex(destinationIndex),
                     scrollOffset = 0,
                 )
             }
-            withFrameNanos { }
-            kotlinx.coroutines.delay(24)
-            val targetRequester = requesterMap["${targetRow.key}:$targetIndex"]
-                ?: requesterMap["${targetRow.key}:0"]
-            if (targetRequester != null) {
-                focusMemory.lastFocusedIndexByRow[targetRow.key] = targetIndex
-                runCatching { targetRequester.requestFocus() }
+            // Collapsed catalog rows must be measured and become focusable
+            // before a remote row change is complete. A single delayed request
+            // can miss that point on slower Fire TVs and leave focus on the rail.
+            repeat(if (catalogHeroMode) 24 else 1) {
+                withFrameNanos { }
+                kotlinx.coroutines.delay(24)
+                if (contentFocusSignal != beforeFocusSignal &&
+                    (focusedCardKey == "${targetRow.key}:$targetIndex" || focusedCardKey == "${targetRow.key}:0")) {
+                    return@launch
+                }
+                if (catalogHeroMode) {
+                    // A zero-height target can be skipped by the first scroll
+                    // before recomposition expands it. Align the expanded row
+                    // again so its card is composed before requesting focus.
+                    columnListState.scrollToItem(columnIndex(destinationIndex), scrollOffset = 0)
+                    withFrameNanos { }
+                }
+                val targetRequester = requesterMap["${targetRow.key}:$targetIndex"]
+                    ?: requesterMap["${targetRow.key}:0"]
+                if (targetRequester != null) {
+                    focusMemory.lastFocusedIndexByRow[targetRow.key] = targetIndex
+                    runCatching { targetRequester.requestFocus() }
+                }
+            }
+            } finally {
+                if (rowFocusJob == kotlinx.coroutines.currentCoroutineContext()[Job]) {
+                    transitioningFromRowKey = null
+                }
             }
         }
     }
 
     fun moveToActiveExclusiveRowFocus() {
         if (!effectiveFocusExclusive) return
+        leadingContentEntryPending = false
+        rowFocusJob?.cancel()
+        transitioningFromRowKey = null
         val leadingEntryVisible = showLeadingContentBeforeRails && leadingContentVisible
         val targetRowKey = if (leadingEntryVisible) {
             rails.firstOrNull()?.key
@@ -340,16 +549,17 @@ internal fun TvMediaRails(
                 ?: rails.firstOrNull()?.key
         } ?: return
         val targetRowIndex = rails.indexOfFirst { it.key == targetRowKey }.takeIf { it >= 0 } ?: return
+        activeExclusiveRowKey = targetRowKey
         val targetIndex = focusMemory.lastFocusedIndexByRow[targetRowKey]
             ?.coerceIn(0, (rails[targetRowIndex].items.size - 1).coerceAtLeast(0))
             ?: 0
         rails[targetRowIndex].items.getOrNull(targetIndex)?.let { item ->
-            onMediaFocused?.invoke(item)
+            queueMediaFocus(item)
         }
-        coroutineScope.launch {
+        rowFocusJob = coroutineScope.launch {
             runCatching {
                 columnListState.scrollToItem(
-                    index = railListItemOffset + targetRowIndex,
+                    index = columnIndex(targetRowIndex),
                     scrollOffset = 0,
                 )
             }
@@ -367,25 +577,46 @@ internal fun TvMediaRails(
 
     fun moveToLeadingContent() {
         val requester = leadingContentFocusRequester ?: return
-        coroutineScope.launch {
+        rowFocusJob?.cancel()
+        transitioningFromRowKey = null
+        // Keep expansion separate from observed focus: a newly measured group
+        // can report hasFocus=false before the requester reaches its child.
+        leadingContentEntryPending = true
+        rowFocusJob = coroutineScope.launch {
+            try {
             runCatching {
                 columnListState.scrollToItem(0, scrollOffset = 0)
             }
-            withFrameNanos { }
-            kotlinx.coroutines.delay(24)
-            runCatching { requester.requestFocus() }
+            repeat(8) {
+                withFrameNanos { }
+                // The first scroll can still see the collapsed zero-height
+                // header and canonicalize to the first rail. Remeasure after
+                // expansion so the Search node is composed and placed again.
+                columnListState.scrollToItem(0, scrollOffset = 0)
+                withFrameNanos { }
+                kotlinx.coroutines.delay(24)
+                if (leadingContentHasFocus) return@launch
+                runCatching { requester.requestFocus() }
+            }
+            } finally {
+                if (rowFocusJob == kotlinx.coroutines.currentCoroutineContext()[Job]) leadingContentEntryPending = false
+            }
         }
     }
 
     fun moveToRowFocus(targetRowIndex: Int) {
         val targetRow = rails.getOrNull(targetRowIndex) ?: return
+        leadingContentEntryPending = false
+        rowFocusJob?.cancel()
+        transitioningFromRowKey = null
+        if (effectiveFocusExclusive) activeExclusiveRowKey = targetRow.key
         val targetIndex = focusMemory.lastFocusedIndexByRow[targetRow.key]
             ?.coerceIn(0, (targetRow.items.size - 1).coerceAtLeast(0))
             ?: 0
-        coroutineScope.launch {
+        rowFocusJob = coroutineScope.launch {
             runCatching {
                 columnListState.scrollToItem(
-                    index = railListItemOffset + targetRowIndex,
+                    index = columnIndex(targetRowIndex),
                     scrollOffset = 0,
                 )
             }
@@ -415,6 +646,7 @@ internal fun TvMediaRails(
                 requestRestore = { origin, reason ->
                     modalFocusRestoreController.requestRestore(origin = origin, reason = reason)
                 },
+                isOriginFocused = modalFocusRestoreController::isOriginFocused,
             ),
         )
         onDispose {
@@ -429,8 +661,11 @@ internal fun TvMediaRails(
         anchorBounds: Rect?,
         rowListState: androidx.compose.foundation.lazy.LazyListState,
     ) {
-        val actionsProvider = contextMenuActionsForItem ?: return
-        val actions = actionsProvider(item, progress).filter { it.label.isNotBlank() }
+        val actions = contextMenuActionsForItem?.invoke(item, progress).orEmpty().filter { it.label.isNotBlank() } +
+            if (!previewPolicy.global && rails.firstOrNull { it.key == target.rowKey }?.cardStyle == TvCardStyle.POSTER) {
+                listOf(TvMediaContextMenuAction("focus_preview_row", if (previewPolicy.enabled(previewPage, target.rowKey))
+                    "Use posters for this row" else "Use expanding landscape for this row"))
+            } else emptyList()
         if (actions.isEmpty()) return
         modalFocusRestoreController.captureOrigin(
             target = target,
@@ -443,6 +678,7 @@ internal fun TvMediaRails(
             anchorBounds = anchorBounds,
             actions = actions,
         )
+        previewMenuRow = target.rowKey
     }
 
     fun dismissContextMenu(restoreFocus: Boolean = true) {
@@ -452,9 +688,42 @@ internal fun TvMediaRails(
         contextMenuState = null
     }
 
+    // The callback is recreated on hero/focus updates; only its presence changes
+    // which targets exist. Rebuilding thousands of IDs for it blocks the remote.
+    val validModalFocusTargets = remember(rails, screenId, showSeeAllCards, onSeeAll != null) {
+        buildSet {
+            rails.forEachIndexed { rowIndex, rail ->
+                rail.items.forEachIndexed { itemIndex, item ->
+                    add(
+                        TvFocusTargetId(
+                            screenId = screenId,
+                            rowKey = rail.key,
+                            itemKey = item.tvRailItemKey(),
+                            rowIndex = rowIndex,
+                            itemIndex = itemIndex,
+                            targetType = "card",
+                        ),
+                    )
+                }
+                if (showSeeAllCards && rail.showSeeAllCard && onSeeAll != null && canShowSeeAllForRail(rail.key)) {
+                    add(
+                        TvFocusTargetId(
+                            screenId = screenId,
+                            rowKey = rail.key,
+                            itemKey = "see_all",
+                            rowIndex = rowIndex,
+                            itemIndex = rail.items.size,
+                            targetType = "see_all",
+                        ),
+                    )
+                }
+            }
+        }
+    }
+
     // Prune stale entries when rails change so disposed FocusRequesters
-    // don't accumulate and cause crashes on focus restore.
-    LaunchedEffect(signature) {
+    // don't accumulate and become invalid restoration candidates.
+    LaunchedEffect(validModalFocusTargets) {
         val validKeys = mutableSetOf<String>()
         val validRowKeys = mutableSetOf<String>()
         for (rail in rails) {
@@ -464,29 +733,47 @@ internal fun TvMediaRails(
         }
         requesterMap.keys.retainAll(validKeys)
         rowListStateByKey.keys.retainAll(validRowKeys)
-        // TODO: modalFocusRestoreController does not expose a pruneStaleTargets() method,
-        // so stale entries in its internal requesterByTarget map are not cleaned up here.
-        // Targets are individually unregistered via DisposableEffect in rememberRegisteredTvFocusRequester,
-        // but orphaned entries could linger if composition disposal is delayed.
+        modalFocusRestoreController.pruneInactiveTargets(validModalFocusTargets)
     }
 
+    val autoFocusNavigationSignal = remember(signature, shouldAutoFocus, autoFocusRequestNonce) { navigationSignal }
     LaunchedEffect(signature, shouldAutoFocus, autoFocusRequestNonce) {
         if (!shouldAutoFocus) return@LaunchedEffect
         if (rails.isEmpty()) return@LaunchedEffect
-        val firstKey = rails.first().key
+        if (navigationSignal != autoFocusNavigationSignal) return@LaunchedEffect
+        val preferredRow = focusMemory.lastFocusedRowKey
+        val destination = tvRailFocusDestination(
+            rails, preferredRow, preferredRow?.let { focusMemory.lastFocusedItemKeyByRow[it] },
+            preferredRow?.let { focusMemory.lastFocusedIndexByRow[it] } ?: 0,
+        ) ?: return@LaunchedEffect
+        if (focusedCardKey == "${destination.rowKey}:${destination.itemIndex}") return@LaunchedEffect
+        rowFocusJob?.cancel()
+        if (effectiveFocusExclusive) activeExclusiveRowKey = destination.rowKey
         repeat(30) {
+            // Entry restoration must yield to a real remote action, and an
+            // already-focused destination needs no retry. Otherwise an old
+            // entry job can keep scrolling the previous row after DOWN/UP.
+            if (navigationSignal != autoFocusNavigationSignal) return@LaunchedEffect
+            if (focusedCardKey == "${destination.rowKey}:${destination.itemIndex}") return@LaunchedEffect
             withFrameNanos { }
-            kotlinx.coroutines.delay(50)
-            val targetRowKey = focusMemory.lastFocusedRowKey?.takeIf { row -> rails.any { it.key == row } }
-                ?: firstKey
-            val targetIndex = focusMemory.lastFocusedIndexByRow[targetRowKey] ?: 0
-            val target = requesterMap["$targetRowKey:$targetIndex"] ?: requesterMap["$firstKey:0"]
+            if (navigationSignal != autoFocusNavigationSignal) return@LaunchedEffect
+            // Expand, measure and compose the destination before asking it
+            // for focus. A cached requester may belong to a zero-height row.
+            columnListState.scrollToItem(columnIndex(destination.rowIndex))
+            rowListStateByKey[destination.rowKey]?.let { rowState ->
+                if (rowState.layoutInfo.visibleItemsInfo.none { it.index == destination.itemIndex }) {
+                    rowState.scrollToItem(destination.itemIndex)
+                }
+            }
+            withFrameNanos { }
+            if (navigationSignal != autoFocusNavigationSignal) return@LaunchedEffect
+            val target = requesterMap["${destination.rowKey}:${destination.itemIndex}"]
             if (target != null) {
                 val beforeFocusSignal = contentFocusSignal
                 val requested = runCatching { target.requestFocus() }.isSuccess
                 if (requested) {
                     withFrameNanos { }
-                    if (contentFocusSignal != beforeFocusSignal) {
+                    if (focusedCardKey == "${destination.rowKey}:${destination.itemIndex}" || contentFocusSignal != beforeFocusSignal) {
                         return@LaunchedEffect
                     }
                 }
@@ -494,11 +781,47 @@ internal fun TvMediaRails(
         }
     }
 
-    LaunchedEffect(contextMenuState, modalFocusRestoreController.pendingRestore?.restoreToken) {
+    LaunchedEffect(signature) {
+        val origin = focusBeforeRailsUpdate ?: return@LaunchedEffect
+        withFrameNanos { }
+        if (contextMenuState != null || navigationSignal != navigationSignalBeforeRailsUpdate) return@LaunchedEffect
+        val destination = tvRailFocusDestination(rails, origin.rowKey, origin.itemKey, origin.itemIndex, origin.rowIndex)
+            ?: return@LaunchedEffect
+        if (effectiveFocusExclusive) activeExclusiveRowKey = destination.rowKey
+        rowFocusJob?.cancel()
+        repeat(30) {
+            withFrameNanos { }
+            // Removing a focused node can make Compose focus a neighbour
+            // automatically. Only a new remote action supersedes restoration.
+            if (contextMenuState != null || navigationSignal != navigationSignalBeforeRailsUpdate) return@LaunchedEffect
+            columnListState.scrollToItem(columnIndex(destination.rowIndex))
+            rowListStateByKey[destination.rowKey]?.let { rowState ->
+                if (rowState.layoutInfo.visibleItemsInfo.none { it.index == destination.itemIndex }) rowState.scrollToItem(destination.itemIndex)
+            }
+            withFrameNanos { }
+            val expected = "${destination.rowKey}:${destination.itemIndex}"
+            if (focusedCardKey == expected) return@LaunchedEffect
+            requesterMap[expected]?.let { runCatching { it.requestFocus() } }
+        }
+    }
+
+    LaunchedEffect(contextMenuState, modalFocusRestoreController.pendingRestore?.restoreToken, signature) {
         if (contextMenuState != null) return@LaunchedEffect
+        val origin = modalFocusRestoreController.pendingRestore
+        if (effectiveFocusExclusive && origin != null) {
+            val destination = tvRailFocusDestination(rails, origin.rowKey, origin.itemKey, origin.itemIndex, origin.rowIndex)
+                ?: return@LaunchedEffect
+            rowFocusJob?.cancel()
+            activeExclusiveRowKey = destination.rowKey
+            withFrameNanos { }
+            columnListState.scrollToItem(columnIndex(destination.rowIndex))
+            withFrameNanos { }
+        }
         modalFocusRestoreController.restorePendingFocus(
             screenId = screenId,
-            outerListState = columnListState,
+            // Old offsets describe the previous order. Keep the expanded
+            // destination in view instead of scrolling back to its old index.
+            outerListState = columnListState.takeUnless { effectiveFocusExclusive },
             innerListStateForRowKey = { rowKey -> rowListStateByKey[rowKey] },
         )
     }
@@ -543,7 +866,7 @@ internal fun TvMediaRails(
                 contentAlignment = Alignment.Center,
             ) {
                 Text(
-                    text = emptyMessage,
+                    text = localizedUiText(emptyMessage),
                     style = MaterialTheme.typography.titleLarge,
                     color = Silver,
                 )
@@ -554,10 +877,44 @@ internal fun TvMediaRails(
             val railStartPad = TV_PAGE_CONTENT_GUTTER
             val rowItemSpacing = if (libraryHeroMode) 14.dp else 12.dp
             val rowVerticalFocusInset = if (libraryHeroMode) 10.dp else 8.dp
-            BoxWithConstraints(modifier = modifier.fillMaxSize()) {
+            androidx.compose.runtime.CompositionLocalProvider(
+                androidx.compose.foundation.gestures.LocalBringIntoViewSpec provides
+                    if (stablePreviewRows) TvAnchoredPreviewBringIntoViewSpec else androidx.compose.foundation.gestures.LocalBringIntoViewSpec.current,
+            ) { BoxWithConstraints(modifier = modifier.fillMaxSize().padding(top = if (compactPreviewRows) 12.dp else 24.dp)) {
+                val availableRailWidth = maxWidth
+                val density = LocalDensity.current
+                val posterTitleStyle = if (compactPosterTitles) MaterialTheme.typography.labelMedium else MaterialTheme.typography.labelLarge
+                val posterCaptionHeight = if (expandingPosters || forcePosterTitles || showTitlesOnCards || rails.any { it.key == "upcoming_schedule" }) {
+                    // Keep a stable budget for two title lines and an air date.
+                    with(density) { if (expandingPosters) posterTitleStyle.lineHeight.toDp() * 3f
+                        else posterTitleStyle.lineHeight.toDp() * 2f + MaterialTheme.typography.labelSmall.lineHeight.toDp() } + 9.dp
+                } else 0.dp
+                val headingHeight = with(density) { MaterialTheme.typography.headlineSmall.lineHeight.toDp() }
+                val rowChromeHeight = headingHeight + 12.dp + rowVerticalFocusInset * 2f + 24.dp
+                val catalogRowBottomPadding = 16.dp
+                // Include the largest focus scale (See All), as well as the
+                // section padding outside LazyRow. Unscaled card height alone
+                // let captions reach the clipped bottom during row navigation.
+                val catalogFocusScale = 1.045f
+                // Reserve both caption lines, the focus outline and a bottom safe margin.
+                // Larger poster preferences must still fit a complete row on a 540dp TV.
+                val catalogPosterWidthLimit = (
+                    ((maxHeight - 180.dp - rowChromeHeight - catalogRowBottomPadding) / catalogFocusScale - posterCaptionHeight) / 1.5f
+                )
+                    .coerceIn(82.dp, 170.dp)
+                val catalogRequestedPosterWidth = posterColumns?.let { requestedColumns ->
+                    val columns = requestedColumns.coerceIn(4, 10)
+                    ((availableRailWidth - railStartPad - TV_ROW_END_GUTTER - rowItemSpacing * (columns - 1)) / columns.toFloat())
+                        .coerceIn(82.dp, 170.dp)
+                }
+                val catalogRowHeight = maxOf(
+                    (catalogRequestedPosterWidth ?: 104.dp).coerceAtMost(catalogPosterWidthLimit) * 1.5f + posterCaptionHeight,
+                    230.dp * 0.5625f + 64.dp,
+                )
+                val railPageHeight = maxHeight
                 val fixedHeroRailViewport = heroOverlay != null &&
                     (catalogHeroMode || libraryHeroMode)
-                val railTop = if (fixedHeroRailViewport) {
+                val railTop = if (fixedHeroRailViewport && !suppressHeroForPreview) {
                     if (libraryHeroMode) {
                         // Library Watchlist/Favorites need a physical rail boundary.
                         // Rail rows, poster cards, rating badges, and focus glow must
@@ -569,6 +926,7 @@ internal fun TvMediaRails(
                         // the hero is a sibling layer pinned at the top while rails
                         // scroll in the bounded viewport below it.
                         (maxHeight * 0.275f).coerceIn(268.dp, 304.dp)
+                            .coerceAtMost((maxHeight - catalogRowHeight * catalogFocusScale - rowChromeHeight - catalogRowBottomPadding).coerceAtLeast(0.dp))
                     }
                 } else {
                     0.dp
@@ -587,6 +945,7 @@ internal fun TvMediaRails(
                         modifier = Modifier
                             .fillMaxWidth()
                             .weight(1f)
+                            .testTag("catalog_rails_viewport")
                             .then(
                                 if (fixedHeroRailViewport) {
                                     Modifier
@@ -623,21 +982,58 @@ internal fun TvMediaRails(
                                     else -> 32.dp
                                 },
                             ),
-                            verticalArrangement = Arrangement.spacedBy(if (libraryHeroMode) 18.dp else 16.dp),
+                            verticalArrangement = Arrangement.spacedBy(
+                                settingsState.railSpacingDp?.dp ?: when {
+                                    catalogHeroMode && effectiveFocusExclusive -> 0.dp
+                                    libraryHeroMode && compactRailTitleSpacing -> 8.dp
+                                    libraryHeroMode -> 18.dp
+                                    else -> 16.dp
+                                },
+                            ),
                         ) {
-                    if (heroOverlay != null && !fixedHeroRailViewport) {
+                    if (heroOverlay != null && !fixedHeroRailViewport && !suppressHeroForPreview) {
                         item(key = "hero_overlay") {
                             heroOverlay()
                         }
                     }
 
                     leadingContent?.takeIf { showLeadingContentBeforeRails }?.let { content ->
+                        if (pinLeadingContent) {
+                            if (leadingContentVisible) {
+                                leadingContentFocusRequester?.let { onFirstContentRequester(it) }
+                            }
+                            tvLeadingContentItem(pinned = true) {
+                                Box(
+                                    modifier = Modifier.fillMaxWidth(),
+                                ) {
+                                    content()
+                                }
+                            }
+                            return@let
+                        }
                         item(key = "leading_content") {
                             if (leadingContentVisible) {
                                 leadingContentFocusRequester?.let { onFirstContentRequester(it) }
                             }
                             Box(
-                                modifier = Modifier.onPreviewKeyEvent { event ->
+                                modifier = Modifier
+                                    // An invisible Search header must not keep
+                                    // consuming a full row of the card viewport.
+                                    // Keep its focus node attached so UP can
+                                    // expand it before requesting focus.
+                                    .then(
+                                        if (catalogHeroMode && !leadingContentHasFocus && !leadingContentEntryPending && focusedCardKey != null) {
+                                            Modifier.height(0.dp)
+                                        } else Modifier,
+                                    )
+                                    .graphicsLayer { alpha = if (catalogHeroMode && !leadingContentHasFocus && !leadingContentEntryPending) 0f else 1f }
+                                    .onFocusChanged {
+                                        leadingContentHasFocus = it.hasFocus
+                                        if (it.hasFocus) leadingContentEntryPending = false
+                                    }
+                                    .focusGroup()
+                                    .onPreviewKeyEvent { event ->
+                                    if (event.type == KeyEventType.KeyDown) navigationSignal += 1
                                     if (
                                         effectiveFocusExclusive &&
                                         event.key == Key.DirectionDown &&
@@ -657,26 +1053,66 @@ internal fun TvMediaRails(
                         }
                     }
 
-                    itemsIndexed(rails, key = { _, row -> row.key }) { rowIndex, row ->
-                    val rowListState = rememberLazyListState()
+                    itemsIndexed(renderedRowIndices, key = { _, index -> rails[index].key }) { _, rowIndex ->
+                    val row = rails[rowIndex]
+                    val rowListState = remember(row.key) {
+                        rowListStateByKey.getOrPut(row.key) { androidx.compose.foundation.lazy.LazyListState() }
+                    }
                     rowListStateByKey[row.key] = rowListState
                     val leadingEntryVisible = showLeadingContentBeforeRails && leadingContentVisible
-                    val activeExclusiveKey = if (leadingEntryVisible) {
-                        rails.firstOrNull()?.key
-                    } else {
+                    // The leading filters define the entry point, but they must
+                    // not permanently pin the first rail as active. Otherwise
+                    // focus can move to a later rail while that rail is still
+                    // rendered at zero height, producing an apparent blank row.
+                    val activeExclusiveKey =
                         activeExclusiveRowKey?.takeIf { key -> rails.any { rail -> rail.key == key } }
                             ?: focusMemory.lastFocusedRowKey?.takeIf { key -> rails.any { rail -> rail.key == key } }
                             ?: rails.firstOrNull()?.key
-                    }
                     val activeExclusiveIndex = rails.indexOfFirst { it.key == activeExclusiveKey }
                     val rowIsActive = !effectiveFocusExclusive || row.key == activeExclusiveKey
-                    val rowIsPeek = allowInactivePeekRows &&
+                    val rowIsTransitionSource = effectiveFocusExclusive && row.key == transitioningFromRowKey
+                    val rowIsPeek = !stablePreviewRows && allowInactivePeekRows &&
+                        !rowIsTransitionSource &&
                         effectiveFocusExclusive &&
-                        !leadingEntryVisible &&
+                        (!leadingEntryVisible || (catalogHeroMode && !leadingContentHasFocus)) &&
                         activeExclusiveIndex >= 0 &&
                         rowIndex == activeExclusiveIndex + 1
-                    val rowIsVisible = rowIsActive || rowIsPeek
-                    val rowCanReceiveFocus = rowIsActive
+                    val rowIsVisible = stablePreviewRows || rowIsActive || rowIsPeek || rowIsTransitionSource
+                    // Keep a keyed, zero-height entry and its scroll state, but
+                    // do not build headings, image requests or focus nodes for
+                    // collapsed rows. Zero-height full rows defeat lazy-list
+                    // virtualization and used to compose hundreds of cards.
+                    if (!rowIsVisible) return@itemsIndexed
+                    val itemKeys = remember(row.items) { tvRailLazyItemKeys(row.items) }
+                    val rowCanReceiveFocus = rowIsActive || rowIsTransitionSource
+                    val rowExpands = row.cardStyle != TvCardStyle.SERVICE && row.items.any { it.isTvPreviewTitle() } && previewPolicy.enabled(previewPage, row.key)
+                    // Reserve all typography first, then use the remaining height for
+                    // landscape artwork. This also fits accessibility text sizes.
+                    val previewTextHeight = with(density) {
+                        MaterialTheme.typography.bodySmall.lineHeight.toDp() +
+                            MaterialTheme.typography.bodyMedium.lineHeight.toDp() * 3f +
+                            MaterialTheme.typography.labelMedium.lineHeight.toDp()
+                    } + 32.dp
+                    val homePreviewWidth = (availableRailWidth * .48f).coerceIn(320.dp, 440.dp)
+                    val gridColumns = (posterColumns ?: 5).coerceIn(4, 10)
+                    val gridImageHeight = ((availableRailWidth - railStartPad - TV_ROW_END_GUTTER -
+                        rowItemSpacing * (gridColumns - 1)) / (16f / 9f + (gridColumns - 1) * 2f / 3f))
+                    val previewImageHeight = if (compactPreviewRows) {
+                        (railPageHeight - previewTextHeight - rowVerticalFocusInset * 2f - 32.dp)
+                            .coerceIn(80.dp, gridImageHeight.coerceAtLeast(80.dp))
+                    } else (railPageHeight - rowChromeHeight - previewTextHeight - 48.dp)
+                        .coerceIn(80.dp, homePreviewWidth * 9f / 16f)
+                    val previewWidth = if (compactPreviewRows) previewImageHeight * 16f / 9f else homePreviewWidth
+                    // Focus owns the horizontal anchor. Set the next measure's
+                    // position together with the final card widths; animating
+                    // widths and scrolling separately briefly squeezed the new
+                    // card and moved the whole row a second time on every key.
+                    val anchoredIndex = focusedCardKey?.takeIf { it.startsWith("${row.key}:") }
+                        ?.substringAfterLast(':')?.toIntOrNull()
+                    remember(rowExpands, anchoredIndex) {
+                        if (rowExpands && anchoredIndex != null) rowListState.requestScrollToItem(anchoredIndex, 0)
+                        Unit
+                    }
                     val isHeroLayout = heroOverlay != null
                     val isContinueRail = row.key.startsWith("continue_watching")
                     val backdropCardWidth = if (libraryHeroMode) {
@@ -693,7 +1129,18 @@ internal fun TvMediaRails(
                     } else {
                         if (isHeroLayout && rowIndex == 0) 94.dp else 104.dp
                     }
-                    val posterCardWidth = if (libraryHeroMode) {
+                    val requestedPosterCardWidth = posterColumns?.let { requestedColumns ->
+                        val columns = requestedColumns.coerceIn(4, 10)
+                        (
+                            (
+                                availableRailWidth -
+                                    railStartPad -
+                                    TV_ROW_END_GUTTER -
+                                    rowItemSpacing * (columns - 1)
+                                ) / columns.toFloat()
+                            ).coerceIn(82.dp, 170.dp)
+                    }
+                    val unconstrainedPosterCardWidth = requestedPosterCardWidth ?: if (libraryHeroMode) {
                         when {
                             isHeroLayout && isContinueRail -> basePosterWidth * 0.67f
                             isHeroLayout -> basePosterWidth * 0.9f
@@ -702,10 +1149,14 @@ internal fun TvMediaRails(
                     } else {
                         basePosterWidth
                     }
-                    val visibleSectionModifier = if (libraryHeroMode && !effectiveFocusExclusive) {
+                    val posterCardWidth = if (rowExpands) previewImageHeight / 1.5f
+                        else if (catalogHeroMode) unconstrainedPosterCardWidth.coerceAtMost(catalogPosterWidthLimit)
+                        else unconstrainedPosterCardWidth
+                    val visibleSectionModifier = if (libraryHeroMode && !effectiveFocusExclusive && !rowExpands) {
+                        val sectionPadding = if (compactRailTitleSpacing) 64.dp else 104.dp
                         when (row.cardStyle) {
-                            TvCardStyle.POSTER -> Modifier.height(posterCardWidth * 1.5f + 104.dp)
-                            TvCardStyle.BACKDROP -> Modifier.height(backdropCardWidth * 0.5625f + 104.dp)
+                            TvCardStyle.POSTER -> Modifier.height(posterCardWidth * 1.5f + sectionPadding)
+                            TvCardStyle.BACKDROP -> Modifier.height(backdropCardWidth * 0.5625f + sectionPadding)
                             TvCardStyle.SERVICE -> Modifier.height(176.dp)
                         }
                     } else {
@@ -719,6 +1170,8 @@ internal fun TvMediaRails(
                     }
                     Column(
                         modifier = Modifier
+                            .testTag("catalog_rail_section:${row.key}")
+                            .padding(bottom = if (catalogHeroMode && effectiveFocusExclusive && rowIsVisible) catalogRowBottomPadding else 0.dp)
                             .then(
                                 if (!rowIsVisible) {
                                     Modifier
@@ -743,21 +1196,67 @@ internal fun TvMediaRails(
                                 alpha = rowAlpha
                             }
                             .then(if (shouldClipRowSection) Modifier.clipToBounds() else Modifier)
-                            .then(if (rowIsActive) Modifier else Modifier.clearAndSetSemantics { }),
-                        verticalArrangement = Arrangement.spacedBy(if (libraryHeroMode) 14.dp else 12.dp),
+                            .then(if (rowCanReceiveFocus) Modifier else Modifier.clearAndSetSemantics {
+                                this[androidx.compose.ui.semantics.SemanticsProperties.TestTag] = "catalog_rail_peek:${row.key}"
+                            }),
+                        verticalArrangement = Arrangement.spacedBy(
+                            if (libraryHeroMode && compactRailTitleSpacing) 4.dp
+                            else if (libraryHeroMode) 14.dp
+                            else 12.dp,
+                        ),
                     ) {
-                        Text(
-                            text = row.title,
+                        if (row.title.isNotBlank()) Row(
+                            Modifier.padding(start = railStartPad), verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            Box(Modifier.width(3.dp).height(22.dp).background(AmberLight, RoundedCornerShape(2.dp)))
+                            Text(
+                            text = localizedUiText(tvRailDisplayTitle(row)),
                             style = MaterialTheme.typography.headlineSmall,
                             color = if (libraryHeroMode) Snow.copy(alpha = 0.98f) else Snow,
                             fontWeight = if (libraryHeroMode) FontWeight.Bold else FontWeight.SemiBold,
-                            modifier = Modifier.padding(start = railStartPad),
                         )
+                        }
 
-                        LazyRow(
+                        if (rowIsPeek) {
+                            // The clipped next-row preview is decorative. Building
+                            // complete clickable cards here doubles initial focus
+                            // registration and layout work on slower Fire TVs.
+                            Row(
+                                modifier = Modifier.padding(start = railStartPad, top = rowVerticalFocusInset)
+                                    .clipToBounds(),
+                                horizontalArrangement = Arrangement.spacedBy(rowItemSpacing),
+                            ) {
+                                row.items.take(8).forEach { item ->
+                                    val item = localizedTvPresentation(withCachedTvBrowsePreviewEnrichment(item),
+                                        settingsState.personalDataUserId, settingsState.appLanguage.code, settingsState.tmdbEnrichmentEnabled)
+                                    val landscape = row.cardStyle == TvCardStyle.BACKDROP
+                                    AsyncImage(
+                                        model = if (landscape) item.backdropUrl ?: item.posterUrl else item.posterUrl,
+                                        onSuccess = { com.torve.android.debug.StartupMetrics.posterReady() },
+                                        contentDescription = null,
+                                        contentScale = ContentScale.Crop,
+                                        alignment = Alignment.TopCenter,
+                                        modifier = Modifier.width(if (landscape) backdropCardWidth else posterCardWidth)
+                                            // The preview has less height than a full poster.
+                                            // aspectRatio can exceed that height and Compose
+                                            // centers the overflow over the section heading.
+                                            // Respect the remaining height and crop from the top.
+                                            .height(if (landscape) backdropCardWidth * 0.5625f else posterCardWidth * 1.5f)
+                                            .clip(RoundedCornerShape(16.dp))
+                                            .background(Graphite),
+                                    )
+                                }
+                            }
+                        } else androidx.compose.runtime.CompositionLocalProvider(
+                            androidx.compose.foundation.gestures.LocalBringIntoViewSpec provides
+                                if (rowExpands) TvAnchoredPreviewBringIntoViewSpec else ordinaryRowBringIntoViewSpec,
+                        ) { LazyRow(
                             state = rowListState,
-                            modifier = if (libraryHeroMode || catalogHeroMode) {
+                            modifier = if (libraryHeroMode || catalogHeroMode || rowExpands) {
                                 Modifier
+                                    .then(if (rowExpands) Modifier.height(previewImageHeight + previewTextHeight + if (compactPreviewRows) 23.dp else 38.dp) else Modifier)
+                                    .then(if (rowExpands) Modifier.padding(start = railStartPad) else Modifier)
                                     .graphicsLayer { clip = true }
                                     .clipToBounds()
                             } else {
@@ -765,37 +1264,51 @@ internal fun TvMediaRails(
                             },
                             horizontalArrangement = Arrangement.spacedBy(rowItemSpacing),
                             contentPadding = PaddingValues(
-                                start = railStartPad,
-                                top = if (libraryHeroMode) 26.dp else rowVerticalFocusInset,
+                                start = if (rowExpands) 0.dp else railStartPad,
+                                top = when {
+                                    libraryHeroMode && compactRailTitleSpacing -> 6.dp
+                                    libraryHeroMode -> 26.dp
+                                    else -> rowVerticalFocusInset
+                                },
                                 end = TV_ROW_END_GUTTER,
-                                bottom = if (libraryHeroMode) 30.dp else rowVerticalFocusInset,
+                                bottom = when {
+                                    libraryHeroMode && compactRailTitleSpacing -> 14.dp
+                                    libraryHeroMode -> 30.dp
+                                    else -> rowVerticalFocusInset
+                                },
                             ),
                         ) {
                             itemsIndexed(
                                 items = row.items,
-                                key = { itemIndex, item ->
-                                    item.tmdbId?.let { "tmdb_${item.type}_${it}_$itemIndex" }
-                                        ?: "${item.type}_${item.id}_$itemIndex"
+                                key = { itemIndex, _ ->
+                                    itemKeys[itemIndex]
                                 },
-                            ) { itemIndex, item ->
+                            ) { itemIndex, sourceItem ->
+                                val item = localizedTvPresentation(withCachedTvBrowsePreviewEnrichment(sourceItem),
+                                    settingsState.personalDataUserId, settingsState.appLanguage.code, settingsState.tmdbEnrichmentEnabled)
                                 val mapKey = "${row.key}:$itemIndex"
-                                val target = remember(row.key, itemIndex, item.id, item.tmdbId) {
+                                val target = remember(row.key, rowIndex, itemIndex, item.id, item.tmdbId) {
                                     TvFocusTargetId(
                                         screenId = screenId,
                                         rowKey = row.key,
-                                        itemKey = item.tmdbId?.let { "tmdb_${item.type}_$it" } ?: "${item.type}_${item.id}",
+                                        itemKey = item.tvRailItemKey(),
                                         rowIndex = rowIndex,
                                         itemIndex = itemIndex,
                                         targetType = "card",
                                     )
                                 }
-                                val baseRequester = remember(mapKey) { FocusRequester() }
+                                val baseRequester = remember(mapKey) { if (rowIndex == 0 && itemIndex == 0) entryFocusRequester ?: FocusRequester() else FocusRequester() }
                                 val focusRequester = rememberRegisteredTvFocusRequester(
                                     controller = modalFocusRestoreController,
                                     target = target,
                                     externalRequester = baseRequester,
                                 )
-                                requesterMap[mapKey] = focusRequester
+                                DisposableEffect(mapKey, focusRequester) {
+                                    requesterMap[mapKey] = focusRequester
+                                    onDispose {
+                                        if (requesterMap[mapKey] == focusRequester) requesterMap.remove(mapKey)
+                                    }
+                                }
 
                                 val isFirstItem = rowIndex == 0 && itemIndex == 0
                                 val isActiveEntryItem = effectiveFocusExclusive && rowIsActive && itemIndex == 0
@@ -808,8 +1321,15 @@ internal fun TvMediaRails(
 
                                 val railProgress = row.progressFor(item)
                                 val progress = progressResolver?.invoke(item, railProgress) ?: railProgress
+                                var cardHasFocus by remember { mutableStateOf(false) }
+                                LaunchedEffect(item) { if (cardHasFocus) onMediaFocused?.invoke(item) }
                                 val cardModifier = Modifier
                                     .focusRequester(focusRequester)
+                                    .onFocusChanged { state ->
+                                        cardHasFocus = state.isFocused
+                                        if (state.isFocused) { focusedCardKey = mapKey; focusedSeeAllRowKey = null }
+                                        else if (focusedCardKey == mapKey) focusedCardKey = null
+                                    }
                                     .focusProperties {
                                         if (effectiveFocusExclusive || catalogHeroMode) {
                                             canFocus = rowCanReceiveFocus
@@ -822,13 +1342,14 @@ internal fun TvMediaRails(
                                         // is unattached and causes a crash.
                                         if (rowIndex == 0 && showLeadingContentBeforeRails && leadingContentFocusRequester != null) {
                                             up = leadingContentFocusRequester
-                                        } else if (rowIndex == 0 && heroOverlayFocusRequester != null) {
+                                        } else if (rowIndex == 0 && heroOverlayFocusRequester != null && !expandedRowFocused) {
                                             up = heroOverlayFocusRequester
-                                        } else if (rowIndex == 0 && headerFocusRequester != null && heroOverlay != null) {
+                                        } else if (rowIndex == 0 && headerFocusRequester != null) {
                                             up = headerFocusRequester
                                         }
                                     }
                                     .onPreviewKeyEvent { event ->
+                                        if (event.type == KeyEventType.KeyDown) navigationSignal += 1
                                         if (!effectiveFocusExclusive) return@onPreviewKeyEvent false
                                         when {
                                             event.key == Key.DirectionDown && event.type == KeyEventType.KeyDown -> {
@@ -837,9 +1358,14 @@ internal fun TvMediaRails(
                                             }
                                             event.key == Key.DirectionDown && event.type == KeyEventType.KeyUp -> true
                                             event.key == Key.DirectionUp && event.type == KeyEventType.KeyDown -> {
-                                                if (rowIndex == 0 && leadingContentFocusRequester != null) {
+                                                if (rowIndex == 0 && onExitUp != null) {
+                                                    onExitUp()
+                                                } else if (rowIndex == 0 && leadingContentFocusRequester != null) {
                                                     moveToLeadingContent()
-                                                } else if (rowIndex == 0 && headerFocusRequester != null && heroOverlay != null) {
+                                                } else if (rowIndex == 0 && heroOverlayFocusRequester != null && !expandedRowFocused) {
+                                                    runCatching { heroOverlayFocusRequester.requestFocus() }
+                                                    onContentFocused(heroOverlayFocusRequester)
+                                                } else if (rowIndex == 0 && headerFocusRequester != null) {
                                                     runCatching { headerFocusRequester.requestFocus() }
                                                     onContentFocused(headerFocusRequester)
                                                 } else {
@@ -852,31 +1378,29 @@ internal fun TvMediaRails(
                                         }
                                     }
 
-                                val onItemFocused: () -> Unit = {
+                                val onItemFocused: () -> Unit = onItemFocused@{
+                                    // Lazy focus fallback may emit a late event for the
+                                    // row being collapsed. It must not reverse a remote
+                                    // move that has already expanded another row.
+                                    if (effectiveFocusExclusive && activeExclusiveRowKey != null && activeExclusiveRowKey != row.key) return@onItemFocused
                                     val previousFocusedRowKey = focusMemory.lastFocusedRowKey
+                                    leadingContentHasFocus = false
                                     modalFocusRestoreController.markFocused(target)
                                     if (effectiveFocusExclusive) {
                                         activeExclusiveRowKey = row.key
                                     }
                                     focusMemory.lastFocusedRowKey = row.key
                                     focusMemory.lastFocusedIndexByRow[row.key] = itemIndex
+                                    focusMemory.lastFocusedItemKeyByRow[row.key] = item.tvRailItemKey()
                                     onContentFocused(focusRequester)
+                                    focusedRowIndex = rowIndex
                                     contentFocusSignal += 1
-                                    onMediaFocused?.invoke(item)
-                                    if (effectiveFocusExclusive && previousFocusedRowKey != row.key) {
+                                    queueMediaFocus(item)
+                                    if (previousFocusedRowKey != row.key && !effectiveFocusExclusive) {
                                         coroutineScope.launch {
                                             runCatching {
                                                 columnListState.scrollToItem(
-                                                    index = railListItemOffset + rowIndex,
-                                                    scrollOffset = 0,
-                                                )
-                                            }
-                                        }
-                                    } else if (previousFocusedRowKey != null && previousFocusedRowKey != row.key) {
-                                        coroutineScope.launch {
-                                            runCatching {
-                                                columnListState.scrollToItem(
-                                                    index = railListItemOffset + rowIndex,
+                                                    index = columnIndex(rowIndex),
                                                     scrollOffset = 0,
                                                 )
                                             }
@@ -884,8 +1408,23 @@ internal fun TvMediaRails(
                                     }
                                 }
 
-                                when (row.cardStyle) {
-                                    TvCardStyle.SERVICE -> {
+                                LaunchedEffect(target) {
+                                    // Stable lazy keys preserve the focused node when
+                                    // its index changes. Refresh the controller identity
+                                    // even though Android emits no new focus event.
+                                    if (cardHasFocus) {
+                                        focusedCardKey = mapKey
+                                        onItemFocused()
+                                    }
+                                }
+
+                                val onItemClick: () -> Unit = {
+                                    val consumed = onRailMediaClick?.invoke(row.key, item) == true
+                                    if (!consumed) onMediaClick(item)
+                                }
+
+                                when {
+                                    row.cardStyle == TvCardStyle.SERVICE -> {
                                         Box(
                                             modifier = Modifier
                                                 .padding(vertical = if (libraryHeroMode) 8.dp else 0.dp)
@@ -893,15 +1432,15 @@ internal fun TvMediaRails(
                                             TvStreamingServiceCard(
                                                 item = item,
                                                 modifier = cardModifier
-                                                    .width(220.dp)
-                                                    .height(120.dp),
-                                                onClick = { onMediaClick(item) },
+                                                    .width(256.dp)
+                                                    .height(144.dp),
+                                                onClick = onItemClick,
                                                 onFocused = onItemFocused,
                                             )
                                         }
                                     }
 
-                                    TvCardStyle.BACKDROP -> {
+                                    row.cardStyle == TvCardStyle.BACKDROP && !rowExpands -> {
                                         Box(
                                             modifier = Modifier
                                                 .padding(vertical = if (libraryHeroMode) 8.dp else 0.dp)
@@ -910,16 +1449,24 @@ internal fun TvMediaRails(
                                                 item = item,
                                                 modifier = cardModifier,
                                                 width = backdropCardWidth,
-                                                onClick = { onMediaClick(item) },
+                                                onClick = onItemClick,
                                                 onFocused = onItemFocused,
                                                 progress = progress,
+                                                showTitles = forcePosterTitles || showTitlesOnCards,
                                                 showTmdbRating = showTmdbRating,
                                                 ratingPrefs = tvCardRatingPrefs,
+                                                showRatings = showPosterRatings,
                                             )
+                                            com.torve.android.ui.community.RemainingEpisodesBadge(row.remainingEpisodesByMediaId[item.id] ?: 0,
+                                                modifier = Modifier.align(Alignment.TopEnd).padding(8.dp))
                                         }
                                     }
 
-                                    TvCardStyle.POSTER -> {
+                                    else -> {
+                                        // Remember selection for navigation, but expand only the
+                                        // poster which actually owns focus. Other rows and See All
+                                        // must never retain a second landscape card.
+                                        val expanded = rowExpands && cardHasFocus
                                         Box(
                                             modifier = Modifier
                                                 .padding(vertical = if (libraryHeroMode) 8.dp else 0.dp)
@@ -927,15 +1474,22 @@ internal fun TvMediaRails(
                                             TvPosterCard(
                                                 item = item,
                                                 modifier = cardModifier
-                                                    .width(posterCardWidth)
-                                                    .aspectRatio(2f / 3f),
-                                                onClick = { onMediaClick(item) },
+                                                    .width(if (expanded) previewWidth else posterCardWidth),
+                                                imageHeight = if (rowExpands) previewImageHeight else null,
+                                                expandedCaptionHeight = previewTextHeight,
+                                                expanded = expanded,
+                                                onClick = onItemClick,
                                                 onFocused = onItemFocused,
                                                 progress = progress,
-                                                showTitles = showTitlesOnCards,
+                                                showTitles = !rowExpands && (item.id.startsWith("person:") || forcePosterTitles || showTitlesOnCards),
+                                                artworkOnlyTitles = rowExpands,
+                                                compactTitles = compactPosterTitles,
+                                                showMetadata = !catalogHeroMode,
                                                 showTmdbRating = showTmdbRating,
-                                                ratingPrefs = tvCardRatingPrefs,
                                                 sourceAwareRatings = sourceAwareRatings,
+                                                ratingPrefs = tvCardRatingPrefs,
+                                                showRatings = showPosterRatings,
+                                                maxPosterRatings = if (posterCardWidth < 112.dp) 1 else 2,
                                                 onContextMenuRequested = { anchorBounds ->
                                                     openContextMenu(
                                                         item = item,
@@ -946,12 +1500,14 @@ internal fun TvMediaRails(
                                                     )
                                                 },
                                             )
+                                            com.torve.android.ui.community.RemainingEpisodesBadge(row.remainingEpisodesByMediaId[item.id] ?: 0,
+                                                modifier = Modifier.align(Alignment.TopEnd).padding(8.dp))
                                         }
                                     }
                                 }
                             }
 
-                            if (showSeeAllCards && onSeeAll != null && canShowSeeAllForRail(row.key)) {
+                            if (showSeeAllCards && row.showSeeAllCard && onSeeAll != null && canShowSeeAllForRail(row.key)) {
                                 item(key = "${row.key}_see_all") {
                                     val seeAllTarget = remember(row.key, rowIndex) {
                                         TvFocusTargetId(
@@ -969,7 +1525,13 @@ internal fun TvMediaRails(
                                         target = seeAllTarget,
                                         externalRequester = seeAllBaseRequester,
                                     )
-                                    requesterMap["${row.key}:see_all"] = seeAllRequester
+                                    DisposableEffect(row.key, seeAllRequester) {
+                                        val mapKey = "${row.key}:see_all"
+                                        requesterMap[mapKey] = seeAllRequester
+                                        onDispose {
+                                            if (requesterMap[mapKey] == seeAllRequester) requesterMap.remove(mapKey)
+                                        }
+                                    }
                                     val seeAllWidth = when (row.cardStyle) {
                                         TvCardStyle.BACKDROP -> backdropCardWidth * 0.82f
                                         TvCardStyle.POSTER -> posterCardWidth
@@ -983,6 +1545,10 @@ internal fun TvMediaRails(
                                     TvSeeAllButton(
                                         modifier = Modifier
                                             .focusRequester(seeAllRequester)
+                                            .onFocusChanged {
+                                                if (it.isFocused) focusedSeeAllRowKey = row.key
+                                                else if (focusedSeeAllRowKey == row.key) focusedSeeAllRowKey = null
+                                            }
                                             .focusProperties {
                                                 if (effectiveFocusExclusive || catalogHeroMode) {
                                                     canFocus = rowCanReceiveFocus
@@ -1004,7 +1570,9 @@ internal fun TvMediaRails(
                                         },
                                         onMoveUp = {
                                             if (effectiveFocusExclusive) {
-                                                if (rowIndex == 0 && leadingContentFocusRequester != null) {
+                                                if (rowIndex == 0 && onExitUp != null) {
+                                                    onExitUp()
+                                                } else if (rowIndex == 0 && leadingContentFocusRequester != null) {
                                                     moveToLeadingContent()
                                                 } else {
                                                     moveExclusiveRowFocus(rowIndex, -1)
@@ -1021,25 +1589,32 @@ internal fun TvMediaRails(
                                         },
                                         onClick = {
                                             if (shouldSeedPendingSeeAllItems(row.key)) {
-                                                SeeAllViewModel.pendingItems[row.key] = row.title to row.items
+                                                SeeAllViewModel.pendingItems[row.key] = row.title to (row.seeAllItems ?: row.items)
                                             } else {
                                                 SeeAllViewModel.pendingItems.remove(row.key)
                                             }
                                             onSeeAll(row.key, row.title)
                                         },
-                                        onFocused = {
+                                        onFocused = seeAllFocused@{
+                                            if (effectiveFocusExclusive && activeExclusiveRowKey != null && activeExclusiveRowKey != row.key) return@seeAllFocused
                                             modalFocusRestoreController.markFocused(seeAllTarget)
                                             if (effectiveFocusExclusive) {
                                                 activeExclusiveRowKey = row.key
                                             }
                                             focusMemory.lastFocusedRowKey = row.key
                                             onContentFocused(seeAllRequester)
+                                            focusedRowIndex = rowIndex
+                                            contentFocusSignal += 1
                                         },
                                         width = seeAllWidth,
                                         aspectRatio = seeAllAspectRatio,
                                     )
                                 }
                             }
+                            if (rowExpands) item(key = "${row.key}_preview_scroll_space") {
+                                Spacer(Modifier.width(availableRailWidth.coerceAtLeast(0.dp)))
+                            }
+                        }
                         }
 
                         if (row.key == "streaming_services") {
@@ -1057,7 +1632,7 @@ internal fun TvMediaRails(
                 }
                 }
 
-                    if (fixedHeroRailViewport) {
+                    if (fixedHeroRailViewport && !suppressHeroForPreview) {
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -1072,12 +1647,16 @@ internal fun TvMediaRails(
                 }
             }
 
+            }
             contextMenuState?.let { menuState ->
                 TvMediaContextMenu(
                     state = menuState,
                     onDismiss = { dismissContextMenu(restoreFocus = true) },
                     onAction = { action ->
-                        onContextMenuAction?.invoke(menuState.item, action, menuState.progress)
+                        if (action.id == "focus_preview_row") previewMenuRow?.let { row ->
+                            com.torve.android.tv.settings.setTvFocusPreview(context, settingsState.personalDataUserId,
+                                "row:$previewPage:$row", !previewPolicy.enabled(previewPage, row))
+                        } else onContextMenuAction?.invoke(menuState.item, action, menuState.progress)
                         dismissContextMenu(restoreFocus = true)
                     },
                 )
@@ -1100,27 +1679,22 @@ private fun TvStreamingServiceCard(
         label = "serviceCardBorder",
     )
     val providerId = item.id.removePrefix("provider:").toIntOrNull()
-    val brandColor = ALL_STREAMING_SERVICES
+    val service = ALL_STREAMING_SERVICES
         .firstOrNull { it.tmdbProviderId == providerId }
-        ?.brandColor
-        ?: Charcoal
+        ?: com.torve.android.ui.home.StreamingService(
+            name = item.title,
+            brandColor = Charcoal,
+            tmdbProviderId = providerId ?: -1,
+        )
     val interactionSource = remember { MutableInteractionSource() }
+    val shape = RoundedCornerShape(14.dp)
 
     Box(
         modifier = modifier
             .zIndex(if (focused) 1f else 0f)
             .scale(scale)
-            .clip(RoundedCornerShape(18.dp))
-            .background(
-                Brush.radialGradient(
-                    colors = listOf(
-                        brandColor.copy(alpha = if (focused) 0.42f else 0.30f),
-                        Charcoal.copy(alpha = 0.92f),
-                        Obsidian.copy(alpha = 0.96f),
-                    ),
-                ),
-            )
-            .border(3.dp, borderColor, RoundedCornerShape(18.dp))
+            .clip(shape)
+            .border(2.dp, borderColor, shape)
             .onFocusChanged {
                 focused = it.isFocused
                 if (it.isFocused) onFocused()
@@ -1129,30 +1703,12 @@ private fun TvStreamingServiceCard(
                 interactionSource = interactionSource,
                 indication = null,
                 onClick = onClick,
-            )
-            .padding(horizontal = 28.dp, vertical = 22.dp),
-        contentAlignment = Alignment.Center,
+            ),
     ) {
-        val logoUrl = item.posterUrl ?: item.backdropUrl
-        if (!logoUrl.isNullOrBlank()) {
-            AsyncImage(
-                model = logoUrl,
-                contentDescription = item.title,
-                contentScale = ContentScale.Fit,
-                modifier = Modifier
-                    .fillMaxSize()
-                    .clip(RoundedCornerShape(10.dp)),
-            )
-        } else {
-            Text(
-                text = item.title,
-                style = MaterialTheme.typography.titleMedium,
-                color = Snow,
-                fontWeight = FontWeight.Bold,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
+        StreamingProviderBrandArtwork(
+            service = service,
+            modifier = Modifier.fillMaxSize(),
+        )
     }
 }
 
@@ -1163,18 +1719,35 @@ private fun TvPosterCard(
     modifier: Modifier,
     onClick: () -> Unit,
     onFocused: () -> Unit,
+    imageHeight: Dp? = null,
+    expandedCaptionHeight: Dp? = null,
+    expanded: Boolean = false,
+    artworkOnlyTitles: Boolean = false,
     progress: Float? = null,
     showTitles: Boolean = true,
+    compactTitles: Boolean = false,
+    showMetadata: Boolean = true,
     showTmdbRating: Boolean = true,
-    ratingPrefs: RatingDisplayPrefs,
     sourceAwareRatings: Boolean = false,
+    ratingPrefs: com.torve.domain.model.RatingDisplayPrefs,
+    showRatings: Boolean = true,
+    maxPosterRatings: Int = 1,
     onContextMenuRequested: ((Rect?) -> Unit)? = null,
 ) {
+    if (item.catalogueNotice != null) {
+        com.torve.android.ui.community.CatalogueNoticeCard(item, modifier, onFocused)
+        return
+    }
     var focused by remember { mutableStateOf(false) }
     var anchorBounds by remember { mutableStateOf<Rect?>(null) }
-    val scale by animateFloatAsState(targetValue = if (focused) 1.052f else 1f, label = "posterScale")
+    val scale by animateFloatAsState(
+        targetValue = if (focused && !expanded) 1.035f else 1f,
+        animationSpec = tween(durationMillis = 100),
+        label = "posterScale",
+    )
     val borderColor by animateColorAsState(
         targetValue = if (focused) AmberLight else Color.Transparent,
+        animationSpec = tween(durationMillis = 100),
         label = "posterBorder",
     )
     val cardShape = RoundedCornerShape(16.dp)
@@ -1182,27 +1755,16 @@ private fun TvPosterCard(
 
     val isWatched = (progress ?: 0f) >= TV_CARD_WATCHED_THRESHOLD
 
-    Box(
+    val shouldShowCaption = expanded || (!artworkOnlyTitles && (showTitles || item.id.startsWith("trakt-calendar:")))
+
+    Column(
         modifier = modifier
+            .testTag("catalog_poster_card:${item.id}")
             .zIndex(if (focused) 1f else 0f)
             .graphicsLayer {
-                shape = focusShape
-                clip = true
                 scaleX = scale
                 scaleY = scale
             }
-            .background(
-                Brush.radialGradient(
-                    colors = listOf(
-                        Amber.copy(alpha = if (focused) 0.34f else 0f),
-                        Amber.copy(alpha = if (focused) 0.16f else 0f),
-                        Color.Transparent,
-                    ),
-                ),
-                focusShape,
-            )
-            .border(if (focused) 3.dp else 1.dp, borderColor, cardShape)
-            .clip(cardShape)
             .onGloballyPositioned { coordinates ->
                 anchorBounds = coordinates.boundsInWindow()
             }
@@ -1232,272 +1794,221 @@ private fun TvPosterCard(
                     onContextMenuRequested?.invoke(anchorBounds)
                 },
             ),
+        verticalArrangement = Arrangement.spacedBy(if (shouldShowCaption) 7.dp else 0.dp),
     ) {
-        val posterImageUrl = item.posterUrl ?: item.backdropUrl
-        if (posterImageUrl.isNullOrBlank()) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(Color(0xFF1A1A2E)),
-                contentAlignment = Alignment.Center,
-            ) {
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(6.dp),
-                    modifier = Modifier.padding(8.dp),
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .testTag("catalog_poster_frame:${item.id}")
+                .then(if (imageHeight != null) Modifier.height(imageHeight) else Modifier.aspectRatio(2f / 3f))
+                .background(
+                    Brush.radialGradient(
+                        colors = listOf(
+                            Amber.copy(alpha = if (focused) 0.34f else 0f),
+                            Amber.copy(alpha = if (focused) 0.16f else 0f),
+                            Color.Transparent,
+                        ),
+                    ),
+                    focusShape,
+                )
+                .border(if (focused) 3.dp else 1.dp, borderColor, cardShape)
+                .clip(cardShape),
+        ) {
+            val (posterImageUrl, artworkFailed) = com.torve.android.ui.community.stableArtwork(item, expanded, preferTitleless = expanded)
+            if (posterImageUrl.isNullOrBlank()) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(Color(0xFF1A1A2E)),
+                    contentAlignment = Alignment.Center,
                 ) {
-                    Text(
-                        text = item.title,
-                        style = MaterialTheme.typography.labelMedium,
-                        color = Snow,
-                        fontWeight = FontWeight.SemiBold,
-                        maxLines = 3,
-                        overflow = TextOverflow.Ellipsis,
-                        textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                    )
-                    item.upcomingScheduleMetadata()?.let { metadata ->
-                        Text(
-                            text = metadata,
-                            style = MaterialTheme.typography.labelSmall,
-                            color = Silver,
-                            maxLines = 1,
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                        modifier = Modifier.padding(8.dp),
+                    ) {
+                        if (!expanded) Text(
+                            text = item.title,
+                            style = MaterialTheme.typography.labelMedium,
+                            color = Snow,
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 3,
                             overflow = TextOverflow.Ellipsis,
                             textAlign = androidx.compose.ui.text.style.TextAlign.Center,
                         )
-                    }
-                }
-            }
-        } else {
-            AsyncImage(
-                model = posterImageUrl,
-                contentDescription = item.title,
-                contentScale = ContentScale.Crop,
-                modifier = Modifier.fillMaxSize(),
-            )
-        }
-
-        val shouldShowTitle = showTitles || item.id.startsWith("trakt-calendar:")
-        if (shouldShowTitle) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .align(Alignment.BottomCenter)
-                    .background(
-                        Brush.verticalGradient(
-                            colors = listOf(
-                                Color.Transparent,
-                                Obsidian.copy(alpha = 0.9f),
-                            ),
-                        ),
-                    )
-                    .padding(horizontal = 10.dp, vertical = 10.dp),
-            ) {
-                Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                    Text(
-                        text = item.title,
-                        style = MaterialTheme.typography.titleMedium,
-                        color = Snow,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp),
-                    ) {
-                        val scheduleMetadata = item.upcomingScheduleMetadata()
-                        if (scheduleMetadata != null) {
+                        item.upcomingScheduleMetadata()?.takeUnless { expanded }?.let { metadata ->
                             Text(
-                                text = scheduleMetadata,
-                                style = MaterialTheme.typography.labelMedium,
+                                text = metadata,
+                                style = MaterialTheme.typography.labelSmall,
                                 color = Silver,
-                            )
-                        } else {
-                            item.year?.let { year ->
-                                Text(
-                                    text = year.toString(),
-                                    style = MaterialTheme.typography.labelMedium,
-                                    color = Silver,
-                                )
-                            }
-                        }
-                        if (!sourceAwareRatings && showTmdbRating && item.rating != null) {
-                            if (scheduleMetadata != null || item.year != null) {
-                                Spacer(modifier = Modifier.width(2.dp))
-                            }
-                            Image(
-                                painter = painterResource(id = R.drawable.tmbd_logo),
-                                contentDescription = "TMDB",
-                                modifier = Modifier.size(16.dp),
-                            )
-                            Text(
-                                text = String.format("%.1f", item.rating),
-                                style = MaterialTheme.typography.labelMedium,
-                                color = Silver,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
                             )
                         }
                     }
                 }
-            }
-        }
-
-        if (sourceAwareRatings) {
-            TvLibraryRatingPills(
-                item = item,
-                modifier = Modifier
-                    .align(Alignment.BottomEnd)
-                    .padding(7.dp),
-            )
-        } else {
-            item.ratings.withFallbackTmdbScore(item.rating)?.let { ratings ->
-                PreferredRatingPills(
-                    ratings = ratings,
-                    prefs = ratingPrefs.copy(maxRatingsOnCard = 2),
-                    modifier = Modifier
-                        .align(Alignment.BottomEnd)
-                        .padding(7.dp),
+            } else {
+                AsyncImage(
+                    model = posterImageUrl,
+                    onSuccess = { com.torve.android.debug.StartupMetrics.posterReady() },
+                    onError = { artworkFailed() },
+                    contentDescription = item.title,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize(),
                 )
             }
-        }
 
-        if (isWatched) {
-            TvPosterWatchedBadge(
-                modifier = Modifier
-                    .align(Alignment.TopEnd)
-                    .padding(8.dp),
-            )
-        }
+            if (expanded) {
+                Box(Modifier.fillMaxSize().background(Brush.verticalGradient(
+                    0f to Color.Transparent, .4f to Color.Transparent, 1f to Color.Black.copy(alpha = .9f),
+                )))
+                Row(
+                    modifier = Modifier.align(Alignment.BottomStart).fillMaxWidth().padding(12.dp),
+                    verticalAlignment = Alignment.Bottom,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    TvTitleArtworkOrText(
+                        item = item.copy(title = item.tvPreviewShowTitle()),
+                        modifier = Modifier.weight(1f).height(64.dp).testTag("catalog_expanded_logo:${item.id}"),
+                        textStyle = MaterialTheme.typography.titleLarge,
+                        textAlignment = Alignment.BottomStart,
+                    )
+                    item.tvPreviewEpisodeCode()?.let { episode ->
+                        Text(episode, color = Snow, style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold, modifier = Modifier.testTag("catalog_expanded_episode:${item.id}"))
+                    }
+                }
+            } else if (artworkOnlyTitles) {
+                item.tvPreviewEpisodeCode()?.let { episode ->
+                    Text(episode, color = Snow, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold,
+                        modifier = Modifier.align(Alignment.BottomEnd).padding(8.dp)
+                            .background(Obsidian.copy(alpha = .86f), RoundedCornerShape(6.dp)).padding(horizontal = 6.dp, vertical = 3.dp))
+                }
+            }
 
-        if (progress != null && progress > 0f && !isWatched) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(3.dp)
-                    .align(Alignment.BottomCenter),
-            ) {
+            if (showRatings && !expanded && (!artworkOnlyTitles || item.tvPreviewEpisodeCode() == null)) {
+                TvPosterRatingPills(
+                    item = item,
+                    prefs = ratingPrefs,
+                    maxRatings = maxPosterRatings,
+                    modifier = Modifier.align(Alignment.BottomStart).padding(start = 4.dp, end = 4.dp, bottom = 8.dp),
+                )
+            }
+
+            if (isWatched) {
+                TvPosterWatchedBadge(
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(8.dp),
+                )
+            }
+
+            if (progress != null && progress > 0f && !isWatched) {
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(3.dp)
-                        .background(Snow.copy(alpha = 0.27f)),
+                        .align(Alignment.BottomCenter),
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(3.dp)
+                            .background(Snow.copy(alpha = 0.27f)),
+                    )
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth(fraction = progress.coerceIn(0f, 1f))
+                            .height(3.dp)
+                            .background(Amber),
+                    )
+                }
+            }
+        }
+
+        if (shouldShowCaption) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("catalog_poster_caption:${item.id}")
+                    .then(if (expanded && expandedCaptionHeight != null) Modifier.height(expandedCaptionHeight) else Modifier)
+                    .padding(horizontal = if (expanded) 0.dp else 2.dp),
+                verticalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
+                if (!expanded) Text(
+                    text = item.title,
+                    style = if (compactTitles) {
+                        MaterialTheme.typography.labelMedium
+                    } else {
+                        MaterialTheme.typography.labelLarge
+                    },
+                    color = Snow,
+                    fontWeight = FontWeight.SemiBold,
+                    minLines = 2,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
                 )
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth(fraction = progress.coerceIn(0f, 1f))
-                        .height(3.dp)
-                        .background(Amber),
-                )
+                if (expanded) {
+                    TvExpandedPosterMetadata(item, ratingPrefs, showRatings)
+                } else if (showMetadata || item.id.startsWith("trakt-calendar:")) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                    val scheduleMetadata = item.upcomingScheduleMetadata()
+                    if (scheduleMetadata != null) {
+                        Text(
+                            text = scheduleMetadata,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = Silver,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    } else {
+                        item.year?.let { year ->
+                            Text(
+                                text = year.toString(),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = Silver,
+                            )
+                        }
+                    }
+                }
+                }
             }
         }
     }
 }
 
 @Composable
-private fun TvLibraryRatingPills(
-    item: MediaItem,
-    modifier: Modifier = Modifier,
-) {
-    val primary = item.bestDisplayRating()
-    val rottenTomatoes = item.ratings?.rottenTomatoesScore?.takeIf { it in 1..100 }
-    if (primary == null && rottenTomatoes == null) return
-
-    Row(
-        modifier = modifier,
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(3.dp),
-    ) {
-        primary?.let { rating ->
-            TvSourceAwareRatingChip(
-                source = rating.source,
-                value = rating.value,
-            )
+internal fun TvExpandedPosterMetadata(item: MediaItem, prefs: com.torve.domain.model.RatingDisplayPrefs, showRatings: Boolean = true) {
+    Column(Modifier.fillMaxWidth().padding(top = 4.dp, bottom = 8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        val metadata = listOfNotNull(item.year?.toString(), item.runtime?.takeIf { it > 0 }?.let { minutes ->
+            if (minutes >= 60) "${minutes / 60}h ${minutes % 60}m" else "${minutes}min"
+        })
+        Row(Modifier.fillMaxWidth().testTag("catalog_expanded_metadata:${item.id}"),
+            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            if (metadata.isNotEmpty()) Text(metadata.joinToString(" · "), color = Silver,
+                style = MaterialTheme.typography.bodySmall, maxLines = 1)
+            if (showRatings) TvPosterRatingPills(item, prefs, maxRatings = 2)
+            val imdbVotes = item.ratings?.imdbVotes?.takeIf { it > 0 }
+            val votes = imdbVotes ?: item.voteCount?.takeIf { it > 0 }
+            votes?.let {
+                val count = when { it >= 1_000_000 -> String.format(java.util.Locale.US, "%.1fM", it / 1_000_000f)
+                    it >= 1000 -> String.format(java.util.Locale.US, "%.1fK", it / 1000f)
+                    else -> it.toString() }
+                Text(localizedUiText("$count ${if (imdbVotes != null) "IMDb votes" else "TMDB votes"}"),
+                    color = Silver, style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f).testTag("catalog_expanded_votes:${item.id}"))
+            }
         }
-        rottenTomatoes?.let { score ->
-            TvPercentRatingChip(
-                label = "RT",
-                value = score,
-                accent = if (score >= 60) Color(0xFF67B346) else Color(0xFFFA320A),
-            )
-        }
-    }
-}
-
-@Composable
-private fun TvSourceAwareRatingChip(
-    source: RatingSource,
-    value: Double,
-    modifier: Modifier = Modifier,
-) {
-    val sourceLabel = when (source) {
-        RatingSource.IMDB -> "IMDb"
-        RatingSource.MDBLIST -> "MDB"
-        RatingSource.TRAKT -> "Trakt"
-        RatingSource.TMDB -> "TMDB"
-        else -> source.displayName
-    }
-    val accent = when (source) {
-        RatingSource.IMDB -> Color(0xFFF5C518)
-        RatingSource.MDBLIST -> Color(0xFFFF6B00)
-        RatingSource.TRAKT -> Color(0xFFED1C24)
-        RatingSource.TMDB -> Color(0xFF01D277)
-        else -> Amber
-    }
-
-    Row(
-        modifier = modifier
-            .clip(RoundedCornerShape(999.dp))
-            .background(Obsidian.copy(alpha = 0.88f))
-            .border(1.dp, accent.copy(alpha = 0.58f), RoundedCornerShape(999.dp))
-            .padding(horizontal = 5.dp, vertical = 3.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(3.dp),
-    ) {
-        Text(
-            text = sourceLabel,
-            style = MaterialTheme.typography.labelSmall.copy(fontSize = 7.5.sp, letterSpacing = 0.sp),
-            color = accent,
-            fontWeight = FontWeight.Bold,
-            maxLines = 1,
-        )
-        Text(
-            text = String.format("%.1f", value),
-            style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp, letterSpacing = 0.sp),
-            color = Snow,
-            fontWeight = FontWeight.SemiBold,
-            maxLines = 1,
-        )
-    }
-}
-
-@Composable
-private fun TvPercentRatingChip(
-    label: String,
-    value: Int,
-    accent: Color,
-    modifier: Modifier = Modifier,
-) {
-    Row(
-        modifier = modifier
-            .clip(RoundedCornerShape(999.dp))
-            .background(Obsidian.copy(alpha = 0.88f))
-            .border(1.dp, accent.copy(alpha = 0.58f), RoundedCornerShape(999.dp))
-            .padding(horizontal = 5.dp, vertical = 3.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(3.dp),
-    ) {
-        Text(
-            text = label,
-            style = MaterialTheme.typography.labelSmall.copy(fontSize = 7.5.sp, letterSpacing = 0.sp),
-            color = accent,
-            fontWeight = FontWeight.Bold,
-            maxLines = 1,
-        )
-        Text(
-            text = "$value%",
-            style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp, letterSpacing = 0.sp),
-            color = Snow,
-            fontWeight = FontWeight.SemiBold,
-            maxLines = 1,
-        )
+        Text(item.overview.orEmpty(), style = MaterialTheme.typography.bodyMedium,
+            color = Snow.copy(alpha = .94f), minLines = 3, maxLines = 3, overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.testTag("catalog_expanded_synopsis:${item.id}"))
+        Text(item.cast.take(6).map { it.name }.filter { it.isNotBlank() }.joinToString(", "),
+            style = MaterialTheme.typography.labelMedium, color = Silver, minLines = 1, maxLines = 1,
+            overflow = TextOverflow.Ellipsis, modifier = Modifier.testTag("catalog_expanded_cast:${item.id}"))
     }
 }
 
@@ -1508,19 +2019,19 @@ private fun TvPosterWatchedBadge(modifier: Modifier = Modifier) {
             .clip(RoundedCornerShape(999.dp))
             .background(Charcoal.copy(alpha = 0.86f))
             .border(1.dp, Amber.copy(alpha = 0.58f), RoundedCornerShape(999.dp))
-            .padding(horizontal = 8.dp, vertical = 4.dp),
+            .padding(5.dp),
     ) {
-        Text(
-            text = stringResource(R.string.tv_watched),
-            style = MaterialTheme.typography.labelSmall,
-            color = AmberLight,
-            fontWeight = FontWeight.SemiBold,
+        Icon(
+            imageVector = Icons.Default.CheckCircle,
+            contentDescription = stringResource(R.string.tv_watched),
+            tint = AmberLight,
+            modifier = Modifier.size(17.dp),
         )
     }
 }
 
 @Composable
-private fun TvMediaContextMenu(
+internal fun TvMediaContextMenu(
     state: TvMediaContextMenuState,
     onDismiss: () -> Unit,
     onAction: (TvMediaContextMenuAction) -> Unit,
@@ -1555,9 +2066,11 @@ private fun TvMediaContextMenu(
         Column(
             modifier = Modifier
                 .width(menuWidth)
+                .heightIn(max = 420.dp)
                 .clip(RoundedCornerShape(16.dp))
-                .background(Charcoal.copy(alpha = 0.95f))
-                .border(2.dp, Steel.copy(alpha = 0.5f), RoundedCornerShape(16.dp))
+                .background(com.torve.android.ui.theme.menuPanelColor(true))
+                .border(1.dp, com.torve.android.ui.theme.menuOutlineColor(), RoundedCornerShape(16.dp))
+                .verticalScroll(rememberScrollState())
                 .padding(horizontal = 10.dp, vertical = 10.dp),
             verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
@@ -1604,9 +2117,8 @@ private fun TvMediaContextMenuRow(
                 when {
                     focused && action.isDestructive -> Color(0xFF4A2727)
                     focused && action.isLocked -> Color(0xFF3D3622)
-                    focused -> Obsidian.copy(alpha = 0.7f)
-                    action.isSecondary -> Obsidian.copy(alpha = 0.42f)
-                    else -> Obsidian.copy(alpha = 0.56f)
+                    focused -> Amber.copy(alpha = 0.12f)
+                    else -> Color.Transparent
                 },
             )
             .border(

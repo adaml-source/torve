@@ -2,11 +2,14 @@ package com.torve.android.ui.player
 
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.focus.FocusRequester
 
 // -- Playback UI mode: represents the current focus topology --------------------
@@ -16,6 +19,8 @@ sealed interface PlaybackUiMode {
     data object ControlsVisible : PlaybackUiMode
     data object TrackSelection : PlaybackUiMode
     data object AudioDelay : PlaybackUiMode
+    data object SubtitleDelay : PlaybackUiMode
+    data object SubtitleSearch : PlaybackUiMode
     data object PictureFormat : PlaybackUiMode
     data object Equalizer : PlaybackUiMode
     data object DevicePicker : PlaybackUiMode
@@ -30,8 +35,11 @@ enum class PlaybackFocusRegion {
     TopActions,
     TransportControls,
     Timeline,
+    SegmentAction,
     TrackSelectionOverlay,
     AudioDelayOverlay,
+    SubtitleDelayOverlay,
+    SubtitleSearchOverlay,
     PictureFormatOverlay,
     EqualizerOverlay,
     DevicePickerOverlay,
@@ -69,10 +77,12 @@ class PlaybackFocusCoordinator {
     }
 
     fun unregisterRegion(region: PlaybackFocusRegion) {
+        val wasCurrent = currentRegion == region
         activeHandles.remove(region)
         // If the disappeared region was current, fall back to PlayerSurface
-        if (currentRegion == region) {
+        if (wasCurrent) {
             currentRegion = PlaybackFocusRegion.PlayerSurface
+            restoreFocusForCurrentMode()
         }
     }
 
@@ -136,8 +146,17 @@ class PlaybackFocusCoordinator {
                 FocusDirection.Up -> PlaybackFocusRegion.TransportControls
                 else -> null
             }
+            PlaybackFocusRegion.SegmentAction -> when (direction) {
+                FocusDirection.Up, FocusDirection.Left -> PlaybackFocusRegion.TransportControls
+                else -> null
+            }
             PlaybackFocusRegion.PlayerSurface -> when (direction) {
-                FocusDirection.Up, FocusDirection.Down -> PlaybackFocusRegion.TopActions
+                FocusDirection.Up -> PlaybackFocusRegion.TopActions
+                FocusDirection.Down -> if (isRegionActive(PlaybackFocusRegion.SegmentAction)) {
+                    PlaybackFocusRegion.SegmentAction
+                } else {
+                    PlaybackFocusRegion.TopActions
+                }
                 else -> null
             }
             // Modal overlays don't participate in inter-region navigation
@@ -164,10 +183,13 @@ class PlaybackFocusCoordinator {
                 PlaybackFocusRegion.TopActions,
                 PlaybackFocusRegion.TransportControls,
                 PlaybackFocusRegion.Timeline,
+                PlaybackFocusRegion.SegmentAction,
                 PlaybackFocusRegion.PlayerSurface,
             )
             is PlaybackUiMode.TrackSelection -> listOf(PlaybackFocusRegion.TrackSelectionOverlay)
             is PlaybackUiMode.AudioDelay -> listOf(PlaybackFocusRegion.AudioDelayOverlay)
+            is PlaybackUiMode.SubtitleDelay -> listOf(PlaybackFocusRegion.SubtitleDelayOverlay)
+            is PlaybackUiMode.SubtitleSearch -> listOf(PlaybackFocusRegion.SubtitleSearchOverlay)
             is PlaybackUiMode.PictureFormat -> listOf(PlaybackFocusRegion.PictureFormatOverlay)
             is PlaybackUiMode.Equalizer -> listOf(PlaybackFocusRegion.EqualizerOverlay)
             is PlaybackUiMode.DevicePicker -> listOf(PlaybackFocusRegion.DevicePickerOverlay)
@@ -197,7 +219,12 @@ fun RegisterFocusRegion(
     region: PlaybackFocusRegion,
     requestFocus: (preferredItemKey: String?) -> Boolean,
 ) {
-    val handle = remember(region) { FocusRegionHandle(region, requestFocus) }
+    val currentRequestFocus by rememberUpdatedState(requestFocus)
+    val handle = remember(region) {
+        FocusRegionHandle(region) { preferredItemKey ->
+            currentRequestFocus(preferredItemKey)
+        }
+    }
     DisposableEffect(region) {
         coordinator.registerRegion(handle)
         onDispose {
@@ -213,4 +240,61 @@ fun RegisterFocusRegion(
 @Composable
 fun rememberRegionFocusRequester(): FocusRequester {
     return remember { FocusRequester() }
+}
+
+@Composable
+internal fun PlaybackFocusModeEffect(
+    showResumePrompt: Boolean,
+    showTrackDialog: Boolean,
+    showAudioDelayDialog: Boolean,
+    showSubtitleDelayDialog: Boolean,
+    showSubtitleSearch: Boolean,
+    showPictureFormatPicker: Boolean,
+    showEqualizerSheet: Boolean,
+    showDevicePicker: Boolean,
+    showNextEpisodeOverlay: Boolean,
+    showControls: Boolean,
+    topMenuFocusTick: Int,
+    isTv: Boolean,
+    coordinator: PlaybackFocusCoordinator,
+    playerSurfaceFocusRequester: FocusRequester,
+) {
+    val mode = when {
+        showResumePrompt -> PlaybackUiMode.ResumePrompt
+        showTrackDialog -> PlaybackUiMode.TrackSelection
+        showAudioDelayDialog -> PlaybackUiMode.AudioDelay
+        showSubtitleDelayDialog -> PlaybackUiMode.SubtitleDelay
+        showSubtitleSearch -> PlaybackUiMode.SubtitleSearch
+        showPictureFormatPicker -> PlaybackUiMode.PictureFormat
+        showEqualizerSheet -> PlaybackUiMode.Equalizer
+        showDevicePicker -> PlaybackUiMode.DevicePicker
+        showNextEpisodeOverlay -> PlaybackUiMode.NextEpisode
+        showControls -> PlaybackUiMode.ControlsVisible
+        else -> PlaybackUiMode.ChromeHidden
+    }
+
+    LaunchedEffect(mode) {
+        coordinator.uiMode = mode
+    }
+
+    LaunchedEffect(mode, topMenuFocusTick) {
+        withFrameNanos { }
+        when (mode) {
+            is PlaybackUiMode.ChromeHidden -> {
+                // Some Fire OS versions briefly leave the window without a
+                // focus owner after the controls disappear. Retry across frames.
+                repeat(4) {
+                    runCatching { playerSurfaceFocusRequester.requestFocus() }
+                    withFrameNanos { }
+                }
+            }
+            is PlaybackUiMode.ControlsVisible -> {
+                val restored = coordinator.restoreFocusForCurrentMode()
+                if (isTv && !restored) {
+                    runCatching { playerSurfaceFocusRequester.requestFocus() }
+                }
+            }
+            else -> Unit
+        }
+    }
 }

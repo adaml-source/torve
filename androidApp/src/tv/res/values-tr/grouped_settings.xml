@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="tv_grouped_ai_search">Yapay zekâ araması</string>
+    <string name="tv_grouped_library_sync">Kitaplık ve eşitleme</string>
+    <string name="tv_grouped_help_advanced">Yardım ve gelişmiş ayarlar</string>
+    <string name="tv_grouped_theme_language">Tema ve dil</string>
+    <string name="tv_grouped_hide_watched">Keşfette izlenen içerikleri gizle</string>
+    <string name="tv_grouped_account_devices">Hesap ve cihazlar</string>
+    <string name="tv_grouped_account_summary">Giriş, profiller ve cihazlar</string>
+    <string name="tv_grouped_sources_summary">Oynatma, takip ve bağlı kitaplıklar</string>
+    <string name="tv_grouped_playback_summary">Video, ses, altyazılar ve bölümler</string>
+    <string name="tv_grouped_appearance_summary">Ekran, kartlar ve ana sayfa düzeni</string>
+    <string name="tv_grouped_library_summary">Listeler, koleksiyonlar ve yedekler</string>
+    <string name="tv_grouped_help_summary">Bağlantı testleri, yapay zekâ araması ve destek</string>
+    <string name="tv_grouped_devices_summary">Giriş ve eşleştirilmiş cihazlar</string>
+    <string name="tv_grouped_profiles_summary">Haneni yönet</string>
+    <string name="tv_grouped_display_summary">Ekran modu ve uygulama dili</string>
+    <string name="tv_grouped_system_theme">Sistem</string>
+    <string name="tv_grouped_sources">Kaynaklar</string>
+    <string name="tv_nav_shows_compact">Diziler</string>
+    <string name="tv_nav_channels_compact">Kanallar</string>
+    <string name="tv_nav_library_compact">Kitaplık</string>
+    <string name="tv_nav_settings_compact">Ayarlar</string>
+    <string name="tv_grouped_menu_streaming_extensions">Yayın ve eklentiler</string>
+    <string name="tv_grouped_menu_sports_replays">"Spor tekrarları"</string>
+    <string name="tv_grouped_menu_streaming_services">Yayın hizmetleri</string>
+    <string name="tv_grouped_menu_tracking_accounts">Takip hesapları</string>
+    <string name="tv_grouped_menu_servers_requests">Medya sunucuları ve istekler</string>
+    <string name="tv_grouped_menu_saved_collections">Koleksiyonlar</string>
+    <string name="tv_grouped_menu_app_features">Uygulama özellikleri</string>
+    <string name="tv_grouped_menu_connection_tests">Bağlantı testleri</string>
+    <string name="tv_grouped_menu_about_help">Hakkında ve yardım</string>
+    <string name="tv_grouped_menu_additional_sources">Diğer kaynaklar</string>
+    <string name="tv_grouped_menu_kodi_devices">Kodi cihazları</string>
+    <string name="tv_grouped_menu_video_sources">Video ve kaynaklar</string>
+    <string name="tv_grouped_menu_audio_subtitles">Ses ve altyazılar</string>
+    <string name="tv_grouped_menu_advanced_playback">Gelişmiş oynatma</string>
+    <string name="tv_grouped_menu_background_spacing">Arka plan ve aralık</string>
+    <string name="tv_grouped_menu_home_cards">Home ve kartlar</string>
+    <string name="tv_grouped_menu_browsing_style">Görünüm</string>
+    <string name="tv_grouped_menu_episode_badges">Bölüm rozetleri</string>
+</resources>

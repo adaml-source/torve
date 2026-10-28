@@ -9,8 +9,12 @@ import io.ktor.client.request.get
 import io.ktor.client.request.parameter
 import io.ktor.client.statement.bodyAsText
 import io.ktor.http.isSuccess
+import kotlinx.serialization.json.*
+
+data class MdbListPage(val items: List<MdbListItem>, val hasMore: Boolean)
 
 class MdbListApi(private val httpClient: HttpClient) {
+    private val json = Json { ignoreUnknownKeys = true; coerceInputValues = true }
 
     companion object {
         private const val BASE_URL = "https://api.mdblist.com"
@@ -28,17 +32,43 @@ class MdbListApi(private val httpClient: HttpClient) {
         apiKey: String,
         limit: Int = 100,
         page: Int = 1,
-    ): List<MdbListItem> {
+    ): List<MdbListItem> = getListPage(listId, apiKey, limit, page).items
+
+    suspend fun getListPage(listId: Int, apiKey: String, limit: Int = 100, page: Int = 1): MdbListPage {
+        require(listId > 0 && limit in 1..1000 && page > 0)
         val response = httpClient.get("$BASE_URL/lists/$listId/items") {
             parameter("apikey", apiKey)
             parameter("limit", limit)
-            parameter("page", page)
+            // The service supports offset for numbered pages; `page` is ignored by MDBList.
+            parameter("offset", (page.toLong() - 1) * limit)
+            parameter("unified", true)
+            parameter("append_to_response", "poster,description,ratings")
         }
         if (!response.status.isSuccess()) {
             val body = try { response.bodyAsText().take(200) } catch (_: Exception) { "" }
             throw Exception("MDBList API error ${response.status.value}: $body")
         }
-        return response.body()
+        val root = json.parseToJsonElement(response.bodyAsText())
+        val entries: List<Pair<JsonElement, String?>> = when (root) {
+            is JsonArray -> root.map { it to null }
+            is JsonObject -> listOf("movies" to "movie", "shows" to "show").flatMap { (bucket, type) ->
+                (root[bucket] as? JsonArray).orEmpty().map { it to type }
+            }
+            else -> error("Invalid MDBList items response")
+        }
+        val items = entries.mapNotNull { (entry, bucketType) ->
+            val obj = entry as? JsonObject ?: return@mapNotNull null
+            val ids = obj["ids"] as? JsonObject
+            val normalized = obj.toMutableMap().apply {
+                if (get("mediatype") == null && bucketType != null) put("mediatype", JsonPrimitive(bucketType))
+                put("tmdb_id", ids?.get("tmdb") ?: obj["tmdb_id"] ?: obj["id"] ?: JsonNull)
+                if (get("year") == null) put("year", obj["release_year"] ?: JsonNull)
+            }
+            json.decodeFromJsonElement<MdbListItem>(JsonObject(normalized))
+        }.filter { it.mediaType in setOf("movie", "show", "tv", "series") }
+        val more = response.headers["X-Has-More"]?.lowercase()?.let { it == "true" || it == "1" }
+            ?: (entries.size >= limit)
+        return MdbListPage(items, more)
     }
 
     suspend fun getListInfo(listId: Int, apiKey: String): MdbListInfo {

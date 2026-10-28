@@ -31,18 +31,21 @@ class CalendarViewModel internal constructor(
     private val prefsRepo: PreferencesRepository,
     mainDispatcher: CoroutineDispatcher = Dispatchers.Main,
     private val diagnostics: CalendarDiagnosticsLogger = CalendarDiagnosticsLogger.Stdout,
+    private val family: com.torve.data.profile.FamilyControls? = null,
 ) {
     constructor(
         traktApi: TraktAuthorizedApi,
         tokenStore: TraktTokenStore,
         prefsRepo: PreferencesRepository,
+        family: com.torve.data.profile.FamilyControls? = null,
     ) : this(
         dataSource = TraktCalendarDataSource(traktApi, tokenStore),
         prefsRepo = prefsRepo,
+        family = family,
     )
 
     private val scope = CoroutineScope(SupervisorJob() + mainDispatcher)
-    private val _state = MutableStateFlow(CalendarUiState())
+    private val _state = family?.let { com.torve.data.profile.ProfilePolicyStateFlow(it, CalendarUiState()) } ?: MutableStateFlow(CalendarUiState())
     val state: StateFlow<CalendarUiState> = _state.asStateFlow()
 
     init {
@@ -87,19 +90,26 @@ class CalendarViewModel internal constructor(
                     isLoading = false,
                     refreshWarning = null,
                     episodeNotificationsEnabled = connected && notificationsEnabled,
+                    episodes = if (connected) it.episodes else emptyList(),
+                    groupedEpisodes = if (connected) it.groupedEpisodes else emptyMap(),
                 )
             }
             if (connected) {
+                dataSource.cachedCalendar(CALENDAR_LOOKAHEAD_DAYS)?.let { saved ->
+                    val visible = familyEpisodes(saved.episodes)
+                    _state.update { it.copy(episodes = visible,
+                        groupedEpisodes = groupEpisodesByDate(visible), isLoading = false) }
+                }
                 loadCalendar(source)
             }
         }
     }
 
     private suspend fun loadCalendar(source: CalendarLoadSource) {
-        _state.update { it.copy(isLoading = true, error = null, requiresTraktReconnect = false) }
+        _state.update { it.copy(isLoading = it.episodes.isEmpty(), error = null, requiresTraktReconnect = false) }
         try {
             val result = dataSource.getCalendar(days = CALENDAR_LOOKAHEAD_DAYS)
-            val episodes = result.episodes
+            val episodes = familyEpisodes(result.episodes)
             val grouped = groupEpisodesByDate(episodes)
             _state.update {
                 it.copy(
@@ -134,6 +144,8 @@ class CalendarViewModel internal constructor(
                         traktConnected = false,
                         requiresTraktReconnect = true,
                         episodeNotificationsEnabled = false,
+                        episodes = emptyList(),
+                        groupedEpisodes = emptyMap(),
                     )
                     else -> current.copy(
                         isLoading = false,
@@ -144,6 +156,17 @@ class CalendarViewModel internal constructor(
                 }
             }
         }
+    }
+
+    private suspend fun familyEpisodes(episodes: List<TraktCalendarEpisode>): List<TraktCalendarEpisode> {
+        val controls = family ?: return episodes
+        controls.initialize()
+        if (!controls.state.value.configuration.enabled) return episodes
+        val verified = controls.prepare(episodes.mapNotNull { ep -> ep.showTmdbId?.let { id ->
+            com.torve.domain.model.MediaItem(id.toString(), tmdbId = id, type = com.torve.domain.model.MediaType.SERIES, title = ep.showTitle)
+        } })
+        val allowed = verified.mapNotNull { it.tmdbId }.toSet()
+        return episodes.filter { it.showTmdbId in allowed }
     }
 
     private fun mapCalendarLoadError(error: Throwable): CalendarMappedError {
@@ -192,7 +215,7 @@ class CalendarViewModel internal constructor(
         val today = Clock.System.now().toLocalDateTime(tz).date
         val tomorrow = today.plus(1, DateTimeUnit.DAY)
 
-        return episodes.groupBy { ep ->
+        return episodes.sortedBy { runCatching { Instant.parse(it.firstAired).toEpochMilliseconds() }.getOrDefault(Long.MAX_VALUE) }.groupBy { ep ->
             try {
                 val instant = Instant.parse(ep.firstAired)
                 val localDate = instant.toLocalDateTime(tz).date
@@ -211,15 +234,6 @@ class CalendarViewModel internal constructor(
                 "Unknown Date"
             }
         }
-            .toList()
-            .sortedBy { (key, _) ->
-                when (key) {
-                    "Today" -> "0"
-                    "Tomorrow" -> "1"
-                    else -> "2_$key"
-                }
-            }
-            .toMap()
     }
 
     companion object {
@@ -231,6 +245,7 @@ class CalendarViewModel internal constructor(
 internal interface CalendarDataSource {
     suspend fun accessToken(): String?
     suspend fun getCalendar(days: Int): TraktCalendarResult
+    suspend fun cachedCalendar(days: Int): TraktCalendarResult? = null
 }
 
 private class TraktCalendarDataSource(
@@ -239,6 +254,7 @@ private class TraktCalendarDataSource(
 ) : CalendarDataSource {
     override suspend fun accessToken(): String? = tokenStore.accessToken()
     override suspend fun getCalendar(days: Int): TraktCalendarResult = traktApi.getCalendarCached(days)
+    override suspend fun cachedCalendar(days: Int): TraktCalendarResult? = traktApi.cachedCalendar(days)
 }
 
 internal data class CalendarDiagnosticsEvent(

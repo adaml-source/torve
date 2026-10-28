@@ -7,11 +7,8 @@ import kotlinx.coroutines.flow.asStateFlow
 /**
  * Singleton mirror of the latest [PandaSetupUiState].
  *
- * The Panda wizard's [PandaSetupViewModel] is bound as a Koin `factory`
- * (a fresh VM per wizard session). Provider-health checkers, however,
- * need a stable reference to the user's current Panda config so their
- * status reflects reality between wizard sessions and even after the
- * VM has been GC'd.
+ * The account-scoped [PandaSetupViewModel] publishes here so provider-health
+ * checkers and settings destinations observe the same synchronized config.
  *
  * On construction the VM publishes its initial state and attaches a
  * `state.collect { … }` so every VM-side update mirrors here. Checkers
@@ -21,8 +18,7 @@ import kotlinx.coroutines.flow.asStateFlow
  * device that has never opened the wizard reports "UNCONFIGURED" via
  * the checkers without any special-casing.
  *
- * Carries no secrets that aren't already in [PandaSetupUiState] (which
- * lives in memory anyway, scoped to the wizard's lifetime).
+ * Carries no secrets that aren't already in [PandaSetupUiState].
  */
 class PandaConfigStateStore {
 

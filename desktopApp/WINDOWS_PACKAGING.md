@@ -2,6 +2,20 @@
 
 This checklist covers the Windows desktop packaging flow for `:desktopApp` with embedded VLC playback.
 
+For the Windows 1.6.0 catch-up release, see
+[`docs/torve-windows-upgrade-1.6.0.json`](../docs/torve-windows-upgrade-1.6.0.json)
+for feature scope and remaining runtime validation, and
+`output/windows-1.6.0/verification.json` for the local artifact checks.
+Build the upgrade-capable MSI in PowerShell with:
+
+```powershell
+.\gradlew.bat :desktopApp:packageMsiCloseApp '-PtorveMsiVersion=1.6.0'
+```
+
+Quote the complete Gradle property in PowerShell so `1.6.0` reaches Gradle intact.
+The launcher, About version and installer all use the same version value. Keep
+the existing MSI UpgradeCode when producing a successor to 1.3.0.
+
 ## VLC Runtime Setup
 
 Torve uses LibVLC (via vlcj) for embedded media playback. The VLC runtime must be available at build time for packaging and at runtime for playback.
@@ -262,9 +276,10 @@ property at startup. CI defines one job per channel; default is
 
 ## Update Path
 
-The desktop shell shows a slim "Torve update available" banner at the top
-when `TORVE_UPDATE_FEED` (or `TORVE_UPDATE_REPO`) points at a release
-manifest. When the feed is a Sparkle/WinSparkle appcast and the latest
+Production packages poll `https://api.torve.app/releases/appcast.xml` and
+show a slim "Torve update available" banner at the top when a newer release
+is published. `TORVE_UPDATE_FEED` (or `TORVE_UPDATE_REPO`) can override the
+production channel for QA. When the feed is a Sparkle/WinSparkle appcast and the latest
 `<item>` includes a direct `<enclosure url="...">`, the banner shows
 **Download & install** in addition to **View release**.
 
@@ -294,7 +309,8 @@ To generate a sample appcast for your CDN:
 
 Edit version, URL, and SHA-256 (compute via `Get-FileHash -Algorithm SHA256`
 on Windows or `shasum -a 256` on Unix), then host the file at a stable
-URL and point `TORVE_UPDATE_FEED` at it for distributed builds.
+URL and point `TORVE_UPDATE_FEED` at it for staging tests. Release builds
+use the official Torve feed unless explicitly overridden.
 
 ## Known Remaining Release Work
 

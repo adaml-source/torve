@@ -26,6 +26,7 @@ class AccelerationApi(
     private val json: Json,
     private val baseUrlProvider: () -> String,
     private val channelProvider: ContentChannelProvider? = null,
+    private val parentGrantProvider: () -> String? = { null },
 ) {
     private fun baseUrl() = baseUrlProvider().trimEnd('/')
 
@@ -166,6 +167,7 @@ class AccelerationApi(
     }
 
     private fun io.ktor.client.request.HttpRequestBuilder.appendChannelHeader() {
+        parentGrantProvider()?.let { header("X-Torve-Parent-Grant", it) }
         channelProvider?.channel?.let { header("X-Torve-Channel", it) }
         authClient.currentDeviceRegistration().installation_id.takeIf { it.isNotBlank() }?.let {
             header("X-Torve-Installation-Id", it)

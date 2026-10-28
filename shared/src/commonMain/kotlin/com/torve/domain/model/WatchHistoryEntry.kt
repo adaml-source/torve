@@ -14,3 +14,11 @@ data class WatchHistoryEntry(
     val showTitle: String?,
     val isContentPlaceholder: Boolean = false,
 )
+
+/** Native playback-start rows are useful history, but are not completed episodes.
+ * Explicit/manual/imported marks keep their existing meaning, including zero-runtime marks. */
+fun WatchHistoryEntry.countsAsWatchedEpisode(): Boolean {
+    val season = seasonNumber ?: return false
+    val episode = episodeNumber ?: return false
+    return durationWatchedMs > 0 || id != "${mediaId}_s${season}e${episode}_${watchedAt}"
+}

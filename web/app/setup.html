@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Profiles & connections - Torve</title>
+  <link rel="icon" type="image/png" href="/assets/favicon.png" />
+  <link rel="stylesheet" href="/assets/site-base.css?v=20260517-mobile" />
+  <link rel="stylesheet" href="/assets/app/app.css?v=1774286000" />
+  <link rel="stylesheet" href="/assets/app/setup-page.css?v=20261028-source-editors" />
+  <script src="/assets/app/i18n.js"></script>
+  <link rel="stylesheet" href="/assets/modern-site.css?v=20261012-7" />
+  <meta name="robots" content="noindex, nofollow" />
+</head>
+<body class="app-body modern-page">
+  <div id="loading" class="app-loading"><div class="spinner"></div> Loading...</div>
+  <div id="appShell" style="display:none;">
+    <div id="verifyBanner" class="verify-banner">Your email is not yet verified. Check your inbox or <a href="#" id="resendLink">resend verification email</a>.</div>
+
+    <header class="site-header" data-site-header>
+    <div class="site-header-inner">
+      <a class="site-brand" href="/" aria-label="Torve home"><img src="/assets/torve-logo-transparent.png" alt="Torve" class="site-header-logo" /></a>
+      <nav id="site-navigation" class="site-header-nav" aria-label="Main navigation"><a href="/#explore">Explore</a><a href="/download.html">Downloads</a><a href="/app/help.html">Guide</a><a href="/support.html">Support</a></nav>
+      <div class="site-header-actions">
+
+          <span class="portal-user-email" id="userEmail"></span>
+          <button class="t-btn t-btn-secondary t-btn-sm" id="signoutBtn">Sign out</button>
+        </div>
+      <button class="site-menu-toggle" type="button" aria-label="Open menu" aria-controls="site-navigation" aria-expanded="false"><span></span><span></span></button>
+    </div>
+  </header><nav class="account-subnav" aria-label="Account navigation">
+          <a href="/account.html">Account overview</a>
+          <a href="/app/setup.html" aria-current="page">Connections</a>
+          <a href="/app/extensions.html">Extensions</a>
+          <a href="/app/devices.html">Devices</a>
+          <a href="/app/help.html">Help</a>
+          <a href="/account.html#seerr-setup">Media automation</a>
+        </nav>
+
+    <div class="setup-page">
+      <div class="setup-layout">
+        <!-- Main content column -->
+        <div class="setup-primary">
+          <h1 class="setup-page-title">Profiles &amp; connections</h1>
+          <p class="setup-page-intro">Choose what you use. Set up Usenet, indexers, sports replays and other connections separately, then sync them to your apps.</p>
+          <p class="note" data-profile-content hidden>Seerr and *Arr automation are managed in <a href="/account.html#seerr-setup">Account overview - Media automation</a>.</p>
+          <section id="profileWorkspace" aria-label="Profiles"><p role="status">Loading profiles…</p></section>
+          <p id="setupNotice" class="setup-notice" role="status" hidden></p>
+          <div id="setupSections" data-profile-content hidden></div>
+        </div>
+
+        <!-- Sticky right rail -->
+        <aside class="setup-rail" id="setupRail" data-profile-content hidden>
+          <div class="rail-card">
+            <h2 class="rail-progress-title">Your sources</h2>
+            <ul class="source-summary" id="sourceSummary"></ul>
+            <p class="source-help">Every connection is optional. Configure only the services you use.</p>
+            <button class="btn-sm btn-edit" id="reloadConnections" type="button">Reload connections</button>
+          </div>
+
+          <!-- Section nav -->
+          <div class="rail-card">
+            <ul class="rail-nav" id="railNav">
+              <li><a href="#usenet" data-section="usenet">Usenet</a></li>
+              <li><a href="#indexers" data-section="indexers">NZB indexers</a></li>
+              <li><a href="#replays" data-section="replays">Sports replays</a></li>
+              <li><a href="#debrid" data-section="debrid">Debrid providers</a></li>
+              <li><a href="#libraries" data-section="libraries">Media servers</a></li>
+              <li><a href="#personalization" data-section="personalization">Enhancements</a></li>
+              <li><a href="#channels" data-section="channels">Live TV</a></li>
+              <li><a href="#sync" data-section="sync">Sync</a></li>
+            </ul>
+            <a href="/app/help.html#article:setup-order" class="rail-help-link">Connections guide</a>
+          </div>
+        </aside>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal -->
+  <div class="modal-overlay" id="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+    <div class="modal">
+      <h2 id="modalTitle"></h2>
+      <p class="subtitle" id="modalSubtitle"></p>
+      <div id="modalNote" class="note" style="display:none"></div>
+      <div id="modalAlert" class="modal-alert"></div>
+      <form id="modalForm"></form>
+      <div class="modal-actions">
+        <button class="btn-sm btn-edit" id="modalCancel" type="button">Cancel</button>
+        <button class="btn-sm btn-setup" id="modalSave" type="button">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <dialog id="sourceDialog" class="source-dialog" aria-labelledby="sourceDialogTitle"></dialog>
+  <dialog id="profileDialog" class="profile-dialog" aria-labelledby="profileDialogTitle"></dialog>
+  <div class="toast" id="toast" role="status"></div>
+
+  <script src="/assets/app/lang/en.js?v=20260815-connections"></script>
+  <script src="/assets/app/lang/de.js?v=20260815-connections"></script>
+  <script src="/assets/app/lang/es.js?v=20260815-connections"></script>
+  <script src="/assets/app/lang/fr.js?v=20260815-connections"></script>
+  <script src="/assets/app/lang/it.js?v=20260815-connections"></script>
+  <script src="/assets/app/lang/pt.js?v=20260815-connections"></script>
+  <script src="/assets/app/lang/tr.js?v=20260815-connections"></script>
+  <script src="/assets/app/lang-switcher.js"></script>
+  <script src="/assets/app/api.js?v=20261028-source-editors"></script>
+  <script src="/assets/app/shell.js?v=20260328"></script>
+  <script src="/assets/app/analytics.js"></script>
+  <script src="/assets/app/setup.js?v=20261028-source-editors"></script>
+  <script src="/assets/app/sync-ui.js"></script>
+  <script src="/assets/app/profiles.js?v=20261028-source-editors"></script>
+  <script src="/assets/app/source-setup.js?v=20261028-source-editors-2"></script>
+  <script src="/assets/app/page-setup.js?v=20261028-source-editors"></script>
+  <script src="/assets/modern-site.js?v=20261028-source-editors" defer></script>
+</body>
+</html>

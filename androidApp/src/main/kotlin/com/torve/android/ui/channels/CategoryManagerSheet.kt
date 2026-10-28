@@ -1,5 +1,7 @@
 package com.torve.android.ui.channels
 
+import com.torve.android.ui.community.parityLabel as localizedUiText
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -26,7 +28,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
+import com.torve.android.ui.system.TorveModalBottomSheet as ModalBottomSheet
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
@@ -107,7 +109,7 @@ fun CategoryManagerSheet(
                     enabled = !noneHidden,
                 ) {
                     Text(
-                        "Select All",
+                        localizedUiText("Select All"),
                         color = if (noneHidden) Torve.colors.textHint else Amber,
                         style = MaterialTheme.typography.labelLarge,
                         fontWeight = FontWeight.SemiBold,
@@ -118,7 +120,7 @@ fun CategoryManagerSheet(
                     enabled = !allHidden,
                 ) {
                     Text(
-                        "Deselect All",
+                        localizedUiText("Deselect All"),
                         color = if (allHidden) Torve.colors.textHint else Torve.colors.error,
                         style = MaterialTheme.typography.labelLarge,
                         fontWeight = FontWeight.SemiBold,
@@ -182,7 +184,7 @@ fun CategoryManagerSheet(
                             val totalChannels = countryCats.sumOf { it.channelCount }
                             val visibleCount = countryCats.size - countryHiddenCount
                             Text(
-                                text = "$visibleCount/${countryCats.size} categories · $totalChannels ch",
+                                text = localizedUiText("$visibleCount/${countryCats.size} categories · $totalChannels ch"),
                                 style = MaterialTheme.typography.labelSmall,
                                 color = Ash,
                             )
@@ -237,7 +239,7 @@ private fun CategoryToggleRow(
     ) {
         Icon(
             imageVector = if (isHidden) Icons.Rounded.VisibilityOff else Icons.Rounded.Visibility,
-            contentDescription = if (isHidden) "Hidden" else "Visible",
+            contentDescription = localizedUiText(if (isHidden) "Hidden" else "Visible"),
             tint = if (isHidden) Torve.colors.textHint else Amber,
             modifier = Modifier.size(18.dp),
         )

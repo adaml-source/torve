@@ -73,6 +73,44 @@ class TvHomeRailsBuilderTest {
     }
 
     @Test
+    fun `availableNow deduplicates the same title represented by different source ids`() {
+        val continueWatchingCopy = item(42, "The Answer").copy(
+            id = "continue-watching:42",
+            posterUrl = "https://images.example/answer.jpg",
+        )
+        val recommendationCopy = item(42, "The Answer").copy(
+            id = "recommendation:movie:42",
+            overview = "Metadata supplied by the recommendation source",
+        )
+        val records = mapOf(
+            42 to record(42, signal(SourceAvailabilityKind.DEBRID_CACHE)),
+        )
+
+        val out = TvHomeRailsBuilder.availableNow(
+            listOf(continueWatchingCopy, recommendationCopy),
+            records,
+        )
+
+        assertEquals(1, out.size)
+        assertEquals("continue-watching:42", out.single().id)
+        assertEquals("https://images.example/answer.jpg", out.single().posterUrl)
+        assertEquals("Metadata supplied by the recommendation source", out.single().overview)
+    }
+
+    @Test
+    fun `availableNow does not collapse a movie and series sharing a TMDB number`() {
+        val movie = item(7, "Movie Seven")
+        val series = movie.copy(id = "series:7", type = MediaType.SERIES, title = "Series Seven")
+        val records = mapOf(
+            7 to record(7, signal(SourceAvailabilityKind.PLEX)),
+        )
+
+        val out = TvHomeRailsBuilder.availableNow(listOf(movie, series), records)
+
+        assertEquals(listOf(MediaType.MOVIE, MediaType.SERIES), out.map { it.type })
+    }
+
+    @Test
     fun `availableNow returns empty when no candidates have records`() {
         val items = listOf(item(1, "A"))
         assertEquals(emptyList(), TvHomeRailsBuilder.availableNow(items, emptyMap()))
@@ -145,6 +183,34 @@ class TvHomeRailsBuilderTest {
         )
         val banner = TvHomeRailsBuilder.providerBanner(rows)
         assertTrue(banner?.title?.contains("2 providers") == true)
+    }
+
+    @Test
+    fun `providerBanner names failing providers and includes their reasons`() {
+        val rows = listOf(
+            ProviderHealthEntry(
+                category = ProviderHealthCategory.DEBRID,
+                providerKey = "debrid:real-debrid",
+                label = "Real-Debrid",
+                status = ProviderHealthStatus.RED,
+                message = "Authorization expired",
+            ),
+            ProviderHealthEntry(
+                category = ProviderHealthCategory.REQUEST_MANAGER,
+                providerKey = "automation:admin",
+                label = "Automation stack",
+                status = ProviderHealthStatus.RED,
+                message = "ARR services unreachable or unauthorized: Sonarr, Radarr",
+            ),
+        )
+
+        val banner = TvHomeRailsBuilder.providerBanner(rows)
+
+        assertTrue(banner?.title?.contains("Real-Debrid") == true)
+        assertTrue(banner?.title?.contains("ARR stack (Sonarr/Radarr/etc.)") == true)
+        assertTrue(banner?.description?.contains("Authorization expired") == true)
+        assertTrue(banner?.description?.contains("Sonarr, Radarr") == true)
+        assertTrue(banner?.description?.contains("Settings > About > Provider health") == true)
     }
 
     // ── onNow ───────────────────────────────────────────────────────

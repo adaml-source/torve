@@ -100,6 +100,7 @@ class SyncCoordinator(
     private val lanInstallationIdByBackendId = mutableMapOf<String, String>()
     /** Replay protection: seen nonces per pairing. Bounded to last 100. */
     private val seenNonces = mutableSetOf<String>()
+    private val seenRemoteEvents = linkedMapOf<String, Long>()
     /** Pairing code currently active on this TV (for KDF binding on inbound claim). */
     @Volatile private var activePairingCodeForKdf: String? = null
     /** Pending confirmation state on TV side — awaiting phone_confirm before committing. */
@@ -309,6 +310,23 @@ class SyncCoordinator(
         )
         val result = lanHttpClient.sendEvent(endpoint, event).getOrElse { return Result.failure(it) }
         return if (result.status == "ok") Result.success(eventId) else Result.failure(IllegalStateException(result.message ?: "Failed to send search push."))
+    }
+
+    suspend fun sendRemoteCommand(targetDeviceId: String, command: com.torve.android.sync.model.TorveRemoteCommand,
+        seekMs: Long = 10_000L): Result<Unit> = runCatching {
+        check(_state.value.isAuthenticated) { "Sign in before controlling a TV" }
+        val target = _state.value.devices.firstOrNull { it.id == targetDeviceId && it.revokedAt == null }
+            ?: error("This device is no longer paired")
+        val endpoint = resolveEndpoint(target.installationId) ?: error("Open Torve on the TV and connect both devices to the same Wi-Fi")
+        val resolvedId = synchronized(peerLock) { lanInstallationIdByBackendId[target.installationId] } ?: target.installationId
+        val secret = synchronized(peerLock) { pairingSecretByInstallationId[target.installationId] ?: pairingSecretByInstallationId[resolvedId] }
+            ?: error("Establish a secure channel for this TV first")
+        val id = UUID.randomUUID().toString()
+        val unsigned = com.torve.android.sync.model.SyncRemoteCommandPayload(command, installationId(), System.currentTimeMillis(), seekMs.coerceIn(1_000, 60_000))
+        val payload = unsigned.copy(proof = SecureTransferCrypto.computeConfirmation(secret, "torve-remote-v1", unsigned.transcript(id, resolvedId)))
+        val event = LanEventEnvelope(id, EVENT_REMOTE_COMMAND, _state.value.deviceId.orEmpty(), resolvedId, json.encodeToJsonElement(payload))
+        val response = lanHttpClient.sendEvent(endpoint, event).getOrThrow()
+        check(response.status == "ok") { response.message ?: "TV could not accept the command" }
     }
 
     suspend fun sendPlaybackIntent(targetDeviceId: String, contentId: String, providerTarget: String, positionMs: Long, mediaType: String? = null, audio: String? = null, subtitles: String? = null): Result<String> {
@@ -1159,6 +1177,7 @@ class SyncCoordinator(
         }
         return runCatching {
             when (event.eventType) {
+                EVENT_REMOTE_COMMAND -> return handleRemoteCommand(event)
                 EVENT_SEARCH_PUSH -> {
                     val payload = json.decodeFromJsonElement<SyncSearchPushPayload>(event.payload)
                     _inboundEvents.tryEmit(SyncInboundEvent.SearchPush(query = payload.query, filters = payload.filters, issuedByDeviceId = payload.issuedByDeviceId ?: event.sourceDeviceId))
@@ -1192,6 +1211,35 @@ class SyncCoordinator(
             }
             LanStatusResponse(status = "ok")
         }.getOrElse { LanStatusResponse(status = "error", message = it.message ?: "Failed to decode event.") }
+    }
+
+    private fun handleRemoteCommand(event: LanEventEnvelope): LanStatusResponse {
+        val payload = runCatching { json.decodeFromJsonElement<com.torve.android.sync.model.SyncRemoteCommandPayload>(event.payload) }
+            .getOrNull() ?: return LanStatusResponse("rejected", "Invalid remote command")
+        val now = System.currentTimeMillis()
+        if (payload.issuedAtMs < now - 20_000L || payload.issuedAtMs > now + 5_000L || payload.seekMs !in 1_000L..60_000L)
+            return LanStatusResponse("rejected", "Remote command expired. Check device clocks.")
+        val secret = synchronized(peerLock) { pairingSecretByInstallationId[payload.senderInstallationId] }
+            ?: return LanStatusResponse("rejected", "Secure pairing is required")
+        if (_state.value.devices.any { it.revokedAt != null && (it.installationId == payload.senderInstallationId ||
+            synchronized(peerLock) { lanInstallationIdByBackendId[it.installationId] } == payload.senderInstallationId) })
+            return LanStatusResponse("rejected", "Pairing was revoked")
+        if (!runCatching { SecureTransferCrypto.verifyConfirmation(secret, "torve-remote-v1",
+                payload.transcript(event.eventId, event.targetDeviceId), payload.proof) }.getOrDefault(false))
+            return LanStatusResponse("rejected", "Remote command could not be verified")
+        if (!com.torve.android.remote.TorveRemoteInput.hasForegroundSurface())
+            return LanStatusResponse("unavailable", "Open Torve on the TV to use its remote")
+        synchronized(seenRemoteEvents) {
+            seenRemoteEvents.entries.removeAll { it.value < now - 25_000L }
+            if (seenRemoteEvents.containsKey(event.eventId)) return LanStatusResponse("ok")
+            if (seenRemoteEvents.size >= 256) return LanStatusResponse("busy", "Commands are arriving too quickly")
+            seenRemoteEvents[event.eventId] = now
+        }
+        if (!_inboundEvents.tryEmit(SyncInboundEvent.RemoteCommand(payload.command, payload.seekMs))) {
+            synchronized(seenRemoteEvents) { seenRemoteEvents.remove(event.eventId) }
+            return LanStatusResponse("busy", "TV is busy. Try again.")
+        }
+        return LanStatusResponse("ok")
     }
 
     /**
@@ -1465,6 +1513,7 @@ class SyncCoordinator(
     private companion object {
         const val TAG = "SyncCoordinator"
         const val EVENT_SEARCH_PUSH = "SEARCH_PUSH"
+        const val EVENT_REMOTE_COMMAND = "REMOTE_COMMAND"
         const val EVENT_PLAYBACK_INTENT = "PLAYBACK_INTENT"
         const val EVENT_SETTINGS_PUSH = "SETTINGS_PUSH"
         const val EVENT_SECURE_SETUP_TRANSFER = "SECURE_SETUP_TRANSFER"

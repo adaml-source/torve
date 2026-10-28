@@ -1,8 +1,8 @@
 package com.torve.android.widget
 
 import android.content.Context
-import android.graphics.Color
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.glance.GlanceId
 import androidx.glance.GlanceModifier
@@ -66,14 +66,14 @@ private fun WidgetContent(items: List<WatchProgress>) {
     Column(
         modifier = GlanceModifier
             .fillMaxSize()
-            .background(Color.parseColor("#1A1A2E"))
+            .background(Color(0xFF1A1A2E))
             .padding(12.dp),
     ) {
         Text(
             text = "Continue Watching",
             style = TextStyle(
                 fontWeight = FontWeight.Bold,
-                color = ColorProvider(Color.WHITE),
+                color = ColorProvider(Color.White),
             ),
         )
         Spacer(modifier = GlanceModifier.height(8.dp))
@@ -82,7 +82,7 @@ private fun WidgetContent(items: List<WatchProgress>) {
             Text(
                 text = "Nothing in progress",
                 style = TextStyle(
-                    color = ColorProvider(Color.parseColor("#888888")),
+                    color = ColorProvider(Color(0xFF888888)),
                 ),
             )
         } else {
@@ -114,7 +114,7 @@ private fun WatchProgressRow(progress: WatchProgress) {
         Text(
             text = title,
             style = TextStyle(
-                color = ColorProvider(Color.WHITE),
+                color = ColorProvider(Color.White),
                 fontWeight = FontWeight.Medium,
             ),
             maxLines = 1,
@@ -128,21 +128,21 @@ private fun WatchProgressRow(progress: WatchProgress) {
                 modifier = GlanceModifier
                     .width((percent.coerceIn(1, 100) * 1.5f).dp)
                     .height(3.dp)
-                    .background(Color.parseColor("#FFB300"))
+                    .background(Color(0xFFFFB300))
                     .cornerRadius(2.dp),
             ) {}
             Box(
                 modifier = GlanceModifier
                     .width(((100 - percent).coerceIn(0, 100) * 1.5f).dp)
                     .height(3.dp)
-                    .background(Color.parseColor("#333333"))
+                    .background(Color(0xFF333333))
                     .cornerRadius(2.dp),
             ) {}
             Spacer(modifier = GlanceModifier.width(8.dp))
             Text(
                 text = "$percent%",
                 style = TextStyle(
-                    color = ColorProvider(Color.parseColor("#888888")),
+                    color = ColorProvider(Color(0xFF888888)),
                 ),
             )
         }

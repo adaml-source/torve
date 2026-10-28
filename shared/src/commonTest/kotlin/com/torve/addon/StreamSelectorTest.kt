@@ -3,6 +3,8 @@ package com.torve.addon
 import com.torve.data.addon.ParsedStream
 import com.torve.data.addon.StreamScorer
 import com.torve.data.addon.StreamSelector
+import com.torve.data.addon.SourceProfile
+import com.torve.domain.model.SourceLanguageMatchMode
 import com.torve.domain.model.AutoSourceMode
 import com.torve.domain.model.CodecPreference
 import com.torve.domain.model.DeviceCodecCaps
@@ -59,6 +61,22 @@ class StreamSelectorTest {
         supportsVp9 = true,
         supportsAv1 = false,
     )
+
+    @Test
+    fun matchingEpisodeGroupCannotBypassDeviceQualityOrLanguageRules() {
+        val current = stream("1080p", "H.264").copy(bingeGroup = "variant", addonBaseUrl = "https://addon.example", languages = listOf("DE"))
+        val valid = current.copy(title = "Next episode", bingeGroup = "fallback")
+        val candidates = listOf(
+            current.copy(title = "Unsupported codec", codec = "HEVC"),
+            current.copy(title = "Above quality cap", quality = "4K"),
+            current.copy(title = "Wrong audio", languages = listOf("EN")),
+            valid,
+        )
+        val prefs = StreamPreferences(maxQuality = StreamQuality.FHD_1080P,
+            preferredAudioLanguages = listOf("DE"), sourceLanguageMatchMode = SourceLanguageMatchMode.REQUIRE)
+        val ranked = selector.rankPlayableVariantsForContinuation(candidates, SourceProfile.from(current), prefs, h264OnlyDevice)
+        assertEquals(listOf("Next episode"), ranked.map { it.stream.title })
+    }
 
     @Test
     fun maxQualityCap_neverSelectsAbove1080() {

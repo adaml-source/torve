@@ -1,5 +1,7 @@
 package com.torve.android.ui.settings
 
+import com.torve.android.ui.community.parityLabel as localizedUiText
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -57,7 +59,7 @@ fun SensitiveMaterialSettingsScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(Obsidian)
+            .background(MaterialTheme.colorScheme.background)
             .statusBarsPadding()
             .verticalScroll(rememberScrollState())
             .padding(16.dp),
@@ -70,7 +72,7 @@ fun SensitiveMaterialSettingsScreen(
             Text(
                 text = stringResource(R.string.settings_sensitive_material),
                 style = MaterialTheme.typography.headlineSmall,
-                color = Snow,
+                color = MaterialTheme.colorScheme.onSurface,
                 fontWeight = FontWeight.Bold,
             )
         }
@@ -88,7 +90,7 @@ fun SensitiveMaterialSettingsScreen(
                 Text(
                     text = stringResource(R.string.sensitive_material_status_title),
                     style = MaterialTheme.typography.titleMedium,
-                    color = Snow,
+                    color = MaterialTheme.colorScheme.onSurface,
                     fontWeight = FontWeight.SemiBold,
                 )
                 Text(
@@ -98,14 +100,14 @@ fun SensitiveMaterialSettingsScreen(
                 )
                 state.notice?.let {
                     Text(
-                        text = it,
+                        text = localizedUiText(it),
                         style = MaterialTheme.typography.bodySmall,
                         color = Amber,
                     )
                 }
                 state.error?.let {
                     Text(
-                        text = it,
+                        text = localizedUiText(it),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.error,
                     )
@@ -219,7 +221,7 @@ private fun SensitiveMaterialDobStep(
                 onValueChange = onValueChange,
                 modifier = Modifier.fillMaxWidth(),
                 label = { Text(stringResource(R.string.sensitive_material_dob_label)) },
-                placeholder = { Text("YYYY-MM-DD") },
+                placeholder = { Text(localizedUiText("YYYY-MM-DD")) },
                 singleLine = true,
             )
             Row(
@@ -267,12 +269,7 @@ private fun SensitiveMaterialConfirmStep(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                TextButton(
-                    onClick = onBack,
-                    enabled = !isWorking,
-                ) {
-                    Text(stringResource(R.string.common_back))
-                }
+                com.torve.android.ui.components.BackButton(onClick = onBack, enabled = !isWorking)
                 Button(
                     onClick = onConfirm,
                     enabled = !isWorking,

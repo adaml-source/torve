@@ -1,5 +1,7 @@
 package com.torve.android.ui.splash
 
+import com.torve.android.ui.community.parityLabel as localizedUiText
+
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -68,7 +70,7 @@ fun TorveLogomark(
         if (showWordmark) {
             Spacer(Modifier.width(10.dp))
             Text(
-                "TORVE",
+                localizedUiText("TORVE"),
                 fontSize = 14.sp,
                 fontWeight = FontWeight.SemiBold,
                 letterSpacing = 4.sp,

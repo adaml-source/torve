@@ -25,11 +25,76 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
+import kotlin.test.assertTrue
+import kotlin.test.assertFalse
 
 class AddonSyncServiceTest {
     private val json = Json {
         ignoreUnknownKeys = true
         explicitNulls = false
+    }
+
+    @Test
+    fun appleSignInAndRestartIgnorePandaButRestoreOtherExtensionsWithoutChangingServer() = runTest {
+        withApplePolicy {
+            val repo = FakeAddonRepository()
+            val calls = mutableListOf<String>()
+            val snapshot = "[" + listOf(
+                addonResponse("panda-1", "https://panda.torve.app/u/android/manifest.json", 0),
+                addonResponse("panda-2", "https://panda.torve.app/u/older/manifest.json", 1),
+                addonResponse("catalogue", "https://catalogue.example/manifest.json", 2),
+            ).joinToString(",") + "]"
+            fun newService() = AddonSyncService(
+                accessTokenProvider = { "token" }, addonRepo = repo,
+                accountSettingsApi = accountApi { method, _ -> calls += method; respondJson(snapshot) },
+                prefsRepo = FakePreferencesRepository(), settingsRefreshNotifier = SettingsRefreshNotifier(), json = json,
+            )
+            newService().syncAfterSignIn()
+            newService().syncAfterSignIn()
+            assertNull(repo.getAddon("https://panda.torve.app/u/android/manifest.json"))
+            assertNotNull(repo.getAddon("https://catalogue.example/manifest.json"))
+            assertEquals(listOf("GET", "GET"), calls)
+        }
+    }
+
+    @Test
+    fun explicitlyInstalledApplePandaStaysLocalAcrossSyncEditsAndRemoval() = runTest {
+        withApplePolicy {
+            val panda = installedAddon("https://panda.torve.app/u/manual/manifest.json", installedFrom = DEVICE_MANIFEST_INSTALL)
+            val repo = FakeAddonRepository().apply { seed(panda) }
+            val calls = mutableListOf<String>()
+            val service = AddonSyncService(
+                accessTokenProvider = { "token" }, addonRepo = repo,
+                accountSettingsApi = accountApi { method, _ -> calls += method; respondJson("[]") },
+                prefsRepo = FakePreferencesRepository(), settingsRefreshNotifier = SettingsRefreshNotifier(), json = json,
+            )
+            service.onAddonInstalled(panda)
+            service.syncAfterSignIn()
+            service.onAddonStateChanged(panda.manifestUrl)
+            service.onAddonOrderChanged(listOf(panda.manifestUrl))
+            service.onAddonRemoved(panda)
+            assertNotNull(repo.getAddon(panda.manifestUrl)) // Repository removal is performed by the caller.
+            assertEquals(listOf("GET"), calls)
+        }
+    }
+
+    @Test
+    fun appleRejectsLegacyRestoresAndAcceptsOnlyDeviceManifestProvenance() = runTest {
+        withApplePolicy {
+            for (source in listOf("app", "web", "sync")) {
+                assertFalse(permitsLocalExtension("com.torve.panda", "https://private.example/manifest.json", source))
+                assertFalse(permitsLocalExtension(null, "https://PANDA.TORVE.APP/u/account/manifest.json", source))
+            }
+            assertTrue(permitsLocalExtension("com.torve.panda", "https://panda.torve.app/u/manual/manifest.json", DEVICE_MANIFEST_INSTALL))
+            assertTrue(permitsLocalExtension("catalogue", "https://other.example/panda.torve.app/manifest.json", "sync"))
+        }
+        assertTrue(permitsLocalExtension("com.torve.panda", "https://panda.torve.app/manifest.json", "sync"))
+    }
+
+    private suspend fun withApplePolicy(block: suspend () -> Unit) {
+        val previous = ExtensionRuntimePolicy.restorePandaFromAccount
+        try { ExtensionRuntimePolicy.restorePandaFromAccount = false; block() }
+        finally { ExtensionRuntimePolicy.restorePandaFromAccount = previous }
     }
 
     @Test

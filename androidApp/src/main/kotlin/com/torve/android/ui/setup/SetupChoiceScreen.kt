@@ -1,5 +1,7 @@
 package com.torve.android.ui.setup
 
+import com.torve.android.ui.community.parityLabel as localizedUiText
+
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
@@ -30,13 +32,13 @@ fun SetupChoiceScreen(
         verticalArrangement = Arrangement.Center,
     ) {
         Text(
-            text = "How do you want to set up Torve?",
+            text = localizedUiText("How do you want to set up Torve?"),
             style = MaterialTheme.typography.headlineMedium,
             fontWeight = FontWeight.Bold,
         )
         Spacer(Modifier.height(10.dp))
         Text(
-            text = "Use the guide if you want Torve to walk you through sources. Choose manual if you already know where your Debrid, Usenet, IPTV, or Plex/Jellyfin settings live.",
+            text = localizedUiText("Use the guide if you want Torve to walk you through sources. Choose manual if you already know where your Debrid, Usenet, IPTV, or Plex/Jellyfin settings live."),
             style = MaterialTheme.typography.bodyLarge,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -45,18 +47,18 @@ fun SetupChoiceScreen(
             onClick = onGuidedSetup,
             modifier = Modifier.fillMaxWidth(),
         ) {
-            Text("Use guided setup")
+            Text(localizedUiText("Use guided setup"))
         }
         Spacer(Modifier.height(10.dp))
         OutlinedButton(
             onClick = onManualSetup,
             modifier = Modifier.fillMaxWidth(),
         ) {
-            Text("Set up manually in Settings")
+            Text(localizedUiText("Set up manually in Settings"))
         }
         Spacer(Modifier.height(10.dp))
         TextButton(onClick = onExit) {
-            Text("Not now - go to app")
+            Text(localizedUiText("Not now - go to app"))
         }
     }
 }

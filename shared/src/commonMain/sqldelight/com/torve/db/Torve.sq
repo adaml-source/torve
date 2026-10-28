@@ -35,8 +35,56 @@ CREATE TABLE watch_progress (
     PRIMARY KEY (user_id, media_id)
 );
 
+CREATE TABLE playback_viewing_coverage (
+    user_id TEXT NOT NULL,
+    media_id TEXT NOT NULL,
+    media_type TEXT NOT NULL,
+    season_number INTEGER NOT NULL DEFAULT -1,
+    episode_number INTEGER NOT NULL DEFAULT -1,
+    duration_ms INTEGER NOT NULL,
+    expected_runtime_ms INTEGER NOT NULL,
+    ranges_json TEXT NOT NULL,
+    completed INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (user_id, media_id, media_type, season_number, episode_number)
+);
+
+getPlaybackCoverage:
+SELECT * FROM playback_viewing_coverage WHERE user_id = :userId AND media_id = :mediaId
+AND media_type = :mediaType AND season_number = :season AND episode_number = :episode;
+
+upsertPlaybackCoverage:
+INSERT OR REPLACE INTO playback_viewing_coverage VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
+
+deletePlaybackCoverage:
+DELETE FROM playback_viewing_coverage WHERE user_id = :userId AND media_id = :mediaId;
+
+deleteEpisodePlaybackCoverage:
+DELETE FROM playback_viewing_coverage WHERE user_id = :userId AND media_id = :mediaId
+AND season_number = :season AND episode_number = :episode;
+
+clearPlaybackCoverage:
+DELETE FROM playback_viewing_coverage WHERE user_id = :userId;
+
+clearPlaybackCoverageForAllUsers:
+DELETE FROM playback_viewing_coverage;
+
 getInProgress:
-SELECT * FROM watch_progress WHERE user_id = :userId AND position_ms > 0 AND (CAST(position_ms AS REAL) / duration_ms) < 0.85 ORDER BY updated_at DESC LIMIT :limit;
+SELECT watch_progress.* FROM watch_progress
+WHERE user_id = :userId AND position_ms > 0 AND duration_ms > 0
+AND CASE WHEN EXISTS (
+    SELECT 1 FROM playback_viewing_coverage c
+    WHERE c.user_id = watch_progress.user_id AND c.media_id = watch_progress.media_id
+      AND c.media_type = watch_progress.media_type
+      AND c.season_number = COALESCE(watch_progress.season_number, -1)
+      AND c.episode_number = COALESCE(watch_progress.episode_number, -1)
+) THEN NOT EXISTS (
+    SELECT 1 FROM playback_viewing_coverage c
+    WHERE c.user_id = watch_progress.user_id AND c.media_id = watch_progress.media_id
+      AND c.media_type = watch_progress.media_type
+      AND c.season_number = COALESCE(watch_progress.season_number, -1)
+      AND c.episode_number = COALESCE(watch_progress.episode_number, -1) AND c.completed = 1
+) ELSE (CAST(position_ms AS REAL) / duration_ms) < 0.85 END
+ORDER BY updated_at DESC LIMIT :limit;
 
 getAllProgress:
 SELECT * FROM watch_progress WHERE user_id = :userId ORDER BY updated_at DESC;
@@ -46,6 +94,12 @@ SELECT * FROM watch_progress WHERE user_id = :userId AND media_id = :mediaId;
 
 upsertProgress:
 INSERT OR REPLACE INTO watch_progress (user_id, media_id, media_type, title, poster_url, backdrop_url, position_ms, duration_ms, season_number, episode_number, show_title, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+
+backfillProgressArtwork:
+UPDATE watch_progress
+SET poster_url = CASE WHEN poster_url IS NULL OR poster_url = '' THEN :posterUrl ELSE poster_url END,
+    backdrop_url = CASE WHEN backdrop_url IS NULL OR backdrop_url = '' THEN :backdropUrl ELSE backdrop_url END
+WHERE user_id = :userId AND media_id = :mediaId;
 
 deleteProgressByMediaId:
 DELETE FROM watch_progress WHERE user_id = :userId AND media_id = :mediaId;
@@ -73,13 +127,34 @@ INSERT OR REPLACE INTO preference (user_id, key, value) VALUES (?, ?, ?);
 getAllPreferences:
 SELECT * FROM preference WHERE user_id = :userId;
 
+-- Read keys independently of values: catalogue snapshots can exceed CursorWindow.
+getPreferenceKeys:
+SELECT key FROM preference WHERE user_id = :userId;
+
+-- Substrings are returned by SQLite, never a full oversized value in a cursor.
+getPreferenceSlice:
+SELECT substr(value, CAST(:start AS INTEGER), CAST(:count AS INTEGER)) AS part, length(value) AS characters
+FROM preference WHERE user_id = :userId AND key = :key;
+
+-- Large household libraries are persisted in bounded rows so Android's
+-- CursorWindow never has to hold the entire sync outbox in a single row.
+getHouseholdLedgerChunks:
+SELECT value FROM preference
+WHERE user_id = :userId AND key GLOB 'household_sync_ledger_v2:*'
+ORDER BY key;
+
+deleteHouseholdLedgerChunks:
+DELETE FROM preference
+WHERE user_id = :userId AND key GLOB 'household_sync_ledger_v2:*';
+
 deletePreference:
 DELETE FROM preference WHERE user_id = :userId AND key = :key;
 
 deleteAllAccountPreferences:
 DELETE FROM preference
 WHERE key NOT LIKE 'auth_%'
-  AND key NOT LIKE 'subscription_backend_verified_%';
+  AND key NOT LIKE 'subscription_backend_verified_%'
+  AND key NOT LIKE 'family_device_%';
 
 -- Installed addons (user-scoped per migration 6.sqm: same Torve install
 -- can host multiple Torve accounts; addons configured by user A must
@@ -297,6 +372,17 @@ WHERE user_id = :userId AND playlist_id = :playlistId AND generation_id = :gener
 GROUP BY group_title
 ORDER BY group_title ASC;
 
+-- Fast path used when the hidden-channel table is empty. Avoids one correlated
+-- primary-key lookup per catalog row on large Xtream libraries.
+getLiveCategoryCountsForPlaylistUnfiltered:
+SELECT group_title, COUNT(*) AS channel_count
+FROM iptv_channel
+WHERE user_id = :userId AND playlist_id = :playlistId AND generation_id = :generationId
+  AND (group_title NOT LIKE 'VOD:%' OR group_title IS NULL)
+  AND content_type != 'VOD_MOVIE' AND content_type != 'VOD_SERIES'
+GROUP BY group_title
+ORDER BY group_title ASC;
+
 getVodCategoryCountsForPlaylist:
 SELECT group_title, COUNT(*) AS channel_count
 FROM iptv_channel
@@ -306,12 +392,28 @@ WHERE user_id = :userId AND playlist_id = :playlistId AND generation_id = :gener
 GROUP BY group_title
 ORDER BY group_title ASC;
 
+getVodCategoryCountsForPlaylistUnfiltered:
+SELECT group_title, COUNT(*) AS channel_count
+FROM iptv_channel
+WHERE user_id = :userId AND playlist_id = :playlistId AND generation_id = :generationId
+  AND (group_title LIKE 'VOD:%' OR content_type = 'VOD_MOVIE' OR content_type = 'VOD_SERIES')
+GROUP BY group_title
+ORDER BY group_title ASC;
+
 getVodCategoryTypeCountsForPlaylist:
 SELECT group_title, content_type, COUNT(*) AS channel_count
 FROM iptv_channel
 WHERE user_id = :userId AND playlist_id = :playlistId AND generation_id = :generationId
   AND (group_title LIKE 'VOD:%' OR content_type = 'VOD_MOVIE' OR content_type = 'VOD_SERIES')
   AND NOT EXISTS (SELECT 1 FROM iptv_hidden_channel WHERE hidden_id = stable_id)
+GROUP BY group_title, content_type
+ORDER BY group_title ASC, content_type ASC;
+
+getVodCategoryTypeCountsForPlaylistUnfiltered:
+SELECT group_title, content_type, COUNT(*) AS channel_count
+FROM iptv_channel
+WHERE user_id = :userId AND playlist_id = :playlistId AND generation_id = :generationId
+  AND (group_title LIKE 'VOD:%' OR content_type = 'VOD_MOVIE' OR content_type = 'VOD_SERIES')
 GROUP BY group_title, content_type
 ORDER BY group_title ASC, content_type ASC;
 
@@ -438,6 +540,13 @@ INSERT OR REPLACE INTO iptv_channel (
 
 clearChannelsForPlaylistGeneration:
 DELETE FROM iptv_channel WHERE user_id = :userId AND playlist_id = :playlistId AND generation_id = :generationId;
+
+deleteStaleChannelsForPlaylistGeneration:
+DELETE FROM iptv_channel
+WHERE user_id = :userId
+  AND playlist_id = :playlistId
+  AND generation_id = :generationId
+  AND updated_at != :updatedAt;
 
 deleteChannelsOlderGenerations:
 DELETE FROM iptv_channel WHERE user_id = :userId AND playlist_id = :playlistId AND generation_id != :generationId;
@@ -567,6 +676,9 @@ DELETE FROM iptv_hidden_channel;
 getAllHiddenChannelIds:
 SELECT hidden_id FROM iptv_hidden_channel;
 
+countHiddenChannelIds:
+SELECT COUNT(*) FROM iptv_hidden_channel;
+
 -- IPTV EPG channels (persisted source metadata, user-scoped)
 CREATE TABLE iptv_epg_channel (
     user_id TEXT NOT NULL DEFAULT '',
@@ -627,14 +739,16 @@ CREATE TABLE iptv_epg_programme (
     xmltv_channel_id TEXT,
     start_time INTEGER NOT NULL,
     end_time INTEGER NOT NULL,
-    title TEXT NOT NULL
+    title TEXT NOT NULL,
+    sub_title TEXT,
+    description TEXT
 );
 
 CREATE INDEX idx_iptv_epg_programme_user_playlist_generation_time ON iptv_epg_programme(user_id, playlist_id, generation_id, start_time, end_time);
 CREATE INDEX idx_iptv_epg_programme_user_playlist_generation_channel_time ON iptv_epg_programme(user_id, playlist_id, generation_id, epg_channel_key, start_time);
 
 getEpgProgrammesForPlaylist:
-SELECT epg_channel_key, xmltv_channel_id, start_time, end_time, title
+SELECT epg_channel_key, xmltv_channel_id, start_time, end_time, title, sub_title, description
 FROM iptv_epg_programme
 WHERE user_id = :userId AND playlist_id = :playlistId AND generation_id = :generationId
 ORDER BY epg_channel_key ASC, start_time ASC;
@@ -651,7 +765,7 @@ FROM iptv_epg_programme
 WHERE user_id = :userId AND playlist_id = :playlistId AND generation_id = :generationId;
 
 getEpgProgrammesForPlaylistWindow:
-SELECT epg_channel_key, xmltv_channel_id, start_time, end_time, title
+SELECT epg_channel_key, xmltv_channel_id, start_time, end_time, title, sub_title, description
 FROM iptv_epg_programme
 WHERE user_id = :userId
   AND playlist_id = :playlistId
@@ -661,7 +775,7 @@ WHERE user_id = :userId
 ORDER BY epg_channel_key ASC, start_time ASC;
 
 getEpgProgrammesForPlaylistWindowLimited:
-SELECT epg_channel_key, xmltv_channel_id, start_time, end_time, title
+SELECT epg_channel_key, xmltv_channel_id, start_time, end_time, title, sub_title, description
 FROM iptv_epg_programme
 WHERE user_id = :userId
   AND playlist_id = :playlistId
@@ -672,7 +786,7 @@ ORDER BY epg_channel_key ASC, start_time ASC
 LIMIT :rowLimit;
 
 getEpgProgrammesForChannelWindowLimited:
-SELECT epg_channel_key, xmltv_channel_id, start_time, end_time, title
+SELECT epg_channel_key, xmltv_channel_id, start_time, end_time, title, sub_title, description
 FROM iptv_epg_programme
 WHERE user_id = :userId
   AND playlist_id = :playlistId
@@ -695,6 +809,12 @@ INSERT INTO iptv_epg_programme (
     end_time,
     title
 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
+
+insertEpgProgrammeWithDetails:
+INSERT INTO iptv_epg_programme (
+    user_id, playlist_id, generation_id, channel_id, epg_channel_key,
+    xmltv_channel_id, start_time, end_time, title, sub_title, description
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
 
 clearEpgProgrammesForPlaylistGeneration:
 DELETE FROM iptv_epg_programme WHERE user_id = :userId AND playlist_id = :playlistId AND generation_id = :generationId;
@@ -932,8 +1052,24 @@ SELECT * FROM watch_history WHERE user_id = :userId AND media_id = :mediaId ORDE
 deleteHistory:
 DELETE FROM watch_history WHERE user_id = :userId AND id = :historyId;
 
+deleteEpisodeHistory:
+DELETE FROM watch_history
+WHERE user_id = :userId AND media_id = :mediaId
+  AND season_number = :season AND episode_number = :episode;
+
+clearImportedTraktSeriesHistoryForMedia:
+DELETE FROM watch_history
+WHERE user_id = :userId AND media_id = :mediaId
+  AND LOWER(media_type) = 'series' AND id GLOB 'trakt_*';
+
 clearAllHistory:
 DELETE FROM watch_history WHERE user_id = :userId;
+
+clearImportedTraktSeriesHistory:
+DELETE FROM watch_history
+WHERE user_id = :userId
+  AND media_type = 'series'
+  AND id LIKE 'trakt_%';
 
 clearAllHistoryForAllUsers:
 DELETE FROM watch_history;
@@ -1065,6 +1201,12 @@ DELETE FROM watch_session WHERE user_id = :userId;
 clearWatchSessionsForUserAndMedia:
 DELETE FROM watch_session WHERE user_id = :userId AND media_id = :mediaId;
 
+deleteEstimatedWatchSessionsForEpisode:
+DELETE FROM watch_session
+WHERE user_id = :userId AND media_id = :mediaId
+  AND season_number = :season AND episode_number = :episode
+  AND source != 'TORVE_PLAYER';
+
 deleteWatchSessionsForUserAndSource:
 DELETE FROM watch_session WHERE user_id = :userId AND source = :source;
 
@@ -1143,6 +1285,12 @@ CREATE TABLE IF NOT EXISTS trakt_rating (
 getTraktRatingByTmdb:
 SELECT * FROM trakt_rating WHERE tmdb_id = ? AND media_type = ? LIMIT 1;
 
+getTraktRatingByKey:
+SELECT * FROM trakt_rating WHERE media_key = ?;
+
+clearScopedTraktRatings:
+DELETE FROM trakt_rating WHERE media_key LIKE ?;
+
 upsertTraktRating:
 INSERT OR REPLACE INTO trakt_rating (media_key, tmdb_id, media_type, rating, rated_at, updated_at)
 VALUES (?, ?, ?, ?, ?, ?);
@@ -1179,6 +1327,9 @@ CREATE TABLE IF NOT EXISTS trakt_sync_queue (
     last_error TEXT,
     next_retry_at INTEGER
 );
+
+getAllTraktQueue:
+SELECT * FROM trakt_sync_queue ORDER BY created_at ASC, rowid ASC;
 
 getPendingTraktQueue:
 SELECT * FROM trakt_sync_queue
@@ -1287,3 +1438,59 @@ WHERE media_type = ? AND genre_id = ?;
 
 deleteAllCatalogTopItems:
 DELETE FROM catalog_top_items;
+
+-- Source-specific, versioned playback segment analysis cache.
+CREATE TABLE IF NOT EXISTS playback_segment_analysis (
+    canonical_episode_id TEXT NOT NULL,
+    media_fingerprint TEXT NOT NULL,
+    runtime_ms INTEGER NOT NULL,
+    analysis_version INTEGER NOT NULL,
+    detector_versions TEXT NOT NULL,
+    validation_count INTEGER NOT NULL DEFAULT 0,
+    segments_json TEXT NOT NULL,
+    analyzed_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    PRIMARY KEY (canonical_episode_id, media_fingerprint, analysis_version)
+);
+
+CREATE INDEX IF NOT EXISTS playback_segment_analysis_episode
+    ON playback_segment_analysis(canonical_episode_id, analysis_version, updated_at DESC);
+
+getPlaybackSegmentAnalysis:
+SELECT * FROM playback_segment_analysis
+WHERE canonical_episode_id = ? AND media_fingerprint = ? AND analysis_version = ?;
+
+getPlaybackSegmentAnalysesForEpisode:
+SELECT * FROM playback_segment_analysis
+WHERE canonical_episode_id = ? AND analysis_version = ?
+ORDER BY updated_at DESC;
+
+upsertPlaybackSegmentAnalysis:
+INSERT OR REPLACE INTO playback_segment_analysis (
+    canonical_episode_id, media_fingerprint, runtime_ms, analysis_version,
+    detector_versions, validation_count, segments_json, analyzed_at, updated_at
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
+
+deletePlaybackSegmentAnalysesBeforeVersion:
+DELETE FROM playback_segment_analysis WHERE analysis_version < ?;
+
+
+copyFamilyAddon:
+INSERT OR IGNORE INTO addon (user_id, manifest_url, id, name, version, description, logo, manifest_json, is_enabled, priority, installed_at, installed_from)
+SELECT :target, manifest_url, id, name, version, description, logo, manifest_json, is_enabled, priority, installed_at, 'app'
+FROM addon WHERE user_id = :source AND id = :addonId AND is_enabled = 1;
+
+copyFamilyPlaylist:
+INSERT OR IGNORE INTO iptv_playlist (user_id, id, name, url, epg_url, channel_count, last_updated, type, server, username, password)
+SELECT :target, id, name, url, epg_url, 0, last_updated, type, server, username, NULL
+FROM iptv_playlist WHERE user_id = :source AND id = :playlistId;
+
+copyFamilyLiveGroup:
+INSERT OR IGNORE INTO iptv_channel (user_id, playlist_id, generation_id, stable_id, sort_index, name, stream_url, tvg_id, tvg_name, logo_url, group_title, tvg_language, tvg_country, tvg_shift, channel_number, duration, catchup_type, catchup_days, catchup_source, user_agent, vlc_options, kodi_props, content_type, updated_at)
+SELECT :target, playlist_id, generation_id, stable_id, sort_index, name, stream_url, tvg_id, tvg_name, logo_url, group_title, tvg_language, tvg_country, tvg_shift, channel_number, duration, catchup_type, catchup_days, catchup_source, user_agent, vlc_options, kodi_props, content_type, updated_at
+FROM iptv_channel WHERE user_id = :source AND playlist_id = :playlistId AND generation_id = :generationId
+AND COALESCE(group_title, 'Ungrouped') = :groupTitle AND content_type NOT IN ('VOD_MOVIE', 'VOD_SERIES');
+
+updateFamilyChannelCount:
+UPDATE iptv_playlist SET channel_count = (SELECT COUNT(*) FROM iptv_channel WHERE user_id = :target AND playlist_id = :playlistId AND generation_id = :generationId)
+WHERE user_id = :target AND id = :playlistId;

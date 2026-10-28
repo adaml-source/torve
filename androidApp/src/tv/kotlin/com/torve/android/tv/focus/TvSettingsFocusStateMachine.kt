@@ -19,6 +19,19 @@ import androidx.compose.ui.focus.FocusRequester
 import com.torve.android.tv.screens.TvSettingsCategory
 import kotlin.math.abs
 
+internal fun adjacentTvSettingsCategory(
+    categoryOrder: List<TvSettingsCategory>,
+    currentCategory: TvSettingsCategory,
+    direction: Int,
+): TvSettingsCategory? {
+    if (direction !in setOf(-1, 1)) return null
+    if (categoryOrder.size < 2) return null
+    val currentIndex = categoryOrder.indexOf(currentCategory)
+    if (currentIndex < 0) return null
+    val targetIndex = (currentIndex + direction + categoryOrder.size) % categoryOrder.size
+    return categoryOrder[targetIndex]
+}
+
 internal object TvSettingsItemIds {
     const val ACCOUNT_PAIR_DEVICE = "settings/account/pair_device"
     const val ACCOUNT_PAIRED_DEVICES = "settings/account/paired_devices"
@@ -26,7 +39,6 @@ internal object TvSettingsItemIds {
     const val ACCOUNT_SYNC_STATUS = "settings/account/sync_status"
     const val ACCOUNT_SYNC_ERROR = "settings/account/sync_error"
     const val ACCOUNT_AUTH_ACCOUNT = "settings/account/auth_account"
-    const val ACCOUNT_BETA_PROGRAM = "settings/account/beta_program"
     const val ACCOUNT_IMPORT_SETUP = "settings/account/import_setup"
     const val ACCOUNT_IMPORT_REFRESH = "settings/account/import_refresh"
     const val ACCOUNT_AUTH_PRIMARY_ACTION = "settings/account/auth_primary_action"
@@ -64,9 +76,15 @@ internal object TvSettingsItemIds {
     const val APPEARANCE_SEE_ALL_POSTER_COLUMNS = "settings/appearance/see_all_poster_columns"
     const val LIBRARY_CHANNELS = "settings/library/channels"
     const val LIBRARY_ADD_PLAYLIST = "settings/library/add_playlist"
+    const val LIBRARY_REFRESH_CHANNELS = "settings/library/refresh_channels"
     const val LIBRARY_REFRESH_EPG = "settings/library/refresh_epg"
     const val LIBRARY_MANAGE_CHANNELS = "settings/library/manage_channels"
+    const val LIBRARY_CHANNEL_MANAGER_SHOW_ALL = "settings/library/channel_manager/show_all"
+    const val LIBRARY_CHANNEL_MANAGER_HIDE_ALL = "settings/library/channel_manager/hide_all"
+    const val CONNECTIONS_AUTOMATION = "settings/connections/automation"
     const val CONNECTIONS_PAIRING = "settings/connections/pairing"
+    const val CONNECTIONS_CENTER = "settings/connections/center"
+    const val CONNECTIONS_RECEIVE_CREDENTIALS = "settings/connections/receive_credentials"
     const val CONNECTIONS_TRAKT = "settings/connections/trakt"
     const val CONNECTIONS_TRAKT_RECONNECT = "settings/connections/trakt_reconnect"
     const val CONNECTIONS_TRAKT_DISCONNECT = "settings/connections/trakt_disconnect"
@@ -95,11 +113,21 @@ internal object TvSettingsItemIds {
     const val ADVANCED_DIAGNOSTICS = "settings/advanced/diagnostics"
     const val ABOUT_VERSION = "settings/about/version"
     const val ABOUT_BUILD = "settings/about/build"
+    const val ABOUT_CHECK_FOR_UPDATES = "settings/about/check_for_updates"
     const val ABOUT_STATS = "settings/about/stats"
     const val ABOUT_SUPPORT = "settings/about/support"
     const val ABOUT_REPORT_ISSUE = "settings/about/report_issue"
     const val ABOUT_TERMS = "settings/about/terms"
     const val ABOUT_LEGAL = "settings/about/legal"
+}
+
+internal fun hasAdjacentTvSettingsControl(
+    focusedItemId: String?,
+    direction: Int,
+): Boolean = when {
+    direction == 1 && focusedItemId == TvSettingsItemIds.LIBRARY_CHANNEL_MANAGER_SHOW_ALL -> true
+    direction == -1 && focusedItemId == TvSettingsItemIds.LIBRARY_CHANNEL_MANAGER_HIDE_ALL -> true
+    else -> false
 }
 
 internal data class TvSettingsFocusTarget(
@@ -434,6 +462,15 @@ internal class TvSettingsFocusStateMachine(
     fun requesterForItemId(itemId: String): FocusRequester? = requesterByItemId[itemId]
 
     fun targetForItemId(itemId: String): TvSettingsFocusTarget? = targetByItemId[itemId]
+
+    fun focusedTarget(): TvSettingsFocusTarget? = focusedItemId?.let(targetByItemId::get)
+
+    fun beginCategorySwitch(category: TvSettingsCategory) {
+        selectedCategory = category
+        focusedItemId = null
+        pendingRestore = null
+        pendingFocusRepair = null
+    }
 
     fun defaultItemIdForCategory(category: TvSettingsCategory): String? = defaultItemByCategory[category]
 

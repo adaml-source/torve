@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "name": "Torve Demo Sources",
+  "description": "Choose catalogue, playback and subtitle support separately. Nothing installs automatically.",
+  "extensions": [
+    {
+      "name": "Demo Catalogue",
+      "manifestUrl": "https://raw.githubusercontent.com/adaml-source/torve-demo-extensions/main/catalogue/manifest.json",
+      "description": "Public testing extension using original synthetic media only.",
+      "capabilities": [
+        "catalog",
+        "meta"
+      ]
+    },
+    {
+      "name": "Demo Playback",
+      "manifestUrl": "https://raw.githubusercontent.com/adaml-source/torve-demo-extensions/main/playback/manifest.json",
+      "description": "Public testing extension using original synthetic media only.",
+      "capabilities": [
+        "stream"
+      ]
+    },
+    {
+      "name": "Demo Subtitles",
+      "manifestUrl": "https://raw.githubusercontent.com/adaml-source/torve-demo-extensions/main/subtitles/manifest.json",
+      "description": "Public testing extension using original synthetic media only.",
+      "capabilities": [
+        "subtitles"
+      ]
+    }
+  ]
+}

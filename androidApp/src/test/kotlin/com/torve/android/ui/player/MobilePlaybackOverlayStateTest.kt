@@ -87,6 +87,7 @@ class MobilePlaybackOverlayStateTest {
         assertEquals(
             listOf(
                 MobilePlaybackSetting.AUDIO_DELAY,
+                MobilePlaybackSetting.SUBTITLE_DELAY,
                 MobilePlaybackSetting.PLAYBACK_SPEED,
                 MobilePlaybackSetting.PICTURE_FORMAT,
             ),
@@ -98,6 +99,7 @@ class MobilePlaybackOverlayStateTest {
         assertEquals(
             listOf(
                 MobilePlaybackSetting.AUDIO_DELAY,
+                MobilePlaybackSetting.SUBTITLE_DELAY,
                 MobilePlaybackSetting.PLAYBACK_SPEED,
                 MobilePlaybackSetting.PICTURE_FORMAT,
                 MobilePlaybackSetting.LIVE_AUDIO_MODE,
@@ -151,7 +153,8 @@ class MobilePlaybackOverlayStateTest {
         assertEquals(channel, resolved.currentChannel)
         assertEquals(currentProgramme, resolved.currentProgramme)
         assertEquals(nextProgramme, resolved.nextProgramme)
-        assertEquals("News", resolved.currentCategoryName)
+        // Country names disambiguate otherwise identical programme groups.
+        assertEquals("United States News", resolved.currentCategoryName)
         assertTrue(resolved.isFavorite)
     }
 

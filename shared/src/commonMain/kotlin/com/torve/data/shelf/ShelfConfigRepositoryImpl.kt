@@ -11,7 +11,7 @@ class ShelfConfigRepositoryImpl(
 ) : ShelfConfigRepository {
 
     override suspend fun getAllConfigs(): List<ShelfConfig> {
-        return database.torveQueries.getAllShelfConfigs(userId = userIdProvider.currentUserId())
+        return database.torveQueries.getAllShelfConfigs(userId = userIdProvider.currentDataUserId())
             .executeAsList().map {
                 ShelfConfig(
                     shelfId = it.shelf_id,
@@ -23,7 +23,7 @@ class ShelfConfigRepositoryImpl(
 
     override suspend fun getConfig(shelfId: String): ShelfConfig? {
         return database.torveQueries.getShelfConfig(
-            userId = userIdProvider.currentUserId(),
+            userId = userIdProvider.currentDataUserId(),
             shelfId = shelfId,
         ).executeAsOneOrNull()?.let {
             ShelfConfig(
@@ -36,7 +36,7 @@ class ShelfConfigRepositoryImpl(
 
     override suspend fun upsertConfig(config: ShelfConfig) {
         database.torveQueries.upsertShelfConfig(
-            user_id = userIdProvider.currentUserId(),
+            user_id = userIdProvider.currentDataUserId(),
             shelf_id = config.shelfId,
             is_visible = if (config.isVisible) 1L else 0L,
             sort_order = config.sortOrder.toLong(),

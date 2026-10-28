@@ -83,6 +83,7 @@ object AnrDebugLogger {
     }
 
     fun log(message: String) {
+        StartupMetrics.record(message)
         if (!enabled) return
         val ts = dateFormat.format(Date())
         val thread = Thread.currentThread().name
@@ -154,7 +155,24 @@ object AnrDebugLogger {
         stateUpdateCount.incrementAndGet()
     }
 
+    /** Explicit debug launch only; captures method names, never arguments or app data. */
+    fun sampleStartup(filesDir: File) {
+        if (!enabled) return
+        Thread({
+            val samples = StringBuilder()
+            val start = SystemClock.elapsedRealtime()
+            while (SystemClock.elapsedRealtime() - start < 30_000L) {
+                samples.appendLine("SAMPLE ${SystemClock.elapsedRealtime() - start}")
+                Looper.getMainLooper().thread.stackTrace.take(120).forEach { samples.appendLine(it) }
+                samples.appendLine()
+                Thread.sleep(100)
+            }
+            File(filesDir, "startup_samples.txt").writeText(samples.toString())
+        }, "StartupSampler").apply { isDaemon = true }.start()
+    }
+
     private fun watchdogLoop() {
+        var capturedHeartbeat = -1L
         while (true) {
             try {
                 Thread.sleep(WATCHDOG_INTERVAL_MS)
@@ -173,6 +191,10 @@ object AnrDebugLogger {
                         appendLine("  zapRate=${zapChannelCount.get()}/s")
                         appendLine("  guideRebuilds=${guideRebuildCount.get()}/s")
                     })
+                    if (elapsed >= 2_000L && capturedHeartbeat != mainThreadHeartbeat) {
+                        capturedHeartbeat = mainThreadHeartbeat
+                        log("MAIN_STACK\n" + Looper.getMainLooper().thread.stackTrace.take(35).joinToString("\n"))
+                    }
                     // Also dump to logcat at ERROR level for adb visibility
                     Log.e(TAG, "STALL ${stallMs}ms screen=$lastScreen overlay=$lastOverlay lastKey=$lastKeyEvent")
                 }

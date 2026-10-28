@@ -1,5 +1,7 @@
 package com.torve.android.ui.player
 
+import com.torve.android.ui.community.parityLabel as localizedUiText
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -11,6 +13,8 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
@@ -35,6 +39,10 @@ import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Replay10
 import androidx.compose.material.icons.filled.ScreenRotation
+import androidx.compose.material.icons.filled.MoreHoriz
+import androidx.compose.material.icons.filled.Notes
+import androidx.compose.material.icons.filled.VolumeUp
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Subtitles
 import androidx.compose.material.icons.filled.Tune
@@ -45,7 +53,10 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.res.stringResource
+import com.torve.android.R
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -90,7 +101,7 @@ internal fun MobilePlayerControlsOverlay(
     sliderPosition: Float,
     isSeeking: Boolean,
     seekPreviewPositionMs: Long,
-    skipSegments: List<com.torve.domain.player.SkipSegment>,
+    skipSegments: List<com.torve.domain.player.PlaybackSegment>,
     voiceOverlayMessage: String?,
     onBack: () -> Unit,
     onOpenPictureFormat: () -> Unit,
@@ -107,6 +118,7 @@ internal fun MobilePlayerControlsOverlay(
     onOpenAudioPicker: () -> Unit,
     onSliderValueChange: (Float) -> Unit,
     onSliderValueChangeFinished: () -> Unit,
+    onOpenSynopsis: (() -> Unit)? = null,
 ) {
     Box(
         modifier = Modifier
@@ -121,13 +133,7 @@ internal fun MobilePlayerControlsOverlay(
                 .padding(horizontal = 12.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            MobileChromeButton(onClick = onBack) {
-                Icon(
-                    Icons.AutoMirrored.Filled.ArrowBack,
-                    contentDescription = null,
-                    tint = Color.White,
-                )
-            }
+            com.torve.android.ui.components.BackButton(onClick = onBack)
             if (!badgeUrl.isNullOrBlank()) {
                 Box(
                     modifier = Modifier
@@ -159,7 +165,7 @@ internal fun MobilePlayerControlsOverlay(
                     )
                     if (isLivePlayback) {
                         Text(
-                            text = "LIVE",
+                            text = localizedUiText("LIVE"),
                             color = Color.Black,
                             style = MaterialTheme.typography.labelSmall,
                             modifier = Modifier
@@ -197,7 +203,7 @@ internal fun MobilePlayerControlsOverlay(
                     MobileChromeButton(onClick = onRotateOrientation) {
                         Icon(
                             Icons.Default.ScreenRotation,
-                            contentDescription = "Change orientation",
+                            contentDescription = localizedUiText("Change orientation"),
                             tint = Color.White,
                         )
                     }
@@ -225,7 +231,7 @@ internal fun MobilePlayerControlsOverlay(
                     .padding(horizontal = 14.dp, vertical = 8.dp),
             ) {
                 Text(
-                    text = voiceOverlayMessage,
+                    text = localizedUiText(voiceOverlayMessage),
                     color = Color.White,
                     style = MaterialTheme.typography.labelLarge,
                 )
@@ -240,7 +246,7 @@ internal fun MobilePlayerControlsOverlay(
                 MobileTransportButton(onClick = onSeekBack) {
                     Icon(
                         Icons.Default.Replay10,
-                        contentDescription = null,
+                        contentDescription = localizedUiText("Rewind 10 seconds"),
                         tint = Color.White,
                         modifier = Modifier.size(30.dp),
                     )
@@ -252,7 +258,7 @@ internal fun MobilePlayerControlsOverlay(
                 ) {
                     Icon(
                         imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
-                        contentDescription = null,
+                        contentDescription = stringResource(if (isPlaying) R.string.common_pause else R.string.common_play),
                         tint = Color.Black,
                         modifier = Modifier.size(34.dp),
                     )
@@ -261,7 +267,7 @@ internal fun MobilePlayerControlsOverlay(
                 MobileTransportButton(onClick = onSeekForward) {
                     Icon(
                         Icons.Default.Forward10,
-                        contentDescription = null,
+                        contentDescription = localizedUiText("Forward 10 seconds"),
                         tint = Color.White,
                         modifier = Modifier.size(30.dp),
                     )
@@ -276,58 +282,6 @@ internal fun MobilePlayerControlsOverlay(
                 .navigationBarsPadding()
                 .padding(horizontal = 14.dp, vertical = 14.dp),
         ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-            ) {
-                if (showFavoriteAction) {
-                    MobileChromeButton(onClick = onToggleFavorite) {
-                        Icon(
-                            if (isFavorite) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
-                            contentDescription = null,
-                            tint = if (isFavorite) com.torve.android.ui.theme.Coral else Color.White,
-                        )
-                    }
-                } else {
-                    Spacer(Modifier.size(48.dp))
-                }
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    if (!showPlaybackTransport) {
-                        MobileChromeButton(onClick = onTogglePlayback) {
-                            Icon(
-                                imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
-                                contentDescription = null,
-                                tint = Color.White,
-                            )
-                        }
-                    }
-                    if (castAvailable) {
-                        MobileChromeButton(onClick = onOpenCast) {
-                            Icon(
-                                if (isCasting) Icons.Default.CastConnected else Icons.Default.Cast,
-                                contentDescription = null,
-                                tint = if (isCasting) com.torve.android.ui.theme.Amber else Color.White,
-                            )
-                        }
-                    }
-                    if (showSettingsAction) {
-                        MobileChromeButton(onClick = onOpenMenu) {
-                            Icon(Icons.Default.Settings, contentDescription = null, tint = Color.White)
-                        }
-                    }
-                    if (showSubtitleAction) {
-                        MobileChromeButton(onClick = onOpenSubtitlePicker) {
-                            Icon(Icons.Default.Subtitles, contentDescription = null, tint = Color.White)
-                        }
-                    }
-                    if (showAudioAction) {
-                        MobileChromeButton(onClick = onOpenAudioPicker) {
-                            Icon(Icons.Default.Tune, contentDescription = null, tint = Color.White)
-                        }
-                    }
-                }
-            }
-
             if (showPlaybackTransport) {
                 Spacer(Modifier.height(14.dp))
                 Slider(
@@ -359,7 +313,7 @@ internal fun MobilePlayerControlsOverlay(
                 }
                 if (isSeeking) {
                     Text(
-                        text = "Preview ${formatTime(seekPreviewPositionMs)}",
+                        text = localizedUiText("Preview ${formatTime(seekPreviewPositionMs)}"),
                         style = MaterialTheme.typography.labelSmall,
                         color = Color.White.copy(alpha = 0.86f),
                         modifier = Modifier.align(Alignment.End),
@@ -368,7 +322,7 @@ internal fun MobilePlayerControlsOverlay(
                 Row(modifier = Modifier.fillMaxWidth()) {
                     Text(formatTime(currentPosition), color = Color.White, style = MaterialTheme.typography.labelSmall)
                     Spacer(Modifier.weight(1f))
-                    Text(formatTime(duration), color = Color.White, style = MaterialTheme.typography.labelSmall)
+                    Text("−${formatTime((duration - currentPosition).coerceAtLeast(0L))}", color = Color.White, style = MaterialTheme.typography.labelSmall)
                 }
             } else {
                 Spacer(Modifier.height(8.dp))
@@ -380,11 +334,21 @@ internal fun MobilePlayerControlsOverlay(
                         .padding(horizontal = 14.dp, vertical = 10.dp),
                 ) {
                     Text(
-                        text = "Live playback stays active while menus are open",
+                        text = localizedUiText("Live playback stays active while menus are open"),
                         color = Color.White.copy(alpha = 0.76f),
                         style = MaterialTheme.typography.bodySmall,
                     )
                 }
+            }
+            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(2.dp), verticalAlignment = Alignment.CenterVertically) {
+                if (!showPlaybackTransport) MobileLabeledChrome(localizedUiText(if (isPlaying) "Pause" else "Play"), if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow, onTogglePlayback)
+                if (showAudioAction) MobileLabeledChrome(localizedUiText("Audio"), Icons.Default.VolumeUp, onOpenAudioPicker)
+                if (showSubtitleAction || !isLivePlayback) MobileLabeledChrome(localizedUiText("Subtitles"), Icons.Default.Subtitles, onOpenSubtitlePicker)
+                MobileLabeledChrome(localizedUiText("Video"), Icons.Default.Tune, onOpenPictureFormat)
+                if (!isLivePlayback && onOpenSynopsis != null) MobileLabeledChrome(localizedUiText("Synopsis"), Icons.Default.Notes, onOpenSynopsis)
+                if (showSettingsAction) MobileLabeledChrome(localizedUiText("More"), Icons.Default.MoreHoriz, onOpenMenu)
+                if (castAvailable) MobileLabeledChrome(localizedUiText("Cast"), if (isCasting) Icons.Default.CastConnected else Icons.Default.Cast, onOpenCast)
+                if (showFavoriteAction) MobileLabeledChrome(localizedUiText("Favorite"), if (isFavorite) Icons.Default.Favorite else Icons.Default.FavoriteBorder, onToggleFavorite)
             }
         }
     }
@@ -533,8 +497,20 @@ internal fun MobilePlaybackSheetHost(
     canReplayProgramme: (Channel, EpgProgramme) -> Boolean,
     onReplayProgramme: (Channel, EpgProgramme) -> Unit,
     onToggleChannelFavorite: (Channel) -> Unit,
+    subtitleDelayMs: Int = 0,
+    onPreviewAudioDelay: (Int) -> Unit = {},
+    onPreviewSubtitleDelay: (Int) -> Unit = {},
+    onApplySubtitleDelay: (Int) -> Unit = {},
 ) {
     if (activeSheet == null) return
+    val delayPicker = (activeSheet as? MobilePlaybackSheet.Picker)?.type
+    if (delayPicker == MobilePlaybackPicker.AUDIO_DELAY || delayPicker == MobilePlaybackPicker.SUBTITLE_DELAY) {
+        val audio = delayPicker == MobilePlaybackPicker.AUDIO_DELAY
+        MobileDelayBar(localizedUiText(if (audio) "Audio delay" else "Subtitle delay"), if (audio) audioDelayMs else subtitleDelayMs,
+            onPreview = if (audio) onPreviewAudioDelay else onPreviewSubtitleDelay,
+            onSave = if (audio) onApplyAudioDelay else onApplySubtitleDelay, onClose = onDismiss)
+        return
+    }
 
     Box(modifier = Modifier.fillMaxSize()) {
         Box(
@@ -555,89 +531,93 @@ internal fun MobilePlaybackSheetHost(
         ) {
             when (activeSheet) {
             MobilePlaybackSheet.QuickActions -> {
-                MobileSheetScaffold(title = "More") {
-                    MobileSheetActionRow("Stream info", onClick = { onPushSheet(MobilePlaybackSheet.StreamInfo) })
+                MobileSheetScaffold(title = localizedUiText("More")) {
+                    MobileSheetActionRow(localizedUiText("Stream info"), onClick = { onPushSheet(MobilePlaybackSheet.StreamInfo) })
                     if (isLivePlayback && currentChannel != null) {
                         MobileSheetActionRow(
-                            title = if (isFavorite) "Remove from favorites" else "Add to favorites",
+                            title = localizedUiText(if (isFavorite) "Remove from favorites" else "Add to favorites"),
                             onClick = onToggleFavorite,
                         )
                     }
                     if (audioTracks.isNotEmpty()) {
                         MobileSheetActionRow(
-                            title = "Audio track",
+                            title = localizedUiText("Audio track"),
                             subtitle = audioTracks.firstOrNull { it.isSelected }?.label,
                             onClick = { onPushSheet(MobilePlaybackSheet.Picker(MobilePlaybackPicker.AUDIO_TRACK)) },
                         )
                     }
                     if (subtitleTracks.isNotEmpty()) {
                         MobileSheetActionRow(
-                            title = "Subtitles",
-                            subtitle = subtitleTracks.firstOrNull { it.isSelected }?.label ?: "Off",
+                            title = localizedUiText("Subtitles"),
+                            subtitle = localizedUiText(subtitleTracks.firstOrNull { it.isSelected }?.label ?: "Off"),
                             onClick = { onPushSheet(MobilePlaybackSheet.Picker(MobilePlaybackPicker.SUBTITLE_TRACK)) },
                         )
                     }
                     if (availableSettings.isNotEmpty()) {
-                        MobileSheetActionRow("Playback settings", onClick = { onPushSheet(MobilePlaybackSheet.Settings) })
+                        MobileSheetActionRow(localizedUiText("Playback settings"), onClick = { onPushSheet(MobilePlaybackSheet.Settings) })
                     }
                     if (isLivePlayback && currentChannel != null) {
-                        MobileSheetActionRow("Open full guide / EPG", onClick = { onPushSheet(MobilePlaybackSheet.Guide) })
-                        MobileSheetActionRow("Channel list", onClick = { onPushSheet(MobilePlaybackSheet.ChannelList) })
+                        MobileSheetActionRow(localizedUiText("Open full guide / EPG"), onClick = { onPushSheet(MobilePlaybackSheet.Guide) })
+                        MobileSheetActionRow(localizedUiText("Channel list"), onClick = { onPushSheet(MobilePlaybackSheet.ChannelList) })
                     }
                     if (handoffAvailable) {
-                        MobileSheetActionRow("Play on device", onClick = onOpenDevicePicker)
+                        MobileSheetActionRow(localizedUiText("Play on device"), onClick = onOpenDevicePicker)
                     }
                     MobileSheetActionRow(
-                        title = "Voice control",
-                        subtitle = when (voiceState) {
+                        title = localizedUiText("Voice control"),
+                        subtitle = localizedUiText(when (voiceState) {
                             com.torve.android.voice.VoiceInputPhase.Listening -> "Listening"
                             com.torve.android.voice.VoiceInputPhase.Processing -> "Processing"
                             com.torve.android.voice.VoiceInputPhase.Error -> "Retry voice input"
                             com.torve.android.voice.VoiceInputPhase.Unsupported -> "Unavailable on this device"
                             com.torve.android.voice.VoiceInputPhase.Idle -> "Speak to control playback"
-                        },
+                        }),
                         enabled = voiceState != com.torve.android.voice.VoiceInputPhase.Unsupported,
                         onClick = onLaunchVoice,
                     )
                     if (showEqualizerAction) {
-                        MobileSheetActionRow("Equalizer", onClick = onOpenEqualizer)
+                        MobileSheetActionRow(localizedUiText("Equalizer"), onClick = onOpenEqualizer)
                     }
                 }
             }
 
             MobilePlaybackSheet.Settings -> {
                 MobileSheetScaffold(
-                    title = "Playback settings",
+                    title = localizedUiText("Playback settings"),
                     onBack = if (canNavigateBack) onNavigateBack else null,
                 ) {
                     availableSettings.forEach { setting ->
                         when (setting) {
                             MobilePlaybackSetting.AUDIO_DELAY -> MobileSheetActionRow(
-                                title = "Audio delay",
+                                title = localizedUiText("Audio delay"),
                                 subtitle = formatAudioDelayLabel(audioDelayMs),
                                 onClick = { onPushSheet(MobilePlaybackSheet.Picker(MobilePlaybackPicker.AUDIO_DELAY)) },
                             )
+                            MobilePlaybackSetting.SUBTITLE_DELAY -> MobileSheetActionRow(
+                                title = localizedUiText("Subtitle delay"), subtitle = formatAudioDelayLabel(subtitleDelayMs),
+                                onClick = { onPushSheet(MobilePlaybackSheet.Picker(MobilePlaybackPicker.SUBTITLE_DELAY)) },
+                            )
 
                             MobilePlaybackSetting.PLAYBACK_SPEED -> MobileSheetActionRow(
-                                title = "Playback speed",
+                                title = localizedUiText("Playback speed"),
                                 subtitle = formatPlaybackSpeedLabel(playbackSpeed),
                                 onClick = { onPushSheet(MobilePlaybackSheet.Picker(MobilePlaybackPicker.PLAYBACK_SPEED)) },
                             )
 
                             MobilePlaybackSetting.PICTURE_FORMAT -> MobileSheetActionRow(
-                                title = "Picture format",
+                                title = localizedUiText("Picture format"),
                                 subtitle = pictureFormat.shortLabel,
                                 onClick = { onPushSheet(MobilePlaybackSheet.Picker(MobilePlaybackPicker.PICTURE_FORMAT)) },
                             )
 
                             MobilePlaybackSetting.LIVE_AUDIO_MODE -> MobileSheetActionRow(
-                                title = "Live audio mode",
+                                title = localizedUiText("Live audio mode"),
                                 subtitle = liveAudioMode.displayLabel(),
                                 onClick = { onPushSheet(MobilePlaybackSheet.Picker(MobilePlaybackPicker.LIVE_AUDIO_MODE)) },
                             )
 
                             MobilePlaybackSetting.LIVE_BUFFER -> MobileSheetActionRow(
-                                title = "Live stream buffer",
+                                title = localizedUiText("Live stream buffer"),
                                 subtitle = formatLiveBufferLabel(liveBufferDurationMs),
                                 onClick = { onPushSheet(MobilePlaybackSheet.Picker(MobilePlaybackPicker.LIVE_BUFFER)) },
                             )
@@ -648,7 +628,7 @@ internal fun MobilePlaybackSheetHost(
 
             MobilePlaybackSheet.StreamInfo -> {
                 MobileSheetScaffold(
-                    title = "Stream info",
+                    title = localizedUiText("Stream info"),
                     onBack = if (canNavigateBack) onNavigateBack else null,
                 ) {
                     if (currentChannel != null) {
@@ -660,14 +640,14 @@ internal fun MobilePlaybackSheetHost(
                         MobileInfoBlock(title = currentTitle)
                     }
                     currentProgramme?.description?.takeIf { it.isNotBlank() }?.let { description ->
-                        MobileInfoSection("About", listOf("Description" to description))
+                        MobileInfoSection(localizedUiText("About"), listOf("Description" to description))
                     }
                     val aboutRows = buildList {
                         currentProgramme?.category?.takeIf { it.isNotBlank() }?.let { add("Category" to it) }
                         currentChannel?.groupTitle?.takeIf { it.isNotBlank() }?.let { add("Group" to CategoryNameCleaner.clean(it).name) }
                     }
                     if (aboutRows.isNotEmpty()) {
-                        MobileInfoSection("Channel", aboutRows)
+                        MobileInfoSection(localizedUiText("Channel"), aboutRows)
                     }
                     playbackRuntimeInfo?.let { info ->
                         val videoRows = buildList {
@@ -677,7 +657,7 @@ internal fun MobilePlaybackSheetHost(
                             info.videoCodec?.let { add("Video codec" to it) }
                         }
                         if (videoRows.isNotEmpty()) {
-                            MobileInfoSection("Video", videoRows)
+                            MobileInfoSection(localizedUiText("Video"), videoRows)
                         }
                         val audioRows = buildList {
                             info.audioCodec?.let { add("Audio codec" to it) }
@@ -686,10 +666,10 @@ internal fun MobilePlaybackSheetHost(
                             info.selectedAudioTrack?.channelCount?.let { add("Channels" to it.toString()) }
                         }
                         if (audioRows.isNotEmpty()) {
-                            MobileInfoSection("Audio", audioRows)
+                            MobileInfoSection(localizedUiText("Audio"), audioRows)
                         }
                         MobileInfoSection(
-                            "Playback",
+                            localizedUiText("Playback"),
                             listOf(
                                 "Player engine" to info.engineId.storageValue.uppercase(),
                                 "Audio mode" to liveAudioMode.displayLabel(),
@@ -701,13 +681,13 @@ internal fun MobilePlaybackSheetHost(
 
             MobilePlaybackSheet.CurrentChannelGuide -> {
                 MobileSheetScaffold(
-                    title = currentChannel?.name ?: "This channel",
+                    title = localizedUiText(currentChannel?.name ?: "This channel"),
                     onBack = if (canNavigateBack) onNavigateBack else null,
                 ) {
                     when {
                         sheetLoading -> MobileSheetLoading()
                         !sheetError.isNullOrBlank() -> MobileSheetMessage(sheetError)
-                        currentChannel == null -> MobileSheetMessage("Guide data is unavailable for this channel.")
+                        currentChannel == null -> MobileSheetMessage(localizedUiText("Guide data is unavailable for this channel."))
                         else -> CurrentChannelGuideSheet(
                             channel = currentChannel,
                             programmes = buildCurrentChannelProgrammeList(
@@ -727,14 +707,14 @@ internal fun MobilePlaybackSheetHost(
 
             MobilePlaybackSheet.ChannelList -> {
                 MobileSheetScaffold(
-                    title = "Channel list",
+                    title = localizedUiText("Channel list"),
                     onBack = if (canNavigateBack) onNavigateBack else null,
                     scrollable = false,
                 ) {
                     when {
                         sheetLoading -> MobileSheetLoading()
                         !sheetError.isNullOrBlank() -> MobileSheetMessage(sheetError)
-                        categoryChannels.isEmpty() -> MobileSheetMessage("No channels available for this group.")
+                        categoryChannels.isEmpty() -> MobileSheetMessage(localizedUiText("No channels available for this group."))
                         else -> LazyColumn {
                             items(categoryChannels, key = { it.channel.playlistId + it.channel.url }) { enriched ->
                                 ChannelRow(
@@ -750,14 +730,14 @@ internal fun MobilePlaybackSheetHost(
 
             MobilePlaybackSheet.Guide -> {
                 MobileSheetScaffold(
-                    title = "Guide / EPG",
+                    title = localizedUiText("Guide / EPG"),
                     onBack = if (canNavigateBack) onNavigateBack else null,
                     scrollable = false,
                 ) {
                     when {
                         sheetLoading -> MobileSheetLoading()
                         !sheetError.isNullOrBlank() -> MobileSheetMessage(sheetError)
-                        categoryChannels.isEmpty() -> MobileSheetMessage("No guide data is available for this channel group.")
+                        categoryChannels.isEmpty() -> MobileSheetMessage(localizedUiText("No guide data is available for this channel group."))
                         else -> ChannelsGuideContent(
                             channels = categoryChannels,
                             guideProgrammes = guideProgrammes,
@@ -774,7 +754,7 @@ internal fun MobilePlaybackSheetHost(
             is MobilePlaybackSheet.Picker -> {
                 when (activeSheet.type) {
                     MobilePlaybackPicker.AUDIO_TRACK -> MobileSingleChoicePickerSheet(
-                        title = "Audio track",
+                        title = localizedUiText("Audio track"),
                         onBack = if (canNavigateBack) onNavigateBack else null,
                         subtitle = audioTracks.firstOrNull { it.isSelected }?.label,
                         options = audioTracks.map { track ->
@@ -788,9 +768,9 @@ internal fun MobilePlaybackSheetHost(
                     )
 
                     MobilePlaybackPicker.SUBTITLE_TRACK -> MobileSingleChoicePickerSheet(
-                        title = "Subtitles",
+                        title = localizedUiText("Subtitles"),
                         onBack = if (canNavigateBack) onNavigateBack else null,
-                        subtitle = subtitleTracks.firstOrNull { it.isSelected }?.label ?: "Off",
+                        subtitle = localizedUiText(subtitleTracks.firstOrNull { it.isSelected }?.label ?: "Off"),
                         options = buildList {
                             add(
                                 MobilePickerOption(
@@ -812,11 +792,11 @@ internal fun MobilePlaybackSheetHost(
                         },
                     )
 
-                    MobilePlaybackPicker.AUDIO_DELAY -> MobileSingleChoicePickerSheet(
-                        title = "Audio delay",
+                    MobilePlaybackPicker.AUDIO_DELAY, MobilePlaybackPicker.SUBTITLE_DELAY -> MobileSingleChoicePickerSheet(
+                        title = localizedUiText("Audio delay"),
                         onBack = if (canNavigateBack) onNavigateBack else null,
                         subtitle = formatAudioDelayLabel(audioDelayMs),
-                        options = listOf(-2000, -1000, -500, -250, 0, 250, 500, 1000, 2000).map { delay ->
+                        options = (-2000..2000 step 50).map { delay ->
                             MobilePickerOption(
                                 key = delay.toString(),
                                 title = formatAudioDelayLabel(delay),
@@ -826,7 +806,7 @@ internal fun MobilePlaybackSheetHost(
                     )
 
                     MobilePlaybackPicker.PLAYBACK_SPEED -> MobileSingleChoicePickerSheet(
-                        title = "Playback speed",
+                        title = localizedUiText("Playback speed"),
                         onBack = if (canNavigateBack) onNavigateBack else null,
                         subtitle = formatPlaybackSpeedLabel(playbackSpeed),
                         options = listOf(0.5f, 0.75f, 1.0f, 1.25f, 1.5f, 2.0f).map { speed ->
@@ -839,7 +819,7 @@ internal fun MobilePlaybackSheetHost(
                     )
 
                     MobilePlaybackPicker.PICTURE_FORMAT -> MobileSingleChoicePickerSheet(
-                        title = "Picture format",
+                        title = localizedUiText("Picture format"),
                         onBack = if (canNavigateBack) onNavigateBack else null,
                         subtitle = pictureFormat.shortLabel,
                         options = PlayerPictureFormat.entries.map { option ->
@@ -853,7 +833,7 @@ internal fun MobilePlaybackSheetHost(
                     )
 
                     MobilePlaybackPicker.LIVE_AUDIO_MODE -> MobileSingleChoicePickerSheet(
-                        title = "Live audio mode",
+                        title = localizedUiText("Live audio mode"),
                         onBack = if (canNavigateBack) onNavigateBack else null,
                         subtitle = liveAudioMode.displayLabel(),
                         options = LiveAudioOutputMode.entries.map { mode ->
@@ -866,7 +846,7 @@ internal fun MobilePlaybackSheetHost(
                     )
 
                     MobilePlaybackPicker.LIVE_BUFFER -> MobileSingleChoicePickerSheet(
-                        title = "Live stream buffer",
+                        title = localizedUiText("Live stream buffer"),
                         onBack = if (canNavigateBack) onNavigateBack else null,
                         subtitle = formatLiveBufferLabel(liveBufferDurationMs),
                         options = listOf(
@@ -911,16 +891,7 @@ private fun MobileSheetScaffold(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             if (onBack != null) {
-                MobileChromeButton(
-                    onClick = onBack,
-                    modifier = Modifier.size(40.dp),
-                ) {
-                    Icon(
-                        Icons.AutoMirrored.Filled.ArrowBack,
-                        contentDescription = null,
-                        tint = Color.White,
-                    )
-                }
+                com.torve.android.ui.components.BackButton(onClick = onBack, modifier = Modifier.size(48.dp))
                 Spacer(Modifier.width(12.dp))
             }
             Text(
@@ -1054,7 +1025,7 @@ private fun MobileSheetLoading() {
 @Composable
 private fun MobileSheetMessage(message: String) {
     Text(
-        text = message,
+        text = localizedUiText(message),
         style = MaterialTheme.typography.bodyMedium,
         color = Color.White.copy(alpha = 0.76f),
         modifier = Modifier.padding(vertical = 12.dp),
@@ -1099,7 +1070,7 @@ private fun MobileInfoSection(
                 .padding(vertical = 4.dp),
         ) {
             Text(
-                text = label,
+                text = localizedUiText(label),
                 style = MaterialTheme.typography.bodySmall,
                 color = Color.White.copy(alpha = 0.58f),
                 modifier = Modifier.width(120.dp),
@@ -1148,18 +1119,18 @@ private fun CurrentChannelGuideSheet(
     onPlayChannel: (Channel) -> Unit,
 ) {
     MobileSheetActionRow(
-        title = "Open full guide / EPG",
-        subtitle = "Browse all channels in this group",
+        title = localizedUiText("Open full guide / EPG"),
+        subtitle = localizedUiText("Browse all channels in this group"),
         onClick = onOpenFullGuide,
     )
     MobileSheetActionRow(
-        title = "Watch live",
+        title = localizedUiText("Watch live"),
         subtitle = channel.name,
         onClick = { onPlayChannel(channel) },
     )
     Spacer(Modifier.height(12.dp))
     if (programmes.isEmpty()) {
-        MobileSheetMessage("No schedule is available for this channel right now.")
+        MobileSheetMessage(localizedUiText("No schedule is available for this channel right now."))
         return
     }
     val nowMs = System.currentTimeMillis()
@@ -1238,4 +1209,14 @@ private fun CurrentChannelProgrammeRow(
         }
     }
     HorizontalDivider(color = Color.White.copy(alpha = 0.08f))
+}
+
+@Composable
+private fun MobileLabeledChrome(label: String, icon: androidx.compose.ui.graphics.vector.ImageVector, onClick: () -> Unit) {
+    TextButton(onClick = onClick, modifier = Modifier.heightIn(min = 48.dp).widthIn(min = 52.dp), contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 6.dp, vertical = 4.dp)) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(3.dp)) {
+            Icon(icon, null, Modifier.size(21.dp), tint = Color.White)
+            Text(localizedUiText(label), color = Color.White, style = MaterialTheme.typography.labelSmall, maxLines = 1)
+        }
+    }
 }

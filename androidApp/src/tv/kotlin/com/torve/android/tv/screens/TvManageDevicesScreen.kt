@@ -1,5 +1,7 @@
 package com.torve.android.tv.screens
 
+import com.torve.android.tv.components.tvSettingsLabel as localizedUiText
+
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -184,7 +186,7 @@ fun TvManageDevicesScreen(
         state.errorKey?.let { key ->
             com.torve.android.error.resolveErrorKey(context, key)?.let { message ->
                 Spacer(Modifier.height(16.dp))
-                Text(text = message, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                Text(text = localizedUiText(message), color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
             }
         }
 
@@ -393,7 +395,7 @@ fun TvDeviceLimitReachedScreen(
         state.errorKey?.let { key ->
             com.torve.android.error.resolveErrorKey(context, key)?.let { message ->
                 Spacer(Modifier.height(16.dp))
-                Text(text = message, color = MaterialTheme.colorScheme.error)
+                Text(text = localizedUiText(message), color = MaterialTheme.colorScheme.error)
             }
         }
     }
@@ -477,7 +479,7 @@ private fun TvActivatedDeviceCard(
                     color = Color.Gray,
                 )
                 Text(
-                    text = if (device.is_active) "Status: Active" else "Status: Not active",
+                    text = com.torve.android.tv.components.tvSettingsLabel(if (device.is_active) "Status: Active" else "Status: Not active"),
                     style = MaterialTheme.typography.bodySmall,
                     color = if (device.is_active) Amber else Color.Gray,
                 )
@@ -497,7 +499,7 @@ private fun TvActivatedDeviceCard(
         AlertDialog(
             onDismissRequest = { showConfirm = false },
             title = { Text(confirmTitle) },
-            text = { Text(confirmText) },
+            text = { com.torve.android.remote.TorveRemoteInputSurface { showConfirm = false }; Text(confirmText) },
             confirmButton = {
                 TextButton(
                     onClick = {
@@ -597,7 +599,7 @@ private fun TvPairedDeviceCard(
                     )
                 }
                 Text(
-                    text = "State: ${if (isPaired) device.pairingState else "revoked"}",
+                    text = com.torve.android.tv.components.tvSettingsLabel("State: ${if (isPaired) device.pairingState else "revoked"}"),
                     style = MaterialTheme.typography.bodySmall,
                     color = if (isPaired) Amber else Color.Gray,
                 )
@@ -617,7 +619,7 @@ private fun TvPairedDeviceCard(
         AlertDialog(
             onDismissRequest = { showConfirm = false },
             title = { Text(confirmTitle) },
-            text = { Text(confirmText) },
+            text = { com.torve.android.remote.TorveRemoteInputSurface { showConfirm = false }; Text(confirmText) },
             confirmButton = {
                 TextButton(
                     onClick = {
@@ -695,7 +697,10 @@ private fun TvLimitDeviceCard(
         AlertDialog(
             onDismissRequest = { showConfirm = false },
             title = { Text(stringResource(R.string.tv_manage_remove_title)) },
-            text = { Text(stringResource(R.string.tv_manage_remove_confirm, device.device_name)) },
+            text = {
+                com.torve.android.remote.TorveRemoteInputSurface { showConfirm = false }
+                Text(stringResource(R.string.tv_manage_remove_confirm, device.device_name))
+            },
             confirmButton = {
                 TextButton(onClick = { showConfirm = false; onRemove() }) {
                     Text(stringResource(R.string.common_remove), color = MaterialTheme.colorScheme.error)
@@ -714,47 +719,8 @@ private fun TvBackButton(
     onFocused: () -> Unit = {},
     onClick: () -> Unit,
 ) {
-    var backFocused by remember { mutableStateOf(false) }
-    Box(
-        modifier = Modifier
-            .border(
-                width = if (backFocused) 2.dp else 0.dp,
-                color = if (backFocused) Amber else Color.Transparent,
-                shape = RoundedCornerShape(8.dp),
-            )
-            .background(
-                if (backFocused) Color(0xFF2A2A2A) else Color.Transparent,
-                RoundedCornerShape(8.dp),
-            )
-            .onFocusChanged {
-                backFocused = it.isFocused
-                if (it.isFocused) onFocused()
-            }
-            .focusRequester(focusRequester)
-            .focusable()
-            .onPreviewKeyEvent { event ->
-                when {
-                    event.type == KeyEventType.KeyDown &&
-                        (event.key == Key.Enter || event.key == Key.DirectionCenter) -> {
-                        onClick()
-                        true
-                    }
-                    event.type == KeyEventType.KeyUp &&
-                        (event.key == Key.Enter || event.key == Key.DirectionCenter) -> {
-                        true
-                    }
-                    else -> false
-                }
-            }
-            .clickable(
-                interactionSource = remember { MutableInteractionSource() },
-                indication = null,
-                onClick = onClick,
-            )
-            .padding(horizontal = 16.dp, vertical = 8.dp),
-    ) {
-        Text(stringResource(R.string.tv_manage_back), color = if (backFocused) Amber else Color.Gray, style = MaterialTheme.typography.bodyLarge)
-    }
+    com.torve.android.ui.components.BackButton(onClick = onClick,
+        modifier = Modifier.focusRequester(focusRequester), onFocused = onFocused)
 }
 
 private fun iconForDeviceType(deviceType: String): ImageVector {

@@ -14,7 +14,6 @@ import java.io.FilterInputStream
 import java.io.InputStream
 import java.io.PushbackInputStream
 import java.util.zip.GZIPInputStream
-import java.util.zip.ZipException
 
 private const val GZIP_MAGIC_BYTE_1 = 0x1F
 private const val GZIP_MAGIC_BYTE_2 = 0x8B
@@ -32,15 +31,21 @@ private class CountingLimitInputStream(
 ) : FilterInputStream(delegate) {
     var totalBytesRead: Long = 0L
         private set
+    var sourceReadDurationNanos: Long = 0L
+        private set
 
     override fun read(): Int {
+        val startedAt = System.nanoTime()
         val v = super.read()
+        sourceReadDurationNanos += System.nanoTime() - startedAt
         if (v >= 0) onRead(1L)
         return v
     }
 
     override fun read(b: ByteArray, off: Int, len: Int): Int {
+        val startedAt = System.nanoTime()
         val r = super.read(b, off, len)
+        sourceReadDurationNanos += System.nanoTime() - startedAt
         if (r > 0) onRead(r.toLong())
         return r
     }
@@ -67,17 +72,11 @@ private fun prepareXmlInput(
     if (first >= 0) pushback.unread(first)
 
     val magicGzip = first == GZIP_MAGIC_BYTE_1 && second == GZIP_MAGIC_BYTE_2
-    val encodingGzip = contentEncoding?.contains("gzip", ignoreCase = true) == true
-
     if (magicGzip) {
         return PreparedXmlInput(GZIPInputStream(pushback, PARSE_BUFFER_BYTES), true)
     }
-    if (encodingGzip) {
-        return try {
-            PreparedXmlInput(GZIPInputStream(pushback, PARSE_BUFFER_BYTES), true)
-        } catch (_: ZipException) {
-            PreparedXmlInput(pushback, false)
-        }
+    if (contentEncoding?.contains("gzip", ignoreCase = true) == true) {
+        println("ChannelsEPG: gzip header mismatch contentEncoding=gzip, parsing as raw XML")
     }
     return PreparedXmlInput(pushback, false)
 }
@@ -90,6 +89,7 @@ internal actual object GzipSupport {
     actual suspend fun downloadToTempFile(
         response: HttpResponse,
         maxCompressedBytes: Long,
+        onProgress: ((bytesRead: Long, totalBytes: Long?) -> Unit)?,
     ): EpgDownloadResult? {
         val tempFile = createDesktopTempFile()
         val contentEncoding = response.headers["Content-Encoding"].orEmpty()
@@ -108,6 +108,7 @@ internal actual object GzipSupport {
                 channel = channel,
                 outputFile = tempFile,
                 maxBytes = maxCompressedBytes,
+                onBytesWritten = { bytes -> onProgress?.invoke(bytes, contentLength) },
                 limitMessage = { bytes ->
                     "EPG too large (${bytes.toMegabytes()}MB compressed). Reduce provider EPG days."
                 },
@@ -152,6 +153,7 @@ internal actual object GzipSupport {
         var stats: EpgDbParseStats? = null
         var bytesParsed = 0L
         var gzipDetected = false
+        var decompressionAndReadDurationMs = 0L
 
         FileInputStream(file).use { fileInput ->
             BufferedInputStream(fileInput, PARSE_BUFFER_BYTES).use { buffered ->
@@ -175,6 +177,7 @@ internal actual object GzipSupport {
                             onProgress = onProgress,
                         )
                         bytesParsed = counted.totalBytesRead
+                        decompressionAndReadDurationMs = counted.sourceReadDurationNanos / 1_000_000L
                     }
                 }
             }
@@ -187,6 +190,7 @@ internal actual object GzipSupport {
                 usedTempFile = true,
                 bytesDownloaded = file.length(),
                 bytesParsed = bytesParsed,
+                decompressionAndReadDurationMs = decompressionAndReadDurationMs,
             )
         }
     }
@@ -329,6 +333,7 @@ private suspend fun writeChannelToFile(
     outputFile: File,
     maxBytes: Long,
     limitMessage: (Long) -> String,
+    onBytesWritten: ((Long) -> Unit)? = null,
 ): Long {
     val buffer = ByteArray(DOWNLOAD_BUFFER_BYTES)
     var bytesWritten = 0L
@@ -343,6 +348,7 @@ private suspend fun writeChannelToFile(
                     throw EpgStreamLimitException(limitMessage(bytesWritten))
                 }
                 output.write(buffer, 0, read)
+                onBytesWritten?.invoke(bytesWritten)
             }
             output.flush()
         }

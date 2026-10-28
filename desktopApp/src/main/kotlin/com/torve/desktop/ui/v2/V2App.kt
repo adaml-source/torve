@@ -211,11 +211,15 @@ fun V2App(
     var settingsLandingCategory by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(onboardingDeepLink) {
         when (onboardingDeepLink?.consume()) {
-            com.torve.desktop.ui.onboarding.DesktopOnboardingDeepLink.Target.Integrations -> {
+            com.torve.desktop.ui.onboarding.DesktopOnboardingDeepLink.Target.PersonalLibrary -> {
                 settingsLandingCategory = "INTEGRATIONS"
                 settingsOpen = true
             }
-            com.torve.desktop.ui.onboarding.DesktopOnboardingDeepLink.Target.PandaSetup -> {
+            com.torve.desktop.ui.onboarding.DesktopOnboardingDeepLink.Target.LiveTv -> {
+                settingsLandingCategory = "PLAYLISTS"
+                settingsOpen = true
+            }
+            com.torve.desktop.ui.onboarding.DesktopOnboardingDeepLink.Target.StreamingSources -> {
                 pandaSetupOpen = true
             }
             null -> Unit
@@ -317,6 +321,11 @@ fun V2App(
     val homeState by homeViewModel.state.collectAsState()
     val searchState by searchViewModel.state.collectAsState()
     val settingsState by settingsViewModel.state.collectAsState()
+    val episodeAlerts = remember { org.koin.mp.KoinPlatform.getKoin().get<com.torve.desktop.reminders.DesktopEpisodeAlerts>() }
+    androidx.compose.runtime.DisposableEffect(episodeAlerts) { episodeAlerts.start(); onDispose { episodeAlerts.stop() } }
+    val customSections by homeViewModel.customSections.collectAsState()
+    var libraryTool by remember(settingsState.personalDataUserId) { mutableStateOf<com.torve.desktop.ui.v2.library.DesktopLibraryTool?>(null) }
+    var libraryToolTarget by remember(settingsState.personalDataUserId) { mutableStateOf<MediaItem?>(null) }
     val channelsState by channelsViewModel.state.collectAsState()
     val playerState by playerController.state.collectAsState()
     val searchDetailState by searchController.state.collectAsState()
@@ -475,7 +484,7 @@ fun V2App(
             }.orEmpty()
         } else ""
         if (torboxKey.isBlank()) {
-            premiumGateReason = "TorBox isn't configured. Open Manage Panda → Download client → TorBox to enable usenet playback."
+            premiumGateReason = "TorBox isn't configured. Open Settings → Connections → Streaming sources and choose TorBox as the download client."
             return
         }
         val isSeries = item.type == com.torve.domain.model.MediaType.SERIES
@@ -590,8 +599,8 @@ fun V2App(
         }
     }
 
-    fun openFullDetail(item: MediaItem, controllerKey: DesktopDetailControllerKey = DesktopDetailControllerKey.LIBRARY) {
-        detailControllerFor(controllerKey).selectResult(item)
+    fun openFullDetail(item: MediaItem, controllerKey: DesktopDetailControllerKey = DesktopDetailControllerKey.LIBRARY, season: Int? = null, episode: Int? = null) {
+        detailControllerFor(controllerKey).selectResult(item, seasonNumber = season, episodeNumber = episode)
         detailStack = listOf(V2DetailStackEntry.Detail(DesktopFullDetailRoute(destination = v2DestToOld(), controllerKey = controllerKey, item = item)))
     }
 
@@ -611,6 +620,23 @@ fun V2App(
             (nextStack.lastOrNull() as? V2DetailStackEntry.Detail)?.route?.let { route ->
                 detailControllerFor(route.controllerKey).selectResult(route.item)
             }
+        }
+    }
+
+    var previousPerson by remember { mutableStateOf(settingsState.personalDataUserId) }
+    LaunchedEffect(settingsState.optionalAppFeatures, destination) {
+        if ((!settingsState.optionalAppFeatures.channels && destination in listOf(V2Destination.LIVE_TV, V2Destination.RECORDINGS)) ||
+            (!settingsState.optionalAppFeatures.sports && destination == V2Destination.SPORTS)) destination = V2Destination.HOME
+    }
+    LaunchedEffect(settingsState.personalDataUserId) {
+        if (previousPerson != settingsState.personalDataUserId) {
+            previousPerson = settingsState.personalDataUserId
+            com.torve.desktop.desktopAlertDismiss()
+            libraryDetailController.reset()
+            searchController.reset()
+            detailStack = emptyList()
+            sourcePickerRoute = null
+            seeAllRoute = null
         }
     }
 
@@ -770,6 +796,14 @@ fun V2App(
         com.torve.desktop.ui.v2.components.LocalRatingDisplayPrefs provides settingsState.ratingPrefs,
         com.torve.desktop.ui.l10n.LocalDesktopStrings provides desktopStrings,
     ) {
+    libraryTool?.let { tool ->
+        com.torve.desktop.ui.v2.library.DesktopLibraryTools(
+            tool = tool, home = homeState, customSections = customSections, target = libraryToolTarget,
+            onDismiss = { libraryTool = null; libraryToolTarget = null },
+            onOpenEpisode = { row -> libraryTool = null; openFullDetail(row.show, season = row.season, episode = row.episode.episodeNumber) },
+            onOpenDetail = { item -> libraryTool = null; pushFullDetail(item) },
+        )
+    }
     val rootFocus = androidx.compose.runtime.remember { androidx.compose.ui.focus.FocusRequester() }
     LaunchedEffect(Unit) { runCatching { rootFocus.requestFocus() } }
 
@@ -1136,6 +1170,7 @@ fun V2App(
                                 recordingsPageOpen = true
                             },
                             initialCategoryName = settingsLandingCategory,
+                            onOpenProfiles = { libraryToolTarget = null; libraryTool = com.torve.desktop.ui.v2.library.DesktopLibraryTool.PROFILES },
                         )
 
                         activeDetail is V2DetailStackEntry.Person -> {
@@ -1156,6 +1191,8 @@ fun V2App(
                                 DesktopDetailControllerKey.SEARCH -> searchDetailState
                             }
                             V2DetailPage(
+                                onTraktLists = { item -> libraryToolTarget = item; libraryTool = com.torve.desktop.ui.v2.library.DesktopLibraryTool.LISTS },
+                                onNotInterested = homeViewModel::dismissRecommendation,
                                 detailState = routeState, watchlistState = watchlistState, favoriteKeys = mediaFavoritesState.favoriteKeys, playerState = playerState,
                                 onBack = { popDetailStack() },
                                 onPlay = { item ->
@@ -1208,6 +1245,7 @@ fun V2App(
                                 },
                                 onToggleWatchlist = { item -> watchlistViewModel.toggleWatchlist(item) },
                                 onToggleFavorite = { item -> mediaFavoritesRepository.toggleFavorite(item) },
+                                onAddToLibrary = { detailControllerFor(route.controllerKey).requestPermanentCopy() },
                                 onSelectSeason = { detailControllerFor(route.controllerKey).selectSeason(it) },
                                 onSelectEpisode = { episode -> detailControllerFor(route.controllerKey).selectEpisode(episode.episodeNumber) },
                                 onOpenRelated = { pushFullDetail(it, route.controllerKey) },
@@ -1268,7 +1306,10 @@ fun V2App(
                                     resolver
                                 }
                                 V2HomePage(
-                                    homeState, homeScroll,
+                                    onOpenShows = { libraryToolTarget = null; libraryTool = com.torve.desktop.ui.v2.library.DesktopLibraryTool.SHOWS },
+                                    onOpenEpisode = { row -> openFullDetail(row.show, season = row.season, episode = row.episode.episodeNumber) },
+                                    customSections = customSections,
+                                    homeState = homeState, scrollState = homeScroll,
                                     onPlay = { launchPlayback(it) },
                                     onOpenDetail = { openFullDetail(it) },
                                     onSeeAll = { req -> seeAllRoute = req },
@@ -1379,6 +1420,12 @@ fun V2App(
                                 },
                             )
                             V2Destination.LIBRARY -> V2LibraryPage(
+                                personalDataUserId = settingsState.personalDataUserId,
+                                onPlayNetworkFile = { entry, config ->
+                                    playerController.openPreResolvedStream(entry.url, entry.name, sizeBytes = entry.size, sourceSurface = "webdav",
+                                        mediaItem = MediaItem(id = entry.mediaId, type = com.torve.domain.model.MediaType.MOVIE, title = entry.name), requestHeaders = config.headers())
+                                },
+                                onOpenTool = { libraryToolTarget = null; libraryTool = it },
                                 homeState = homeState,
                                 downloadState = downloadState,
                                 downloadCatalogueState = downloadCatalogueState,
@@ -1662,6 +1709,7 @@ fun V2App(
                         isSettingsActive = settingsOpen,
                         backdropLuminance = navRailLuminance,
                         adultModeEnabled = adultModeEnabled,
+                        optionalFeatures = settingsState.optionalAppFeatures,
                         modifier = Modifier.align(Alignment.CenterStart).zIndex(2f),
                     )
 

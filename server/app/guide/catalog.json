@@ -1,0 +1,2989 @@
+{
+  "revision": "2026-10-12.2",
+  "reviewedOn": "2026-10-12",
+  "language": "en",
+  "title": "The Torve guide",
+  "platforms": [
+    {
+      "id": "ios",
+      "label": "iPhone & iPad",
+      "article": "ios-start"
+    },
+    {
+      "id": "tvos",
+      "label": "Apple TV",
+      "article": "tvos-start"
+    },
+    {
+      "id": "android",
+      "label": "Android phone",
+      "article": "android-start"
+    },
+    {
+      "id": "firetv",
+      "label": "Fire TV & Google TV",
+      "article": "firetv-start"
+    },
+    {
+      "id": "windows",
+      "label": "Windows",
+      "article": "windows-start"
+    }
+  ],
+  "categories": [
+    {
+      "id": "start",
+      "title": "Start here",
+      "summary": "Choose your app, install it, and find your way around."
+    },
+    {
+      "id": "discover",
+      "title": "Find something to watch",
+      "summary": "Search, recommendations, streaming services, and artwork."
+    },
+    {
+      "id": "library",
+      "title": "Your library",
+      "summary": "Watchlists, episodes, calendars, profiles, and downloads."
+    },
+    {
+      "id": "streaming",
+      "title": "Sources & Panda",
+      "summary": "Connect services, set up Usenet, and choose a source."
+    },
+    {
+      "id": "playback",
+      "title": "Playback & languages",
+      "summary": "Audio, subtitles, source checks, and player controls."
+    },
+    {
+      "id": "channels",
+      "title": "Channels & sports",
+      "summary": "Live TV, guides, catch-up, sports events, and recordings."
+    },
+    {
+      "id": "integrations",
+      "title": "Connected services",
+      "summary": "Tracking, personal libraries, requests, ratings, and AI."
+    },
+    {
+      "id": "devices",
+      "title": "Devices & handoff",
+      "summary": "Sign in on a TV, pair devices, transfer settings, and send playback."
+    },
+    {
+      "id": "account",
+      "title": "Account & settings",
+      "summary": "Sign-in, access, privacy, backups, and appearance."
+    },
+    {
+      "id": "troubleshooting",
+      "title": "Fix a problem",
+      "summary": "Connection errors, missing sources, playback, and sync."
+    }
+  ],
+  "articles": [
+    {
+      "id": "welcome",
+      "category": "start",
+      "title": "Start with your app",
+      "summary": "What Torve does, what you need, and where to begin.",
+      "platforms": [
+        "ios",
+        "tvos",
+        "android",
+        "firetv",
+        "windows"
+      ],
+      "tags": [],
+      "sections": [
+        {
+          "title": "Your media, in one place",
+          "paragraphs": [
+            "Torve brings together discovery, watch state, your connected media sources, and playback. Posters and catalogue entries describe titles; seeing a title does not mean a playable copy is available from your services. Torve does not include a film, television, or channel subscription."
+          ]
+        },
+        {
+          "title": "A useful setup order",
+          "steps": [
+            "Install the app for your device from the Downloads page. Use its current availability status; an Apple test build is not a public App Store release.",
+            "Sign in to your Torve account for account services and device linking. Check the access screen if your Apple build requires Premium.",
+            "Open Settings, then Connections or Connection Center. Add your media source, personal server, or channel playlist.",
+            "Open a title, choose an episode if appropriate, then select a source. Optional tracking, language preferences, and personalisation can be added next."
+          ]
+        },
+        {
+          "title": "About this edition",
+          "paragraphs": [
+            "Reviewed against the applications and backend on 12 October 2026. Features in current code and features in an installed store build can differ. The platform articles explain that distinction. This review is not a new hardware test of every feature."
+          ]
+        },
+        {
+          "title": "Guide language",
+          "paragraphs": [
+            "This is the current English edition. App interface languages and translated titles or posters are described separately. Older translated help articles have been retired because they contained obsolete setup and device-limit instructions."
+          ]
+        }
+      ],
+      "related": [
+        "ios-start",
+        "tvos-start",
+        "android-start",
+        "firetv-start",
+        "windows-start"
+      ]
+    },
+    {
+      "id": "ios-start",
+      "category": "start",
+      "title": "iPhone & iPad",
+      "summary": "Apple navigation, setup, and the limits of current verification.",
+      "platforms": [
+        "ios"
+      ],
+      "tags": [],
+      "sections": [
+        {
+          "title": "Find your way",
+          "paragraphs": [
+            "The main tabs are Home, Movies, TV Shows, Search, and Library. Settings opens from the cog. Account & Sync provides a sign-in route when signed out. Connections, Panda setup, playback preferences, home layout, downloads, and device tools are reached through Settings or Library."
+          ]
+        },
+        {
+          "title": "On iPad",
+          "paragraphs": [
+            "The iOS target supports both iPhone and iPad. That does not establish that every iPad layout or multitasking combination has been tested. Use the same account and source setup; report tablet-specific layout issues with the screen and orientation."
+          ]
+        },
+        {
+          "title": "Current availability",
+          "paragraphs": [
+            "The Apple work is being delivered through test builds. Check Downloads for the current distribution link. Completed downloads on iPhone have been verified playing in airplane mode. New reminders, profile separation, recommendations, and handoff work should be checked against the build you have; this guide does not certify every recent addition on a physical device."
+          ]
+        }
+      ],
+      "related": [
+        "activated-devices",
+        "downloads",
+        "calendar-alerts",
+        "audio-language"
+      ]
+    },
+    {
+      "id": "tvos-start",
+      "category": "start",
+      "title": "Apple TV",
+      "summary": "The tvOS app, remote navigation, and release readiness.",
+      "platforms": [
+        "tvos"
+      ],
+      "tags": [],
+      "sections": [
+        {
+          "title": "Main navigation",
+          "paragraphs": [
+            "The Apple TV navigation rail includes Home, Movies, TV Shows, Search, Channels, Sports, Jellyfin, Library, Your shows, and Settings. Channels has its own main-menu destination. Use the remote to move focus and Select to open a control."
+          ]
+        },
+        {
+          "title": "What is implemented",
+          "paragraphs": [
+            "The tvOS app has a TV interface over shared Apple and core services: title and episode details, source selection, playback, preferred languages, Panda and Usenet setup, channel guide, sports, watch state, household profiles, personal libraries, and receiving credentials. It is not simply the phone screen stretched to a television."
+          ]
+        },
+        {
+          "title": "What still needs qualification",
+          "paragraphs": [
+            "Build 188 is available to invited testers in the private Torve TestFlight group. Its seven focused native simulator checks passed. That is a beta milestone, not a public App Store release or a complete physical Apple TV acceptance pass. The tvOS app does not include the iPhone offline download library or phone-style episode notifications; the TV uses its own remote-focused interface."
+          ]
+        },
+        {
+          "title": "Setting up a TV",
+          "paragraphs": [
+            "Use the TV sign-in code or QR flow from a phone where offered. You can also receive supported service credentials instead of typing long keys with a remote. Keep the TV and phone on the same network for local companion operations."
+          ]
+        }
+      ],
+      "related": [
+        "tv-qr-signin",
+        "install-panda",
+        "add-url-import",
+        "sports"
+      ]
+    },
+    {
+      "id": "android-start",
+      "category": "start",
+      "title": "Android phone",
+      "summary": "Navigation and setup for the mobile Android app.",
+      "platforms": [
+        "android"
+      ],
+      "tags": [],
+      "sections": [
+        {
+          "title": "Find your way",
+          "paragraphs": [
+            "Home, Movies, TV Shows, Search, and Library are the main destinations. The settings cog should always open the main settings page, even when its connection attention dot is shown. Open Connections from there to address a service warning."
+          ]
+        },
+        {
+          "title": "Mobile tools",
+          "paragraphs": [
+            "The mobile app includes source and language filters, Android track inspection and caching, downloads, Your shows, watch statistics, household profiles, device linking, and credential transfer. Install the phone build; the Fire TV build has a different navigation interface."
+          ]
+        },
+        {
+          "title": "Platform differences",
+          "paragraphs": [
+            "Shared Usenet fixes apply to Android sources as well as Apple. A shared data service does not make every screen universal: the dedicated Sports browser is documented for the television and Windows apps, plus iOS, and is not claimed as a separate Android phone destination in this edition."
+          ]
+        }
+      ],
+      "related": [
+        "audio-language",
+        "track-inspection",
+        "downloads",
+        "install-panda"
+      ]
+    },
+    {
+      "id": "firetv-start",
+      "category": "start",
+      "title": "Fire TV, Android TV & Google TV",
+      "summary": "Remote navigation and the television build.",
+      "platforms": [
+        "firetv"
+      ],
+      "tags": [],
+      "sections": [
+        {
+          "title": "Install and navigate",
+          "paragraphs": [
+            "Use the TV package on the Downloads page and the public Fire TV installation instructions for sideloading if required. The TV menu includes Home, Movies, TV Shows, Search, Channels, Sports, Jellyfin, Library, and Settings. Use the highlighted control as the current remote focus target."
+          ]
+        },
+        {
+          "title": "Panda setup",
+          "paragraphs": [
+            "Open Settings and the Panda setup entry. The guided setup starts at its first configuration page. Left and Right can switch setup pages; Back and Next are also available. Select a URL or API-key control to edit it and save the configuration before leaving."
+          ]
+        },
+        {
+          "title": "Current shared work",
+          "paragraphs": [
+            "The Android family includes audio-language selection, subtitle fallback, readable-source inspection, source-type filtering, automatic preferred-track selection, and the shared Usenet matching fixes. TV Sports searches the configured indexers rather than assuming only the first entry. New builds still need installation on the device to include client-side changes."
+          ]
+        }
+      ],
+      "related": [
+        "install-panda",
+        "sports",
+        "transfer-credentials"
+      ]
+    },
+    {
+      "id": "windows-start",
+      "category": "start",
+      "title": "Windows desktop",
+      "summary": "Desktop navigation and features that differ from the mobile apps.",
+      "platforms": [
+        "windows"
+      ],
+      "tags": [],
+      "sections": [
+        {
+          "title": "Find your way",
+          "paragraphs": [
+            "The desktop navigation includes Home, Movies, TV Shows, Search, Library, Live, Recordings, Sports, and the optional adult catalogue. Settings contains service connections, Panda setup, player preferences, and device management."
+          ]
+        },
+        {
+          "title": "Desktop-specific work",
+          "paragraphs": [
+            "Live TV recording and scheduled series passes have a dedicated Recordings page. Desktop player backends include mpv and VLC with language preferences. The exact installed package determines which backend is available."
+          ]
+        },
+        {
+          "title": "Release qualification",
+          "paragraphs": [
+            "The latest Apple and Android work is not evidence of a newly delivered Windows build. This edition documents the desktop implementation, and does not claim that all recent mobile features, track-inspection behaviour, or layouts have been revalidated on Windows."
+          ]
+        }
+      ],
+      "related": [
+        "recordings",
+        "adult-catalogue",
+        "player-engines"
+      ]
+    },
+    {
+      "id": "catalogues",
+      "category": "discover",
+      "title": "Browse titles and open the right episode",
+      "summary": "Movies, series, seasons, cast, trailers, and catalogue extensions.",
+      "platforms": [
+        "ios",
+        "tvos",
+        "android",
+        "firetv",
+        "windows"
+      ],
+      "tags": [],
+      "sections": [
+        {
+          "title": "Browse a title",
+          "steps": [
+            "Open Movies or TV Shows, a Home row, or a catalogue collection. Use See All to expand a row.",
+            "Open a poster for details, overview, ratings, cast, and available title actions. Trailer and person links depend on available metadata.",
+            "For a series, choose the season and episode before opening sources. Check the series year when different shows share a name."
+          ]
+        },
+        {
+          "title": "Upcoming episodes",
+          "paragraphs": [
+            "An upcoming entry may have an air date and metadata without any playable source yet. Your shows and calendar entries should still open useful title or episode details. A catalogue entry does not guarantee that the episode has aired or that a connected provider has it."
+          ]
+        },
+        {
+          "title": "Extensions",
+          "paragraphs": [
+            "An extension can supply catalogues, metadata, streams, or a combination. Adding a catalogue alone does not add playback sources. Manage extensions in Settings or the account portal."
+          ]
+        },
+        {
+          "title": "Latest on Usenet on Windows",
+          "paragraphs": [
+            "The desktop Movies area includes a Latest on Usenet shelf with a dedicated See All filter view. It replaces the former separate Movies via Usenet destination. Its release data comes from the configured indexer and is separate from general metadata discovery."
+          ]
+        }
+      ],
+      "related": [
+        "search",
+        "streaming-services",
+        "recommendations"
+      ]
+    },
+    {
+      "id": "search",
+      "category": "discover",
+      "title": "Search and AI search",
+      "summary": "Switch between ordinary title search and an optional AI request.",
+      "platforms": [
+        "ios",
+        "tvos",
+        "android",
+        "firetv",
+        "windows"
+      ],
+      "tags": [
+        "natural language",
+        "recommendations",
+        "ChatGPT",
+        "Claude",
+        "Gemini",
+        "Perplexity",
+        "DeepSeek"
+      ],
+      "sections": [
+        {
+          "title": "Search normally",
+          "steps": [
+            "Open Search and enter a movie, series, or person name.",
+            "Use the available media-type and catalogue filters. Open the result to inspect the title and year before selecting sources."
+          ]
+        },
+        {
+          "title": "Use AI search",
+          "steps": [
+            "Connect an AI provider in Settings → Integrations or the AI connection section with your own valid key.",
+            "Enable the AI search toggle on the Search page, then describe what you want to watch.",
+            "Open a recommendation to view its normal details and available sources. Turn the toggle off to return to ordinary search."
+          ]
+        },
+        {
+          "title": "What AI changes",
+          "paragraphs": [
+            "AI helps interpret a request and suggest titles; it does not create a media subscription or guarantee a source. The configured AI service receives your request and may apply its own charges or limits. If AI is unconfigured or fails, ordinary search remains the fallback."
+          ]
+        }
+      ],
+      "related": [
+        "ai-connection",
+        "recommendations",
+        "streaming-services"
+      ]
+    },
+    {
+      "id": "streaming-services",
+      "category": "discover",
+      "title": "Browse a streaming service",
+      "summary": "Movies and TV shows on a provider, with filters and a region.",
+      "platforms": [
+        "ios",
+        "tvos",
+        "android",
+        "firetv",
+        "windows"
+      ],
+      "tags": [],
+      "sections": [
+        {
+          "title": "Open a provider",
+          "steps": [
+            "Choose a streaming-service tile on Home, or configure the visible services in Settings.",
+            "Switch between Movies and TV Shows. Use genre, year, and rating filters to narrow the selected provider’s catalogue.",
+            "Check the watch region used by the app. Availability changes by country and over time."
+          ]
+        },
+        {
+          "title": "Where the list comes from",
+          "paragraphs": [
+            "Provider pages use catalogue availability data for the selected service and region. A title can be shown on Netflix without being a Netflix original. These pages do not grant access to the provider’s subscription or replace the normal Torve source picker."
+          ]
+        },
+        {
+          "title": "Missing or unexpected titles",
+          "paragraphs": [
+            "Reset the provider’s filters and verify the region before assuming the catalogue is empty. Metadata availability can lag the provider itself; a displayed title is not a guarantee of immediate playback through a separate connected source."
+          ]
+        }
+      ],
+      "related": [
+        "catalogues",
+        "search",
+        "recommendations"
+      ]
+    },
+    {
+      "id": "recommendations",
+      "category": "discover",
+      "title": "Recommendations and Mood Matcher",
+      "summary": "Use discovery tools, your viewing activity, and optional AI.",
+      "platforms": [
+        "ios",
+        "tvos",
+        "android",
+        "firetv",
+        "windows"
+      ],
+      "tags": [
+        "mood",
+        "similar",
+        "personalised"
+      ],
+      "sections": [
+        {
+          "title": "Discovery routes",
+          "paragraphs": [
+            "Home recommendations, Discover, related titles on a detail page, and Mood Matcher offer different ways to find something to watch. Mobile apps expose more dedicated discovery screens; TV uses its Home and Search flows."
+          ]
+        },
+        {
+          "title": "Make results more relevant",
+          "paragraphs": [
+            "Keep watched state and ratings accurate. Connect Trakt or SIMKL if you use their history, and select the household profile whose activity should guide your browsing. AI suggestions additionally require an enabled AI connection."
+          ]
+        },
+        {
+          "title": "Availability",
+          "paragraphs": [
+            "The iOS recommendation and profile work is part of the current implementation; its presence in a test or store build must be checked separately. Recommendations can include titles without an available playback source. Use title details and your provider filters to decide what to open."
+          ]
+        }
+      ],
+      "related": [
+        "catalogues",
+        "search",
+        "streaming-services"
+      ]
+    },
+    {
+      "id": "home-layout",
+      "category": "discover",
+      "title": "Personalise Home and poster cards",
+      "summary": "Rows, custom sections, card style, and rating badges.",
+      "platforms": [
+        "ios",
+        "tvos",
+        "android",
+        "firetv",
+        "windows"
+      ],
+      "tags": [],
+      "sections": [
+        {
+          "title": "Choose what appears",
+          "paragraphs": [
+            "Open Settings → Home Layout to order or enable the supported rows. Streaming Services controls provider tiles. Custom Sections and catalogue groups let you build additional routes into the catalogues you use. The available controls differ between mobile and television layouts."
+          ]
+        },
+        {
+          "title": "Poster presentation",
+          "paragraphs": [
+            "Card Style and Ratings settings control the supported card layouts and rating badges. Ratings from different services are separate measurements; a missing badge can mean missing metadata or an unconfigured API service."
+          ]
+        },
+        {
+          "title": "Artwork is metadata",
+          "paragraphs": [
+            "A poster is loaded separately from playback. Missing artwork does not prove that a title is unavailable. Refresh the title or catalogue if the artwork is stale; see the localisation article for translated posters and fallbacks."
+          ]
+        }
+      ],
+      "related": [
+        "catalogues",
+        "search",
+        "streaming-services"
+      ]
+    },
+    {
+      "id": "localisation",
+      "category": "discover",
+      "title": "Interface language, titles, and posters",
+      "summary": "Translate the browsing experience while keeping playback language separate.",
+      "platforms": [
+        "ios",
+        "tvos",
+        "android",
+        "firetv",
+        "windows"
+      ],
+      "tags": [],
+      "sections": [
+        {
+          "title": "Interface",
+          "paragraphs": [
+            "The app language options target English, German, Spanish, French, Italian, Portuguese, and Turkish. Choose an app language or the system-language option in Appearance. A platform build can still contain untranslated service messages."
+          ]
+        },
+        {
+          "title": "Title and artwork language",
+          "paragraphs": [
+            "Metadata requests use the selected locale for supported titles, descriptions, and artwork. A translated poster only appears when the metadata service has an appropriate image. If there is none, a fallback poster or title is used; Torve does not invent a translated film poster. Cached metadata may need a refresh after changing language."
+          ]
+        },
+        {
+          "title": "Playback is a separate preference",
+          "paragraphs": [
+            "A German interface does not create a German audio track. Playback can follow the app language or a separately selected audio language. Source filtering and subtitle fallback use that playback setting, not the language of the poster."
+          ]
+        }
+      ],
+      "related": [
+        "catalogues",
+        "search",
+        "streaming-services"
+      ]
+    },
+    {
+      "id": "watchlist-history",
+      "category": "library",
+      "title": "Watchlists, favourites, history, and ratings",
+      "summary": "Keep track of what you want to watch and what you have seen.",
+      "platforms": [
+        "ios",
+        "tvos",
+        "android",
+        "firetv",
+        "windows"
+      ],
+      "tags": [],
+      "sections": [
+        {
+          "title": "From title details",
+          "paragraphs": [
+            "Use Watchlist for titles you intend to watch, Favourites for quick access, and the watched or rating actions for your viewing record. Series and season actions can affect multiple episodes; check the selected scope before marking them watched."
+          ]
+        },
+        {
+          "title": "Library views",
+          "paragraphs": [
+            "Library and Library tools expose the supported favourites, viewing history, watchlists, personal lists, and collections. Continue Watching uses saved progress, while Up Next chooses an episode from your viewing state. A tracking-service list and a local catalogue group are different objects."
+          ]
+        },
+        {
+          "title": "Across devices",
+          "paragraphs": [
+            "Use the same Torve account and household profile, and connect the intended tracking account if you rely on Trakt or SIMKL. Allow synchronisation to complete before comparing two devices. A download file is local even when its watch progress is synced."
+          ]
+        }
+      ],
+      "related": [
+        "up-next",
+        "calendar-alerts",
+        "profiles"
+      ]
+    },
+    {
+      "id": "up-next",
+      "category": "library",
+      "title": "Your shows and Up Next",
+      "summary": "Resume episodes, choose the next one, and open upcoming entries.",
+      "platforms": [
+        "ios",
+        "tvos",
+        "android",
+        "firetv",
+        "windows"
+      ],
+      "tags": [],
+      "sections": [
+        {
+          "title": "Resume or continue",
+          "paragraphs": [
+            "Your shows brings episode progress and upcoming viewing together. An Up Next card may resume an unfinished episode or point to the next episode. Confirm the season and episode shown under the artwork."
+          ]
+        },
+        {
+          "title": "When an episode has not aired",
+          "paragraphs": [
+            "Use the upcoming entry for its details and air date. Availability of metadata is independent of availability of sources. Opening it should not require finding a playable episode first."
+          ]
+        },
+        {
+          "title": "If an entry is wrong",
+          "paragraphs": [
+            "Check watched state, your active profile, and Trakt or SIMKL sync. Correcting the watched episode is preferable to repeatedly opening a mismatched source. A perpetual loading page is a fault; return to the show details and report the title, episode, and app build."
+          ]
+        }
+      ],
+      "related": [
+        "watchlist-history",
+        "calendar-alerts",
+        "profiles"
+      ]
+    },
+    {
+      "id": "calendar-alerts",
+      "category": "library",
+      "title": "Calendar and episode alerts",
+      "summary": "Track air dates and enable supported phone reminders.",
+      "platforms": [
+        "ios",
+        "tvos",
+        "android",
+        "firetv",
+        "windows"
+      ],
+      "tags": [
+        "notification",
+        "air date",
+        "upcoming"
+      ],
+      "sections": [
+        {
+          "title": "Calendar",
+          "paragraphs": [
+            "Open Your shows and its calendar or upcoming view. The dedicated Trakt calendar requires a connected Trakt account; other upcoming lists depend on the app’s tracked-show data. Air dates can change and do not guarantee provider availability."
+          ]
+        },
+        {
+          "title": "Phone reminders",
+          "paragraphs": [
+            "Where the episode-reminder control is available, enable it and allow notifications in the phone’s system settings. The current Apple implementation schedules local reminders for upcoming episodes within its next-day window and refreshes them as the app reconciles your shows. Reopen the app to refresh stale schedules."
+          ]
+        },
+        {
+          "title": "Delivery limits",
+          "paragraphs": [
+            "System notification permissions, background execution, time zones, and available episode metadata affect delivery. Switching accounts or profiles must use the corresponding viewing data. A TV calendar is not a promise that the TV will deliver phone-style notifications."
+          ]
+        }
+      ],
+      "related": [
+        "watchlist-history",
+        "up-next",
+        "profiles"
+      ]
+    },
+    {
+      "id": "profiles",
+      "category": "library",
+      "title": "Household profiles and personal separation",
+      "summary": "Choose whose watch activity and restrictions you are using.",
+      "platforms": [
+        "ios",
+        "tvos",
+        "android",
+        "firetv",
+        "windows"
+      ],
+      "tags": [],
+      "sections": [
+        {
+          "title": "Choose a household profile",
+          "steps": [
+            "Open Library tools → Household profiles, or the profile entry provided by your app.",
+            "Create or edit a profile, and choose it before browsing or playing. Where offered, set a PIN and maximum content rating.",
+            "After switching, check the profile name before changing watched state, ratings, or personal lists."
+          ]
+        },
+        {
+          "title": "Profile versus account",
+          "paragraphs": [
+            "A Torve account is the sign-in identity. A household profile separates supported personal data within that account. It is not automatically a separate login to every external service. A single connected Trakt or SIMKL account can still represent one external viewing history."
+          ]
+        },
+        {
+          "title": "Restrictions",
+          "paragraphs": [
+            "A PIN and metadata rating filter depend on the app and available ratings; they are not a substitute for a device’s parental controls. The new Apple profile work should be checked on the installed build before relying on complete separation in a shared household."
+          ]
+        }
+      ],
+      "related": [
+        "watchlist-history",
+        "up-next",
+        "calendar-alerts"
+      ]
+    },
+    {
+      "id": "personal-lists",
+      "category": "library",
+      "title": "Lists and catalogue groups",
+      "summary": "Organise titles and pin the catalogues you actually use.",
+      "platforms": [
+        "ios",
+        "tvos",
+        "android",
+        "firetv",
+        "windows"
+      ],
+      "tags": [],
+      "sections": [
+        {
+          "title": "Trakt lists",
+          "paragraphs": [
+            "Connect Trakt before opening its personal lists. Supported list screens let you create, rename, delete, and manage lists. Deleting an external list changes it at the tracking service; removing a shortcut does not necessarily delete the list."
+          ]
+        },
+        {
+          "title": "Catalogue groups",
+          "paragraphs": [
+            "Use catalogue groups or custom sections to collect and pin catalogue entries in the app. These organise browsing routes rather than downloading media or creating a playable source."
+          ]
+        },
+        {
+          "title": "Statistics",
+          "paragraphs": [
+            "Watch statistics summarise available viewing history. Missing history, another profile, or an unconnected tracking service can change the totals. They are not a record of local files on disk."
+          ]
+        }
+      ],
+      "related": [
+        "watchlist-history",
+        "up-next",
+        "calendar-alerts"
+      ]
+    },
+    {
+      "id": "downloads",
+      "category": "library",
+      "title": "Download and watch offline",
+      "summary": "Save supported media locally and verify it before travelling.",
+      "platforms": [
+        "ios",
+        "android"
+      ],
+      "tags": [],
+      "sections": [
+        {
+          "title": "Download",
+          "steps": [
+            "Open the supported download action for a title or episode and choose a downloadable source. Keep the app online while the download completes.",
+            "Use Library → Downloads to inspect completed items, individual episodes, and available storage. A queued or partial item is not an offline copy.",
+            "Test a completed item with the network disabled before relying on it while travelling. Start it from Downloads rather than searching for a new online source."
+          ]
+        },
+        {
+          "title": "What is verified",
+          "paragraphs": [
+            "Completed iOS downloads have been verified playing with the network disabled. Android phone also has a download library. This does not promise downloading every provider, offline licence, subtitle fetch, or format."
+          ]
+        },
+        {
+          "title": "Local storage",
+          "paragraphs": [
+            "Downloaded bytes stay on that device and consume its storage. Account sync does not copy them to another phone. Remove an item through the download library when you no longer need its local copy. tvOS is not documented as having the iPhone offline-download library."
+          ]
+        }
+      ],
+      "related": [
+        "watchlist-history",
+        "up-next",
+        "calendar-alerts"
+      ]
+    },
+    {
+      "id": "cloud-files",
+      "category": "library",
+      "title": "Cloud files and personal libraries",
+      "summary": "Browse files that belong to a connected media service.",
+      "platforms": [
+        "ios",
+        "tvos",
+        "android",
+        "firetv",
+        "windows"
+      ],
+      "tags": [],
+      "sections": [
+        {
+          "title": "Cloud files",
+          "paragraphs": [
+            "Library tools and the desktop or TV file browser can expose the files available from connected cloud services. A file listed in a cloud account is not a completed download on your device. Its provider still needs to return a usable playback URL."
+          ]
+        },
+        {
+          "title": "Personal libraries",
+          "paragraphs": [
+            "Use the Jellyfin or Plex integration for your own server library. Server access, library permissions, and network reachability are separate from Torve account sign-in."
+          ]
+        },
+        {
+          "title": "Local playback",
+          "paragraphs": [
+            "On phones, use completed items in Downloads for supported offline playback. This guide does not claim universal arbitrary-file import, SMB, or WebDAV browsing in every app. Windows recording files belong to the desktop recording workflow."
+          ]
+        }
+      ],
+      "related": [
+        "network-files",
+        "personal-servers",
+        "downloads"
+      ]
+    },
+    {
+      "id": "what-is-panda",
+      "category": "streaming",
+      "title": "Panda and the source flow",
+      "summary": "Understand configuration, search, and playback preparation.",
+      "platforms": [
+        "ios",
+        "tvos",
+        "android",
+        "firetv",
+        "windows"
+      ],
+      "tags": [],
+      "sections": [
+        {
+          "title": "What Panda does",
+          "paragraphs": [
+            "Panda combines configured source providers and Usenet indexers into sources Torve can search and open. It is one source path; personal servers, channel playlists, and other installed stream extensions have their own paths."
+          ]
+        },
+        {
+          "title": "Three separate stages",
+          "paragraphs": [
+            "A catalogue identifies a title. A source search finds releases for that title or episode. Opening a release resolves or prepares a playable file through the configured playback service. A successful search does not prove that a download service can fetch that release."
+          ]
+        },
+        {
+          "title": "Before you start",
+          "paragraphs": [
+            "Have the actual service credentials ready. An indexer API key searches releases; a download-client or cloud-service key handles retrieval. Torve account credentials are not a replacement for either."
+          ]
+        }
+      ],
+      "related": [
+        "install-panda",
+        "panda-management-token",
+        "debrid-providers"
+      ]
+    },
+    {
+      "id": "install-panda",
+      "category": "streaming",
+      "title": "Set up or update Panda",
+      "summary": "Use the native wizard and save the installed configuration.",
+      "platforms": [
+        "ios",
+        "tvos",
+        "android",
+        "firetv",
+        "windows"
+      ],
+      "tags": [],
+      "sections": [
+        {
+          "title": "Configure",
+          "steps": [
+            "Open Settings → Panda setup or Panda & Usenet. Choose the source mode and services you intend to use.",
+            "Connect or verify each selected cloud provider. Add Usenet account details or indexers only if you use those paths.",
+            "For an NZB indexer, add its URL and API key, then choose a supported download service or client.",
+            "Review and save or install the configuration. Return to the source manager and check that the intended sources are enabled."
+          ]
+        },
+        {
+          "title": "TV navigation",
+          "paragraphs": [
+            "Fire TV setup starts at the first configuration page. Left and Right switch pages, with Back and Next also available. Editing a URL or key is a separate focusable action."
+          ]
+        },
+        {
+          "title": "Editing later",
+          "paragraphs": [
+            "Reopen the existing configuration to change it. Selecting a provider is not proof of a successful connection. If a restore or management key is shown, store it before dismissing the acknowledgement."
+          ]
+        }
+      ],
+      "related": [
+        "what-is-panda",
+        "panda-management-token",
+        "debrid-providers"
+      ]
+    },
+    {
+      "id": "panda-management-token",
+      "category": "streaming",
+      "title": "Panda recovery and management keys",
+      "summary": "Keep the key needed to manage or restore a configuration.",
+      "platforms": [
+        "ios",
+        "tvos",
+        "android",
+        "firetv",
+        "windows"
+      ],
+      "tags": [],
+      "sections": [
+        {
+          "title": "Store the recovery information",
+          "paragraphs": [
+            "A Panda configuration may provide a recovery or management key during setup. Save it privately when the app asks you to acknowledge it. A configured source URL and a management key serve different purposes."
+          ]
+        },
+        {
+          "title": "Restore",
+          "paragraphs": [
+            "Use the restore or management action in Panda setup and enter the key for that configuration. Check its providers and indexers after restoring, then save the installed source."
+          ]
+        },
+        {
+          "title": "Protect it",
+          "paragraphs": [
+            "Do not paste service API keys, management keys, or full authenticated source URLs into support screenshots or public chats. Sign-in, normal settings backup, and credential transfer have different scopes; do not assume one automatically recreates the others."
+          ]
+        }
+      ],
+      "related": [
+        "what-is-panda",
+        "install-panda",
+        "debrid-providers"
+      ]
+    },
+    {
+      "id": "debrid-providers",
+      "category": "streaming",
+      "title": "Connect one or more cloud providers",
+      "summary": "Real-Debrid, AllDebrid, Premiumize, and TorBox.",
+      "platforms": [
+        "ios",
+        "tvos",
+        "android",
+        "firetv",
+        "windows"
+      ],
+      "tags": [
+        "RealDebrid",
+        "real debrid",
+        "AllDebrid",
+        "Premiumize",
+        "TorBox"
+      ],
+      "sections": [
+        {
+          "title": "Connect a service",
+          "steps": [
+            "Open Connections or the provider section of Panda setup. Select the provider you actually have an account with.",
+            "Complete its offered authorisation flow or enter its API key. Use Connect or Verify and wait for a successful result.",
+            "Repeat for another supported provider if required, then enable the source paths you want in Panda."
+          ]
+        },
+        {
+          "title": "Connection state",
+          "paragraphs": [
+            "A highlighted provider or an existing selection is not the same as a verified connection. Check the individual provider’s status. If it reports a connection you do not recognise, inspect and disconnect that provider rather than assuming all providers share the same login."
+          ]
+        },
+        {
+          "title": "Source labels",
+          "paragraphs": [
+            "A source may name both its originating extension or indexer and its playback service. These are separate roles. Several providers can be configured; playback still uses the provider attached to the selected result."
+          ]
+        }
+      ],
+      "related": [
+        "what-is-panda",
+        "install-panda",
+        "panda-management-token"
+      ]
+    },
+    {
+      "id": "usenet-overview",
+      "category": "streaming",
+      "title": "Usenet: indexer, account, and playback service",
+      "summary": "Understand what each credential is for.",
+      "platforms": [
+        "ios",
+        "tvos",
+        "android",
+        "firetv",
+        "windows"
+      ],
+      "tags": [],
+      "sections": [
+        {
+          "title": "Search and retrieval",
+          "paragraphs": [
+            "An NZB indexer finds releases and returns an NZB reference. A configured client or cloud download service retrieves and prepares the media. Easynews is another supported Usenet route with its own account configuration. A search result does not prove that every part of this chain is connected."
+          ]
+        },
+        {
+          "title": "Shared search",
+          "paragraphs": [
+            "The Panda server’s indexer and title-matching work serves both Apple and Android clients. Configured, enabled Usenet sources can work without Torrentio. The selected language, quality, cached-only, and source-type filters can still hide results."
+          ]
+        },
+        {
+          "title": "Cold versus ready",
+          "paragraphs": [
+            "A ready or cached result may open quickly. An uncached Usenet result can need download, repair, or extraction before it is playable. Account limits and missing articles can prevent completion. See preparation and troubleshooting rather than treating every delay as an empty catalogue."
+          ]
+        }
+      ],
+      "related": [
+        "what-is-panda",
+        "install-panda",
+        "panda-management-token"
+      ]
+    },
+    {
+      "id": "usenet-nzb-indexer",
+      "category": "streaming",
+      "title": "Add Treasure Maps, Videothek, or another indexer",
+      "summary": "Enter and persist a Newznab URL and API key.",
+      "platforms": [
+        "ios",
+        "tvos",
+        "android",
+        "firetv",
+        "windows"
+      ],
+      "tags": [
+        "newznab",
+        "Treasure Maps",
+        "Videothek",
+        "custom URL",
+        "API"
+      ],
+      "sections": [
+        {
+          "title": "Add an indexer",
+          "steps": [
+            "In Panda setup, choose Add another indexer. Select a preset or Custom URL.",
+            "Enter the indexer’s own base URL and API key. For these presets the sites are https://treasure-maps.com and https://videothek.io. The app resolves the API endpoint; avoid constructing a duplicated /api/api path.",
+            "Complete the row, verify it where available, and save the overall Panda configuration. Reopen it to confirm the indexer persisted.",
+            "Select the download client or service that will retrieve its NZBs; the indexer itself does not play the video."
+          ]
+        },
+        {
+          "title": "More than one indexer",
+          "paragraphs": [
+            "Add each indexer as its own entry. Use the same configuration when testing across Apple and Android. A provider can reject a query or download because of credentials, subscription permissions, trial limits, or quotas."
+          ]
+        },
+        {
+          "title": "Search metadata",
+          "paragraphs": [
+            "Indexers can expose title IDs, release names, audio language, and subtitles separately. A subtitle-language field must not be treated as proof of an audio track. Exact show identity and episode metadata help distinguish remakes with the same name."
+          ]
+        }
+      ],
+      "related": [
+        "usenet-overview",
+        "source-preparation",
+        "usenet-troubleshooting"
+      ]
+    },
+    {
+      "id": "usenet-easynews",
+      "category": "streaming",
+      "title": "Easynews and direct Usenet access",
+      "summary": "Configure the route you subscribe to.",
+      "platforms": [
+        "ios",
+        "tvos",
+        "android",
+        "firetv",
+        "windows"
+      ],
+      "tags": [],
+      "sections": [
+        {
+          "title": "Easynews",
+          "paragraphs": [
+            "Choose the Easynews option in Panda and enter the required account credentials. Verify the connection and save the source configuration. Its access and usage policy are separate from those of an NZB indexer or TorBox account."
+          ]
+        },
+        {
+          "title": "Other Usenet routes",
+          "paragraphs": [
+            "Some app configurations expose NNTP host, port, user, password, and secure-connection settings, or NzbDAV. Use the values from your own service and the setup entry actually offered by your app. Do not put a Newznab API key in an NNTP password field."
+          ]
+        },
+        {
+          "title": "Compare routes",
+          "paragraphs": [
+            "If one configured route fails, a result from a different route may still work. Use the source provider label and error to identify the failing service before replacing unrelated credentials."
+          ]
+        }
+      ],
+      "related": [
+        "what-is-panda",
+        "install-panda",
+        "panda-management-token"
+      ]
+    },
+    {
+      "id": "nzbdav",
+      "category": "streaming",
+      "title": "NzbDAV and download-client connections",
+      "summary": "Test the service that turns a selected NZB into playback.",
+      "platforms": [
+        "ios",
+        "tvos",
+        "android",
+        "firetv",
+        "windows"
+      ],
+      "tags": [],
+      "sections": [
+        {
+          "title": "Connect",
+          "paragraphs": [
+            "Open the NzbDAV or download-client integration where provided. Enter its reachable server address and credentials, then use Test or Save & check. The address must be reachable from the device or server that performs that request."
+          ]
+        },
+        {
+          "title": "Roles",
+          "paragraphs": [
+            "Panda indexer search and download-client preparation are distinct steps. An indexer returning results does not establish that NzbDAV, TorBox, or another selected client can retrieve and serve the media."
+          ]
+        },
+        {
+          "title": "On a home network",
+          "paragraphs": [
+            "A private server address can work at home and fail away from home. Keep service access controlled and use your own remote-access arrangement where needed. Check the preparation error rather than silently substituting another endpoint."
+          ]
+        }
+      ],
+      "related": [
+        "what-is-panda",
+        "install-panda",
+        "panda-management-token"
+      ]
+    },
+    {
+      "id": "source-filters",
+      "category": "streaming",
+      "title": "Choose and filter sources",
+      "summary": "Source type, provider, language, quality, size, and readiness.",
+      "platforms": [
+        "ios",
+        "tvos",
+        "android",
+        "firetv",
+        "windows"
+      ],
+      "tags": [],
+      "sections": [
+        {
+          "title": "Read a result",
+          "paragraphs": [
+            "Check the release title, show year, season and episode, quality, size, provider, and readiness indicator. A score is a preference ranking; it is not a guarantee that the release matches your title or will start."
+          ]
+        },
+        {
+          "title": "Filter deliberately",
+          "paragraphs": [
+            "Use All sources, Usenet, torrent or provider options where offered. A provider filter and a language filter both apply, so the resulting list can be empty even when the initial search found releases. Quality limits, file-size limits, codec, cached-only, and custom playback rules may also apply."
+          ]
+        },
+        {
+          "title": "Sort and reset",
+          "paragraphs": [
+            "Recommended and size sorting reorder matching sources. Cached-only excludes sources needing preparation. Clear filters restores the picker’s broad view; choosing Any language is useful when checking whether a language rule hid the result."
+          ]
+        },
+        {
+          "title": "Source groups",
+          "paragraphs": [
+            "Stream Groups and regex rules are advanced preference or matching tools. A rule that is too restrictive can hide a valid release. Compare with the default configuration when diagnosing a missing source."
+          ]
+        }
+      ],
+      "related": [
+        "what-is-panda",
+        "install-panda",
+        "panda-management-token"
+      ]
+    },
+    {
+      "id": "source-preparation",
+      "category": "streaming",
+      "title": "Opening, preparing, cancelling, and retrying",
+      "summary": "What happens after you select a source.",
+      "platforms": [
+        "ios",
+        "tvos",
+        "android",
+        "firetv",
+        "windows"
+      ],
+      "tags": [],
+      "sections": [
+        {
+          "title": "While it opens",
+          "paragraphs": [
+            "Keep the source picker open while Preparing video is shown. An uncached result may be downloading or resolving in the background. Wait for the player, use Cancel opening to stop the current opening attempt, or choose another source after an error."
+          ]
+        },
+        {
+          "title": "After an error",
+          "paragraphs": [
+            "The list should remain available with Try source again and Refresh sources. Retry repeats the selected opening attempt; refresh requests a new list. A preparation timeout is different from an empty search."
+          ]
+        },
+        {
+          "title": "Cancellation scope",
+          "paragraphs": [
+            "Cancelling the app’s opening attempt does not promise to delete a job already created in a third-party download service. Check that service if you need to cancel its retrieval."
+          ]
+        },
+        {
+          "title": "Useful report",
+          "paragraphs": [
+            "Include the app build, title year, season and episode, indexer plus playback service label, and the exact displayed message. Keep account tokens and authenticated URLs out of the report."
+          ]
+        }
+      ],
+      "related": [
+        "usenet-troubleshooting",
+        "playback-troubleshooting"
+      ]
+    },
+    {
+      "id": "extensions",
+      "category": "streaming",
+      "title": "Manage extensions and source lists",
+      "summary": "Catalogues and playable streams are different capabilities.",
+      "platforms": [
+        "ios",
+        "tvos",
+        "android",
+        "firetv",
+        "windows"
+      ],
+      "tags": [],
+      "sections": [
+        {
+          "title": "Install and manage",
+          "steps": [
+            "Open Settings → Content Sources or the extension manager, or use Extensions in the account portal.",
+            "Add the supported extension URL or the source generated by Panda setup. Review the extension name and capabilities.",
+            "Enable the sources you want, disable a source for a comparison test, or remove an unused entry. Refresh its configuration after editing it externally."
+          ]
+        },
+        {
+          "title": "What an extension supplies",
+          "paragraphs": [
+            "A catalogue extension can populate posters without providing any stream. A stream extension can return releases without controlling the title artwork. Configuration and account sync do not create credentials for a third-party service."
+          ]
+        },
+        {
+          "title": "Trust and duplicates",
+          "paragraphs": [
+            "Only install sources you intend to use. Duplicate configurations can create duplicate results, and disabled sources should not be expected to contribute to a fresh search."
+          ]
+        }
+      ],
+      "related": [
+        "what-is-panda",
+        "install-panda",
+        "panda-management-token"
+      ]
+    },
+    {
+      "id": "audio-language",
+      "category": "playback",
+      "title": "Preferred audio language and subtitle fallback",
+      "summary": "Filter for actual audio, with optional matching subtitles.",
+      "platforms": [
+        "ios",
+        "tvos",
+        "android",
+        "firetv",
+        "windows"
+      ],
+      "tags": [
+        "German",
+        "English",
+        "multi audio",
+        "flags",
+        "language filter"
+      ],
+      "sections": [
+        {
+          "title": "Set the preference",
+          "steps": [
+            "Open Settings → Playback → Preferred audio language. Choose a language, use the app language where offered, or choose Any language.",
+            "Leave Include matching subtitles off if you require that language as an audio track.",
+            "Turn it on if you also accept original-language audio with subtitles in your selected language."
+          ]
+        },
+        {
+          "title": "What qualifies",
+          "paragraphs": [
+            "With a specific language and subtitle fallback off, subtitle-only evidence must not qualify a source as matching audio. With fallback on, a source with matching subtitles may qualify when matching audio is unavailable. The rule applies to every supported selected language, not only German."
+          ]
+        },
+        {
+          "title": "During playback",
+          "paragraphs": [
+            "When track information becomes available, the player attempts to select the preferred audio track. If subtitle fallback is enabled and used, it can select the matching subtitle instead. You can inspect or override the selected tracks in the player. Filenames and provider hints are not as strong as an actual track inspection."
+          ]
+        }
+      ],
+      "related": [
+        "track-inspection",
+        "subtitles",
+        "source-filters"
+      ]
+    },
+    {
+      "id": "track-inspection",
+      "category": "playback",
+      "title": "Pre-play checks and cached track languages",
+      "summary": "How Torve distinguishes track information from language hints.",
+      "platforms": [
+        "ios",
+        "tvos",
+        "android",
+        "firetv"
+      ],
+      "tags": [
+        "probe",
+        "cache",
+        "verified",
+        "unverified",
+        "unknown"
+      ],
+      "sections": [
+        {
+          "title": "Before playback",
+          "paragraphs": [
+            "On supported Apple and Android paths, Torve inspects readable media to discover audio and subtitle tracks before applying a strict language match. It can reuse cached track observations instead of probing the same file on every visit."
+          ]
+        },
+        {
+          "title": "What can be checked",
+          "paragraphs": [
+            "A usable media URL must exist and the server or format must allow a bounded read. Unresolved, uncached, inaccessible, or slow media may not be inspectable yet. Inspection does not mean downloading every release or starting every Usenet retrieval."
+          ]
+        },
+        {
+          "title": "Read the evidence",
+          "paragraphs": [
+            "Track-checked information describes media observed by the app. Filename or source-information language labels are hints and can be incomplete. Unknown languages may remain hidden under a strict language selection; Any language is the broadest view. Audio and subtitle information are kept separate."
+          ]
+        },
+        {
+          "title": "Limits",
+          "paragraphs": [
+            "A source can change its file or URL, or provide missing or incorrect language tags. The actual player track list is the final check. Do not assume Windows has the same pre-play inspection workflow merely because it has preferred-language playback."
+          ]
+        }
+      ],
+      "related": [
+        "audio-language",
+        "source-preparation",
+        "no-streams-troubleshooting"
+      ]
+    },
+    {
+      "id": "subtitles",
+      "category": "playback",
+      "title": "Subtitles without a crowded source list",
+      "summary": "Choose tracks in the player and keep source rows readable.",
+      "platforms": [
+        "ios",
+        "tvos",
+        "android",
+        "firetv",
+        "windows"
+      ],
+      "tags": [],
+      "sections": [
+        {
+          "title": "Source list",
+          "paragraphs": [
+            "The compact source presentation prioritises audio languages. A long list of subtitle flags does not need to be displayed to retain subtitle evidence for filtering. Include matching subtitles controls eligibility independently of how much information is printed on a source card."
+          ]
+        },
+        {
+          "title": "In the player",
+          "paragraphs": [
+            "Open Subtitles to choose an embedded track or turn subtitles off. If online subtitle search is available, configure its integration and use the matching title or episode. A downloaded subtitle is separate from evidence available during the initial source search."
+          ]
+        },
+        {
+          "title": "Adjustments",
+          "paragraphs": [
+            "Use subtitle delay and the available style or track controls when needed. External subtitle availability, format support, and synchronisation depend on the player and service. A subtitle in German does not turn English audio into German audio."
+          ]
+        }
+      ],
+      "related": [
+        "audio-language",
+        "track-inspection",
+        "player-controls"
+      ]
+    },
+    {
+      "id": "player-controls",
+      "category": "playback",
+      "title": "Player controls and playback preferences",
+      "summary": "Seek, tracks, speed, screen fit, and next episodes.",
+      "platforms": [
+        "ios",
+        "tvos",
+        "android",
+        "firetv",
+        "windows"
+      ],
+      "tags": [],
+      "sections": [
+        {
+          "title": "Core controls",
+          "paragraphs": [
+            "Use play/pause, the timeline, and skip controls to move through a seekable video. Repeated +15-second presses should accumulate the requested position; a provider must still support seeking for the player to fulfil it. Live streams may have no seekable past."
+          ]
+        },
+        {
+          "title": "More controls",
+          "paragraphs": [
+            "The active player may expose audio and subtitle tracks, playback speed, aspect or fit, audio delay, and additional sound controls. Available controls differ by platform and player engine. Change a track here if its metadata or automatic selection is wrong."
+          ]
+        },
+        {
+          "title": "Preferences",
+          "paragraphs": [
+            "Playback settings include auto-play best stream, auto-play next episode, quality and size limits, codec preferences, and HDR options where supported. These influence source choice; they cannot make a device decode an unsupported format."
+          ]
+        },
+        {
+          "title": "External display",
+          "paragraphs": [
+            "Picture in Picture and AirPlay depend on the Apple player path and device capabilities. Desktop and Android external-player choices, when offered, hand playback to that app. External playback may have different progress reporting and controls."
+          ]
+        }
+      ],
+      "related": [
+        "audio-language",
+        "track-inspection",
+        "subtitles"
+      ]
+    },
+    {
+      "id": "player-engines",
+      "category": "playback",
+      "title": "Switch player and diagnose a seek failure",
+      "summary": "Separate a player issue from an inaccessible stream.",
+      "platforms": [
+        "ios",
+        "tvos",
+        "android",
+        "firetv",
+        "windows"
+      ],
+      "tags": [],
+      "sections": [
+        {
+          "title": "Switching",
+          "paragraphs": [
+            "Use Switch player or the configured player-engine preference where the build offers it. Apple playback has native and VLC paths; desktop exposes its available mpv and VLC backends. Not every stream can be handled by every backend."
+          ]
+        },
+        {
+          "title": "Seeking",
+          "paragraphs": [
+            "If the same position fails in multiple players, the provider’s range responses or stream format may be the limiting factor. Repeatedly reopening a bad source does not repair its server. Try another valid release and keep the failing position for a useful report."
+          ]
+        },
+        {
+          "title": "Before changing settings",
+          "paragraphs": [
+            "Check whether the source is still being prepared, whether it is live, and whether the failure is a network interruption. Reset advanced codec or quality rules only when they are relevant to the selected release."
+          ]
+        }
+      ],
+      "related": [
+        "audio-language",
+        "track-inspection",
+        "subtitles"
+      ]
+    },
+    {
+      "id": "add-url-import",
+      "category": "channels",
+      "title": "Add a channel playlist or Xtream login",
+      "summary": "Import your own channels and provider details.",
+      "platforms": [
+        "ios",
+        "tvos",
+        "android",
+        "firetv",
+        "windows"
+      ],
+      "tags": [],
+      "sections": [
+        {
+          "title": "Playlist URL",
+          "steps": [
+            "Open Channels setup in Connections or Settings.",
+            "Choose the playlist or URL-import option and enter the provider’s supported M3U URL. Add an EPG URL if it is separate.",
+            "Save, refresh, and open Channels. The URL must be reachable and any embedded credentials must still be valid."
+          ]
+        },
+        {
+          "title": "Service login",
+          "steps": [
+            "Choose the service-login or Xtream option. Enter the server address, username, and password from your provider.",
+            "Save and check the connection. Load its channel groups and, where offered, its movie or series library."
+          ]
+        },
+        {
+          "title": "Keep the roles separate",
+          "paragraphs": [
+            "An IPTV login is not an NZB indexer or a cloud download account. Provider data determines which channels, guide entries, VOD titles, and replay windows are available."
+          ]
+        }
+      ],
+      "related": [
+        "epg-explained",
+        "catchup-vod",
+        "sports"
+      ]
+    },
+    {
+      "id": "epg-explained",
+      "category": "channels",
+      "title": "Channel guide, favourites, and hidden groups",
+      "summary": "Use the programme guide and maintain the channel list.",
+      "platforms": [
+        "ios",
+        "tvos",
+        "android",
+        "firetv",
+        "windows"
+      ],
+      "tags": [],
+      "sections": [
+        {
+          "title": "Open the guide",
+          "paragraphs": [
+            "Channels offers a list and programme-guide view. Select a channel or programme, move the guide time window, and use Now to return to the current time. Programme timing follows the guide feed and time-zone handling."
+          ]
+        },
+        {
+          "title": "Organise",
+          "paragraphs": [
+            "Use favourite channels, country and category controls, and hide/show options offered by the app. Hidden channels or groups may explain why an imported channel is missing from the visible list."
+          ]
+        },
+        {
+          "title": "Refresh and diagnose",
+          "paragraphs": [
+            "Refresh the playlist and guide after a provider changes them. Missing or overlapping programmes can come from duplicate or conflicting feed entries. Check the channel, programme time, and configured feed when reporting an unreadable guide. Poster and logo loading is independent of the programme schedule."
+          ]
+        }
+      ],
+      "related": [
+        "add-url-import",
+        "catchup-vod",
+        "sports"
+      ]
+    },
+    {
+      "id": "catchup-vod",
+      "category": "channels",
+      "title": "Catch-up and IPTV video on demand",
+      "summary": "Replays and VOD require provider support.",
+      "platforms": [
+        "ios",
+        "tvos",
+        "android",
+        "firetv",
+        "windows"
+      ],
+      "tags": [],
+      "sections": [
+        {
+          "title": "Catch-up",
+          "paragraphs": [
+            "If the provider supplies a catch-up URL and a valid replay window, supported guide entries can open a past programme. A normal EPG entry alone does not create a recording or a replay stream."
+          ]
+        },
+        {
+          "title": "IPTV films and series",
+          "paragraphs": [
+            "Xtream-style services can expose VOD films and series separately from live channels. Open the provider’s movie or series entry, then choose an episode. This catalogue is distinct from Torve’s general metadata catalogue."
+          ]
+        },
+        {
+          "title": "Seeking and availability",
+          "paragraphs": [
+            "VOD seeking depends on the stream endpoint. A replay can expire even though the guide still displays the old programme. If play or seeking fails, compare another episode and report the provider route and time position without revealing its credentials."
+          ]
+        }
+      ],
+      "related": [
+        "add-url-import",
+        "epg-explained",
+        "sports"
+      ]
+    },
+    {
+      "id": "sports",
+      "category": "channels",
+      "title": "Sports from all configured indexers",
+      "summary": "Find event broadcasts and replays without game or drama results.",
+      "platforms": [
+        "ios",
+        "tvos",
+        "firetv",
+        "windows"
+      ],
+      "tags": [],
+      "sections": [
+        {
+          "title": "Open Sports",
+          "paragraphs": [
+            "Dedicated Sports browsing is present in iOS, the TV apps, and Windows. It is not documented as a separate Android phone screen in this edition. Choose a sport, date range, or search term and refresh when needed."
+          ]
+        },
+        {
+          "title": "Which indexers",
+          "paragraphs": [
+            "The updated shared flow uses the configured indexers available to the Sports search. Results can survive a failure from another indexer. Credentials, indexer capabilities, account limits, and filters determine which one contributes results."
+          ]
+        },
+        {
+          "title": "What belongs here",
+          "paragraphs": [
+            "Sports is intended for sports-event recordings and broadcasts. Video games such as NBA 2K, scripted series, films, and unrelated releases should be excluded even if their names contain a sports term. Metadata classification can still be imperfect; report the exact unwanted release."
+          ]
+        },
+        {
+          "title": "When nothing loads",
+          "paragraphs": [
+            "A connection error is different from an empty result after filters. Check the indexer connection and limits, expand the date range, and retry. The page should not silently treat a failed request as proof that no events exist."
+          ]
+        }
+      ],
+      "related": [
+        "usenet-nzb-indexer",
+        "channels-troubleshooting"
+      ]
+    },
+    {
+      "id": "recordings",
+      "category": "channels",
+      "title": "Record live TV on Windows",
+      "summary": "Immediate recordings, schedules, and series passes.",
+      "platforms": [
+        "windows"
+      ],
+      "tags": [
+        "DVR",
+        "schedule",
+        "series pass"
+      ],
+      "sections": [
+        {
+          "title": "Record",
+          "steps": [
+            "Open a live channel and use Record Now, or choose a programme in the Live TV guide and schedule it.",
+            "Choose the available recording options and destination, then inspect the entry in Recordings.",
+            "Use the filters for Scheduled, Recording, Completed, or Failed. A completed file can be opened through the recording workflow."
+          ]
+        },
+        {
+          "title": "Series passes",
+          "paragraphs": [
+            "A series pass schedules matching guide programmes; the supported new-episodes option narrows which programmes are recorded. Cancel a pass when you no longer want its future recordings."
+          ]
+        },
+        {
+          "title": "Keep the recorder available",
+          "paragraphs": [
+            "The computer, configured recorder components, destination storage, and stream connection must remain available. Guide changes, provider limits, storage exhaustion, or a sleeping computer can prevent a recording. This desktop feature is not claimed for every phone or TV app."
+          ]
+        }
+      ],
+      "related": [
+        "add-url-import",
+        "epg-explained",
+        "catchup-vod"
+      ]
+    },
+    {
+      "id": "adult-catalogue",
+      "category": "channels",
+      "title": "Optional desktop adult catalogue",
+      "summary": "A separate indexer catalogue, not part of Sports.",
+      "platforms": [
+        "windows"
+      ],
+      "tags": [],
+      "sections": [
+        {
+          "title": "Desktop scope",
+          "paragraphs": [
+            "The Windows implementation has a separate adult catalogue using configured Newznab categories. It uses indexer release names rather than pretending every item is a movie-database title."
+          ]
+        },
+        {
+          "title": "Configure and browse",
+          "paragraphs": [
+            "Use the appropriate indexer configuration and category controls offered by the desktop app. Search and paging depend on that indexer’s capabilities and account access. These results belong in their own destination, not the Sports event list."
+          ]
+        },
+        {
+          "title": "Household access",
+          "paragraphs": [
+            "Use the restrictions available in your installed app and device. This guide does not claim that every client has the same adult destination or that catalogue metadata alone enforces all parental restrictions."
+          ]
+        }
+      ],
+      "related": [
+        "add-url-import",
+        "epg-explained",
+        "catchup-vod"
+      ]
+    },
+    {
+      "id": "connect-trakt",
+      "category": "integrations",
+      "title": "Trakt",
+      "summary": "Authorise tracking, lists, history, and calendar access.",
+      "platforms": [
+        "ios",
+        "tvos",
+        "android",
+        "firetv",
+        "windows"
+      ],
+      "tags": [],
+      "sections": [
+        {
+          "title": "Connect",
+          "steps": [
+            "Open Settings → Trakt or its Connection Center entry. Start authorisation.",
+            "Follow the displayed browser, QR, or device-code instructions using the intended Trakt account.",
+            "Return to Torve, wait for connection confirmation, and run sync where offered."
+          ]
+        },
+        {
+          "title": "What it supplies",
+          "paragraphs": [
+            "Supported flows use Trakt for watched state, watchlists, ratings, history, personal lists, and calendar data. Check the connected account if two devices show different histories."
+          ]
+        },
+        {
+          "title": "Disconnecting",
+          "paragraphs": [
+            "Disconnect from Torve to stop using that connection. This is separate from deleting the external account or erasing its history. A household profile does not automatically provision another Trakt account."
+          ]
+        }
+      ],
+      "related": [
+        "connect-simkl",
+        "personal-servers",
+        "requests"
+      ]
+    },
+    {
+      "id": "connect-simkl",
+      "category": "integrations",
+      "title": "SIMKL",
+      "summary": "Link supported viewing history and watch-state services.",
+      "platforms": [
+        "ios",
+        "tvos",
+        "android",
+        "firetv",
+        "windows"
+      ],
+      "tags": [],
+      "sections": [
+        {
+          "title": "Connect",
+          "steps": [
+            "Open Settings → SIMKL or the SIMKL connection entry.",
+            "Complete the displayed authorisation flow with your intended SIMKL account.",
+            "Check the confirmed connection and allow its initial synchronisation to finish."
+          ]
+        },
+        {
+          "title": "Scope",
+          "paragraphs": [
+            "SIMKL is a tracking integration, not a stream provider. The connected service can contribute supported watched and list data. Do not assume that every Trakt-specific calendar or list screen has an identical SIMKL counterpart."
+          ]
+        },
+        {
+          "title": "Troubleshooting",
+          "paragraphs": [
+            "If history looks wrong, verify the active Torve profile and external account. Reauthorise only the failing integration rather than replacing unrelated source keys."
+          ]
+        }
+      ],
+      "related": [
+        "connect-trakt",
+        "personal-servers",
+        "requests"
+      ]
+    },
+    {
+      "id": "personal-servers",
+      "category": "integrations",
+      "title": "Jellyfin and Plex",
+      "summary": "Browse and play from your own media server.",
+      "platforms": [
+        "ios",
+        "tvos",
+        "android",
+        "firetv",
+        "windows"
+      ],
+      "tags": [
+        "Jellyfin",
+        "Plex"
+      ],
+      "sections": [
+        {
+          "title": "Connect a server",
+          "steps": [
+            "Open the Jellyfin or Plex integration. Enter the server address and the requested login or token information.",
+            "Test the connection and select the offered server profile or library.",
+            "Open its library destination to browse and play media you are allowed to access."
+          ]
+        },
+        {
+          "title": "Network access",
+          "paragraphs": [
+            "A local server URL may only work on the home network. A successful Torve login does not make that server reachable remotely. Server permissions, codecs, and transcoding can affect playback."
+          ]
+        },
+        {
+          "title": "Separation",
+          "paragraphs": [
+            "A server’s media library, Torve’s metadata catalogue, and a cloud provider’s files are different collections. A title appearing in one does not prove it exists in the others."
+          ]
+        }
+      ],
+      "related": [
+        "connect-trakt",
+        "connect-simkl",
+        "requests"
+      ]
+    },
+    {
+      "id": "requests",
+      "category": "integrations",
+      "title": "Requests and media automation",
+      "summary": "Use Seerr and supported library-request flows.",
+      "platforms": [
+        "ios",
+        "tvos",
+        "android",
+        "firetv",
+        "windows"
+      ],
+      "tags": [
+        "Seerr",
+        "Jellyseerr",
+        "Overseerr",
+        "Sonarr",
+        "Radarr"
+      ],
+      "sections": [
+        {
+          "title": "Connect",
+          "paragraphs": [
+            "Configure the Seerr server URL and key in Integrations or Connections. In the web account portal, use the media-automation section for its supported setup. Test access to your own server."
+          ]
+        },
+        {
+          "title": "Request a title",
+          "paragraphs": [
+            "Use the request action on title details or the Requests library tool when available. Check request status before sending the same request again."
+          ]
+        },
+        {
+          "title": "What a request means",
+          "paragraphs": [
+            "A submitted or approved request is not a playable source. Your configured server and its automation services must obtain and import the media. Permissions, quality profiles, and service errors are controlled by that setup. The administrative web tools are separate from normal playback."
+          ]
+        }
+      ],
+      "related": [
+        "connect-trakt",
+        "connect-simkl",
+        "personal-servers"
+      ]
+    },
+    {
+      "id": "ratings-metadata",
+      "category": "integrations",
+      "title": "Ratings, lists, and metadata keys",
+      "summary": "OMDb, MDBList, and catalogue information.",
+      "platforms": [
+        "ios",
+        "tvos",
+        "android",
+        "firetv",
+        "windows"
+      ],
+      "tags": [
+        "OMDb",
+        "MDBList",
+        "IMDb",
+        "TMDB"
+      ],
+      "sections": [
+        {
+          "title": "Configure",
+          "paragraphs": [
+            "Use Integrations and Ratings settings to configure supported OMDb or MDBList keys and select the badges you want shown. MDBList list settings are separate from the badge display preference."
+          ]
+        },
+        {
+          "title": "Interpret the result",
+          "paragraphs": [
+            "IMDb, TMDB, and other supported ratings use different scales and populations. Missing metadata, missing votes, service limits, or an unconfigured key can produce an absent badge. A movie rating does not indicate stream quality."
+          ]
+        },
+        {
+          "title": "Refresh",
+          "paragraphs": [
+            "Give updated metadata time to refresh before clearing the full app cache. Changing a metadata key does not change source credentials or add access to a film."
+          ]
+        }
+      ],
+      "related": [
+        "connect-trakt",
+        "connect-simkl",
+        "personal-servers"
+      ]
+    },
+    {
+      "id": "ai-connection",
+      "category": "integrations",
+      "title": "Connect an AI service",
+      "summary": "Use your chosen model provider for the app’s AI tools.",
+      "platforms": [
+        "ios",
+        "tvos",
+        "android",
+        "firetv",
+        "windows"
+      ],
+      "tags": [],
+      "sections": [
+        {
+          "title": "Set up",
+          "paragraphs": [
+            "Open the AI integration section and choose the provider offered by your build, such as Claude, ChatGPT, Gemini, Perplexity, or DeepSeek. Enter your own API credentials and the required model or endpoint options if shown."
+          ]
+        },
+        {
+          "title": "Use",
+          "paragraphs": [
+            "Enable AI search on the Search page when you want a natural-language request. Mood and recommendation tools use their own available entry points. Keep ordinary catalogue search available when AI is not needed."
+          ]
+        },
+        {
+          "title": "Errors and privacy",
+          "paragraphs": [
+            "Quota, billing, model access, and credentials are controlled by that provider. Do not share its key in a bug report. An AI subscription in another app does not necessarily provide API access for Torve."
+          ]
+        }
+      ],
+      "related": [
+        "connect-trakt",
+        "connect-simkl",
+        "personal-servers"
+      ]
+    },
+    {
+      "id": "opensubtitles",
+      "category": "integrations",
+      "title": "Online subtitle search",
+      "summary": "Configure the subtitle service separately from audio filtering.",
+      "platforms": [
+        "ios",
+        "tvos",
+        "android",
+        "firetv",
+        "windows"
+      ],
+      "tags": [],
+      "sections": [
+        {
+          "title": "Connect",
+          "paragraphs": [
+            "Enter the supported OpenSubtitles connection details in Integrations. Then open the player’s subtitle search where provided and select a subtitle matching the title, episode, and release."
+          ]
+        },
+        {
+          "title": "Separate from embedded tracks",
+          "paragraphs": [
+            "Online subtitle downloads can help after playback starts, but are not proof that every source had an embedded subtitle at search time. A source filter must use the evidence actually available to it."
+          ]
+        },
+        {
+          "title": "If timing differs",
+          "paragraphs": [
+            "Try another matching release or use the player’s subtitle delay. A correct language with the wrong cut or frame timing can still be out of sync."
+          ]
+        }
+      ],
+      "related": [
+        "connect-trakt",
+        "connect-simkl",
+        "personal-servers"
+      ]
+    },
+    {
+      "id": "activated-devices",
+      "category": "devices",
+      "title": "Device access and the Apple limit change",
+      "summary": "Manage signed-in devices without the old universal five-device rule.",
+      "platforms": [
+        "ios",
+        "tvos",
+        "android",
+        "firetv",
+        "windows"
+      ],
+      "tags": [
+        "five",
+        "5",
+        "limit",
+        "unlimited"
+      ],
+      "sections": [
+        {
+          "title": "Apple devices",
+          "paragraphs": [
+            "The backend excludes iOS, iPadOS, and tvOS devices from the capped-device count. Apple devices are not subject to the former five-device limit. This is separate from any Apple Premium entitlement required by the app."
+          ]
+        },
+        {
+          "title": "Other platforms",
+          "paragraphs": [
+            "Other device families follow the account’s displayed device allowance. Do not use an old guide’s universal five-device statement to infer your current allowance."
+          ]
+        },
+        {
+          "title": "Manage devices",
+          "paragraphs": [
+            "Open Account & Sync → Devices or Manage devices, or the website Devices page. Inspect the device name and platform, remove an old registration when needed, and use the matching account when comparing devices. Removing a registration is not the same action as deleting the account."
+          ]
+        }
+      ],
+      "related": [
+        "apple-access",
+        "tv-qr-signin"
+      ]
+    },
+    {
+      "id": "tv-qr-signin",
+      "category": "devices",
+      "title": "Sign in on a TV using your phone",
+      "summary": "Approve a TV account sign-in with its current code.",
+      "platforms": [
+        "ios",
+        "tvos",
+        "android",
+        "firetv"
+      ],
+      "tags": [],
+      "sections": [
+        {
+          "title": "Sign in",
+          "steps": [
+            "Open the TV’s sign-in screen and display its QR code or sign-in code.",
+            "On your phone, open the companion or Sign in a TV flow. Choose the sign-in option, scan the QR code or enter the code, and confirm the TV shown.",
+            "Wait for the TV to finish signing in, then check its account and access state."
+          ]
+        },
+        {
+          "title": "Not the same as pairing",
+          "paragraphs": [
+            "TV sign-in authorises the account session. Pairing establishes a companion connection, while credential transfer copies selected service setup. Use the flow that matches the code displayed; the codes are not interchangeable."
+          ]
+        },
+        {
+          "title": "If it expires",
+          "paragraphs": [
+            "Generate a new code on the TV and repeat the matching flow. Do not reuse a screenshot of an old code."
+          ]
+        }
+      ],
+      "related": [
+        "activated-devices",
+        "pair-phone-tv",
+        "handoff"
+      ]
+    },
+    {
+      "id": "pair-phone-tv",
+      "category": "devices",
+      "title": "Pair a phone and TV",
+      "summary": "Set up the companion connection for supported actions.",
+      "platforms": [
+        "ios",
+        "tvos",
+        "android",
+        "firetv"
+      ],
+      "tags": [],
+      "sections": [
+        {
+          "title": "Pair",
+          "steps": [
+            "Keep the phone and television on the same local network for local companion features, and sign in where the flow requires it.",
+            "Open the TV’s pairing page and the phone’s companion or pairing action.",
+            "Scan the current pairing QR code or enter its pairing code, then confirm the target device."
+          ]
+        },
+        {
+          "title": "Available actions",
+          "paragraphs": [
+            "Use the actions shown by your app, such as sending a search or playback intent. The iOS companion has a search-on-TV and pairing flow; this guide does not promise a complete directional-pad remote on iPhone."
+          ]
+        },
+        {
+          "title": "Troubleshooting",
+          "paragraphs": [
+            "Guest Wi-Fi, network isolation, a stale pairing, or choosing sign-in mode for a pairing code can prevent discovery. Manage paired devices separately from the account’s activated-device list."
+          ]
+        }
+      ],
+      "related": [
+        "phone-remote",
+        "tv-qr-signin",
+        "handoff"
+      ]
+    },
+    {
+      "id": "handoff",
+      "category": "devices",
+      "title": "Send a search or playback to another device",
+      "summary": "Choose a target and continue from a supported position.",
+      "platforms": [
+        "ios",
+        "tvos",
+        "android",
+        "firetv"
+      ],
+      "tags": [],
+      "sections": [
+        {
+          "title": "Choose the device",
+          "paragraphs": [
+            "Use the companion device selector or the Send to TV action offered by the detail or playback screen. Confirm the destination, especially when more than one television is paired."
+          ]
+        },
+        {
+          "title": "Search and playback",
+          "paragraphs": [
+            "A sent search opens a search on the target. A playback handoff can include the title or episode and the current position. The target still needs valid source access and a player able to open that media."
+          ]
+        },
+        {
+          "title": "Limits",
+          "paragraphs": [
+            "Sending a playback intent is not a transfer of downloaded video bytes, a subscription, or every service credential. Mobile and TV implementations expose different companion controls; use only the actions your installed build offers."
+          ]
+        }
+      ],
+      "related": [
+        "activated-devices",
+        "tv-qr-signin",
+        "pair-phone-tv"
+      ]
+    },
+    {
+      "id": "transfer-credentials",
+      "category": "devices",
+      "title": "Send service setup to another device",
+      "summary": "Credential transfer is distinct from account sync.",
+      "platforms": [
+        "ios",
+        "tvos",
+        "android",
+        "firetv",
+        "windows"
+      ],
+      "tags": [],
+      "sections": [
+        {
+          "title": "Transfer",
+          "steps": [
+            "Open Receive credentials on the destination and Send credentials on the already configured device.",
+            "Follow the pairing or transfer instructions and choose the supported configuration to send. Confirm the destination before approving.",
+            "Review the received connections and test them on the destination; local server addresses may need a different network route."
+          ]
+        },
+        {
+          "title": "Scope",
+          "paragraphs": [
+            "Credential transfer is the explicit workflow for sensitive service configuration. A normal settings backup does not necessarily contain those secrets, and a TV account sign-in does not create third-party logins."
+          ]
+        },
+        {
+          "title": "Diagnostics",
+          "paragraphs": [
+            "Use the transfer diagnostics screen where offered if discovery or receipt fails. Avoid sharing the transfer secret, API tokens, or the full payload in screenshots."
+          ]
+        }
+      ],
+      "related": [
+        "activated-devices",
+        "tv-qr-signin",
+        "pair-phone-tv"
+      ]
+    },
+    {
+      "id": "what-syncs",
+      "category": "devices",
+      "title": "Account sync, tracking sync, and backups",
+      "summary": "Understand which system owns which data.",
+      "platforms": [
+        "ios",
+        "tvos",
+        "android",
+        "firetv",
+        "windows"
+      ],
+      "tags": [],
+      "sections": [
+        {
+          "title": "Torve sync",
+          "paragraphs": [
+            "Torve’s account services synchronise supported account settings and viewing state across signed-in apps. Household profile scope matters. A setting stored only on a device is not automatically portable just because another setting syncs."
+          ]
+        },
+        {
+          "title": "External tracking",
+          "paragraphs": [
+            "Trakt and SIMKL have their own watched state, lists, and authorisation. Their sync is separate from Torve account login and from a cloud provider’s media files."
+          ]
+        },
+        {
+          "title": "Files and secrets",
+          "paragraphs": [
+            "Downloaded video files remain local. Use the explicit credential-transfer workflow for supported sensitive setup. Manual backup in iOS includes supported extensions, preferences, progress, and channel favourites, while excluding API keys and tokens."
+          ]
+        },
+        {
+          "title": "Compare safely",
+          "paragraphs": [
+            "Verify the account, household profile, external tracking account, and installed build before judging a sync difference. Allow a fresh sync to finish on both devices."
+          ]
+        }
+      ],
+      "related": [
+        "activated-devices",
+        "tv-qr-signin",
+        "pair-phone-tv"
+      ]
+    },
+    {
+      "id": "sign-in-out",
+      "category": "account",
+      "title": "Sign in, verify email, and recover your account",
+      "summary": "Use the account flow from both the app and the website.",
+      "platforms": [
+        "ios",
+        "tvos",
+        "android",
+        "firetv",
+        "windows"
+      ],
+      "tags": [],
+      "sections": [
+        {
+          "title": "Sign in",
+          "paragraphs": [
+            "Open Profile or Settings → Account & Sync and use Sign in when signed out. On the website use Sign in or Create an account. Opening this guide while signed out takes you to sign-in and returns you to the requested article after a successful login."
+          ]
+        },
+        {
+          "title": "Verification and password reset",
+          "paragraphs": [
+            "Follow the verification email for the account you created. Use resend verification when offered and check your spam folder. Use Forgot password for a reset email; do not create another account just because a password is forgotten."
+          ]
+        },
+        {
+          "title": "Sign out",
+          "paragraphs": [
+            "Sign out ends that app or website session. It does not automatically delete your third-party accounts, downloads, or every connected device. A guide request with an expired or revoked session must require sign-in again."
+          ]
+        }
+      ],
+      "related": [
+        "apple-access",
+        "appearance-settings",
+        "backup-sync"
+      ]
+    },
+    {
+      "id": "apple-access",
+      "category": "account",
+      "title": "Apple Premium and restoring access",
+      "summary": "Device counts and purchase entitlements are separate.",
+      "platforms": [
+        "ios",
+        "tvos"
+      ],
+      "tags": [],
+      "sections": [
+        {
+          "title": "Check the access screen",
+          "paragraphs": [
+            "An Apple build can require Premium for source setup or playback. Use the current in-app access and purchase screen to see its terms and availability. Do not treat a guide or test-build invitation as proof of a live store subscription."
+          ]
+        },
+        {
+          "title": "Restore",
+          "paragraphs": [
+            "Use Restore purchases where offered, with the intended Apple account and Torve account. Allow the entitlement check to finish. A successful sign-in and a successful purchase restore are different checks."
+          ]
+        },
+        {
+          "title": "No five-device rule for Apple",
+          "paragraphs": [
+            "The Apple device-cap removal does not itself grant a paid entitlement, and Premium status does not determine whether an indexer or media provider has valid credentials."
+          ]
+        }
+      ],
+      "related": [
+        "sign-in-out",
+        "appearance-settings",
+        "backup-sync"
+      ]
+    },
+    {
+      "id": "appearance-settings",
+      "category": "account",
+      "title": "Settings, language, theme, and privacy controls",
+      "summary": "Find the main settings page and change presentation preferences.",
+      "platforms": [
+        "ios",
+        "tvos",
+        "android",
+        "firetv",
+        "windows"
+      ],
+      "tags": [],
+      "sections": [
+        {
+          "title": "Settings entry",
+          "paragraphs": [
+            "The cog opens the settings menu. A red attention indicator calls out connection work; it should not trap you in Connections or make the main settings page unreachable."
+          ]
+        },
+        {
+          "title": "Presentation",
+          "paragraphs": [
+            "Use Appearance for supported system, dark, or light themes and interface language. Card style, Home layout, rating badges, and streaming-service visibility have their own controls. Available television settings are organised for remote focus."
+          ]
+        },
+        {
+          "title": "Advanced preferences",
+          "paragraphs": [
+            "Playback filters, stream groups, and regex patterns affect source choice. Sensitive-material preferences and household restrictions depend on the client; check the active profile and available device controls."
+          ]
+        }
+      ],
+      "related": [
+        "sign-in-out",
+        "apple-access",
+        "backup-sync"
+      ]
+    },
+    {
+      "id": "backup-sync",
+      "category": "account",
+      "title": "Export or import a settings backup",
+      "summary": "Back up supported settings without assuming secrets or video are included.",
+      "platforms": [
+        "ios",
+        "tvos",
+        "android",
+        "firetv",
+        "windows"
+      ],
+      "tags": [],
+      "sections": [
+        {
+          "title": "Back up",
+          "steps": [
+            "Open Backup & Sync or the backup section in Settings. Choose Export Backup and save the file to a location you control.",
+            "To restore, choose Import Backup and select a compatible backup file. Read any import result or error.",
+            "Verify your extensions, preferences, viewing state, and channel favourites after the import, and reconnect services that require credentials."
+          ]
+        },
+        {
+          "title": "Scope",
+          "paragraphs": [
+            "The iOS export explicitly excludes API keys and tokens. A settings backup is not an archive of downloaded films, a server library, or third-party accounts. Use credential transfer separately where supported."
+          ]
+        },
+        {
+          "title": "Before a reset",
+          "paragraphs": [
+            "Export first if you need to retain supported configuration. Clearing a cache is a smaller action than resetting configuration or deleting the app."
+          ]
+        }
+      ],
+      "related": [
+        "sign-in-out",
+        "apple-access",
+        "appearance-settings"
+      ]
+    },
+    {
+      "id": "account-data",
+      "category": "account",
+      "title": "Account data, export, and deletion",
+      "summary": "Manage personal data from the account portal.",
+      "platforms": [
+        "ios",
+        "tvos",
+        "android",
+        "firetv",
+        "windows"
+      ],
+      "tags": [],
+      "sections": [
+        {
+          "title": "Account tools",
+          "paragraphs": [
+            "The website account page provides account status, supported data-request and deletion flows, and links to devices, connections, extensions, and media automation. Some actions require a verified account."
+          ]
+        },
+        {
+          "title": "Deletion",
+          "paragraphs": [
+            "Read the account-deletion instructions before confirming. Account deletion is different from signing out or removing a device, and does not cancel every third-party provider account. Use the relevant store or service to manage its subscription."
+          ]
+        },
+        {
+          "title": "Guide access",
+          "paragraphs": [
+            "A valid website sign-in is required for this guide. Guide responses are private and are not stored as public cached article bundles. Public installation, legal, status, and support pages remain available without reading the account guide."
+          ]
+        }
+      ],
+      "related": [
+        "sign-in-out",
+        "apple-access",
+        "appearance-settings"
+      ]
+    },
+    {
+      "id": "website-admin",
+      "category": "account",
+      "title": "Website account and administrator pages",
+      "summary": "Normal account tools and restricted administration.",
+      "platforms": [
+        "ios",
+        "tvos",
+        "android",
+        "firetv",
+        "windows"
+      ],
+      "tags": [],
+      "sections": [
+        {
+          "title": "Account portal",
+          "paragraphs": [
+            "Account overview links to Connections, Devices, Extensions, and media automation. Use the sign-in button to enter the portal; the Install button leads to the platform downloads rather than account setup."
+          ]
+        },
+        {
+          "title": "Administrative access",
+          "paragraphs": [
+            "Administrator pages are for authorised administrators, not a step required for normal media playback. The website has separate account, downloads, streams, rebate, and Discord administration surfaces. Their data actions must use the authenticated administrative APIs and the account’s actual permissions."
+          ]
+        },
+        {
+          "title": "Release content",
+          "paragraphs": [
+            "Publishing a download link or editing distribution information does not build or sign an app. Use current release evidence when updating availability. This guide does not claim that a redesigned admin page has been used to publish a new native build."
+          ]
+        }
+      ],
+      "related": [
+        "sign-in-out",
+        "apple-access",
+        "appearance-settings"
+      ]
+    },
+    {
+      "id": "connection-errors",
+      "category": "troubleshooting",
+      "title": "Connection status and loading errors",
+      "summary": "Find the failing service instead of reconnecting everything.",
+      "platforms": [
+        "ios",
+        "tvos",
+        "android",
+        "firetv",
+        "windows"
+      ],
+      "tags": [],
+      "sections": [
+        {
+          "title": "Check",
+          "steps": [
+            "Open Connections and inspect the individual service with an error. A selected provider is not evidence that its credentials were verified.",
+            "Use its Test, Verify, or Reconnect action. Check the server URL, account status, and key scope at that service.",
+            "Return to the feature and refresh after confirmation. If the server is private, test whether this device can reach it on the current network."
+          ]
+        },
+        {
+          "title": "Report the distinction",
+          "paragraphs": [
+            "A loading error, a successful empty search, and a source hidden by filters are different states. Include the service name and exact error message. Never include passwords, full authenticated URLs, or API keys."
+          ]
+        }
+      ],
+      "related": [
+        "no-streams-troubleshooting",
+        "usenet-troubleshooting",
+        "playback-troubleshooting"
+      ]
+    },
+    {
+      "id": "no-streams-troubleshooting",
+      "category": "troubleshooting",
+      "title": "No matching sources",
+      "summary": "Check search identity, provider response, and filters separately.",
+      "platforms": [
+        "ios",
+        "tvos",
+        "android",
+        "firetv",
+        "windows"
+      ],
+      "tags": [],
+      "sections": [
+        {
+          "title": "Narrow it down",
+          "steps": [
+            "Confirm the exact title, original release year, season, and episode. Different versions of The Office must not be mixed just because their names match.",
+            "Use All sources and Any language, relax quality or size limits, and turn cached-only off for a comparison.",
+            "Check that the intended stream extensions and Panda source paths are enabled. A catalogue alone does not return playable streams.",
+            "Inspect the failing provider connection or trial/quota status. Refresh after fixing it."
+          ]
+        },
+        {
+          "title": "Language edge cases",
+          "paragraphs": [
+            "With subtitle fallback enabled, a source needs real subtitle evidence in the chosen language. A large set of unverified flags is not proof of audio. A readable-file probe may still be pending or unavailable; do not fabricate a match to make the count nonzero."
+          ]
+        }
+      ],
+      "related": [
+        "connection-errors",
+        "usenet-troubleshooting",
+        "playback-troubleshooting"
+      ]
+    },
+    {
+      "id": "usenet-troubleshooting",
+      "category": "troubleshooting",
+      "title": "Usenet results that will not start",
+      "summary": "Download limits, preparation, and indexer failures.",
+      "platforms": [
+        "ios",
+        "tvos",
+        "android",
+        "firetv",
+        "windows"
+      ],
+      "tags": [],
+      "sections": [
+        {
+          "title": "Read the service pair",
+          "paragraphs": [
+            "Treasure Maps or Videothek identifies the indexer; a label such as +torbox identifies the preparation service. Finding an NZB, downloading that NZB, retrieving its articles, extracting the video, and returning a play URL can each fail separately."
+          ]
+        },
+        {
+          "title": "Trial and quota limits",
+          "paragraphs": [
+            "A trial can allow searches while limiting downloads. Quotas and reset times depend on the indexer and account plan. Check the provider’s account page and its time zone before retrying; do not assume every plan has the same allowance."
+          ]
+        },
+        {
+          "title": "Retry appropriately",
+          "paragraphs": [
+            "After a quota reset or fixed connection, refresh and try again. While a source is preparing, keep the loading state visible. If it times out, use Try source again or another result; the remaining list should stay accessible."
+          ]
+        },
+        {
+          "title": "Wrong show",
+          "paragraphs": [
+            "If a 2024 remake appears for a 2005 show, report the exact release and requested series. The server matching flow should use title IDs and year or episode evidence, not simply accept every release with the same title words."
+          ]
+        }
+      ],
+      "related": [
+        "connection-errors",
+        "no-streams-troubleshooting",
+        "playback-troubleshooting"
+      ]
+    },
+    {
+      "id": "playback-troubleshooting",
+      "category": "troubleshooting",
+      "title": "Playback, seeking, and incorrect tracks",
+      "summary": "Use the actual player information to diagnose the fault.",
+      "platforms": [
+        "ios",
+        "tvos",
+        "android",
+        "firetv",
+        "windows"
+      ],
+      "tags": [],
+      "sections": [
+        {
+          "title": "Does it reach the player?",
+          "paragraphs": [
+            "A source-preparation failure happens before playback and belongs to the source service. A player error after a URL opens can involve codecs, network response, or a malformed file. Record where it failed."
+          ]
+        },
+        {
+          "title": "Wrong language",
+          "paragraphs": [
+            "Open Audio and inspect the available tracks. If only English exists, German subtitle evidence must not have qualified it under an audio-only German filter. Check the source’s inspection label and current language settings, then report the discrepancy."
+          ]
+        },
+        {
+          "title": "Seek failure",
+          "paragraphs": [
+            "Try a different source or the alternative player if available. A failure in both engines at the same position may indicate a server or file issue. Include whether repeated +15-second taps or a timeline jump triggered it."
+          ]
+        },
+        {
+          "title": "Offline",
+          "paragraphs": [
+            "Start completed downloads from the local download library. New searches, licence checks for some providers, and online subtitle downloads may still require a network."
+          ]
+        }
+      ],
+      "related": [
+        "connection-errors",
+        "no-streams-troubleshooting",
+        "usenet-troubleshooting"
+      ]
+    },
+    {
+      "id": "channels-troubleshooting",
+      "category": "troubleshooting",
+      "title": "Channels or Sports will not load",
+      "summary": "Check feed access and indexer access independently.",
+      "platforms": [
+        "ios",
+        "tvos",
+        "android",
+        "firetv",
+        "windows"
+      ],
+      "tags": [],
+      "sections": [
+        {
+          "title": "Channels",
+          "paragraphs": [
+            "Verify the M3U or Xtream credentials, channel visibility filters, and guide URL. Refresh the playlist and EPG. An imported playlist can be valid while its playback URLs are expired."
+          ]
+        },
+        {
+          "title": "Sports",
+          "paragraphs": [
+            "Check all configured indexers and the selected date range. A trial restriction or one failing indexer should not be mistaken for no events at every service. Unrelated video games, films, and scripted shows should be excluded from the sports list."
+          ]
+        },
+        {
+          "title": "Different inputs",
+          "paragraphs": [
+            "A working IPTV feed does not prove that a Newznab sports search works. Name the feature and failing provider when reporting the issue."
+          ]
+        }
+      ],
+      "related": [
+        "connection-errors",
+        "no-streams-troubleshooting",
+        "usenet-troubleshooting"
+      ]
+    },
+    {
+      "id": "pairing-troubleshooting",
+      "category": "troubleshooting",
+      "title": "Pairing, TV sign-in, and sync problems",
+      "summary": "Use the right code, account, and network.",
+      "platforms": [
+        "ios",
+        "tvos",
+        "android",
+        "firetv",
+        "windows"
+      ],
+      "tags": [],
+      "sections": [
+        {
+          "title": "Codes",
+          "paragraphs": [
+            "TV sign-in, companion pairing, and credential transfer are different operations. Generate a fresh code and use the matching phone action. Confirm the target device rather than reusing a previous screenshot."
+          ]
+        },
+        {
+          "title": "Network and account",
+          "paragraphs": [
+            "For local companion actions, both devices need network reachability; guest isolation can prevent it. For synced data, compare the Torve account, household profile, and connected tracking account."
+          ]
+        },
+        {
+          "title": "Device cap",
+          "paragraphs": [
+            "Apple devices are excluded from the capped-device count. Other platforms use the account allowance. If a current Apple build still reports the old five-device restriction, include the app build and device type in the report."
+          ]
+        }
+      ],
+      "related": [
+        "connection-errors",
+        "no-streams-troubleshooting",
+        "usenet-troubleshooting"
+      ]
+    },
+    {
+      "id": "diagnostics",
+      "category": "troubleshooting",
+      "title": "Cache, diagnostics, and a useful support report",
+      "summary": "Collect enough detail without exposing credentials.",
+      "platforms": [
+        "ios",
+        "tvos",
+        "android",
+        "firetv",
+        "windows"
+      ],
+      "tags": [],
+      "sections": [
+        {
+          "title": "Smallest useful reset",
+          "paragraphs": [
+            "Refresh the failing page or source list first. Clear the app cache for stale metadata or artwork only when appropriate; do not delete working service setup just to refresh a poster."
+          ]
+        },
+        {
+          "title": "Diagnostics",
+          "paragraphs": [
+            "Use the app’s Diagnostics or transfer-diagnostics screen where available. Report the platform and build, title and year, episode, provider label, filters, and exact error. A screenshot should show the failed state and redact tokens, keys, and authenticated URLs."
+          ]
+        },
+        {
+          "title": "Release differences",
+          "paragraphs": [
+            "Check Downloads and the platform article before comparing a store app, an internal TestFlight build, and source code. A fix in the server may apply immediately, while a changed button, filter, or player needs the updated client."
+          ]
+        }
+      ],
+      "related": [
+        "connection-errors",
+        "no-streams-troubleshooting",
+        "usenet-troubleshooting"
+      ]
+    },
+    {
+      "id": "phone-remote",
+      "category": "devices",
+      "title": "Android phone remote and Kodi",
+      "summary": "Control a paired TV or a configured Kodi host.",
+      "platforms": [
+        "android"
+      ],
+      "tags": [],
+      "sections": [
+        {
+          "title": "Choose a target",
+          "paragraphs": [
+            "Open the phone’s companion remote and select the intended TV or Kodi host. A Torve TV needs its secure pairing connection to be ready. Configure and test a Kodi host in Settings before choosing it as a target."
+          ]
+        },
+        {
+          "title": "Remote controls",
+          "paragraphs": [
+            "The Android remote offers directional navigation, Select, Back, Menu, play/pause, stop, and seeking. For a Torve TV, the seek-step control switches between the offered 10- and 30-second steps. Kodi uses the supported Kodi command behaviour."
+          ]
+        },
+        {
+          "title": "Keep the distinction clear",
+          "paragraphs": [
+            "This is the Android phone remote. The iOS companion’s search and handoff actions do not imply the same directional-pad interface. A paired device can also be unreachable or busy; wait for the current command and inspect any reported error."
+          ]
+        }
+      ],
+      "related": [
+        "pair-phone-tv",
+        "handoff",
+        "kodi"
+      ]
+    },
+    {
+      "id": "kodi",
+      "category": "integrations",
+      "title": "Connect a Kodi host",
+      "summary": "Send supported playback to a Kodi instance on your network.",
+      "platforms": [
+        "ios",
+        "android",
+        "windows"
+      ],
+      "tags": [
+        "JSON-RPC",
+        "external player"
+      ],
+      "sections": [
+        {
+          "title": "Add the host",
+          "steps": [
+            "Open the Kodi integration in Settings. Add a recognisable name, the host’s IP address, and the configured control port.",
+            "Enable the necessary network control on your own Kodi installation, then use Torve’s connection test. The host must be reachable from this device.",
+            "Use the supported send-to-Kodi or companion action when choosing playback."
+          ]
+        },
+        {
+          "title": "Separate from Torve pairing",
+          "paragraphs": [
+            "A Kodi host is an external player target. It does not use the same pairing code as a Torve television and does not automatically receive your media credentials or downloaded files. It must be able to reach the selected stream."
+          ]
+        },
+        {
+          "title": "Controls vary",
+          "paragraphs": [
+            "Android phone has an integrated remote for its configured Kodi hosts. Other clients expose their own connection and playback actions; do not assume every remote control is present on every platform."
+          ]
+        }
+      ],
+      "related": [
+        "phone-remote",
+        "handoff",
+        "player-controls"
+      ]
+    },
+    {
+      "id": "network-files",
+      "category": "library",
+      "title": "Browse a WebDAV file server",
+      "summary": "Connect Android phone or TV to a supported network file library.",
+      "platforms": [
+        "android",
+        "firetv"
+      ],
+      "tags": [
+        "files",
+        "WebDAV",
+        "network",
+        "folders"
+      ],
+      "sections": [
+        {
+          "title": "Connect and browse",
+          "steps": [
+            "Open Files in the app’s library tools and choose Connect or Connection. Enter the supported WebDAV server address and credentials.",
+            "After a successful connection, open folders and select a playable media file. Back returns to the parent folder before leaving the browser.",
+            "Refresh the listing after a server-side change. A bookmarked playback position is separate from downloading the file."
+          ]
+        },
+        {
+          "title": "Reachability and restrictions",
+          "paragraphs": [
+            "The file server must remain reachable during playback. Authentication, address, and network errors have different causes. The browser respects the supported profile restrictions; a restricted profile may not be allowed to connect."
+          ]
+        },
+        {
+          "title": "Offline distinction",
+          "paragraphs": [
+            "Browsing a WebDAV folder does not store its videos for offline use. Use the download library for supported completed offline items. This entry documents the Android file browser and does not promise equivalent SMB or arbitrary-file import in all Apple or Windows clients."
+          ]
+        }
+      ],
+      "related": [
+        "cloud-files",
+        "downloads",
+        "profiles"
+      ]
+    }
+  ],
+  "aliases": {
+    "how-torve-works": "welcome",
+    "setup-order": "welcome",
+    "setup-checklist": "install-panda",
+    "what-is-streaming-service": "debrid-providers",
+    "setup-rd": "debrid-providers",
+    "setup-ad": "debrid-providers",
+    "setup-pm": "debrid-providers",
+    "setup-tb": "debrid-providers",
+    "url-import-vs-service-login": "add-url-import",
+    "add-service-login": "add-url-import",
+    "setup-omdb": "ratings-metadata",
+    "setup-mdblist": "ratings-metadata",
+    "setup-jellyfin": "personal-servers",
+    "setup-plex": "personal-servers",
+    "manage-devices": "activated-devices",
+    "sync-settings-to-tv": "what-syncs",
+    "create-account": "sign-in-out",
+    "verify-email": "sign-in-out",
+    "reset-password": "sign-in-out",
+    "delete-account": "account-data",
+    "streaming-troubleshooting": "connection-errors",
+    "device-limit-troubleshooting": "activated-devices",
+    "signin-troubleshooting": "sign-in-out",
+    "what-are-extensions": "extensions",
+    "how-to-install-extension": "extensions",
+    "catalog-vs-stream": "extensions",
+    "managing-extensions": "extensions"
+  },
+  "categoryAliases": {
+    "getting-started": "start",
+    "multi-device": "devices",
+    "panda": "streaming",
+    "usenet": "streaming",
+    "extensions": "streaming",
+    "iptv": "channels",
+    "sync": "devices",
+    "tracking": "integrations"
+  }
+}

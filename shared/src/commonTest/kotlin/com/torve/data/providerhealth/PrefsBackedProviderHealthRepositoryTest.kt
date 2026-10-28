@@ -10,6 +10,21 @@ import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 class PrefsBackedProviderHealthRepositoryTest {
+    @Test fun disabledFeatureRowsAreFilteredOnColdStartAndCannotBeRepublished() = runTest {
+        val prefs = FakePrefs()
+        val repo = PrefsBackedProviderHealthRepository(prefs)
+        val old = ProviderHealthEntry(ProviderHealthCategory.IPTV, "legacy-channels", "Channels", ProviderHealthStatus.RED)
+        repo.upsert(old)
+        prefs.setString(com.torve.presentation.settings.OptionalAppFeature.CHANNELS.preferenceKey, "false")
+        val restarted = PrefsBackedProviderHealthRepository(prefs)
+        restarted.load()
+        assertTrue(restarted.entries.value.isEmpty())
+        restarted.upsert(old)
+        assertTrue(restarted.entries.value.isEmpty())
+        prefs.setString(com.torve.presentation.settings.OptionalAppFeature.CHANNELS.preferenceKey, "true")
+        restarted.upsert(old.copy(status = ProviderHealthStatus.GREEN))
+        assertEquals(ProviderHealthStatus.GREEN, restarted.entries.value.single().status)
+    }
 
     private class FakePrefs : PreferencesRepository {
         val store = mutableMapOf<String, String>()
@@ -66,6 +81,23 @@ class PrefsBackedProviderHealthRepositoryTest {
         )
         repo.upsert(a); repo.upsert(b)
         assertEquals(2, repo.entries.value.size)
+    }
+
+    @Test
+    fun `out of order health refresh keeps existing rows in place after reload`() = runTest {
+        val prefs = FakePrefs()
+        val repo = PrefsBackedProviderHealthRepository(prefs)
+        val first = ProviderHealthEntry(ProviderHealthCategory.DEBRID, "torbox", "TorBox", ProviderHealthStatus.GREEN)
+        val second = ProviderHealthEntry(ProviderHealthCategory.TRAKT, "trakt", "Trakt", ProviderHealthStatus.RED)
+        val third = ProviderHealthEntry(ProviderHealthCategory.IPTV, "channels", "Channels", ProviderHealthStatus.UNCONFIGURED)
+        listOf(first, second, third).forEach { repo.upsert(it) }
+        repo.upsert(second.copy(status = ProviderHealthStatus.UNKNOWN))
+        repo.upsert(first.copy(status = ProviderHealthStatus.RED))
+        repo.upsert(second.copy(status = ProviderHealthStatus.GREEN))
+        assertEquals(listOf("torbox", "trakt", "channels"), repo.entries.value.map { it.providerKey })
+        val restored = PrefsBackedProviderHealthRepository(prefs)
+        restored.load()
+        assertEquals(repo.entries.value, restored.entries.value)
     }
 
     @Test

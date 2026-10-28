@@ -1,0 +1,1722 @@
+{
+  "Cloud Backups": {
+    "de": "Cloud-Backups",
+    "es": "Copias en la nube",
+    "fr": "Sauvegardes cloud",
+    "it": "Backup nel cloud",
+    "pt": "Backups na nuvem",
+    "tr": "Bulut yedekleri"
+  },
+  "Bass Boost": {
+    "de": "Bassverstärkung",
+    "es": "Refuerzo de graves",
+    "fr": "Renforcement des basses",
+    "it": "Potenziamento dei bassi",
+    "pt": "Reforço de graves",
+    "tr": "Bas güçlendirme"
+  },
+  "Watchlist Empty": {
+    "de": "Merkliste leer",
+    "es": "Lista para ver vacía",
+    "fr": "Liste à voir vide",
+    "it": "Lista da guardare vuota",
+    "pt": "Lista para assistir vazia",
+    "tr": "İzleme listesi boş"
+  },
+  "No Watch History": {
+    "de": "Noch kein Wiedergabeverlauf",
+    "es": "Sin historial de visualización",
+    "fr": "Aucun historique de visionnage",
+    "it": "Nessuna cronologia di visione",
+    "pt": "Sem histórico de visualização",
+    "tr": "İzleme geçmişi yok"
+  },
+  "App default": {
+    "de": "App-Standard",
+    "es": "Predeterminado de la app",
+    "fr": "Valeur par défaut de l’app",
+    "it": "Predefinito dell’app",
+    "pt": "Padrão do aplicativo",
+    "tr": "Uygulama varsayılanı"
+  },
+  "Focus Preview": {
+    "de": "Fokusvorschau",
+    "es": "Vista previa al enfocar",
+    "fr": "Aperçu de la sélection",
+    "it": "Anteprima della selezione",
+    "pt": "Prévia da seleção",
+    "tr": "Odak önizlemesi"
+  },
+  "Parent PIN": {
+    "de": "Eltern-PIN",
+    "es": "PIN parental",
+    "fr": "Code PIN parental",
+    "it": "PIN genitore",
+    "pt": "PIN parental",
+    "tr": "Ebeveyn PIN’i"
+  },
+  "Add an extension": {
+    "de": "Erweiterung hinzufügen",
+    "es": "Añadir una extensión",
+    "fr": "Ajouter une extension",
+    "it": "Aggiungi un’estensione",
+    "pt": "Adicionar uma extensão",
+    "tr": "Uzantı ekle"
+  },
+  "Home screen customization coming soon": {
+    "es": "La personalización de Home estará disponible pronto"
+  },
+  "Active Downloads": {
+    "tr": "Etkin indirmeler"
+  },
+  "Add custom row": {
+    "tr": "Özel satır ekle"
+  },
+  "Add indexer": {
+    "tr": "İndeksleyici ekle"
+  },
+  "Arrange & customize Home": {
+    "tr": "Home’u düzenle ve özelleştir"
+  },
+  "Back to previous playback settings": {
+    "tr": "Önceki oynatma ayarlarına dön"
+  },
+  "Bold text": {
+    "tr": "Kalın metin"
+  },
+  "Cancel autoplay": {
+    "tr": "Otomatik oynatmayı iptal et",
+    "pt": "Cancelar reprodução automática"
+  },
+  "Card preset": {
+    "tr": "Kart ön ayarı"
+  },
+  "Change profile PIN": {
+    "tr": "Profil PIN’ini değiştir"
+  },
+  "Channel guide": {
+    "tr": "Kanal rehberi"
+  },
+  "Clear rating": {
+    "tr": "Puanı kaldır"
+  },
+  "Connect Jellyfin": {
+    "tr": "Jellyfin’e bağlan",
+    "fr": "Connecter Jellyfin"
+  },
+  "Connected Services": {
+    "tr": "Bağlı hizmetler"
+  },
+  "Content Rating": {
+    "tr": "Yaş sınıflandırması",
+    "fr": "Classification par âge"
+  },
+  "Content Rating: %1$s": {
+    "tr": "Yaş sınıflandırması: %1$s"
+  },
+  "Corner Radius: %1$s": {
+    "tr": "Köşe yarıçapı: %1$s",
+    "es": "Radio de las esquinas: %1$s",
+    "fr": "Rayon des angles : %1$s",
+    "pt": "Raio dos cantos: %1$s"
+  },
+  "Create card preset": {
+    "tr": "Kart ön ayarı oluştur"
+  },
+  "Data Sources": {
+    "tr": "Veri kaynakları"
+  },
+  "Delete Profile?": {
+    "tr": "Profil silinsin mi?"
+  },
+  "Delete Season": {
+    "tr": "Sezonu sil"
+  },
+  "Delete Watched": {
+    "tr": "İzlenenleri sil",
+    "es": "Eliminar vistos",
+    "fr": "Supprimer les titres vus"
+  },
+  "Delete row": {
+    "tr": "Satırı sil"
+  },
+  "Device & App Info": {
+    "tr": "Cihaz ve uygulama bilgileri"
+  },
+  "Device access": {
+    "tr": "Cihaz erişimi"
+  },
+  "Download type": {
+    "tr": "İndirme türü"
+  },
+  "Downloaded Library": {
+    "tr": "İndirilenler kitaplığı"
+  },
+  "Duplicate preset": {
+    "tr": "Ön ayarı çoğalt",
+    "fr": "Dupliquer le préréglage"
+  },
+  "Enable NzbDAV": {
+    "tr": "NzbDAV’ı etkinleştir"
+  },
+  "Enable Sports Replays in settings": {
+    "tr": "Ayarlardan spor tekrarlarını etkinleştir"
+  },
+  "Group view": {
+    "tr": "Grup görünümü"
+  },
+  "Hidden Gems": {
+    "tr": "Keşfedilmeyi bekleyenler"
+  },
+  "Loading watchlist...": {
+    "tr": "İzleme listesi yükleniyor..."
+  },
+  "Manual Backup": {
+    "tr": "Elle yedekleme"
+  },
+  "Mark Season Watched": {
+    "tr": "Sezonu izlendi olarak işaretle",
+    "es": "Marcar temporada como vista",
+    "fr": "Marquer la saison comme vue"
+  },
+  "Match Pattern (regex)": {
+    "tr": "Eşleştirme deseni (regex)",
+    "it": "Regola di corrispondenza (regex)"
+  },
+  "Max Rating": {
+    "tr": "En yüksek puan",
+    "es": "Puntuación máx.",
+    "fr": "Note maximale"
+  },
+  "Max Runtime": {
+    "tr": "En uzun süre",
+    "es": "Duración máx.",
+    "fr": "Durée maximale",
+    "it": "Durata massima",
+    "pt": "Duração máxima"
+  },
+  "Min Rating (0-10)": {
+    "tr": "En düşük puan (0–10)",
+    "es": "Puntuación mín. (0-10)",
+    "fr": "Note minimale (0-10)"
+  },
+  "Min Runtime": {
+    "tr": "En kısa süre",
+    "es": "Duración mín.",
+    "fr": "Durée minimale",
+    "pt": "Duração mínima"
+  },
+  "Mood Match": {
+    "tr": "Ruh haline göre",
+    "es": "Según tu ánimo",
+    "fr": "Selon votre humeur"
+  },
+  "Open browser": {
+    "tr": "Tarayıcıyı aç"
+  },
+  "Playback service": {
+    "tr": "Oynatma hizmeti"
+  },
+  "Playlist Type": {
+    "tr": "Çalma listesi türü",
+    "fr": "Type de liste de lecture"
+  },
+  "Playlist order": {
+    "tr": "Çalma listesi sırası"
+  },
+  "Rail spacing": {
+    "tr": "Satır aralığı",
+    "es": "Espacio entre filas"
+  },
+  "Rating Pill Position": {
+    "tr": "Puan etiketinin konumu"
+  },
+  "Replay available": {
+    "tr": "Tekrar mevcut"
+  },
+  "Replay from start": {
+    "tr": "Baştan oynat"
+  },
+  "Retry account restore": {
+    "tr": "Hesabı geri yüklemeyi yeniden dene"
+  },
+  "Retry track checks": {
+    "tr": "Ses izi denetimini yeniden dene"
+  },
+  "Save name": {
+    "tr": "Adı kaydet"
+  },
+  "Save row": {
+    "tr": "Satırı kaydet"
+  },
+  "Show Sports Replays on Home": {
+    "tr": "Spor tekrarlarını Home’da göster",
+    "de": "Sport-Replays auf Home anzeigen",
+    "es": "Mostrar repeticiones deportivas en Home",
+    "fr": "Afficher les rediffusions sportives sur Home",
+    "it": "Mostra i replay sportivi su Home",
+    "pt": "Mostrar replays esportivos em Home"
+  },
+  "Shows Watched": {
+    "tr": "İzlenen diziler",
+    "fr": "Séries vues"
+  },
+  "Trakt comments": {
+    "tr": "Trakt yorumları",
+    "fr": "Commentaires Trakt"
+  },
+  "Up Next order": {
+    "tr": "Sıradakilerin sırası"
+  },
+  "Use image": {
+    "tr": "Görseli kullan"
+  },
+  "Watchlist order": {
+    "tr": "İzleme listesi sırası",
+    "fr": "Ordre de la liste à voir"
+  },
+  "No titles are available from these services in %1$s. Try another service or change your region using the cog.": {
+    "de": "In %1$s sind bei diesen Diensten keine Titel verfügbar. Wähle einen anderen Dienst oder ändere die Region über das Zahnrad."
+  },
+  "Check more sources (%1$s remaining)": {
+    "es": "Comprobar más fuentes (%1$s restantes)",
+    "it": "Controlla altre fonti (%1$s rimanenti)"
+  },
+  "Filters%1$s": {
+    "es": "Filtros%1$s"
+  },
+  "%1$s of %2$s categories enabled": {
+    "tr": "%2$s kategoriden %1$s tanesi etkin"
+  },
+  "%1$s, %2$s, %3$s channels": {
+    "tr": "%1$s, %2$s, %3$s kanal"
+  },
+  "Step %1$s of %2$s · %3$s": {
+    "tr": "%2$s adımdan %1$s. adım · %3$s"
+  },
+  "%1$s day": {
+    "de": "%1$s Tag",
+    "es": "%1$s día",
+    "fr": "%1$s jour",
+    "it": "%1$s giorno",
+    "pt": "%1$s dia",
+    "tr": "%1$s gün"
+  },
+  "%1$s days": {
+    "de": "%1$s Tage",
+    "es": "%1$s días",
+    "fr": "%1$s jours",
+    "it": "%1$s giorni",
+    "pt": "%1$s dias",
+    "tr": "%1$s gün"
+  },
+  "%1$s episode": {
+    "de": "%1$s Folge",
+    "es": "%1$s episodio",
+    "fr": "%1$s épisode",
+    "it": "%1$s episodio",
+    "pt": "%1$s episódio",
+    "tr": "%1$s bölüm"
+  },
+  "%1$s episodes": {
+    "de": "%1$s Folgen",
+    "es": "%1$s episodios",
+    "fr": "%1$s épisodes",
+    "it": "%1$s episodi",
+    "pt": "%1$s episódios",
+    "tr": "%1$s bölüm"
+  },
+  "Episode synopsis is unavailable.": {
+    "fr": "Le résumé de cet épisode est indisponible."
+  },
+  "Playback stopped": {
+    "fr": "Lecture arrêtée"
+  },
+  "Refresh to search your enabled providers again, or check your content sources in Settings.": {
+    "fr": "Actualisez pour relancer la recherche auprès des fournisseurs activés ou vérifiez vos sources dans les réglages."
+  },
+  "NZB indexer #%1$s": {
+    "tr": "NZB indeksleyici #%1$s"
+  },
+  " (%1$s votes)": {
+    "es": " (%1$s votos)"
+  },
+  "Genre%1$s": {
+    "es": "Género%1$s",
+    "fr": "Genre%1$s"
+  },
+  "%1$s API Key": {
+    "es": "Clave API de %1$s",
+    "tr": "%1$s API anahtarı"
+  },
+  "%1$smin remaining": {
+    "es": "Quedan %1$s min"
+  },
+  "%1$s of %2$s indexers ready; some keys missing.": {
+    "fr": "%1$s indexeurs prêts sur %2$s ; certaines clés manquent.",
+    "tr": "%2$s indeksleyiciden %1$s tanesi hazır; bazı anahtarlar eksik."
+  },
+  "All %1$s addon manifests reachable.": {
+    "fr": "Les %1$s manifestes d’extensions sont accessibles."
+  },
+  "Failed to refresh device session.": {
+    "fr": "Impossible d’actualiser la session de cet appareil."
+  },
+  "Restore could not be retried": {
+    "fr": "Impossible de relancer la restauration"
+  },
+  "Syncing Trakt...": {
+    "fr": "Synchronisation de Trakt…",
+    "it": "Sincronizzazione di Trakt…"
+  },
+  "Syncing playlists...": {
+    "fr": "Synchronisation des listes de lecture…"
+  },
+  "Syncing source providers...": {
+    "fr": "Synchronisation des fournisseurs de sources…"
+  },
+  "Credentials missing for %1$s.": {
+    "it": "Credenziali mancanti per %1$s."
+  },
+  "download client: %1$s.": {
+    "it": "client di download: %1$s."
+  },
+  "\"%1$s\" — %2$s channels (loading EPG).": {
+    "pt": "\"%1$s\" — %2$s canais (carregando o guia)."
+  },
+  "\"%1$s\" — %2$s channels, %3$s/%4$s EPG matched.": {
+    "tr": "\"%1$s\" — %2$s kanal, program rehberiyle eşleşen: %3$s/%4$s."
+  },
+  "%1$s of %2$s ARR services connected. %3$s": {
+    "tr": "%2$s ARR hizmetinden %1$s tanesi bağlı. %3$s"
+  },
+  "%1$s of %2$s addons reachable. %3$s": {
+    "tr": "%2$s eklentiden %1$s tanesine erişilebiliyor. %3$s"
+  },
+  "%1$s of %2$s channels matched (%3$s%).": {
+    "tr": "%2$s kanaldan %1$s tanesi eşleşti (%3$s%)."
+  },
+  "%1$s/%2$s categories · %3$s ch": {
+    "tr": "%1$s/%2$s kategori · %3$s kanal"
+  },
+  "0 of %1$s channels matched the EPG.": {
+    "tr": "%1$s kanaldan hiçbiri program rehberiyle eşleşmedi."
+  },
+  "Connect Trakt in Settings": {
+    "tr": "Ayarlardan Trakt’a bağlan"
+  },
+  "EPG works for %1$s of %2$s channels (%3$s%). Optional mapping can improve coverage.": {
+    "tr": "Program rehberi %2$s kanaldan %1$s tanesinde çalışıyor (%3$s%). İsteğe bağlı eşleştirme kapsamı artırabilir.",
+    "it": "La guida EPG funziona per %1$s canali su %2$s (%3$s%). La mappatura facoltativa può migliorare la copertura."
+  },
+  "No API key on file for %1$s.": {
+    "tr": "%1$s için kayıtlı API anahtarı yok."
+  },
+  "Only %1$s of %2$s channels matched the EPG (%3$s%).": {
+    "tr": "%2$s kanaldan yalnızca %1$s tanesi program rehberiyle eşleşti (%3$s%).",
+    "it": "Solo %1$s canali su %2$s corrispondono alla guida EPG (%3$s%)."
+  },
+  "Restoring integrations...": {
+    "tr": "Entegrasyonlar geri yükleniyor…"
+  },
+  "AI key configured": {
+    "tr": "AI anahtarı ayarlandı"
+  },
+  "Usenet service": {
+    "de": "Usenet-Dienst",
+    "es": "Servicio Usenet",
+    "fr": "Service Usenet",
+    "it": "Servizio Usenet",
+    "pt": "Serviço Usenet",
+    "tr": "Usenet hizmeti"
+  },
+  "Multiple languages · unspecified": {
+    "de": "Mehrere Sprachen · nicht angegeben",
+    "es": "Varios idiomas · sin especificar",
+    "fr": "Plusieurs langues · non précisées",
+    "it": "Più lingue · non specificate",
+    "pt": "Vários idiomas · não especificados",
+    "tr": "Birden fazla dil · belirtilmemiş"
+  },
+  "Audio language unknown": {
+    "de": "Audiosprache unbekannt",
+    "es": "Idioma de audio desconocido",
+    "fr": "Langue audio inconnue",
+    "it": "Lingua audio sconosciuta",
+    "pt": "Idioma do áudio desconhecido",
+    "tr": "Ses dili bilinmiyor"
+  },
+  "Sports Replays": {
+    "de": "Sport-Replays",
+    "es": "Repeticiones deportivas",
+    "fr": "Rediffusions sportives",
+    "it": "Replay sportivi",
+    "pt": "Replays esportivos",
+    "tr": "Spor tekrarları"
+  },
+  "Use a page with replay cards, such as a sport or competition page.": {
+    "de": "Verwende eine Seite mit Replays, etwa eine Sport- oder Wettbewerbsseite."
+  },
+  "Press OK to edit a field. Press Back to finish typing.": {
+    "de": "Drücke OK, um ein Feld zu bearbeiten. Mit Zurück beendest du die Eingabe."
+  },
+  "Your Watchlist": {
+    "de": "Deine Merkliste",
+    "es": "Tu lista para ver",
+    "fr": "Votre liste à voir",
+    "it": "La tua lista da guardare",
+    "pt": "Sua lista para assistir",
+    "tr": "İzleme listeniz"
+  },
+  "AIOStreams configuration %1$s": {
+    "de": "AIOStreams-Konfiguration %1$s",
+    "es": "Configuración de AIOStreams %1$s",
+    "fr": "Configuration AIOStreams %1$s",
+    "it": "Configurazione AIOStreams %1$s",
+    "pt": "Configuração do AIOStreams %1$s",
+    "tr": "AIOStreams yapılandırması %1$s"
+  },
+  "Reminder set": {
+    "es": "Recordatorio programado"
+  },
+  "Watch trailer": {
+    "fr": "Voir la bande-annonce"
+  },
+  "Enable %1$s": {
+    "de": "%1$s aktivieren",
+    "es": "Activar %1$s",
+    "fr": "Activer %1$s",
+    "it": "Attiva %1$s",
+    "pt": "Ativar %1$s",
+    "tr": "%1$s etkinleştir"
+  },
+  "Play downloaded %1$s": {
+    "de": "Heruntergeladenes %1$s abspielen",
+    "es": "Reproducir %1$s descargado",
+    "fr": "Lire %1$s téléchargé",
+    "it": "Riproduci %1$s scaricato",
+    "pt": "Reproduzir %1$s baixado",
+    "tr": "İndirilen %1$s oynat"
+  },
+  "Return to %1$s": {
+    "de": "Zurück zu %1$s",
+    "es": "Volver a %1$s",
+    "fr": "Revenir à %1$s",
+    "it": "Torna a %1$s",
+    "pt": "Voltar a %1$s",
+    "tr": "%1$s ekranına dön"
+  },
+  "%1$s milliseconds": {
+    "de": "%1$s Millisekunden",
+    "es": "%1$s milisegundos",
+    "fr": "%1$s millisecondes",
+    "it": "%1$s millisecondi",
+    "pt": "%1$s milissegundos",
+    "tr": "%1$s milisaniye"
+  },
+  "Local sync transport failed: %1$s": {
+    "de": "Lokale Synchronisierung fehlgeschlagen: %1$s",
+    "es": "Error de sincronización local: %1$s",
+    "fr": "Échec de la synchronisation locale : %1$s",
+    "it": "Sincronizzazione locale non riuscita: %1$s",
+    "pt": "Falha na sincronização local: %1$s",
+    "tr": "Yerel eşitleme başarısız: %1$s"
+  },
+  "Unsupported event type %1$s": {
+    "de": "Nicht unterstützter Ereignistyp %1$s",
+    "es": "Tipo de evento no compatible: %1$s",
+    "fr": "Type d’événement non pris en charge : %1$s",
+    "it": "Tipo di evento non supportato: %1$s",
+    "pt": "Tipo de evento não compatível: %1$s",
+    "tr": "Desteklenmeyen olay türü: %1$s"
+  },
+  "Home content": {
+    "de": "Inhalte auf Home",
+    "es": "Contenido de Home",
+    "fr": "Contenu de Home",
+    "it": "Contenuti di Home",
+    "pt": "Conteúdo de Home",
+    "tr": "Home içeriği"
+  },
+  "Invalid search push payload": {
+    "de": "Ungültige übertragene Suchanfrage",
+    "es": "Solicitud de búsqueda recibida no válida",
+    "fr": "Requête de recherche reçue non valide",
+    "it": "Richiesta di ricerca ricevuta non valida",
+    "pt": "Solicitação de busca recebida inválida",
+    "tr": "Alınan arama isteği geçersiz"
+  },
+  "Unpaired sender or duplicate event.": {
+    "de": "Absender nicht gekoppelt oder Ereignis doppelt.",
+    "es": "Remitente no vinculado o evento duplicado.",
+    "fr": "Expéditeur non associé ou événement en double.",
+    "it": "Mittente non abbinato o evento duplicato.",
+    "pt": "Remetente não pareado ou evento duplicado.",
+    "tr": "Gönderen eşleştirilmemiş veya olay yineleniyor."
+  },
+  "Invalid playback intent payload": {
+    "de": "Ungültige Wiedergabeanfrage",
+    "es": "Solicitud de reproducción no válida",
+    "fr": "Demande de lecture non valide",
+    "it": "Richiesta di riproduzione non valida",
+    "pt": "Solicitação de reprodução inválida",
+    "tr": "Geçersiz oynatma isteği"
+  },
+  "Extension preview": {
+    "de": "Erweiterungsvorschau",
+    "es": "Vista previa de la extensión",
+    "fr": "Aperçu de l’extension",
+    "it": "Anteprima dell’estensione",
+    "pt": "Prévia da extensão",
+    "tr": "Eklenti önizlemesi"
+  },
+  "Open Library": {
+    "de": "Mediathek öffnen",
+    "es": "Abrir biblioteca",
+    "fr": "Ouvrir la bibliothèque",
+    "it": "Apri la libreria",
+    "pt": "Abrir biblioteca",
+    "tr": "Kitaplığı aç"
+  },
+  "Unknown endpoint": {
+    "de": "Unbekannter Endpunkt",
+    "es": "Destino desconocido",
+    "fr": "Point d’accès inconnu",
+    "it": "Endpoint sconosciuto",
+    "pt": "Destino desconhecido",
+    "tr": "Bilinmeyen uç nokta"
+  },
+  "Invalid encoding": {
+    "de": "Ungültige Kodierung",
+    "es": "Codificación no válida",
+    "fr": "Encodage non valide",
+    "it": "Codifica non valida",
+    "pt": "Codificação inválida",
+    "tr": "Geçersiz kodlama"
+  },
+  "Watch Now": {
+    "de": "Jetzt ansehen",
+    "es": "Ver ahora",
+    "fr": "Regarder",
+    "it": "Guarda ora",
+    "pt": "Assistir agora",
+    "tr": "Şimdi izle"
+  },
+  "Play next episode (%1$ss)": {
+    "de": "Nächste Folge abspielen (%1$s s)",
+    "es": "Reproducir siguiente episodio (%1$s s)",
+    "fr": "Lire l’épisode suivant (%1$s s)",
+    "it": "Riproduci episodio successivo (%1$s s)",
+    "pt": "Reproduzir próximo episódio (%1$s s)",
+    "tr": "Sonraki bölümü oynat (%1$s sn)"
+  },
+  "Next episode · %1$ss": {
+    "de": "Nächste Folge · %1$s s",
+    "es": "Siguiente episodio · %1$s s",
+    "fr": "Épisode suivant · %1$s s",
+    "it": "Episodio successivo · %1$s s",
+    "pt": "Próximo episódio · %1$s s",
+    "tr": "Sonraki bölüm · %1$s sn"
+  },
+  "Featured title %1$s of %2$s: %3$s": {
+    "de": "Ausgewählter Titel %1$s von %2$s: %3$s",
+    "es": "Título destacado %1$s de %2$s: %3$s",
+    "fr": "Titre à l’affiche %1$s sur %2$s : %3$s",
+    "it": "Titolo in primo piano %1$s di %2$s: %3$s",
+    "pt": "Título em destaque %1$s de %2$s: %3$s",
+    "tr": "Öne çıkan %2$s başlıktan %1$s: %3$s"
+  },
+  "IMDb rating": {
+    "es": "Puntuación IMDb"
+  },
+  "EPG URL": {
+    "fr": "URL du guide TV",
+    "tr": "EPG adresi"
+  },
+  "Indexer URL": {
+    "fr": "URL de l’indexeur",
+    "tr": "İndeksleyici adresi"
+  },
+  "Manifest URL": {
+    "fr": "URL du manifeste",
+    "tr": "Bildirim adresi"
+  },
+  "Minimum TMDB Rating": {
+    "fr": "Note TMDB minimale"
+  },
+  "Server host": {
+    "fr": "Adresse du serveur"
+  },
+  "Indexer type · newznab, nzbgeek, nzbplanet": {
+    "tr": "İndeksleyici türü · newznab, nzbgeek, nzbplanet"
+  },
+  "One account · Up to 5 Apple devices": {
+    "tr": "Tek hesap · En fazla 5 Apple aygıtı"
+  },
+  "Playback service API key": {
+    "tr": "Oynatma hizmeti API anahtarı"
+  },
+  "Playback service URL": {
+    "tr": "Oynatma hizmeti adresi"
+  },
+  "Home": {
+    "de": "Home",
+    "es": "Home",
+    "fr": "Home",
+    "it": "Home",
+    "pt": "Home",
+    "tr": "Home"
+  },
+  "Torve": {
+    "de": "Torve",
+    "es": "Torve",
+    "fr": "Torve",
+    "it": "Torve",
+    "pt": "Torve",
+    "tr": "Torve"
+  },
+  "TORVE": {
+    "de": "TORVE",
+    "es": "TORVE",
+    "fr": "TORVE",
+    "it": "TORVE",
+    "pt": "TORVE",
+    "tr": "TORVE"
+  },
+  "Trakt": {
+    "de": "Trakt",
+    "es": "Trakt",
+    "fr": "Trakt",
+    "it": "Trakt",
+    "pt": "Trakt",
+    "tr": "Trakt"
+  },
+  "SIMKL": {
+    "de": "SIMKL",
+    "es": "SIMKL",
+    "fr": "SIMKL",
+    "it": "SIMKL",
+    "pt": "SIMKL",
+    "tr": "SIMKL"
+  },
+  "Simkl": {
+    "de": "Simkl",
+    "es": "Simkl",
+    "fr": "Simkl",
+    "it": "Simkl",
+    "pt": "Simkl",
+    "tr": "Simkl"
+  },
+  "Plex": {
+    "de": "Plex",
+    "es": "Plex",
+    "fr": "Plex",
+    "it": "Plex",
+    "pt": "Plex",
+    "tr": "Plex"
+  },
+  "Jellyfin": {
+    "de": "Jellyfin",
+    "es": "Jellyfin",
+    "fr": "Jellyfin",
+    "it": "Jellyfin",
+    "pt": "Jellyfin",
+    "tr": "Jellyfin"
+  },
+  "AIOStreams": {
+    "de": "AIOStreams",
+    "es": "AIOStreams",
+    "fr": "AIOStreams",
+    "it": "AIOStreams",
+    "pt": "AIOStreams",
+    "tr": "AIOStreams"
+  },
+  "AllDebrid": {
+    "de": "AllDebrid",
+    "es": "AllDebrid",
+    "fr": "AllDebrid",
+    "it": "AllDebrid",
+    "pt": "AllDebrid",
+    "tr": "AllDebrid"
+  },
+  "AirPlay": {
+    "de": "AirPlay",
+    "es": "AirPlay",
+    "fr": "AirPlay",
+    "it": "AirPlay",
+    "pt": "AirPlay",
+    "tr": "AirPlay"
+  },
+  "Atmos": {
+    "de": "Atmos",
+    "es": "Atmos",
+    "fr": "Atmos",
+    "it": "Atmos",
+    "pt": "Atmos",
+    "tr": "Atmos"
+  },
+  "BluRay": {
+    "de": "BluRay",
+    "es": "BluRay",
+    "fr": "BluRay",
+    "it": "BluRay",
+    "pt": "BluRay",
+    "tr": "BluRay"
+  },
+  "ChatGPT": {
+    "de": "ChatGPT",
+    "es": "ChatGPT",
+    "fr": "ChatGPT",
+    "it": "ChatGPT",
+    "pt": "ChatGPT",
+    "tr": "ChatGPT"
+  },
+  "Claude": {
+    "de": "Claude",
+    "es": "Claude",
+    "fr": "Claude",
+    "it": "Claude",
+    "pt": "Claude",
+    "tr": "Claude"
+  },
+  "DeepSeek": {
+    "de": "DeepSeek",
+    "es": "DeepSeek",
+    "fr": "DeepSeek",
+    "it": "DeepSeek",
+    "pt": "DeepSeek",
+    "tr": "DeepSeek"
+  },
+  "Easynews": {
+    "de": "Easynews",
+    "es": "Easynews",
+    "fr": "Easynews",
+    "it": "Easynews",
+    "pt": "Easynews",
+    "tr": "Easynews"
+  },
+  "Gemini": {
+    "de": "Gemini",
+    "es": "Gemini",
+    "fr": "Gemini",
+    "it": "Gemini",
+    "pt": "Gemini",
+    "tr": "Gemini"
+  },
+  "IMDb": {
+    "de": "IMDb",
+    "es": "IMDb",
+    "fr": "IMDb",
+    "it": "IMDb",
+    "pt": "IMDb",
+    "tr": "IMDb"
+  },
+  "Letterboxd": {
+    "de": "Letterboxd",
+    "es": "Letterboxd",
+    "fr": "Letterboxd",
+    "it": "Letterboxd",
+    "pt": "Letterboxd",
+    "tr": "Letterboxd"
+  },
+  "MAL": {
+    "de": "MAL",
+    "es": "MAL",
+    "fr": "MAL",
+    "it": "MAL",
+    "pt": "MAL",
+    "tr": "MAL"
+  },
+  "MDBList": {
+    "de": "MDBList",
+    "es": "MDBList",
+    "fr": "MDBList",
+    "it": "MDBList",
+    "pt": "MDBList",
+    "tr": "MDBList"
+  },
+  "Metacritic": {
+    "de": "Metacritic",
+    "es": "Metacritic",
+    "fr": "Metacritic",
+    "it": "Metacritic",
+    "pt": "Metacritic",
+    "tr": "Metacritic"
+  },
+  "NzbDAV": {
+    "de": "NzbDAV",
+    "es": "NzbDAV",
+    "fr": "NzbDAV",
+    "it": "NzbDAV",
+    "pt": "NzbDAV",
+    "tr": "NzbDAV"
+  },
+  "OMDB": {
+    "de": "OMDB",
+    "es": "OMDB",
+    "fr": "OMDB",
+    "it": "OMDB",
+    "pt": "OMDB",
+    "tr": "OMDB"
+  },
+  "Perplexity": {
+    "de": "Perplexity",
+    "es": "Perplexity",
+    "fr": "Perplexity",
+    "it": "Perplexity",
+    "pt": "Perplexity",
+    "tr": "Perplexity"
+  },
+  "Premiumize": {
+    "de": "Premiumize",
+    "es": "Premiumize",
+    "fr": "Premiumize",
+    "it": "Premiumize",
+    "pt": "Premiumize",
+    "tr": "Premiumize"
+  },
+  "SQLDelight": {
+    "de": "SQLDelight",
+    "es": "SQLDelight",
+    "fr": "SQLDelight",
+    "it": "SQLDelight",
+    "pt": "SQLDelight",
+    "tr": "SQLDelight"
+  },
+  "Seerr": {
+    "de": "Seerr",
+    "es": "Seerr",
+    "fr": "Seerr",
+    "it": "Seerr",
+    "pt": "Seerr",
+    "tr": "Seerr"
+  },
+  "TorBox": {
+    "de": "TorBox",
+    "es": "TorBox",
+    "fr": "TorBox",
+    "it": "TorBox",
+    "pt": "TorBox",
+    "tr": "TorBox"
+  },
+  "TMDB": {
+    "de": "TMDB",
+    "es": "TMDB",
+    "fr": "TMDB",
+    "it": "TMDB",
+    "pt": "TMDB",
+    "tr": "TMDB"
+  },
+  "YouTube": {
+    "de": "YouTube",
+    "es": "YouTube",
+    "fr": "YouTube",
+    "it": "YouTube",
+    "pt": "YouTube",
+    "tr": "YouTube"
+  },
+  "Kodi": {
+    "de": "Kodi",
+    "es": "Kodi",
+    "fr": "Kodi",
+    "it": "Kodi",
+    "pt": "Kodi",
+    "tr": "Kodi"
+  },
+  "Koin": {
+    "de": "Koin",
+    "es": "Koin",
+    "fr": "Koin",
+    "it": "Koin",
+    "pt": "Koin",
+    "tr": "Koin"
+  },
+  "Ktor": {
+    "de": "Ktor",
+    "es": "Ktor",
+    "fr": "Ktor",
+    "it": "Ktor",
+    "pt": "Ktor",
+    "tr": "Ktor"
+  },
+  "Coil": {
+    "de": "Coil",
+    "es": "Coil",
+    "fr": "Coil",
+    "it": "Coil",
+    "pt": "Coil",
+    "tr": "Coil"
+  },
+  "IPTV": {
+    "de": "IPTV",
+    "es": "IPTV",
+    "fr": "IPTV",
+    "it": "IPTV",
+    "pt": "IPTV",
+    "tr": "IPTV"
+  },
+  "HDR": {
+    "de": "HDR",
+    "es": "HDR",
+    "fr": "HDR",
+    "it": "HDR",
+    "pt": "HDR",
+    "tr": "HDR"
+  },
+  "SSL": {
+    "de": "SSL",
+    "es": "SSL",
+    "fr": "SSL",
+    "it": "SSL",
+    "pt": "SSL",
+    "tr": "SSL"
+  },
+  "SDH": {
+    "de": "SDH",
+    "es": "SDH",
+    "fr": "SDH",
+    "it": "SDH",
+    "pt": "SDH",
+    "tr": "SDH"
+  },
+  "Remux": {
+    "de": "Remux",
+    "es": "Remux",
+    "fr": "Remux",
+    "it": "Remux",
+    "pt": "Remux",
+    "tr": "Remux"
+  },
+  "Torrent": {
+    "de": "Torrent",
+    "es": "Torrent",
+    "fr": "Torrent",
+    "it": "Torrent",
+    "pt": "Torrent",
+    "tr": "Torrent"
+  },
+  "Torrents": {
+    "de": "Torrents",
+    "es": "Torrents",
+    "fr": "Torrents",
+    "it": "Torrents",
+    "pt": "Torrents",
+    "tr": "Torrents"
+  },
+  "Usenet": {
+    "de": "Usenet",
+    "es": "Usenet",
+    "fr": "Usenet",
+    "it": "Usenet",
+    "pt": "Usenet",
+    "tr": "Usenet"
+  },
+  "Xtream": {
+    "de": "Xtream",
+    "es": "Xtream",
+    "fr": "Xtream",
+    "it": "Xtream",
+    "pt": "Xtream",
+    "tr": "Xtream"
+  },
+  "Xtream Codes": {
+    "de": "Xtream Codes",
+    "es": "Xtream Codes",
+    "fr": "Xtream Codes",
+    "it": "Xtream Codes",
+    "pt": "Xtream Codes",
+    "tr": "Xtream Codes"
+  },
+  "Dolby Vision": {
+    "de": "Dolby Vision",
+    "es": "Dolby Vision",
+    "fr": "Dolby Vision",
+    "it": "Dolby Vision",
+    "pt": "Dolby Vision",
+    "tr": "Dolby Vision"
+  },
+  "Kotlin Multiplatform": {
+    "de": "Kotlin Multiplatform",
+    "es": "Kotlin Multiplatform",
+    "fr": "Kotlin Multiplatform",
+    "it": "Kotlin Multiplatform",
+    "pt": "Kotlin Multiplatform",
+    "tr": "Kotlin Multiplatform"
+  },
+  "Torve Premium": {
+    "de": "Torve Premium",
+    "es": "Torve Premium",
+    "fr": "Torve Premium",
+    "it": "Torve Premium",
+    "pt": "Torve Premium",
+    "tr": "Torve Premium"
+  },
+  "Torve Score": {
+    "de": "Torve Score",
+    "es": "Torve Score",
+    "fr": "Torve Score",
+    "it": "Torve Score",
+    "pt": "Torve Score",
+    "tr": "Torve Score"
+  },
+  "Real-Debrid / AllDebrid / Premiumize / TorBox": {
+    "de": "Real-Debrid / AllDebrid / Premiumize / TorBox",
+    "es": "Real-Debrid / AllDebrid / Premiumize / TorBox",
+    "fr": "Real-Debrid / AllDebrid / Premiumize / TorBox",
+    "it": "Real-Debrid / AllDebrid / Premiumize / TorBox",
+    "pt": "Real-Debrid / AllDebrid / Premiumize / TorBox",
+    "tr": "Real-Debrid / AllDebrid / Premiumize / TorBox"
+  },
+  "Español": {
+    "de": "Español",
+    "es": "Español",
+    "fr": "Español",
+    "it": "Español",
+    "pt": "Español",
+    "tr": "Español"
+  },
+  "Français": {
+    "de": "Français",
+    "es": "Français",
+    "fr": "Français",
+    "it": "Français",
+    "pt": "Français",
+    "tr": "Français"
+  },
+  "Português": {
+    "de": "Português",
+    "es": "Português",
+    "fr": "Português",
+    "it": "Português",
+    "pt": "Português",
+    "tr": "Português"
+  },
+  "Deutsch": {
+    "de": "Deutsch",
+    "es": "Deutsch",
+    "fr": "Deutsch",
+    "it": "Deutsch",
+    "pt": "Deutsch",
+    "tr": "Deutsch"
+  },
+  "Italiano": {
+    "de": "Italiano",
+    "es": "Italiano",
+    "fr": "Italiano",
+    "it": "Italiano",
+    "pt": "Italiano",
+    "tr": "Italiano"
+  },
+  "Plex or Jellyfin": {
+    "de": "Plex or Jellyfin",
+    "es": "Plex or Jellyfin",
+    "fr": "Plex or Jellyfin",
+    "it": "Plex or Jellyfin",
+    "pt": "Plex or Jellyfin",
+    "tr": "Plex or Jellyfin"
+  },
+  "Playback Startup": {
+    "de": "Wiedergabestart",
+    "es": "Inicio de reproducción",
+    "fr": "Démarrage de la lecture",
+    "it": "Avvio della riproduzione",
+    "pt": "Início da reprodução",
+    "tr": "Oynatma başlangıcı"
+  },
+  "New Group": {
+    "es": "Nuevo grupo",
+    "fr": "Nouveau groupe"
+  },
+  "How extensions work": {
+    "fr": "Fonctionnement des extensions"
+  },
+  "New Pattern": {
+    "fr": "Nouvelle règle"
+  },
+  "Show Border": {
+    "fr": "Afficher la bordure"
+  },
+  "Sports Replay": {
+    "fr": "Rediffusion sportive"
+  },
+  "Episodes left": {
+    "fr": "Épisodes restants"
+  },
+  "Show synopsis": {
+    "fr": "Afficher le résumé"
+  },
+  "Source organization": {
+    "fr": "Organisation des sources"
+  },
+  "TORVE Score on Detail Page": {
+    "es": "Puntuación TORVE en la ficha"
+  },
+  "Sync completed": {
+    "fr": "Synchronisation terminée"
+  },
+  "Minimum IMDb · %1$s": {
+    "de": "IMDb-Minimum · %1$s",
+    "fr": "Note IMDb minimale · %1$s",
+    "tr": "En düşük IMDb · %1$s"
+  },
+  "Watch %1$s live": {
+    "de": "%1$s live ansehen"
+  },
+  "IMDb votes high": {
+    "fr": "Votes IMDb décroissants"
+  },
+  "IMDb votes low": {
+    "fr": "Votes IMDb croissants"
+  },
+  "TMDB votes": {
+    "fr": "Votes TMDB"
+  },
+  "NZB indexer": {
+    "tr": "NZB indeksleyici"
+  },
+  "Syncing Trakt": {
+    "es": "Sincronizando Trakt",
+    "fr": "Synchronisation Trakt"
+  },
+  "Usenet / Easynews / NZB indexers": {
+    "de": "Usenet / Easynews / NZB-Indexer",
+    "es": "Usenet / Easynews / indexadores NZB",
+    "fr": "Usenet / Easynews / indexeurs NZB",
+    "it": "Usenet / Easynews / indicizzatori NZB",
+    "pt": "Usenet / Easynews / indexadores NZB",
+    "tr": "Usenet / Easynews / NZB indeksleyicileri"
+  },
+  "%1$s IMDb votes": {
+    "fr": "%1$s votes IMDb"
+  },
+  "IMDb Rating": {
+    "es": "Puntuación IMDb",
+    "fr": "Note IMDb"
+  },
+  "Refresh playlist": {
+    "fr": "Actualiser la liste de lecture"
+  },
+  "Home rows": {
+    "es": "Filas de Home",
+    "fr": "Rangées de Home"
+  },
+  "Refresh guide": {
+    "fr": "Actualiser le guide"
+  },
+  "Billed and managed through the App Store.": {
+    "es": "Facturación y gestión a través del App Store."
+  },
+  "Panda setup": {
+    "de": "Usenet einrichten",
+    "es": "Configurar Usenet",
+    "fr": "Configurer Usenet",
+    "it": "Configura Usenet",
+    "pt": "Configurar Usenet",
+    "tr": "Usenet kurulumu"
+  },
+  "Download Source": {
+    "tr": "İndirme kaynağı"
+  },
+  "Replay website address": {
+    "pt": "Endereço do site de replays"
+  },
+  "Oldest First": {
+    "fr": "Les plus anciens d’abord"
+  },
+  "View Premium": {
+    "fr": "Voir Premium"
+  },
+  "Refresh access": {
+    "de": "Zugriff aktualisieren",
+    "es": "Actualizar acceso",
+    "fr": "Actualiser l’accès",
+    "it": "Aggiorna accesso",
+    "pt": "Atualizar acesso",
+    "tr": "Erişimi yenile"
+  },
+  "TORVE Score on Cards": {
+    "es": "Puntuación TORVE en tarjetas"
+  },
+  "Refresh Devices": {
+    "fr": "Actualiser les appareils"
+  },
+  "e.g. dark sci-fi thrillers from the 90s": {
+    "es": "p. ej., thrillers de ciencia ficción oscuros de los años 90"
+  },
+  "%1$s matching sources": {
+    "es": "%1$s fuentes coincidentes"
+  },
+  "Sort collection": {
+    "fr": "Trier la collection"
+  },
+  "Contact support": {
+    "fr": "Contacter l’assistance"
+  },
+  "Reminder set for ": {
+    "es": "Recordatorio para "
+  },
+  "IMDb votes": {
+    "fr": "Votes IMDb"
+  },
+  "PIN Lock": {
+    "es": "Bloqueo con PIN"
+  },
+  "Badge": {
+    "es": "Insignia",
+    "fr": "Badge",
+    "it": "Etichetta",
+    "pt": "Selo"
+  },
+  "Border": {
+    "fr": "Bordure",
+    "it": "Bordo"
+  },
+  "Dot": {
+    "es": "Punto",
+    "fr": "Point",
+    "it": "Punto",
+    "tr": "Nokta"
+  },
+  "Grid": {
+    "de": "Raster",
+    "es": "Cuadrícula",
+    "fr": "Grille",
+    "tr": "Izgara"
+  },
+  "Deinterlace": {
+    "es": "Desentrelazar",
+    "fr": "Désentrelacement",
+    "it": "Deinterlacciamento",
+    "tr": "Görüntü ayrıştırma"
+  },
+  "Loudness": {
+    "es": "Compensación de volumen",
+    "fr": "Correction du volume"
+  },
+  "Older": {
+    "es": "Anteriores",
+    "fr": "Plus anciens"
+  },
+  "Patterns": {
+    "fr": "Règles"
+  },
+  "Shelf": {
+    "de": "Reihe",
+    "fr": "Rangée",
+    "it": "Scaffale"
+  },
+  "Tab": {
+    "es": "Pestaña",
+    "fr": "Onglet"
+  },
+  "Unrestricted": {
+    "tr": "Sınırsız"
+  },
+  "Reload": {
+    "tr": "Yeniden yükle"
+  },
+  "Organize": {
+    "es": "Organizar"
+  },
+  "Disclaimer": {
+    "fr": "Avertissement",
+    "it": "Esclusione di responsabilità"
+  },
+  "Indexer": {
+    "es": "Indexador",
+    "fr": "Indexeur",
+    "tr": "İndeksleyici"
+  },
+  "480p": {
+    "de": "480p",
+    "es": "480p",
+    "fr": "480p",
+    "it": "480p",
+    "pt": "480p",
+    "tr": "480p"
+  },
+  "576p": {
+    "de": "576p",
+    "es": "576p",
+    "fr": "576p",
+    "it": "576p",
+    "pt": "576p",
+    "tr": "576p"
+  },
+  "720p": {
+    "de": "720p",
+    "es": "720p",
+    "fr": "720p",
+    "it": "720p",
+    "pt": "720p",
+    "tr": "720p"
+  },
+  "1080p": {
+    "de": "1080p",
+    "es": "1080p",
+    "fr": "1080p",
+    "it": "1080p",
+    "pt": "1080p",
+    "tr": "1080p"
+  },
+  "1440p": {
+    "de": "1440p",
+    "es": "1440p",
+    "fr": "1440p",
+    "it": "1440p",
+    "pt": "1440p",
+    "tr": "1440p"
+  },
+  "2160p": {
+    "de": "2160p",
+    "es": "2160p",
+    "fr": "2160p",
+    "it": "2160p",
+    "pt": "2160p",
+    "tr": "2160p"
+  },
+  "2K": {
+    "de": "2K",
+    "es": "2K",
+    "fr": "2K",
+    "it": "2K",
+    "pt": "2K",
+    "tr": "2K"
+  },
+  "4K": {
+    "de": "4K",
+    "es": "4K",
+    "fr": "4K",
+    "it": "4K",
+    "pt": "4K",
+    "tr": "4K"
+  },
+  "8K": {
+    "de": "8K",
+    "es": "8K",
+    "fr": "8K",
+    "it": "8K",
+    "pt": "8K",
+    "tr": "8K"
+  },
+  "4K UHD": {
+    "de": "4K UHD",
+    "es": "4K UHD",
+    "fr": "4K UHD",
+    "it": "4K UHD",
+    "pt": "4K UHD",
+    "tr": "4K UHD"
+  },
+  "HD": {
+    "de": "HD",
+    "es": "HD",
+    "fr": "HD",
+    "it": "HD",
+    "pt": "HD",
+    "tr": "HD"
+  },
+  "UHD": {
+    "de": "UHD",
+    "es": "UHD",
+    "fr": "UHD",
+    "it": "UHD",
+    "pt": "UHD",
+    "tr": "UHD"
+  },
+  "SD": {
+    "de": "SD",
+    "es": "SD",
+    "fr": "SD",
+    "it": "SD",
+    "pt": "SD",
+    "tr": "SD"
+  },
+  "AC3": {
+    "de": "AC3",
+    "es": "AC3",
+    "fr": "AC3",
+    "it": "AC3",
+    "pt": "AC3",
+    "tr": "AC3"
+  },
+  "EAC3": {
+    "de": "EAC3",
+    "es": "EAC3",
+    "fr": "EAC3",
+    "it": "EAC3",
+    "pt": "EAC3",
+    "tr": "EAC3"
+  },
+  "DTS": {
+    "de": "DTS",
+    "es": "DTS",
+    "fr": "DTS",
+    "it": "DTS",
+    "pt": "DTS",
+    "tr": "DTS"
+  },
+  "H.264": {
+    "de": "H.264",
+    "es": "H.264",
+    "fr": "H.264",
+    "it": "H.264",
+    "pt": "H.264",
+    "tr": "H.264"
+  },
+  "H.265": {
+    "de": "H.265",
+    "es": "H.265",
+    "fr": "H.265",
+    "it": "H.265",
+    "pt": "H.265",
+    "tr": "H.265"
+  },
+  "HEVC": {
+    "de": "HEVC",
+    "es": "HEVC",
+    "fr": "HEVC",
+    "it": "HEVC",
+    "pt": "HEVC",
+    "tr": "HEVC"
+  },
+  "AV1": {
+    "de": "AV1",
+    "es": "AV1",
+    "fr": "AV1",
+    "it": "AV1",
+    "pt": "AV1",
+    "tr": "AV1"
+  },
+  "VP9": {
+    "de": "VP9",
+    "es": "VP9",
+    "fr": "VP9",
+    "it": "VP9",
+    "pt": "VP9",
+    "tr": "VP9"
+  },
+  "AAC": {
+    "de": "AAC",
+    "es": "AAC",
+    "fr": "AAC",
+    "it": "AAC",
+    "pt": "AAC",
+    "tr": "AAC"
+  },
+  "MP3": {
+    "de": "MP3",
+    "es": "MP3",
+    "fr": "MP3",
+    "it": "MP3",
+    "pt": "MP3",
+    "tr": "MP3"
+  },
+  "FLAC": {
+    "de": "FLAC",
+    "es": "FLAC",
+    "fr": "FLAC",
+    "it": "FLAC",
+    "pt": "FLAC",
+    "tr": "FLAC"
+  },
+  "HDR10": {
+    "de": "HDR10",
+    "es": "HDR10",
+    "fr": "HDR10",
+    "it": "HDR10",
+    "pt": "HDR10",
+    "tr": "HDR10"
+  },
+  "HDR10+": {
+    "de": "HDR10+",
+    "es": "HDR10+",
+    "fr": "HDR10+",
+    "it": "HDR10+",
+    "pt": "HDR10+",
+    "tr": "HDR10+"
+  },
+  "Rate %1$s/10": {
+    "de": "Mit %1$s/10 bewerten",
+    "es": "Puntuar %1$s/10",
+    "fr": "Noter %1$s/10",
+    "it": "Vota %1$s/10",
+    "pt": "Avaliar %1$s/10",
+    "tr": "%1$s/10 puan ver"
+  },
+  "%1$s, %2$s to %3$s": {
+    "de": "%1$s, %2$s bis %3$s",
+    "es": "%1$s, de %2$s a %3$s",
+    "fr": "%1$s, de %2$s à %3$s",
+    "it": "%1$s, da %2$s a %3$s",
+    "pt": "%1$s, de %2$s a %3$s",
+    "tr": "%1$s, %2$s – %3$s"
+  },
+  "%1$s of %2$s": {
+    "de": "%1$s von %2$s",
+    "es": "%1$s de %2$s",
+    "fr": "%1$s sur %2$s",
+    "it": "%1$s di %2$s",
+    "pt": "%1$s de %2$s",
+    "tr": "%1$s / %2$s"
+  },
+  "≈ %1$s of %2$s": {
+    "de": "≈ %1$s von %2$s",
+    "es": "≈ %1$s de %2$s",
+    "fr": "≈ %1$s sur %2$s",
+    "it": "≈ %1$s di %2$s",
+    "pt": "≈ %1$s de %2$s",
+    "tr": "≈ %1$s / %2$s"
+  },
+  "Add to Home": {
+    "de": "Zu Home hinzufügen",
+    "es": "Añadir a Home",
+    "fr": "Ajouter à Home",
+    "it": "Aggiungi a Home",
+    "pt": "Adicionar a Home",
+    "tr": "Home’a ekle"
+  },
+  "Add to watchlist": {
+    "de": "Zur Merkliste hinzufügen",
+    "es": "Añadir a Mi lista",
+    "fr": "Ajouter à la liste à voir",
+    "it": "Aggiungi alla lista",
+    "pt": "Adicionar à Minha lista",
+    "tr": "İzleme listesine ekle"
+  },
+  "All genres (%1$s)": {
+    "de": "Alle Genres (%1$s)",
+    "es": "Todos los géneros (%1$s)",
+    "fr": "Tous les genres (%1$s)",
+    "it": "Tutti i generi (%1$s)",
+    "pt": "Todos os gêneros (%1$s)",
+    "tr": "Tüm türler (%1$s)"
+  },
+  "Categories": {
+    "de": "Kategorien",
+    "es": "Categorías",
+    "fr": "Catégories",
+    "it": "Categorie",
+    "pt": "Categorias",
+    "tr": "Kategoriler"
+  },
+  "Close channel search": {
+    "de": "Sendersuche schließen",
+    "es": "Cerrar búsqueda de canales",
+    "fr": "Fermer la recherche de chaînes",
+    "it": "Chiudi ricerca canali",
+    "pt": "Fechar busca de canais",
+    "tr": "Kanal aramasını kapat"
+  },
+  "Find a country or category": {
+    "de": "Land oder Kategorie suchen",
+    "es": "Buscar un país o categoría",
+    "fr": "Chercher un pays ou une catégorie",
+    "it": "Cerca un paese o una categoria",
+    "pt": "Buscar um país ou categoria",
+    "tr": "Ülke veya kategori bul"
+  },
+  "Max Ratings on Card: %1$s": {
+    "de": "Max. Bewertungen auf Karten: %1$s",
+    "es": "Valoraciones máx. por tarjeta: %1$s",
+    "fr": "Notes max. par carte : %1$s",
+    "it": "Valutazioni max. per scheda: %1$s",
+    "pt": "Avaliações máx. por cartão: %1$s",
+    "tr": "Kart başına en fazla puan: %1$s"
+  },
+  "New API key (optional)": {
+    "de": "Neuer API-Schlüssel (optional)",
+    "es": "Nueva clave API (opcional)",
+    "fr": "Nouvelle clé API (facultatif)",
+    "it": "Nuova chiave API (facoltativa)",
+    "pt": "Nova chave API (opcional)",
+    "tr": "Yeni API anahtarı (isteğe bağlı)"
+  },
+  "Priority: %1$s": {
+    "de": "Priorität: %1$s",
+    "es": "Prioridad: %1$s",
+    "fr": "Priorité : %1$s",
+    "it": "Priorità: %1$s",
+    "pt": "Prioridade: %1$s",
+    "tr": "Öncelik: %1$s"
+  },
+  "Remove from watchlist": {
+    "de": "Von der Merkliste entfernen",
+    "es": "Quitar de Mi lista",
+    "fr": "Retirer de la liste à voir",
+    "it": "Rimuovi dalla lista",
+    "pt": "Remover da Minha lista",
+    "tr": "İzleme listesinden kaldır"
+  },
+  "Search TV show groups": {
+    "de": "Seriengruppen suchen",
+    "es": "Buscar grupos de series",
+    "fr": "Rechercher des groupes de séries",
+    "it": "Cerca gruppi di serie",
+    "pt": "Buscar grupos de séries",
+    "tr": "Dizi gruplarında ara"
+  },
+  "Search groups and channels": {
+    "de": "Gruppen und Sender suchen",
+    "es": "Buscar grupos y canales",
+    "fr": "Rechercher des groupes et des chaînes",
+    "it": "Cerca gruppi e canali",
+    "pt": "Buscar grupos e canais",
+    "tr": "Grup ve kanallarda ara"
+  },
+  "Search movie groups": {
+    "de": "Filmgruppen suchen",
+    "es": "Buscar grupos de películas",
+    "fr": "Rechercher des groupes de films",
+    "it": "Cerca gruppi di film",
+    "pt": "Buscar grupos de filmes",
+    "tr": "Film gruplarında ara"
+  },
+  "Search this on-demand group": {
+    "de": "Diese On-Demand-Gruppe durchsuchen",
+    "es": "Buscar en este grupo bajo demanda",
+    "fr": "Rechercher dans ce groupe à la demande",
+    "it": "Cerca in questo gruppo on demand",
+    "pt": "Buscar neste grupo sob demanda",
+    "tr": "Bu isteğe bağlı grupta ara"
+  },
+  "Show channel groups": {
+    "de": "Sendergruppen anzeigen",
+    "es": "Mostrar grupos de canales",
+    "fr": "Afficher les groupes de chaînes",
+    "it": "Mostra gruppi di canali",
+    "pt": "Mostrar grupos de canais",
+    "tr": "Kanal gruplarını göster"
+  },
+  "Show favorite channels": {
+    "de": "Lieblingssender anzeigen",
+    "es": "Mostrar canales favoritos",
+    "fr": "Afficher les chaînes favorites",
+    "it": "Mostra canali preferiti",
+    "pt": "Mostrar canais favoritos",
+    "tr": "Favori kanalları göster"
+  },
+  "Show fewer genres": {
+    "de": "Weniger Genres anzeigen",
+    "es": "Mostrar menos géneros",
+    "fr": "Afficher moins de genres",
+    "it": "Mostra meno generi",
+    "pt": "Mostrar menos gêneros",
+    "tr": "Daha az tür göster"
+  },
+  "Use an API key instead": {
+    "de": "Stattdessen API-Schlüssel verwenden",
+    "es": "Usar una clave API",
+    "fr": "Utiliser une clé API",
+    "it": "Usa una chiave API",
+    "pt": "Usar uma chave API",
+    "tr": "API anahtarı kullan"
+  },
+  "View subscription": {
+    "de": "Abonnement ansehen",
+    "es": "Ver suscripción",
+    "fr": "Voir l’abonnement",
+    "it": "Visualizza abbonamento",
+    "pt": "Ver assinatura",
+    "tr": "Aboneliği görüntüle"
+  }
+}

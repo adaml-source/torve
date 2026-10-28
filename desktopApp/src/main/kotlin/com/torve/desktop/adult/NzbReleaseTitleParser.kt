@@ -1,5 +1,7 @@
 package com.torve.desktop.adult
 
+import com.torve.util.DisplayTextDecoder
+
 /**
  * Parse a scene-style NZB release name into a (title, year) pair we can
  * feed to TMDB search. Releases follow loose conventions like:
@@ -25,7 +27,7 @@ object NzbReleaseTitleParser {
     data class Parsed(val title: String, val year: Int)
 
     fun parse(release: String): Parsed? {
-        val cleaned = release
+        val cleaned = DisplayTextDecoder.decodeReleaseTitle(release)
             .substringBeforeLast(".nzb")
             .trim()
         val yearMatch = YEAR_REGEX.find(cleaned) ?: return null

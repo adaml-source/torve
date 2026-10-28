@@ -127,7 +127,7 @@ fun Download.toDownloadedItem(
         year = parsedYear,
         downloadedAt = completedAt ?: createdAt,
         watchProgress = progressPercent,
-        isWatched = progressPercent >= 0.9f,
+        isWatched = watchProgress?.isWatched(.9f) == true,
         lastWatchedAt = watchProgress?.updatedAt,
     )
 }

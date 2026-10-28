@@ -1,9 +1,11 @@
 package com.torve.platform
 
 import app.cash.sqldelight.db.SqlDriver
+import app.cash.sqldelight.driver.jdbc.ConnectionManager
 import app.cash.sqldelight.driver.jdbc.sqlite.JdbcSqliteDriver
 import com.torve.db.TorveDatabase
 import java.io.File
+import java.util.Properties
 
 actual class DatabaseDriverFactory {
     actual fun createDriver(): SqlDriver {
@@ -11,7 +13,11 @@ actual class DatabaseDriverFactory {
         val isFreshFile = !dbFile.exists()
         dbFile.parentFile?.mkdirs()
 
-        val driver = JdbcSqliteDriver("jdbc:sqlite:${dbFile.absolutePath}")
+        val driver = JdbcSqliteDriver(
+            "jdbc:sqlite:${dbFile.absolutePath}",
+            desktopSqliteProperties(),
+        )
+        configureDesktopSqlite(driver)
         val targetVersion = TorveDatabase.Schema.version
 
         if (isFreshFile) {
@@ -45,6 +51,39 @@ actual class DatabaseDriverFactory {
         }
         ensureDesktopIncrementalMigrations(driver)
         return driver
+    }
+}
+
+internal fun desktopSqliteProperties(): Properties = Properties().apply {
+    // The desktop driver creates one JDBC connection per worker thread, so
+    // connection-wide settings must be supplied as driver properties. A PRAGMA
+    // executed once during startup would configure only the startup thread.
+    setProperty("busy_timeout", "10000")
+    setProperty("foreign_keys", "true")
+    setProperty("journal_mode", "WAL")
+    setProperty("synchronous", "NORMAL")
+}
+
+/**
+ * Desktop runs catalog refresh, EPG ingestion, account sync, and downloads on
+ * independent coroutines. WAL lets readers continue while one writer commits,
+ * while the busy timeout absorbs short write bursts instead of surfacing
+ * SQLITE_BUSY to the UI. A process-level single-instance guard prevents a
+ * second Torve process from becoming a competing writer to the same file.
+ */
+internal fun configureDesktopSqlite(driver: JdbcSqliteDriver) {
+    val connection = (driver as ConnectionManager).getConnection()
+    connection.createStatement().use { statement ->
+        statement.execute("PRAGMA busy_timeout = 10000")
+        statement.execute("PRAGMA foreign_keys = ON")
+    }
+    runCatching {
+        connection.createStatement().use { statement ->
+            statement.executeQuery("PRAGMA journal_mode = WAL").use { result ->
+                if (result.next()) result.getString(1)
+            }
+            statement.execute("PRAGMA synchronous = NORMAL")
+        }
     }
 }
 
@@ -121,6 +160,28 @@ private fun ensureDesktopIncrementalMigrations(driver: SqlDriver) {
         """CREATE TABLE IF NOT EXISTS iptv_hidden_channel (
             hidden_id TEXT NOT NULL PRIMARY KEY
         )""",
+        0,
+    )
+    driver.execute(
+        null,
+        """CREATE TABLE IF NOT EXISTS playback_segment_analysis (
+            canonical_episode_id TEXT NOT NULL,
+            media_fingerprint TEXT NOT NULL,
+            runtime_ms INTEGER NOT NULL,
+            analysis_version INTEGER NOT NULL,
+            detector_versions TEXT NOT NULL,
+            validation_count INTEGER NOT NULL DEFAULT 0,
+            segments_json TEXT NOT NULL,
+            analyzed_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL,
+            PRIMARY KEY (canonical_episode_id, media_fingerprint, analysis_version)
+        )""",
+        0,
+    )
+    driver.execute(
+        null,
+        """CREATE INDEX IF NOT EXISTS playback_segment_analysis_episode
+            ON playback_segment_analysis(canonical_episode_id, analysis_version, updated_at DESC)""",
         0,
     )
     driver.execute(

@@ -1,5 +1,8 @@
 package com.torve.android.tv.screens
 
+import com.torve.android.tv.components.tvSettingsLabel as localizedUiText
+
+import com.torve.android.tv.components.tvGlassControl
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -20,12 +23,16 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
@@ -110,7 +117,7 @@ fun LiveCurrentChannelGuideOverlay(
                             overflow = TextOverflow.Ellipsis,
                         )
                         Text(
-                            text = channel.currentProgramme?.title ?: "Channel schedule",
+                            text = localizedUiText(channel.currentProgramme?.title ?: "Channel schedule"),
                             color = Silver,
                             fontSize = 15.sp,
                             maxLines = 1,
@@ -124,14 +131,14 @@ fun LiveCurrentChannelGuideOverlay(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     SecondaryActionButton(
-                        label = "Full guide",
+                        label = localizedUiText("Full guide"),
                         icon = Icons.Filled.CalendarMonth,
                         focusRequester = firstFocus,
                         onClick = onOpenFullGuide,
                     )
                     if (onWatchLive != null) {
                         SecondaryActionButton(
-                            label = "Watch live",
+                            label = localizedUiText("Watch live"),
                             icon = Icons.Filled.PlayArrow,
                             onClick = onWatchLive,
                         )
@@ -142,11 +149,11 @@ fun LiveCurrentChannelGuideOverlay(
             Spacer(Modifier.height(24.dp))
 
             Text(
-                text = if (activeReplayProgramme != null) {
+                text = localizedUiText(if (activeReplayProgramme != null) {
                     "Replay is active. Select another finished programme or return to the live channel."
                 } else {
                     "Current channel schedule. Finished programmes can be replayed when archive support is available."
-                },
+                }),
                 color = Silver,
                 fontSize = 14.sp,
             )
@@ -166,7 +173,7 @@ fun LiveCurrentChannelGuideOverlay(
                                 .padding(24.dp),
                         ) {
                             Text(
-                                text = "No programme data is available for this channel yet.",
+                                text = localizedUiText("No programme data is available for this channel yet."),
                                 color = Silver,
                                 fontSize = 15.sp,
                             )
@@ -208,6 +215,7 @@ private fun SecondaryActionButton(
     focusRequester: FocusRequester? = null,
     onClick: () -> Unit,
 ) {
+    var focused by remember { mutableStateOf(false) }
     val modifier = if (focusRequester != null) {
         Modifier.focusRequester(focusRequester)
     } else {
@@ -216,11 +224,12 @@ private fun SecondaryActionButton(
 
     Surface(
         onClick = onClick,
-        modifier = modifier.height(54.dp),
+        modifier = modifier.height(54.dp).tvGlassControl(focused, cornerRadius = 14.dp).onFocusChanged { focused = it.isFocused },
         shape = ClickableSurfaceDefaults.shape(RoundedCornerShape(14.dp)),
         colors = ClickableSurfaceDefaults.colors(
-            containerColor = Graphite.copy(alpha = 0.88f),
-            focusedContainerColor = Amber.copy(alpha = 0.3f),
+            containerColor = Color.Transparent,
+            focusedContainerColor = Color.Transparent,
+            disabledContainerColor = Color.Transparent,
         ),
         border = ClickableSurfaceDefaults.border(
             focusedBorder = androidx.tv.material3.Border(
@@ -235,7 +244,7 @@ private fun SecondaryActionButton(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             Icon(icon, contentDescription = label, tint = Snow, modifier = Modifier.size(20.dp))
-            Text(text = label, color = Snow, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+            Text(text = localizedUiText(label), color = Snow, fontSize = 14.sp, fontWeight = FontWeight.Medium)
         }
     }
 }

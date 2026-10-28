@@ -14,9 +14,12 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+
+import com.torve.android.tv.components.tvSettingsLabel as localizedUiText
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -74,6 +77,7 @@ import com.torve.domain.model.allowsTmdbRatingProvider
 import com.torve.domain.model.deriveProvidersToRender
 import com.torve.domain.model.hasAnyEnabledDisplayValue
 import com.torve.domain.model.extractTmdbIdOrNull
+import com.torve.domain.model.extractImdbIdOrNull
 import com.torve.domain.model.hasRichExternalRating
 import com.torve.domain.model.withFallbackTmdbScore
 import com.torve.domain.repository.MetadataRepository
@@ -86,41 +90,100 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import org.koin.compose.koinInject
 
-/** App-lifetime enriched item cache — survives all recomposition/navigation.
- *  SnapshotStateMap so Compose observes reads and recomposes when entries are added. */
-private val enrichedItemCache = androidx.compose.runtime.mutableStateMapOf<String, MediaItem>()
+/** Each title has its own observable cell. A rating arriving for one title must
+ * not invalidate every poster, rail and the root hero at once. Missing entries
+ * also have cells so their first enrichment remains observable. */
+private class TvPreviewItemCache {
+    private val cells = java.util.concurrent.ConcurrentHashMap<String, androidx.compose.runtime.MutableState<MediaItem?>>()
+    private fun cell(key: String) = cells.getOrPut(key) { mutableStateOf(null) }
+    operator fun get(key: String): MediaItem? = cell(key).value
+    operator fun set(key: String, value: MediaItem) { cell(key).value = value }
+    val size: Int get() = cells.size
+    val keys: Set<String> get() = cells.keys
+    fun remove(key: String) { cells.remove(key) }
+}
+private val enrichedItemCache = TvPreviewItemCache()
+// Saved rows and slower catalogue responses may still contain an older IMDb
+// pair. Keep the focused lookup authoritative across all preview aliases.
+// Plain immutable values here: the existing preview cells publish changes.
+// Creating a second set of snapshot cells while catalogue work is running can
+// expose a cell to a composition whose snapshot predates that cell.
+private val focusedImdbCache = java.util.concurrent.ConcurrentHashMap<String, MediaItem>()
+
+internal fun cacheTvFocusedImdbRefresh(item: MediaItem) {
+    if (item.ratings?.imdbScore == null) return
+    previewCacheKeys(item).forEach { focusedImdbCache[it] = item }
+    while (focusedImdbCache.size > 2048) focusedImdbCache.keys.firstOrNull()?.let(focusedImdbCache::remove)
+    cacheTvBrowsePreviewEnrichedItem(item)
+}
 
 internal fun tvBrowsePreviewEnrichedItemKey(item: MediaItem): String =
     "${item.type}:${item.tmdbId ?: item.id}"
 
 internal fun cacheTvBrowsePreviewEnrichedItem(item: MediaItem) {
-    val key = tvBrowsePreviewEnrichedItemKey(item)
-    val existing = enrichedItemCache[key]
-    enrichedItemCache[key] = existing?.mergeWithRicherPreviewItem(item) ?: item
+    val keys = previewCacheKeys(item)
+    val existing = keys.firstNotNullOfOrNull { enrichedItemCache[it] }
+    val merged = withFocusedTvImdb(existing?.mergeWithRicherPreviewItem(item) ?: item)
+    (keys + previewCacheKeys(merged)).distinct().forEach { key ->
+        if (enrichedItemCache[key] != merged) enrichedItemCache[key] = merged
+    }
+    while (enrichedItemCache.size > 2048) enrichedItemCache.keys.firstOrNull()?.let(enrichedItemCache::remove)
+}
+
+private fun previewCacheKeys(item: MediaItem): List<String> = buildList {
+    add("${item.type}:${item.id}")
+    item.tvPreviewTmdbId()?.let { add("${item.type}:$it") }
+    (item.imdbId ?: item.id.extractImdbIdOrNull())?.let { add("${item.type}:$it") }
+}.distinct()
+
+/**
+ * Returns the richest already-cached preview representation for [item].
+ *
+ * The cache is observable Compose state, so callers such as the TV hero
+ * recompose as soon as the focused-poster enrichment completes. This keeps
+ * IMDb and other external ratings consistent without issuing a second request.
+ */
+internal fun withCachedTvBrowsePreviewEnrichment(item: MediaItem): MediaItem {
+    val keys = previewCacheKeys(item)
+    val cached = keys.firstNotNullOfOrNull { enrichedItemCache[it] }
+    val merged = cached?.let { item.mergeWithRicherPreviewItem(it) } ?: item
+    return withFocusedTvImdb(merged)
+}
+
+private fun withFocusedTvImdb(item: MediaItem): MediaItem {
+    val current = previewCacheKeys(item).firstNotNullOfOrNull { focusedImdbCache[it] } ?: return item
+    return item.copy(imdbId = item.imdbId ?: current.imdbId,
+        ratings = (item.ratings ?: MediaRatings()).copy(
+            imdbScore = current.ratings?.imdbScore, imdbVotes = current.ratings?.imdbVotes,
+        ))
 }
 
 private fun MediaItem.mergeWithRicherPreviewItem(other: MediaItem): MediaItem =
     copy(
         tmdbId = tmdbId ?: other.tmdbId,
         imdbId = imdbId ?: other.imdbId,
-        overview = overview ?: other.overview,
+        overview = overview?.takeIf { it.isNotBlank() } ?: other.overview,
         genres = genres.ifEmpty { other.genres },
         year = year ?: other.year,
         runtime = runtime ?: other.runtime,
         ratings = ratings.preferRichRatings(other.ratings),
-        logoUrl = logoUrl ?: other.logoUrl,
-        posterUrl = posterUrl ?: other.posterUrl,
-        backdropUrl = backdropUrl ?: other.backdropUrl,
+        logoUrl = logoUrl?.takeIf { it.isNotBlank() } ?: other.logoUrl,
+        titlelessBackdropUrl = titlelessBackdropUrl?.takeIf { it.isNotBlank() } ?: other.titlelessBackdropUrl,
+        posterUrl = com.torve.android.ui.community.preferUsableArtwork(posterUrl, other.posterUrl),
+        backdropUrl = com.torve.android.ui.community.preferUsableArtwork(backdropUrl, other.backdropUrl),
+        isStubDetail = isStubDetail && (other.isStubDetail || other.posterUrl.isNullOrBlank()),
         cast = if (cast.isNotEmpty()) cast else other.cast,
     )
 
 private fun MediaRatings?.preferRichRatings(other: MediaRatings?): MediaRatings? =
-    when {
-        this.hasRichExternalRating() -> this
-        other.hasRichExternalRating() -> other
-        this != null -> this
-        else -> other
-    }
+    if (this == null) other else if (other == null) this else copy(
+        imdbScore = other.imdbScore ?: imdbScore, imdbVotes = other.imdbVotes ?: imdbVotes,
+        rottenTomatoesScore = other.rottenTomatoesScore ?: rottenTomatoesScore,
+        rtAudienceScore = other.rtAudienceScore ?: rtAudienceScore,
+        tmdbScore = other.tmdbScore ?: tmdbScore, metacriticScore = other.metacriticScore ?: metacriticScore,
+        letterboxdScore = other.letterboxdScore ?: letterboxdScore, traktScore = other.traktScore ?: traktScore,
+        mdblistScore = other.mdblistScore ?: mdblistScore, malScore = other.malScore ?: malScore,
+    )
 
 private fun MediaItem.upcomingScheduleDateTime(): String? {
     if (!id.startsWith("trakt-calendar:")) return null
@@ -279,7 +342,7 @@ fun TvFocusDetailsPanel(
                         cast = if (item.cast.isNotEmpty()) item.cast else cached.cast,
                     )
                 } else item
-                val displayItem = base.let { b ->
+                val displayItem = withCachedTvBrowsePreviewEnrichment(base).let { b ->
                     val latestLogo = item.logoUrl?.takeIf { it.isNotBlank() } ?: b.logoUrl
                     if (latestLogo != b.logoUrl) b.copy(logoUrl = latestLogo) else b
                 }
@@ -321,6 +384,7 @@ fun TvBrowsePreviewPanel(
     val requestedSourceItem = focusedItem
     val requestedSourceKey = requestedSourceItem?.let { tvBrowsePreviewEnrichedItemKey(it) }
     var debouncedSourceItem by remember { mutableStateOf(focusedItem) }
+    val resolvedLogoLookupKeys = remember { mutableStateMapOf<String, Boolean>() }
 
     LaunchedEffect(requestedSourceKey) {
         if (requestedSourceItem == null) {
@@ -333,36 +397,36 @@ fun TvBrowsePreviewPanel(
 
     val sourceItem = debouncedSourceItem
     val sourceKey = sourceItem?.let { tvBrowsePreviewEnrichedItemKey(it) }
-    val cachedItem = sourceKey?.let { enrichedItemCache[it] }
-    val item = if (sourceItem != null && cachedItem != null) {
-        sourceItem.copy(
-            tmdbId = sourceItem.tmdbId ?: cachedItem.tmdbId,
-            imdbId = sourceItem.imdbId ?: cachedItem.imdbId,
-            overview = sourceItem.overview ?: cachedItem.overview,
-            genres = sourceItem.genres.ifEmpty { cachedItem.genres },
-            year = sourceItem.year ?: cachedItem.year,
-            runtime = sourceItem.runtime ?: cachedItem.runtime,
-            ratings = sourceItem.ratings.preferRichRatings(cachedItem.ratings),
-            logoUrl = sourceItem.logoUrl ?: cachedItem.logoUrl,
-            posterUrl = sourceItem.posterUrl ?: cachedItem.posterUrl,
-            backdropUrl = sourceItem.backdropUrl ?: cachedItem.backdropUrl,
-        )
-    } else {
-        sourceItem
-    }
+    val item = sourceItem?.let(::withCachedTvBrowsePreviewEnrichment)
+    val artworkLookupPending = item != null &&
+        item.logoUrl.isNullOrBlank() &&
+        (item.tmdbId != null || item.id.extractTmdbIdOrNull() != null) &&
+        resolvedLogoLookupKeys[sourceKey] != true
 
     LaunchedEffect(sourceKey) {
-        val base = sourceItem ?: return@LaunchedEffect
-        val key = sourceKey ?: return@LaunchedEffect
-        if (!base.logoUrl.isNullOrBlank()) return@LaunchedEffect
-        val tmdbId = base.tmdbId ?: base.id.extractTmdbIdOrNull() ?: return@LaunchedEffect
+        val base = sourceItem
+        val key = sourceKey
+        if (base == null || key == null) {
+            return@LaunchedEffect
+        }
+        if (!base.logoUrl.isNullOrBlank()) {
+            resolvedLogoLookupKeys[key] = true
+            return@LaunchedEffect
+        }
+        val tmdbId = base.tmdbId ?: base.id.extractTmdbIdOrNull()
+        if (tmdbId == null) {
+            resolvedLogoLookupKeys[key] = true
+            return@LaunchedEffect
+        }
         val mediaType = if (base.type == MediaType.MOVIE) "movie" else "tv"
-        delay(360L)
         val logoUrl = withContext(Dispatchers.IO) {
             runCatching { metadataRepo.getLogoUrl(mediaType, tmdbId) }.getOrNull()
-        } ?: return@LaunchedEffect
-        val current = enrichedItemCache[key] ?: base
-        enrichedItemCache[key] = current.copy(logoUrl = current.logoUrl ?: logoUrl)
+        }
+        if (logoUrl != null) {
+            val current = enrichedItemCache[key] ?: base
+            enrichedItemCache[key] = current.copy(logoUrl = current.logoUrl ?: logoUrl)
+        }
+        resolvedLogoLookupKeys[key] = true
     }
 
     LaunchedEffect(sourceKey) {
@@ -389,7 +453,9 @@ fun TvBrowsePreviewPanel(
             year = base.year ?: detail.year,
             runtime = base.runtime ?: detail.runtime,
             ratings = base.ratings.preferRichRatings(detail.ratings),
-            logoUrl = base.logoUrl ?: detail.logoUrl,
+            // Logo artwork has a dedicated lookup above. Do not introduce it
+            // during delayed detail enrichment after text fallback is visible.
+            logoUrl = cached?.logoUrl ?: base.logoUrl,
             posterUrl = base.posterUrl ?: detail.posterUrl,
             backdropUrl = base.backdropUrl ?: detail.backdropUrl,
         )
@@ -403,7 +469,6 @@ fun TvBrowsePreviewPanel(
 
     val imageUrl = item?.backdropUrl?.takeIf { it.isNotBlank() }
         ?: item?.posterUrl?.takeIf { it.isNotBlank() }
-    val logoUrl = item?.logoUrl?.takeIf { it.isNotBlank() }
     val overviewScrollState = rememberScrollState()
     val overview = item?.overview?.takeIf { it.isNotBlank() }
     LaunchedEffect(sourceKey, overview) {
@@ -492,32 +557,40 @@ fun TvBrowsePreviewPanel(
                     ),
                 ),
         )
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(20.dp),
-            verticalArrangement = Arrangement.Bottom,
-        ) {
-            if (!logoUrl.isNullOrBlank()) {
-                AsyncImage(
-                    model = logoUrl,
-                    contentDescription = item?.title,
-                    contentScale = ContentScale.Fit,
-                    alignment = Alignment.CenterStart,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(68.dp),
+        BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+            val previewHeight = maxHeight
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(horizontal = 20.dp, vertical = 20.dp),
+                verticalArrangement = Arrangement.Top,
+            ) {
+                Spacer(
+                    modifier = Modifier.height(
+                        (previewHeight * 0.12f).coerceIn(32.dp, 72.dp),
+                    ),
                 )
-            } else {
-                Text(
-                    text = item?.title ?: "Focus a title",
-                    style = MaterialTheme.typography.headlineSmall,
-                    color = Snow,
-                    fontWeight = FontWeight.Bold,
-                    maxLines = 3,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
+                if (item != null) {
+                    TvTitleArtworkOrText(
+                        item = item,
+                        textStyle = MaterialTheme.typography.headlineSmall,
+                        maxTextLines = 3,
+                        artworkLookupPending = artworkLookupPending,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(72.dp),
+                    )
+                } else {
+                    Text(
+                        text = localizedUiText("Focus a title"),
+                        style = MaterialTheme.typography.headlineSmall,
+                        color = Snow,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 3,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.height(72.dp),
+                    )
+                }
             if (metadata.isNotBlank()) {
                 Spacer(Modifier.height(10.dp))
                 Text(
@@ -534,20 +607,21 @@ fun TvBrowsePreviewPanel(
                     ratingPrefs = settingsState.ratingPrefs.tvExternalCardRatingPrefs(),
                 )
             }
-            overview?.let {
-                Spacer(Modifier.height(12.dp))
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .heightIn(max = 156.dp)
-                        .verticalScroll(overviewScrollState),
-                ) {
-                    Text(
-                        text = it,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = Snow.copy(alpha = 0.84f),
-                        lineHeight = 20.sp,
-                    )
+                overview?.let {
+                    Spacer(Modifier.height(12.dp))
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 156.dp)
+                            .verticalScroll(overviewScrollState),
+                    ) {
+                        Text(
+                            text = it,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = Snow.copy(alpha = 0.84f),
+                            lineHeight = 20.sp,
+                        )
+                    }
                 }
             }
         }
@@ -884,7 +958,7 @@ private fun MetadataBlock(item: MediaItem) {
         if (statusText != null) {
             Spacer(Modifier.height(4.dp))
             Text(
-                text = statusText,
+                text = localizedUiText(statusText),
                 style = MaterialTheme.typography.labelMedium.copy(fontSize = 13.sp),
                 color = Amber.copy(alpha = 0.85f),
             )
@@ -899,7 +973,7 @@ private fun CastStrip(cast: List<CastMember>) {
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         Text(
-            text = "Cast",
+            text = localizedUiText("Cast"),
             style = MaterialTheme.typography.labelLarge,
             color = Silver,
             fontWeight = FontWeight.SemiBold,

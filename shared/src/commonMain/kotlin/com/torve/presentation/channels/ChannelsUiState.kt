@@ -7,6 +7,7 @@ import com.torve.domain.model.Channel
 import com.torve.domain.model.ChannelPlaylist
 import com.torve.domain.player.LiveAudioOutputMode
 import com.torve.domain.repository.PlaylistAddProgress
+import com.torve.domain.repository.EpgRefreshProgress
 
 enum class ChannelsSubTab { LIVE, FAVOURITES, GUIDE, MOVIES }
 
@@ -29,6 +30,28 @@ sealed interface EpgState {
     data class Error(
         val message: String,
     ) : EpgState
+}
+
+fun EpgRefreshProgress.userMessage(): String = when (phase) {
+    EpgRefreshProgress.Phase.DOWNLOADING -> {
+        val downloadedMb = bytesRead / (1024L * 1024L)
+        if (bytesRead > 0L) "Downloading EPG… $downloadedMb MB" else "Downloading EPG…"
+    }
+    EpgRefreshProgress.Phase.PARSING ->
+        if (programmesParsed > 0) "Parsing guide… $programmesParsed programmes" else "Parsing guide…"
+    EpgRefreshProgress.Phase.MATCHING -> "Matching channels… $channelsParsed EPG channels"
+    EpgRefreshProgress.Phase.SAVING -> "Saving programmes… $programmesSaved"
+}
+
+/** Lightweight bridge that exposes channel state only after Channels is opened. */
+class ChannelsStateRelay {
+    private var source: kotlinx.coroutines.flow.StateFlow<ChannelsUiState>? = null
+
+    fun attach(source: kotlinx.coroutines.flow.StateFlow<ChannelsUiState>) {
+        this.source = source
+    }
+
+    fun snapshot(): ChannelsUiState = source?.value ?: ChannelsUiState()
 }
 
 data class ChannelsUiState(
@@ -92,6 +115,7 @@ data class ChannelsUiState(
     val isLoadingGuide: Boolean = false,
     val guideError: String? = null,
     val epgState: EpgState = EpgState.NotConfigured,
+    val epgRefreshProgress: EpgRefreshProgress? = null,
     // Guide filter + sort controls (desktop EPG)
     val guideSearchQuery: String = "",
     val guideSortMode: GuideSortMode = GuideSortMode.NUMBER,

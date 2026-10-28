@@ -1,5 +1,11 @@
 package com.torve.android.ui.auth
 
+import com.torve.android.ui.community.parityLabel as localizedUiText
+
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.background
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.platform.testTag
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
@@ -17,11 +23,11 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.Button
+import com.torve.android.ui.components.MobileGlassButton as Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
+import com.torve.android.ui.components.MobileGlassOutlinedButton as OutlinedButton
+import com.torve.android.ui.components.MobileGlassTextField as OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.ui.res.stringResource
@@ -84,14 +90,16 @@ fun LoginScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
+            .background(Brush.verticalGradient(listOf(MaterialTheme.colorScheme.primary.copy(alpha = .06f), MaterialTheme.colorScheme.background)))
+            .statusBarsPadding().navigationBarsPadding().imePadding()
             .verticalScroll(rememberScrollState())
             .padding(24.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
+        horizontalAlignment = Alignment.Start,
         verticalArrangement = Arrangement.Center,
     ) {
         Text(
-            text = "Torve",
-            style = MaterialTheme.typography.headlineLarge,
+            text = localizedUiText("Torve"),
+            style = MaterialTheme.typography.displaySmall,
             fontWeight = FontWeight.Bold,
             color = MaterialTheme.colorScheme.primary,
         )
@@ -141,7 +149,6 @@ fun LoginScreen(
                 singleLine = true,
                 visualTransformation = when {
                     passwordRevealed -> VisualTransformation.None
-                    isRegisterMode -> VisualTransformation.None
                     else -> peekTransformation
                 },
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
@@ -161,7 +168,7 @@ fun LoginScreen(
         error?.let {
             Spacer(Modifier.height(8.dp))
             Text(
-                text = it,
+                text = localizedUiText(it),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.error,
             )
@@ -170,7 +177,7 @@ fun LoginScreen(
         successMessage?.let {
             Spacer(Modifier.height(8.dp))
             Text(
-                text = it,
+                text = localizedUiText(it),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.primary,
             )
@@ -194,7 +201,8 @@ fun LoginScreen(
                         }
                     }
                 },
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp).testTag("auth_submit"),
+                accented = true,
                 enabled = !isLoading && email.isNotBlank(),
             ) {
                 if (isLoading) {
@@ -206,9 +214,7 @@ fun LoginScreen(
 
             Spacer(Modifier.height(8.dp))
 
-            TextButton(onClick = { isForgotPasswordMode = false; error = null; successMessage = null }) {
-                Text(stringResource(R.string.login_back_to_sign_in))
-            }
+            com.torve.android.ui.components.BackButton(onClick = { isForgotPasswordMode = false; error = null; successMessage = null })
         } else {
             Button(
                 onClick = {
@@ -246,7 +252,8 @@ fun LoginScreen(
                         }
                     }
                 },
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp).testTag("auth_submit"),
+                accented = true,
                 enabled = !isLoading && email.isNotBlank() && password.isNotBlank(),
             ) {
                 if (isLoading) {

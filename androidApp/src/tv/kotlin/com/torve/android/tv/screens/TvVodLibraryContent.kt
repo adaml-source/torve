@@ -1,5 +1,7 @@
 package com.torve.android.tv.screens
 
+import com.torve.android.tv.components.tvSettingsLabel as localizedUiText
+
 import android.content.Context
 import android.view.inputmethod.InputMethodManager
 import androidx.activity.compose.BackHandler
@@ -10,6 +12,8 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -58,7 +62,9 @@ import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -469,7 +475,7 @@ internal fun TvVodLibraryContent(
                 contentAlignment = Alignment.Center,
             ) {
                 Text(
-                    text = uiState.error ?: "No VOD items found",
+                    text = localizedUiText(uiState.error ?: "No VOD items found"),
                     style = MaterialTheme.typography.titleLarge,
                     color = Silver,
                 )
@@ -733,13 +739,13 @@ private fun TvVodSeriesEpisodePickerOverlay(
                         overflow = TextOverflow.Ellipsis,
                     )
                     Text(
-                        text = "Choose an episode",
+                        text = localizedUiText("Choose an episode"),
                         style = MaterialTheme.typography.titleMedium,
                         color = Silver,
                     )
                 }
                 TvVodEpisodeActionChip(
-                    text = "Close",
+                    text = localizedUiText("Close"),
                     onClick = onClose,
                 )
             }
@@ -750,7 +756,7 @@ private fun TvVodSeriesEpisodePickerOverlay(
             ) {
                 itemsIndexed(seasons, key = { _, season -> "vod_season_$season" }) { _, season ->
                     TvVodEpisodeActionChip(
-                        text = "Season $season",
+                        text = localizedUiText("Season $season"),
                         selected = season == selectedSeason,
                         onClick = { selectedSeason = season },
                     )
@@ -771,7 +777,7 @@ private fun TvVodSeriesEpisodePickerOverlay(
 
                 error != null -> {
                     Text(
-                        text = error,
+                        text = localizedUiText(error),
                         style = MaterialTheme.typography.titleLarge,
                         color = Silver,
                     )
@@ -970,8 +976,11 @@ private fun TvVodSearchAndFilters(
     ) {
         val context = LocalContext.current
         val view = LocalView.current
+        val keyboardController = LocalSoftwareKeyboardController.current
+        val inputRequester = remember { FocusRequester() }
         var focused by remember { mutableStateOf(false) }
         var editMode by remember { mutableStateOf(false) }
+        var restoreSearchFocus by remember { mutableStateOf(false) }
         val borderColor by animateColorAsState(
             targetValue = when {
                 editMode -> AmberLight
@@ -982,28 +991,42 @@ private fun TvVodSearchAndFilters(
         )
         fun showKeyboard() {
             val imm = context.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
-            imm.showSoftInput(view, InputMethodManager.SHOW_IMPLICIT)
+            keyboardController?.show()
+            view.post {
+                // Compose owns the input connection; this platform request is a
+                // fallback for Fire TV IMEs that bind one frame later.
+                imm.showSoftInput(view, InputMethodManager.SHOW_IMPLICIT)
+            }
         }
         fun hideKeyboard() {
+            keyboardController?.hide()
             val imm = context.getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
             imm.hideSoftInputFromWindow(view.windowToken, 0)
         }
 
         LaunchedEffect(editMode) {
             if (editMode) {
-                kotlinx.coroutines.delay(50)
+                runCatching { inputRequester.requestFocus() }
+                androidx.compose.runtime.withFrameNanos { }
                 showKeyboard()
+                // Some Fire TV IMEs bind one frame later than Compose's text input
+                // session. A second request is harmless and covers that race.
+                kotlinx.coroutines.delay(120)
+                if (editMode) showKeyboard()
+            } else if (restoreSearchFocus) {
+                androidx.compose.runtime.withFrameNanos { }
+                runCatching { searchRequester.requestFocus() }
+                restoreSearchFocus = false
             }
         }
 
-        BasicTextField(
-            value = query,
-            onValueChange = { value ->
-                if (editMode) onQueryChange(value)
-            },
-            readOnly = !editMode,
-            singleLine = true,
-            textStyle = MaterialTheme.typography.bodyMedium.copy(color = Snow, fontSize = 14.sp),
+        BackHandler(enabled = editMode) {
+            restoreSearchFocus = true
+            editMode = false
+            hideKeyboard()
+        }
+
+        Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(38.dp)
@@ -1016,8 +1039,9 @@ private fun TvVodSearchAndFilters(
                 .background(Charcoal.copy(alpha = if (focused) 0.42f else 0.24f))
                 .border(1.dp, borderColor, RoundedCornerShape(10.dp))
                 .onFocusChanged {
-                    focused = it.isFocused
-                    if (!it.isFocused && editMode) {
+                    focused = it.hasFocus
+                    if (!it.hasFocus && editMode) {
+                        restoreSearchFocus = false
                         editMode = false
                         hideKeyboard()
                     }
@@ -1027,6 +1051,7 @@ private fun TvVodSearchAndFilters(
                     when (event.key) {
                         Key.DirectionUp -> {
                             if (editMode) {
+                                restoreSearchFocus = false
                                 editMode = false
                                 hideKeyboard()
                             }
@@ -1038,6 +1063,7 @@ private fun TvVodSearchAndFilters(
 
                         Key.DirectionDown -> {
                             if (editMode) {
+                                restoreSearchFocus = false
                                 editMode = false
                                 hideKeyboard()
                             }
@@ -1056,6 +1082,7 @@ private fun TvVodSearchAndFilters(
 
                         Key.Back -> {
                             if (editMode) {
+                                restoreSearchFocus = true
                                 editMode = false
                                 hideKeyboard()
                                 true
@@ -1070,23 +1097,53 @@ private fun TvVodSearchAndFilters(
                 .clickable(
                     interactionSource = remember { MutableInteractionSource() },
                     indication = null,
-                    onClick = { editMode = true },
+                    onClick = {
+                        if (!editMode) editMode = true
+                    },
                 )
                 .padding(horizontal = 12.dp, vertical = 9.dp),
-            decorationBox = { innerTextField ->
-                Box(contentAlignment = Alignment.CenterStart) {
-                    if (query.isBlank()) {
-                        Text(
-                            text = if (editMode) "Type to search" else "Search VOD",
-                            color = Silver.copy(alpha = 0.58f),
-                            style = MaterialTheme.typography.bodyMedium,
-                            maxLines = 1,
-                        )
-                    }
-                    innerTextField()
-                }
-            },
-        )
+            contentAlignment = Alignment.CenterStart,
+        ) {
+            if (editMode) {
+                BasicTextField(
+                    value = query,
+                    onValueChange = onQueryChange,
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                    keyboardActions = KeyboardActions(
+                        onSearch = {
+                            restoreSearchFocus = true
+                            editMode = false
+                            hideKeyboard()
+                        },
+                    ),
+                    textStyle = MaterialTheme.typography.bodyMedium.copy(color = Snow, fontSize = 14.sp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .focusRequester(inputRequester),
+                    decorationBox = { innerTextField ->
+                        Box(contentAlignment = Alignment.CenterStart) {
+                            if (query.isBlank()) {
+                                Text(
+                                    text = localizedUiText("Type to search"),
+                                    color = Silver.copy(alpha = 0.58f),
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    maxLines = 1,
+                                )
+                            }
+                            innerTextField()
+                        }
+                    },
+                )
+            } else {
+                Text(
+                    text = localizedUiText(query.ifBlank { "Search VOD" }),
+                    color = if (query.isBlank()) Silver.copy(alpha = 0.58f) else Snow,
+                    style = MaterialTheme.typography.bodyMedium.copy(fontSize = 14.sp),
+                    maxLines = 1,
+                )
+            }
+        }
 
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -1157,7 +1214,7 @@ private fun TvVodFilterChip(
         contentAlignment = Alignment.Center,
     ) {
         Text(
-            text = label,
+            text = localizedUiText(label),
             color = if (focused || selected) Snow else Silver,
             fontSize = 10.sp,
             fontWeight = if (focused || selected) FontWeight.SemiBold else FontWeight.Medium,
@@ -1413,7 +1470,7 @@ private fun TvVodPreviewPanel(
         ) {
             if (item == null) {
                 Text(
-                    text = if (loading) "Loading..." else categoryLabel,
+                    text = localizedUiText(if (loading) "Loading..." else categoryLabel),
                     color = Silver,
                     style = MaterialTheme.typography.titleLarge,
                 )
@@ -1573,7 +1630,7 @@ private fun TvVodPosterStrip(
                 contentAlignment = Alignment.Center,
             ) {
                 Text(
-                    text = "No items in this category",
+                    text = localizedUiText("No items in this category"),
                     color = Silver,
                     style = MaterialTheme.typography.titleMedium,
                 )
@@ -1737,7 +1794,7 @@ private fun TvVodPosterCard(
                     .padding(horizontal = 7.dp, vertical = 3.dp),
             ) {
                 Text(
-                    text = "Fav",
+                    text = localizedUiText("Fav"),
                     color = AmberLight,
                     fontSize = 10.sp,
                     fontWeight = FontWeight.Bold,

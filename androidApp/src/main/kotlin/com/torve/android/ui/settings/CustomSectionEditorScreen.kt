@@ -1,5 +1,7 @@
 package com.torve.android.ui.settings
 
+import com.torve.android.ui.community.parityLabel as localizedUiText
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -439,10 +441,10 @@ fun CustomSectionEditorScreen(
             BackButton(onClick = onBack)
             Spacer(Modifier.width(12.dp))
             Text(
-                if (isEditing) "Edit Section" else "New Custom Section",
+                localizedUiText(if (isEditing) "Edit Section" else "New Custom Section"),
                 style = MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.Bold,
-                color = Snow,
+                color = MaterialTheme.colorScheme.onSurface,
                 modifier = Modifier.weight(1f),
             )
             if (isEditing) {
@@ -450,21 +452,21 @@ fun CustomSectionEditorScreen(
                     viewModel.deleteCustomSection(sectionId!!)
                     onBack()
                 }) {
-                    Icon(Icons.Rounded.Delete, "Delete", tint = Ruby)
+                    Icon(Icons.Rounded.Delete, localizedUiText("Delete"), tint = Ruby)
                 }
             }
         }
 
         Column(Modifier.padding(horizontal = 16.dp)) {
             // ── AI-Powered Search ──
-            SectionLabel("Describe what you want")
+            SectionLabel(localizedUiText("Describe what you want"))
             OutlinedTextField(
                 value = aiSearchQuery,
                 onValueChange = { aiSearchQuery = it },
                 placeholder = {
                     Text(
-                        "e.g. christmas movies, dark sci-fi thriller 90s...",
-                        color = Silver.copy(alpha = 0.6f),
+                        localizedUiText("e.g. christmas movies, dark sci-fi thriller 90s..."),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
                     )
                 },
                 modifier = Modifier.fillMaxWidth(),
@@ -481,7 +483,7 @@ fun CustomSectionEditorScreen(
                         )
                     } else {
                         IconButton(onClick = { performAiSearch() }) {
-                            Icon(Icons.Rounded.Search, "Search", tint = Amber)
+                            Icon(Icons.Rounded.Search, localizedUiText("Search"), tint = Amber)
                         }
                     }
                 },
@@ -493,16 +495,16 @@ fun CustomSectionEditorScreen(
 
             if (settingsState.activeAiApiKey.isBlank()) {
                 Text(
-                    "Tip: Add an AI API key in Settings for smarter AI results",
+                    localizedUiText("Tip: Add an AI API key in Settings for smarter AI results"),
                     style = MaterialTheme.typography.labelSmall,
-                    color = Silver.copy(alpha = 0.6f),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
                     modifier = Modifier.padding(top = 4.dp),
                 )
             }
 
             if (inferredKeywordTerms.isNotEmpty()) {
                 Spacer(Modifier.height(8.dp))
-                SectionLabel("Inferred Keywords")
+                SectionLabel(localizedUiText("Inferred Keywords"))
                 FlowRow(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalArrangement = Arrangement.spacedBy(4.dp),
@@ -521,7 +523,7 @@ fun CustomSectionEditorScreen(
 
             aiSearchError?.let { error ->
                 Text(
-                    error,
+                    localizedUiText(error),
                     style = MaterialTheme.typography.bodySmall,
                     color = Ruby,
                     modifier = Modifier.padding(top = 4.dp),
@@ -531,7 +533,7 @@ fun CustomSectionEditorScreen(
             // Matched Titles (specific mode)
             if (specificItems.isNotEmpty()) {
                 Spacer(Modifier.height(12.dp))
-                SectionLabel("Matched Titles")
+                SectionLabel(localizedUiText("Matched Titles"))
                 FlowRow(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalArrangement = Arrangement.spacedBy(4.dp),
@@ -542,7 +544,7 @@ fun CustomSectionEditorScreen(
                             onClick = { specificItems = specificItems.filter { it.tmdbId != item.tmdbId } },
                             label = { Text(item.title) },
                             trailingIcon = {
-                                Icon(Icons.Rounded.Close, "Remove", modifier = Modifier.size(16.dp))
+                                Icon(Icons.Rounded.Close, localizedUiText("Remove"), modifier = Modifier.size(16.dp))
                             },
                             colors = chipColors(),
                             shape = RoundedCornerShape(20.dp),
@@ -575,7 +577,7 @@ fun CustomSectionEditorScreen(
                         FilterChip(
                             selected = mediaType == value,
                             onClick = { mediaType = value },
-                            label = { Text(label) },
+                            label = { Text(localizedUiText(label)) },
                             colors = chipColors(),
                             shape = RoundedCornerShape(20.dp),
                         )
@@ -591,7 +593,7 @@ fun CustomSectionEditorScreen(
                         FilterChip(
                             selected = sortBy == value,
                             onClick = { sortBy = value },
-                            label = { Text(label) },
+                            label = { Text(localizedUiText(label)) },
                             colors = chipColors(),
                             shape = RoundedCornerShape(20.dp),
                         )
@@ -634,7 +636,7 @@ fun CustomSectionEditorScreen(
                                 onClick = { keywordIds = keywordIds - kwId },
                                 label = { Text("#$kwId") },
                                 trailingIcon = {
-                                    Icon(Icons.Rounded.Close, "Remove", modifier = Modifier.size(16.dp))
+                                    Icon(Icons.Rounded.Close, localizedUiText("Remove"), modifier = Modifier.size(16.dp))
                                 },
                                 colors = chipColors(),
                                 shape = RoundedCornerShape(20.dp),
@@ -682,7 +684,7 @@ fun CustomSectionEditorScreen(
                 Spacer(Modifier.height(20.dp))
 
                 // Actors
-                SectionLabel("Actors")
+                SectionLabel(localizedUiText("Actors"))
                 PersonChips(persons = castPersons, onRemove = { p -> castPersons = castPersons.filter { it.id != p.id } })
                 PersonSearchField(
                     query = personSearchQuery.takeIf { searchingForRole == "cast" } ?: "",
@@ -703,7 +705,7 @@ fun CustomSectionEditorScreen(
                 Spacer(Modifier.height(20.dp))
 
                 // Directors
-                SectionLabel("Directors / Crew")
+                SectionLabel(localizedUiText("Directors / Crew"))
                 PersonChips(persons = crewPersons, onRemove = { p -> crewPersons = crewPersons.filter { it.id != p.id } })
                 PersonSearchField(
                     query = personSearchQuery.takeIf { searchingForRole == "crew" } ?: "",
@@ -873,7 +875,7 @@ private fun SectionLabel(text: String) {
     Text(
         text,
         style = MaterialTheme.typography.labelLarge,
-        color = Silver,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
         modifier = Modifier.padding(bottom = 8.dp),
     )
 }
@@ -882,7 +884,7 @@ private fun SectionLabel(text: String) {
 private fun chipColors() = FilterChipDefaults.filterChipColors(
     selectedContainerColor = Amber,
     selectedLabelColor = Obsidian,
-    containerColor = Gunmetal,
+    containerColor = MaterialTheme.colorScheme.surface,
     labelColor = Silver,
 )
 
@@ -901,7 +903,7 @@ private fun PersonChips(persons: List<SavedPerson>, onRemove: (SavedPerson) -> U
                 onClick = { onRemove(person) },
                 label = { Text(person.name) },
                 trailingIcon = {
-                    Icon(Icons.Rounded.Close, "Remove", modifier = Modifier.size(16.dp))
+                    Icon(Icons.Rounded.Close, localizedUiText("Remove"), modifier = Modifier.size(16.dp))
                 },
                 colors = chipColors(),
                 shape = RoundedCornerShape(20.dp),
@@ -921,12 +923,12 @@ private fun PersonSearchField(
     OutlinedTextField(
         value = query,
         onValueChange = onQueryChange,
-        placeholder = { Text(stringResource(R.string.custom_search_person), color = Silver) },
+        placeholder = { Text(stringResource(R.string.custom_search_person), color = MaterialTheme.colorScheme.onSurfaceVariant) },
         modifier = Modifier.fillMaxWidth(),
         singleLine = true,
         trailingIcon = {
             IconButton(onClick = onSearch) {
-                Icon(Icons.Rounded.Search, "Search", tint = Silver)
+                Icon(Icons.Rounded.Search, localizedUiText("Search"), tint = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         },
         keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
@@ -969,9 +971,9 @@ private fun PersonSearchField(
                         )
                         Spacer(Modifier.width(12.dp))
                         Column {
-                            Text(person.name, color = Snow, style = MaterialTheme.typography.bodyMedium)
+                            Text(person.name, color = MaterialTheme.colorScheme.onSurface, style = MaterialTheme.typography.bodyMedium)
                             person.knownForDepartment?.let {
-                                Text(it, color = Silver, style = MaterialTheme.typography.labelSmall)
+                                Text(it, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelSmall)
                             }
                         }
                     }

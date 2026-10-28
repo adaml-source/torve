@@ -6,16 +6,20 @@ import com.torve.data.contentpolicy.ContentPolicyCacheInvalidationCoordinator
 import com.torve.data.contentpolicy.ContentPolicyRepository
 import com.torve.data.mdblist.MdbListApi
 import com.torve.data.mdblist.RatingsEnricher
+import com.torve.data.metadata.TmdbGenres
 import com.torve.data.network.catalogContentLoadErrorMessage
 import com.torve.data.network.sanitizeNetworkDiagnosticText
 import com.torve.domain.model.ContentAccessContext
 import com.torve.domain.model.ContentPolicyState
 import com.torve.domain.model.ContentSourceType
 import com.torve.domain.model.MediaItem
+import com.torve.domain.model.Genre
 import com.torve.domain.model.MediaType
 import com.torve.domain.model.PagedResult
+import com.torve.domain.model.StreamingProviderCandidate
 import com.torve.domain.model.dedupeByStableKey
 import com.torve.domain.model.extractTmdbIdOrNull
+import com.torve.domain.model.resolveStreamingProviderIds
 import com.torve.domain.discovery.tmdbDiscoverRating
 import com.torve.domain.integrations.IntegrationSecretKey
 import com.torve.domain.integrations.IntegrationSecretStore
@@ -26,20 +30,26 @@ import com.torve.platform.torveVerboseLog
 import com.torve.presentation.contentpolicy.ContentPolicyFilter
 import com.torve.presentation.settings.SettingsViewModel
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.supervisorScope
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.debounce
-import kotlinx.coroutines.flow.distinctUntilChanged
-import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 
 /**
  * Shared catalog ViewModel used by both Movies and TV Shows screens.
@@ -56,7 +66,9 @@ class CatalogViewModel(
     private val contentPolicyRepository: ContentPolicyRepository? = null,
     private val contentPolicyFilter: ContentPolicyFilter = ContentPolicyFilter(),
     invalidationCoordinator: ContentPolicyCacheInvalidationCoordinator? = null,
-    initialProviderId: Int? = null,
+    private val initialProviderId: Int? = null,
+    private val initialProviderName: String? = null,
+    private val initialProviderGroup: Map<Int, String>? = null,
     /**
      * Optional pre-paginated top-1000 cache. When present and populated for
      * the active genre + media type, the catalog grid is rendered straight
@@ -74,8 +86,10 @@ class CatalogViewModel(
     )
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
-    private val _state = MutableStateFlow(CatalogUiState(providerId = initialProviderId))
+    private val _state = contentPolicyFilter.profileState(CatalogUiState(providerId = initialProviderId))
     val state: StateFlow<CatalogUiState> = _state.asStateFlow()
+    val genres: List<Genre> = (if (mediaType == "tv") TmdbGenres.TV_GENRES else TmdbGenres.MOVIE_GENRES)
+        .map { (id, name) -> Genre(id, name) }
 
     // Cancellation handles for loadCatalog + its enrichment pass.
     // Without these, rapid genre-pill clicks (Comedy → Drama → Action)
@@ -87,12 +101,35 @@ class CatalogViewModel(
     // enrichment from a previous genre.
     private var catalogLoadJob: kotlinx.coroutines.Job? = null
     private var catalogEnrichJob: kotlinx.coroutines.Job? = null
+    private var catalogPageJob: kotlinx.coroutines.Job? = null
+    private var searchPageJob: kotlinx.coroutines.Job? = null
+    private var shelvesJob: kotlinx.coroutines.Job? = null
+    private val discoverySnapshots = prefsRepo?.let { CatalogDiscoverySnapshotStore(it, mediaType) }
+    private val providerSnapshots = prefsRepo?.takeIf { initialProviderGroup == null }?.let { ProviderCatalogSnapshotStore(it, mediaType) }
+    private var resolvedProvider: Triple<Int, String, String>? = null
+    private var discoverySnapshotJob: kotlinx.coroutines.Job? = null
 
-    private val searchQueryFlow = MutableStateFlow("")
+    // A filter/provider change must rerun the same query, too.
+    private val searchRequests = MutableStateFlow(0L)
 
     init {
-        loadCatalog()
-        loadShelves()
+        scope.launch {
+            contentPolicyFilter.awaitProfileBoundary()
+            loadCatalog()
+            loadShelves()
+        }
+        scope.launch {
+            contentPolicyFilter.profileOwners().distinctUntilChanged().drop(1).collect {
+                _state.value = CatalogUiState(providerId = initialProviderId)
+                loadCatalog(); loadShelves()
+            }
+        }
+        scope.launch {
+            contentPolicyFilter.discoveryChanges().collectLatest {
+                contentPolicyFilter.awaitProfileBoundary()
+                loadCatalog(); loadShelves()
+            }
+        }
         observeSearch()
         if (invalidationCoordinator != null) {
             scope.launch {
@@ -105,99 +142,122 @@ class CatalogViewModel(
         }
     }
 
-    private fun loadShelves() {
-        if (watchProgressRepo == null) return
-        scope.launch {
-            torveVerboseLog { "CATALOG_TAB shelves_fetch_start mediaType=$mediaType" }
-            try {
-                val targetType = if (mediaType == "tv") MediaType.SERIES else MediaType.MOVIE
-                val shelvesLoad = supervisorScope {
-                    val continueDeferred = async { watchProgressRepo.getInProgress(20) }
-                    val trendingDeferred = async { metadataRepo.getTrending(mediaType) }
-                    val popularDeferred = async { metadataRepo.getPopular(mediaType) }
-                    val topRatedDeferred = async { metadataRepo.getTopRated(mediaType) }
-                    CatalogShelvesLoad(
-                        continueWatching = continueDeferred.await().filter { it.mediaType == targetType },
-                        trending = trendingDeferred.await(),
-                        popular = popularDeferred.await(),
-                        topRated = topRatedDeferred.await(),
-                    )
-                }
-                val cachedTrending = hydrateCachedRatings(shelvesLoad.trending)
-                val cachedPopular = hydrateCachedRatings(shelvesLoad.popular)
-                val cachedTopRated = hydrateCachedRatings(shelvesLoad.topRated)
+    private fun saveDiscoverySnapshot() {
+        discoverySnapshotJob?.cancel()
+        discoverySnapshotJob = scope.launch {
+            kotlinx.coroutines.delay(100)
+            discoverySnapshots?.write(_state.value)
+        }
+    }
 
-                _state.update {
-                    applyContentPolicy(
-                        it.copy(
-                            continueWatching = shelvesLoad.continueWatching,
-                            trendingItems = cachedTrending,
-                            popularItems = cachedPopular,
-                            topRatedItems = cachedTopRated,
-                            shelvesLoaded = true,
-                        ),
-                    )
+    private fun loadShelves() {
+        if (watchProgressRepo == null || _state.value.providerId != null) return
+        shelvesJob?.cancel()
+        shelvesJob = scope.launch {
+            try {
+                if (_state.value.trendingItems.isEmpty() && _state.value.popularItems.isEmpty() && _state.value.topRatedItems.isEmpty()) {
+                    discoverySnapshots?.read()?.let { saved ->
+                        _state.update { applyContentPolicy(it.copy(continueWatching = saved.continueWatching,
+                            trendingItems = saved.trending, popularItems = saved.popular, topRatedItems = saved.topRated,
+                            shelvesLoaded = true)) }
+                    }
                 }
-                torveVerboseLog {
-                    "CATALOG_TAB shelves_fetch_success mediaType=$mediaType trending=${cachedTrending.size} popular=${cachedPopular.size} topRated=${cachedTopRated.size}"
-                }
-                enrichAndUpdateItems(cachedTrending) { items ->
-                    _state.update { current -> applyContentPolicy(current.copy(trendingItems = items)) }
-                }
-                enrichAndUpdateItems(cachedPopular) { items ->
-                    _state.update { current -> applyContentPolicy(current.copy(popularItems = items)) }
-                }
-                enrichAndUpdateItems(cachedTopRated) { items ->
-                    _state.update { current -> applyContentPolicy(current.copy(topRatedItems = items)) }
-                }
-                launchHeroArtworkBackfill()
-            } catch (e: Exception) {
-                torveVerboseLog {
-                    "CATALOG_TAB shelves_fetch_failure mediaType=$mediaType ${e::class.simpleName}: ${e.message}"
+                val targetType = if (mediaType == "tv") MediaType.SERIES else MediaType.MOVIE
+                // Each ready row publishes independently. A slow/failing request must
+                // not hide another row or erase its saved presentation.
+                supervisorScope {
+                    suspend fun attempt(block: suspend () -> Unit) {
+                        try { block(); saveDiscoverySnapshot() }
+                        catch (cancelled: CancellationException) { throw cancelled }
+                        catch (_: Exception) { /* Retain the previous version of this row. */ }
+                    }
+                    launch { attempt {
+                        val progress = watchProgressRepo.getInProgress(20).filter { it.mediaType == targetType }
+                        _state.update { applyContentPolicy(it.copy(continueWatching = progress)) }
+                    } }
+                    suspend fun row(fetch: suspend (Int) -> com.torve.domain.model.PagedResult, update: (CatalogUiState, List<MediaItem>) -> CatalogUiState) {
+                        attempt {
+                            var cursor = 1
+                            var items = emptyList<MediaItem>()
+                            do {
+                                val result = fetch(cursor)
+                                val pageItems = kotlinx.coroutines.withContext(com.torve.util.ioDispatcher) { hydrateCachedRatings(result.items) }
+                                items = (items + pageItems).dedupeByStableKey().take(20)
+                                _state.update { applyContentPolicy(update(it, items)) }
+                                saveDiscoverySnapshot()
+                                cursor = maxOf(cursor + 1, result.page + 1)
+                                if (!contentPolicyFilter.familyKidsProfile || result.page >= result.totalPages) break
+                            } while (items.size < 20 && cursor <= 20)
+                            // Enrich this rail independently; another rail cannot
+                            // cancel it or replace an already visible prefix.
+                            ratingsEnricher?.let { enricher ->
+                                val key = integrationSecretStore?.get(IntegrationSecretKey.MDBLIST_API_KEY)
+                                    ?: prefsRepo?.getString(SettingsViewModel.KEY_MDBLIST_API_KEY) ?: MdbListApi.DEFAULT_API_KEY
+                                val enriched = enricher.enrichList(items, key)
+                                _state.update { applyContentPolicy(update(it, enriched)) }
+                            }
+                        }
+                    }
+                    launch { row({ page -> if (contentPolicyFilter.familyKidsProfile) metadataRepo.getTrendingPaged(mediaType, page)
+                        else metadataRepo.getTrending(mediaType, page).let { com.torve.domain.model.PagedResult(it, page, page, it.size) } }) { state, items -> state.copy(trendingItems = items) } }
+                    launch { row({ page -> if (contentPolicyFilter.familyKidsProfile) metadataRepo.getPopularPaged(mediaType, page)
+                        else metadataRepo.getPopular(mediaType, page).let { com.torve.domain.model.PagedResult(it, page, page, it.size) } }) { state, items -> state.copy(popularItems = items) } }
+                    launch { row({ page -> if (contentPolicyFilter.familyKidsProfile) metadataRepo.getTopRatedPaged(mediaType, page)
+                        else metadataRepo.getTopRated(mediaType, page).let { com.torve.domain.model.PagedResult(it, page, page, it.size) } }) { state, items -> state.copy(topRatedItems = items) } }
                 }
                 _state.update { it.copy(shelvesLoaded = true) }
-            }
+                saveDiscoverySnapshot()
+                launchHeroArtworkBackfill()
+            } catch (cancelled: CancellationException) { throw cancelled }
+            catch (_: Exception) { _state.update { it.copy(shelvesLoaded = true) } }
         }
     }
 
     fun setProvider(providerId: Int) {
         catalogDiagLog("ACTION setProvider($providerId)")
-        _state.update { it.copy(providerId = providerId) }
+        shelvesJob?.cancel()
+        _state.update {
+            it.copy(providerId = providerId, providerRegion = null, continueWatching = emptyList(),
+                trendingItems = emptyList(), popularItems = emptyList(), topRatedItems = emptyList(),
+                shelvesLoaded = false)
+        }
         loadCatalog()
     }
 
     /** Reset the watch-provider filter back to "All providers". */
     fun clearProvider() {
         catalogDiagLog("ACTION clearProvider()")
-        _state.update { it.copy(providerId = null) }
+        _state.update { it.copy(providerId = null, providerRegion = null) }
         loadCatalog()
+        loadShelves()
     }
 
     fun setViewMode(mode: CatalogViewMode) {
         _state.update { it.copy(viewMode = mode) }
     }
 
-    fun loadCatalog() {
+    fun loadCatalog() = loadCatalog(retainItems = false)
+
+    private fun loadCatalog(retainItems: Boolean) {
         // Cancel any prior in-flight load + enrichment so a slow
         // previous-genre fetch can't land after a faster newer-genre
         // fetch has already updated the grid.
         catalogLoadJob?.cancel()
         catalogEnrichJob?.cancel()
+        catalogPageJob?.cancel()
+        restartSearch()
         catalogLoadJob = scope.launch {
             torveVerboseLog {
                 "CATALOG_TAB bootstrap_start mediaType=$mediaType category=${_state.value.selectedCategory}"
             }
-            // Clear items immediately so the grid shows a clean loading
-            // state instead of the previous filter's posters lingering
-            // until the network fetch returns. Without this, clicking
-            // genre pills produced a chaotic "old posters → new posters
-            // pop in → re-sort → re-paint" sequence that felt broken.
+            // Keep the current page mounted during filter changes; replace results in one update.
             _state.update {
                 it.copy(
                     isLoading = true,
+                    isLoadingMore = false,
                     error = null,
                     currentPage = 1,
-                    items = emptyList(),
+                    items = if (retainItems) it.items else emptyList(),
                     hasMore = false,
                 )
             }
@@ -205,6 +265,17 @@ class CatalogViewModel(
                 val filter = _state.value.filter
                 val genreId = _state.value.selectedGenreId
                 val providerId = _state.value.providerId
+                val region = providerId?.let { providerRegion() }
+                val providerFingerprint = if (providerId != null && region != null) providerSnapshots?.fingerprint(_state.value, region) else null
+                if (providerId != null && region != null && providerFingerprint != null) {
+                    providerSnapshots?.read(providerId, providerFingerprint)?.let { saved ->
+                        currentCoroutineContext().ensureActive()
+                        resolvedProvider = Triple(providerId, region, saved.providerIds)
+                        _state.update { applyContentPolicy(it.copy(items = saved.items, providerRegion = region,
+                            currentPage = 1, totalPages = saved.totalPages, hasMore = false)) }
+                    }
+                }
+                val providerFilter = resolveProviderFilter(providerId)
                 val category = _state.value.selectedCategory
 
                 // Pre-cache fast path DISABLED 2026-05-08. SQLite's
@@ -236,7 +307,7 @@ class CatalogViewModel(
                         totalResults = cachedTop.size,
                     )
                     // In Progress: always local data, never discovery endpoints
-                    category == CatalogCategory.IN_PROGRESS -> {
+                    category == CatalogCategory.IN_PROGRESS && providerId == null -> {
                         loadInProgressItems(genreId)
                     }
                     // No genre/filter/provider active: use curated list endpoints
@@ -267,14 +338,18 @@ class CatalogViewModel(
                             yearTo = filter.yearTo,
                             runtimeGte = filter.runtimeFilter?.minMinutes,
                             runtimeLte = filter.runtimeFilter?.maxMinutes,
-                            withWatchProviders = providerId?.toString(),
-                            watchRegion = if (providerId != null) "US" else null,
+                            withWatchProviders = providerFilter.first,
+                            watchRegion = providerFilter.second,
                         )
                     }
                 }
 
+                currentCoroutineContext().ensureActive()
                 val finalItems = if (shouldDedupe()) result.items.dedupeByStableKey() else result.items
-                val cachedItems = hydrateCachedRatings(finalItems)
+                // Posters do not depend on a remote ratings batch. Enforce a
+                // requested minimum before display; otherwise rank cached IMDb
+                // values now and finish rating/order updates in the background.
+                val cachedItems = hydrateCachedRatings(finalItems, resolvePrimary = providerId == null || filter.minRating != null)
                 catalogDiagLog(
                     "load result.items=${result.items.size} finalItems=${finalItems.size} " +
                         "cachedItems=${cachedItems.size}",
@@ -295,15 +370,13 @@ class CatalogViewModel(
                 torveVerboseLog {
                     "CATALOG_TAB state_transition state=success mediaType=$mediaType category=$category items=${cachedItems.size} page=${result.page}/${result.totalPages}"
                 }
+                if (providerId != null && providerFingerprint != null) {
+                    providerSnapshots?.write(providerId, providerFingerprint, providerFilter.first.orEmpty(), _state.value)
+                }
                 enrichAndUpdateItems(cachedItems) { enriched ->
-                    // Merge ENRICHED RATINGS into the already-visible items by id.
-                    // Critically: do NOT replace the items list and do NOT re-run
-                    // applyContentPolicy. Re-applying content policy after
-                    // enrichment was the source of "posters disappear / rearrange"
-                    // -- enrichment adds metadata that can re-classify an item as
-                    // adult/restricted, the policy then drops it, and everything
-                    // below shifts up. Patching ratings in place keeps stable
-                    // item identity and zero list-size changes.
+                    // Patch only rating fields, preserving visible titles and IDs.
+                    // Provider pages finish their IMDb ranking in one batch;
+                    // discovery shelves keep their original presentation order.
                     _state.update { current ->
                         val byId = enriched.associateBy { it.id }
                         val merged = current.items.map { existing ->
@@ -316,7 +389,13 @@ class CatalogViewModel(
                         }
                         current.copy(items = merged)
                     }
+                    if (providerId != null && providerFingerprint != null) {
+                        val snapshot = _state.value
+                        scope.launch { providerSnapshots?.write(providerId, providerFingerprint, providerFilter.first.orEmpty(), snapshot) }
+                    }
                 }
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 torveVerboseLog {
                     "CATALOG_TAB state_transition state=error mediaType=$mediaType category=${_state.value.selectedCategory} ${e::class.simpleName}: ${sanitizeNetworkDiagnosticText(e.message)}"
@@ -374,23 +453,24 @@ class CatalogViewModel(
 
     fun loadMore() {
         val s = _state.value
-        if (s.isLoadingMore || !s.hasMore || s.isLoading) return
         // Don't paginate during search
         if (s.searchQuery.length >= 2) {
             loadMoreSearch()
             return
         }
+        if (s.isLoadingMore || !s.hasMore || s.isLoading) return
 
-        scope.launch {
+        catalogPageJob = scope.launch {
             _state.update { it.copy(isLoadingMore = true) }
             try {
                 val nextPage = s.currentPage + 1
                 val filter = s.filter
                 val genreId = s.selectedGenreId
                 val providerId = s.providerId
+                val providerFilter = resolveProviderFilter(providerId)
                 val category = s.selectedCategory
 
-                if (category == CatalogCategory.IN_PROGRESS) return@launch
+                if (category == CatalogCategory.IN_PROGRESS && providerId == null) return@launch
 
                 val result = if (!filter.isActive && genreId == null && providerId == null) {
                     when (category) {
@@ -417,14 +497,19 @@ class CatalogViewModel(
                         yearTo = filter.yearTo,
                         runtimeGte = filter.runtimeFilter?.minMinutes,
                         runtimeLte = filter.runtimeFilter?.maxMinutes,
-                        withWatchProviders = providerId?.toString(),
-                        watchRegion = if (providerId != null) "US" else null,
+                        withWatchProviders = providerFilter.first,
+                        watchRegion = providerFilter.second,
                     )
                 }
 
-                val combined = _state.value.items + result.items
-                val newItems = if (shouldDedupe()) combined.dedupeByStableKey() else combined
-                val cachedItems = hydrateCachedRatings(newItems)
+                currentCoroutineContext().ensureActive()
+                // Rank only the incoming page. Re-sorting the entire grid here
+                // moves cards above the scroll anchor whenever new scores arrive.
+                val pageItems = kotlinx.coroutines.withContext(com.torve.util.ioDispatcher) {
+                    hydrateCachedRatings(result.items, resolvePrimary = false)
+                }
+                val combined = _state.value.items + pageItems
+                val cachedItems = if (shouldDedupe()) combined.dedupeByStableKey() else combined
                 _state.update {
                     applyContentPolicy(
                         it.copy(
@@ -436,7 +521,7 @@ class CatalogViewModel(
                         ),
                     )
                 }
-                enrichAndUpdateItems(cachedItems) { enriched ->
+                enrichAndUpdateItems(result.items) { enriched ->
                     // Same in-place merge as loadCatalog -- patch ratings only.
                     _state.update { current ->
                         val byId = enriched.associateBy { it.id }
@@ -451,6 +536,8 @@ class CatalogViewModel(
                         current.copy(items = merged)
                     }
                 }
+            } catch (e: CancellationException) {
+                throw e
             } catch (_: Exception) {
                 torveVerboseLog {
                     "Catalog loadMore failed mediaType=$mediaType category=${_state.value.selectedCategory}"
@@ -462,14 +549,16 @@ class CatalogViewModel(
 
     private fun loadMoreSearch() {
         val s = _state.value
-        if (s.isSearchingMore || !s.searchHasMore) return
+        if (s.isSearching || s.isSearchingMore || !s.searchHasMore) return
 
-        scope.launch {
+        searchPageJob = scope.launch {
             _state.update { it.copy(isSearchingMore = true) }
             try {
                 val nextPage = s.searchPage + 1
                 val result = metadataRepo.searchMultiPaged(s.searchQuery, nextPage, mediaType)
-                val combined = _state.value.searchResults + result.items
+                val scopedItems = filterProviderSearchResults(result.items, s)
+                currentCoroutineContext().ensureActive()
+                val combined = _state.value.searchResults + scopedItems
                 val newItems = if (shouldDedupe()) combined.dedupeByStableKey() else combined
                 val cachedItems = hydrateCachedRatings(newItems)
                 _state.update {
@@ -485,6 +574,8 @@ class CatalogViewModel(
                 enrichAndUpdateItems(cachedItems) { items ->
                     _state.update { current -> applyContentPolicy(current.copy(searchResults = items)) }
                 }
+            } catch (e: CancellationException) {
+                throw e
             } catch (_: Exception) {
                 torveVerboseLog {
                     "Catalog loadMoreSearch failed mediaType=$mediaType query=${s.searchQuery}"
@@ -495,24 +586,30 @@ class CatalogViewModel(
     }
 
     fun selectCategory(category: CatalogCategory) {
+        if (_state.value.selectedCategory == category) return
         _state.update { it.copy(selectedCategory = category) }
-        loadCatalog()
+        loadCatalog(retainItems = true)
     }
 
     fun selectGenre(genreId: Int?) {
+        if (_state.value.selectedGenreId == genreId) return
         catalogDiagLog("ACTION selectGenre($genreId)")
         _state.update { it.copy(selectedGenreId = genreId) }
-        loadCatalog()
+        loadCatalog(retainItems = true)
     }
 
     fun applyFilter(filter: CatalogFilter) {
-        _state.update { it.copy(filter = filter, showFilterSheet = false) }
-        loadCatalog()
+        applyFilters(filter, _state.value.selectedGenreId)
+    }
+
+    fun applyFilters(filter: CatalogFilter, genreId: Int?) {
+        _state.update { it.copy(filter = filter, selectedGenreId = genreId, showFilterSheet = false) }
+        loadCatalog(retainItems = true)
     }
 
     fun clearFilters() {
         _state.update { it.copy(filter = CatalogFilter(), selectedGenreId = null, showFilterSheet = false) }
-        loadCatalog()
+        loadCatalog(retainItems = true)
     }
 
     fun toggleFilterSheet() {
@@ -539,17 +636,28 @@ class CatalogViewModel(
                 it.copy(searchQuery = query)
             }
         }
-        searchQueryFlow.value = query
+        restartSearch()
+    }
+
+    private fun restartSearch() {
+        searchPageJob?.cancel()
+        catalogEnrichJob?.cancel()
+        _state.update {
+            it.copy(searchResults = emptyList(), isSearching = it.searchQuery.length >= 2,
+                searchHasMore = false, isSearchingMore = false, hasActiveSearch = false, error = null)
+        }
+        searchRequests.value += 1
     }
 
     @OptIn(FlowPreview::class)
     private fun observeSearch() {
         scope.launch {
-            searchQueryFlow
+            searchRequests
                 .debounce(300)
-                .distinctUntilChanged()
-                .filter { it.length >= 2 }
-                .collect { query ->
+                .collectLatest {
+                    val searchState = _state.value
+                    val query = searchState.searchQuery
+                    if (query.length < 2) return@collectLatest
                     // Sensitive-query gate. When the policy is locked AND the
                     // typed query itself contains an explicit keyword
                     // (e.g. "porn"), commit empty results instead of fetching.
@@ -573,12 +681,15 @@ class CatalogViewModel(
                                 hasActiveSearch = true,
                             )
                         }
-                        return@collect
+                        return@collectLatest
                     }
                     _state.update { it.copy(isSearching = true, searchPage = 1) }
                     try {
                         val result = metadataRepo.searchMultiPaged(query, 1, mediaType)
-                        val finalResults = if (shouldDedupe()) result.items.dedupeByStableKey() else result.items
+                        val scopedItems = filterProviderSearchResults(result.items, searchState)
+                        currentCoroutineContext().ensureActive()
+                        if (_state.value.searchQuery != query || !sameSearchFilters(searchState)) return@collectLatest
+                        val finalResults = if (shouldDedupe()) scopedItems.dedupeByStableKey() else scopedItems
                         val cachedResults = hydrateCachedRatings(finalResults)
                         _state.update {
                             applyContentPolicy(
@@ -592,13 +703,17 @@ class CatalogViewModel(
                             )
                         }
                         enrichAndUpdateItems(cachedResults) { items ->
-                            _state.update { current -> applyContentPolicy(current.copy(searchResults = items)) }
+                            if (_state.value.searchQuery == query && sameSearchFilters(searchState)) {
+                                _state.update { current -> applyContentPolicy(current.copy(searchResults = items)) }
+                            }
                         }
+                    } catch (e: CancellationException) {
+                        throw e
                     } catch (_: Exception) {
                         torveVerboseLog {
                             "Catalog search failed mediaType=$mediaType query=$query"
                         }
-                        _state.update { it.copy(isSearching = false) }
+                        _state.update { it.copy(isSearching = false, error = "Search could not be loaded. Please try again.") }
                     }
                 }
         }
@@ -695,7 +810,8 @@ class CatalogViewModel(
                     }
                 }
 
-                val finalItems = if (shouldDedupe()) items.dedupeByStableKey() else items
+                val scopedItems = filterProviderSearchResults(items, _state.value)
+                val finalItems = if (shouldDedupe()) scopedItems.dedupeByStableKey() else scopedItems
                 val cachedItems = hydrateCachedRatings(finalItems)
                 _state.update {
                     applyContentPolicy(
@@ -727,11 +843,45 @@ class CatalogViewModel(
                 hasActiveSearch = false,
             )
         }
-        searchQueryFlow.value = ""
+        restartSearch()
     }
 
     fun refresh() {
+        loadCatalog(retainItems = true)
+        loadShelves()
+    }
+
+    fun refreshLocalizedContent() {
+        // Retain the current provider, filters and query while replacing all rails.
         loadCatalog()
+        loadShelves()
+    }
+
+    fun close() { scope.cancel() }
+
+    private fun sameSearchFilters(previous: CatalogUiState): Boolean = _state.value.let {
+        it.providerId == previous.providerId && it.selectedGenreId == previous.selectedGenreId && it.filter == previous.filter
+    }
+
+    /** TMDB text search is global: verify each hit against the selected service and country. */
+    private suspend fun filterProviderSearchResults(items: List<MediaItem>, state: CatalogUiState): List<MediaItem> {
+        if (state.providerId == null) return items
+        val (providers, region) = resolveProviderFilter(state.providerId)
+        val providerIds = providers.orEmpty().split('|').mapNotNull(String::toIntOrNull).toSet()
+        val permits = Semaphore(4)
+        return supervisorScope {
+            items.map { item -> async {
+                permits.withPermit {
+                    val id = item.tmdbId ?: item.id.extractTmdbIdOrNull() ?: return@withPermit null
+                    val filterItem = if (state.filter.runtimeFilter != null && item.runtime == null) {
+                        metadataRepo.getDetail(mediaType, id)
+                    } else item
+                    if (!ProviderCatalogPolicy.matchesFilters(filterItem, mediaType, state.selectedGenreId, state.filter)) return@withPermit null
+                    val availability = metadataRepo.getTitleWatchProviderCandidates(mediaType, id)
+                    item.takeIf { availability.any { it.id in providerIds && region in it.regions } }
+                }
+            } }.mapNotNull { it.await() }
+        }
     }
 
     private suspend fun shouldDedupe(): Boolean {
@@ -750,15 +900,65 @@ class CatalogViewModel(
         torveVerboseLog { "CATALOG mediaType=$mediaType $message" }
     }
 
-    private fun hydrateCachedRatings(items: List<MediaItem>): List<MediaItem> {
-        val enricher = ratingsEnricher ?: return items
-        val hydrated = enricher.hydrateListFromCache(items)
-        // Apply the user's sort client-side immediately using cached ratings so
-        // the first paint already reflects the chosen order — waiting for the
-        // full enrichment round-trip would flash items into place after the fact.
-        return if (_state.value.filter.sortBy == SortOption.IMDB_SCORE_DESC) {
-            hydrated.sortedByDescending { it.ratings?.imdbScore ?: -1f }
-        } else hydrated
+    private suspend fun providerRegion(): String = prefsRepo?.getString(SettingsViewModel.KEY_REGION_CODE)
+            ?.trim()
+            ?.uppercase()
+            ?.takeIf { it.matches(Regex("[A-Z]{2}")) }
+            ?: "US"
+
+    private suspend fun resolveProviderFilter(providerId: Int?): Pair<String?, String?> {
+        if (providerId == null) return null to null
+        val region = providerRegion()
+        _state.update { it.copy(providerRegion = region) }
+        resolvedProvider?.takeIf { it.first == providerId && it.second == region }?.let { return it.third to region }
+        if (initialProviderGroup != null) {
+            // An empty favourite group must never turn into unscoped discovery.
+            check(initialProviderGroup.isNotEmpty()) { "Choose a streaming service first." }
+            val names = metadataRepo.getWatchProviderNames(mediaType, region)
+            currentCoroutineContext().ensureActive()
+            val available = names.map { StreamingProviderCandidate(it.key, it.value) }
+            val identifiers = initialProviderGroup.flatMap { (id, name) ->
+                resolveStreamingProviderIds(name, id, region, available)
+            }.distinct().sorted().joinToString("|")
+            check(identifiers.isNotEmpty())
+            resolvedProvider = Triple(providerId, region, identifiers)
+            return identifiers to region
+        }
+        val providerName = initialProviderName
+            ?.takeIf { providerId == initialProviderId }
+            ?.takeIf { it.isNotBlank() }
+            ?: return providerId.toString() to region
+        val providerNames = runCatching {
+            metadataRepo.getWatchProviderNames(mediaType, region)
+        }.getOrDefault(emptyMap())
+        currentCoroutineContext().ensureActive()
+        val resolved = resolveStreamingProviderIds(
+            requestedName = providerName,
+            configuredProviderId = providerId,
+            region = region,
+            availableProviders = providerNames.map { (id, name) ->
+                StreamingProviderCandidate(id = id, name = name)
+            },
+        )
+        val identifiers = resolved.joinToString("|").ifBlank { providerId.toString() }
+        resolvedProvider = Triple(providerId, region, identifiers)
+        return identifiers to region
+    }
+
+    private suspend fun hydrateCachedRatings(items: List<MediaItem>, resolvePrimary: Boolean = true): List<MediaItem> {
+        val enricher = ratingsEnricher ?: return _state.value.filter.applyRatingOrder(items)
+        val filter = _state.value.filter
+        var hydrated = enricher.hydrateListFromCache(items)
+        if (resolvePrimary && filter.minRating != null &&
+            filter.ratingSource != com.torve.domain.discovery.DiscoveryRatingSource.TMDB) {
+            val key = integrationSecretStore?.get(IntegrationSecretKey.MDBLIST_API_KEY)
+                ?: prefsRepo?.getString(SettingsViewModel.KEY_MDBLIST_API_KEY) ?: MdbListApi.DEFAULT_API_KEY
+            // Resolve a ranked page before committing it, so the initial
+            // order and minimum filter agree with the displayed pills.
+            hydrated = kotlinx.coroutines.withTimeoutOrNull(8_000) { enricher.enrichList(hydrated, key, requirePrimaryProviders = true) } ?: hydrated
+            currentCoroutineContext().ensureActive()
+        }
+        return filter.applyRatingOrder(hydrated)
     }
 
     private fun enrichAndUpdateItems(
@@ -781,17 +981,9 @@ class CatalogViewModel(
             // Enrich even without an MDBList key — OMDB/Trakt fallbacks still provide
             // IMDB ratings so pills render on every card.
             val enriched = enricher.enrichList(items, apiKey)
-            // PRESERVE ORDER. The cache-hydrate phase (hydrateCachedRatings)
-            // already sorted by cached imdbScore for IMDB_SCORE_DESC mode;
-            // re-sorting here would shuffle items into new positions as
-            // freshly-enriched scores arrive, making the grid feel chaotic
-            // -- posters animate from one cell to another for several seconds
-            // after the user clicked a genre pill. Now the order is fixed
-            // at first paint; enrichment only updates the pills in place.
-            //
-            // Tradeoff: items aren't perfectly sorted by globally-best
-            // imdbScore, only by what was cached at first paint. Still much
-            // better UX than the dancing grid.
+            currentCoroutineContext().ensureActive()
+            // Publish once after the complete batch; the caller controls whether
+            // this grid needs a final IMDb order or a stable shelf order.
             update(enriched)
         }
     }
@@ -847,7 +1039,6 @@ class CatalogViewModel(
 
     private fun applyContentPolicy(state: CatalogUiState): CatalogUiState {
         val policy = currentPolicy()
-        if (!policy.enforcementEnabled) return state
         return state.copy(
             items = contentPolicyFilter.filterItems(
                 policy = policy,

@@ -1,5 +1,7 @@
 package com.torve.android.ui.channels
 
+import com.torve.android.ui.community.parityLabel as localizedUiText
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -21,6 +23,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.rounded.LiveTv
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
@@ -33,12 +36,14 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import com.torve.android.ui.components.TorveSearchField
+import com.torve.android.ui.components.mobileGlassSurface
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -49,10 +54,11 @@ import coil3.compose.AsyncImage
 import com.torve.android.R
 import com.torve.android.ui.theme.Amber
 import com.torve.android.ui.theme.Torve
-import com.torve.domain.model.canonicalEpgChannelKey
+import com.torve.domain.model.programmesForEpgChannel
 import com.torve.domain.model.EnrichedChannel
 import com.torve.domain.model.EpgProgramme
 import com.torve.domain.model.Channel
+import com.torve.domain.model.supportsCatchupArchive
 
 private val CHANNEL_COL_WIDTH = 100.dp
 private val ROW_HEIGHT = 64.dp
@@ -107,7 +113,9 @@ fun ChannelsGuideContent(
         return
     }
 
-    val now = remember { System.currentTimeMillis() }
+    val now by androidx.compose.runtime.produceState(System.currentTimeMillis()) {
+        while (true) { kotlinx.coroutines.delay(60_000); value = System.currentTimeMillis() }
+    }
     // Round down to current hour
     val baseTime = now - (now % 3600000L)
     val timelineWidthDp = (GUIDE_HOURS * 60 * PIXELS_PER_MINUTE).dp
@@ -195,15 +203,7 @@ fun ChannelsGuideContent(
         LazyColumn(modifier = Modifier.fillMaxSize()) {
             items(filteredChannels, key = { "guide_${it.channel.playlistId}_${it.channel.url}" }) { enriched ->
                 val progs = remember(enriched.channel, guideProgrammes) {
-                    val chKey = canonicalEpgChannelKey(
-                        playlistId = enriched.channel.playlistId,
-                        channel = enriched.channel,
-                    )
-                    if (chKey.isNullOrBlank()) {
-                        emptyList()
-                    } else {
-                        guideProgrammes[chKey].orEmpty()
-                    }
+                    programmesForEpgChannel(guideProgrammes, enriched.channel.playlistId, enriched.channel)
                 }
 
                 Row(
@@ -264,7 +264,7 @@ private fun TimeHeaderRow(baseTime: Long, totalWidth: Dp, now: Long) {
             }
 
             Text(
-                text = label,
+                text = localizedUiText(label),
                 style = MaterialTheme.typography.labelSmall,
                 fontWeight = if (isNowHour) FontWeight.Bold else FontWeight.Normal,
                 color = if (isNowHour) Amber else Torve.colors.textTertiary,
@@ -328,14 +328,24 @@ private fun ChannelCell(
 
         Spacer(Modifier.width(4.dp))
 
-        Text(
-            text = channel.name,
-            style = MaterialTheme.typography.labelSmall,
-            color = Torve.colors.textPrimary,
-            maxLines = 2,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.weight(1f),
-        )
+        val hasCatchup = channel.supportsCatchupArchive
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = channel.name,
+                style = MaterialTheme.typography.labelSmall,
+                color = Torve.colors.textPrimary,
+                maxLines = if (hasCatchup) 1 else 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+            if (hasCatchup) {
+                Icon(
+                    imageVector = Icons.Filled.History,
+                    contentDescription = localizedUiText("Timeshift available"),
+                    tint = Amber,
+                    modifier = Modifier.size(18.dp),
+                )
+            }
+        }
     }
 }
 
@@ -379,14 +389,16 @@ private fun ProgrammeTimeline(
                 }
             },
     ) {
-        if (programmes.isEmpty()) {
+        val visibleProgrammes = remember(programmes, baseTime) {
+            mobileGuideProgrammeSlots(programmes, baseTime, baseTime + GUIDE_HOURS * 3_600_000L)
+        }
+        if (visibleProgrammes.isEmpty()) {
             // No programme data — show placeholder
             Box(
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(vertical = 4.dp, horizontal = 2.dp)
-                    .clip(RoundedCornerShape(4.dp))
-                    .background(Torve.colors.inputBackground.copy(alpha = 0.5f))
+                    .mobileGlassSurface(RoundedCornerShape(10.dp), quiet = true)
                     .clickable(onClick = onPlay),
                 contentAlignment = Alignment.CenterStart,
             ) {
@@ -399,17 +411,15 @@ private fun ProgrammeTimeline(
             }
         } else {
             // Programme blocks
-            Row(
-                modifier = Modifier.fillMaxHeight().padding(vertical = 3.dp),
-                horizontalArrangement = Arrangement.Start,
-            ) {
-                programmes.forEach { prog ->
-                    val startOffset = ((prog.startTime - baseTime).coerceAtLeast(0) / 60000f * PIXELS_PER_MINUTE).dp
-                    val durationMin = ((prog.endTime - prog.startTime).coerceAtLeast(60000) / 60000f)
-                    val blockWidth = (durationMin * PIXELS_PER_MINUTE).dp.coerceAtLeast(30.dp)
+            Box(Modifier.fillMaxSize().padding(vertical = 3.dp)) {
+                visibleProgrammes.forEach { slot ->
+                    val prog = slot.programme
+                    val startOffset = ((slot.startTime - baseTime) / 60000f * PIXELS_PER_MINUTE).dp
+                    val durationMin = (slot.endTime - slot.startTime) / 60000f
+                    val blockWidth = (durationMin * PIXELS_PER_MINUTE).dp
 
-                    val isCurrent = now in prog.startTime until prog.endTime
-                    val isPast = prog.endTime <= now
+                    val isCurrent = slot.isCurrentAt(now)
+                    val isPast = slot.schedule.endTime <= now
                     val canReplay = isPast && canReplayProgramme(channel, prog)
 
                     val bgColor = when {
@@ -423,10 +433,10 @@ private fun ProgrammeTimeline(
                         modifier = Modifier
                             .offset(x = startOffset)
                             .width(blockWidth)
+                            .testTag("guide_programme_${prog.startTime}")
                             .fillMaxHeight()
                             .padding(end = 1.dp)
-                            .clip(RoundedCornerShape(4.dp))
-                            .background(bgColor)
+                            .mobileGlassSurface(RoundedCornerShape(10.dp), selected = isCurrent, quiet = true, tint = bgColor)
                             .drawBehind {
                                 // Left border accent for current programme
                                 if (isCurrent) {
@@ -451,7 +461,7 @@ private fun ProgrammeTimeline(
                         Column {
                             if (canReplay) {
                                 Text(
-                                    text = "Replay",
+                                    text = localizedUiText("Replay"),
                                     style = MaterialTheme.typography.labelSmall,
                                     color = Amber,
                                     fontWeight = FontWeight.Bold,
@@ -467,9 +477,9 @@ private fun ProgrammeTimeline(
                                 overflow = TextOverflow.Ellipsis,
                             )
                             // Show time range
-                            val timeText = remember(prog) {
-                                val startCal = java.util.Calendar.getInstance().apply { timeInMillis = prog.startTime }
-                                val endCal = java.util.Calendar.getInstance().apply { timeInMillis = prog.endTime }
+                            val timeText = remember(slot.schedule) {
+                                val startCal = java.util.Calendar.getInstance().apply { timeInMillis = slot.schedule.startTime }
+                                val endCal = java.util.Calendar.getInstance().apply { timeInMillis = slot.schedule.endTime }
                                 String.format(
                                     "%02d:%02d-%02d:%02d",
                                     startCal.get(java.util.Calendar.HOUR_OF_DAY),

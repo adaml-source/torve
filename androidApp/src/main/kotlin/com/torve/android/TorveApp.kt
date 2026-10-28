@@ -10,8 +10,11 @@ import com.torve.android.download.DownloadWorker
 import com.torve.android.epg.EpgWarmupWorker
 import com.torve.android.notification.EpisodeNotificationWorker
 import com.torve.android.sync.TraktSyncWorker
+import com.torve.android.update.AppUpdateWorker
+import com.torve.android.update.usesVpsReleaseUpdates
 import com.torve.data.acceleration.AccelerationInventorySyncService
 import com.torve.data.contentpolicy.MutableContentChannelProvider
+import com.torve.data.trakt.TraktClient
 import com.torve.di.sharedModule
 import com.torve.domain.security.ClientTrustSignalProvider
 import com.torve.domain.security.ClientTrustSignalRegistry
@@ -26,28 +29,48 @@ import org.koin.android.ext.koin.androidLogger
 import org.koin.core.context.startKoin
 import org.koin.java.KoinJavaComponent.getKoin
 
-class TorveApp : Application() {
+class TorveApp : Application(), androidx.work.Configuration.Provider {
+    override fun attachBaseContext(base: android.content.Context) {
+        super.attachBaseContext(base)
+        com.torve.android.debug.StartupMetrics.init(this)
+    }
+
+    override val workManagerConfiguration: androidx.work.Configuration
+        get() = androidx.work.Configuration.Builder().build()
+
+    internal val tvUiReady = kotlinx.coroutines.CompletableDeferred<Unit>()
+    internal fun onTvUiReady() { tvUiReady.complete(Unit) }
+
     companion object {
         private const val NON_CRITICAL_STARTUP_DELAY_MS = 2_000L
     }
 
     private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
-    /** Signalled once startKoin + DB pre-warm have completed on the background thread. */
+    /** Signalled once dependency registration and packaged credentials are ready. */
     internal val koinReady = java.util.concurrent.CountDownLatch(1)
 
     override fun onCreate() {
         super.onCreate()
-        TorveRuntimeDebug.verboseLoggingEnabled = BuildConfig.DEBUG
+        val applicationEnteredAtMs = android.os.SystemClock.elapsedRealtime()
+        android.util.Log.i("TorveStartup", "application_enter")
+        com.torve.data.addon.ExtensionRuntimePolicy.restorePandaFromAccount = false
+        com.torve.data.addon.ExtensionRuntimePolicy.preserveLegacyLocalAppInstalls = true
+        com.torve.data.addon.ExtensionRuntimePolicy.userManagedOnly = true
+        com.torve.data.addon.ExtensionRuntimePolicy.optionalMetadataExtensions = true
+        // Installed TV debug builds must exercise normal remote performance.
+        // Verbose network logging repeatedly redacts large payloads on callers.
+        TorveRuntimeDebug.verboseLoggingEnabled = BuildConfig.DEBUG && !BuildConfig.FLAVOR.endsWith("Tv", ignoreCase = true)
 
         // Firebase Crashlytics — disabled in debug, unavailable on Amazon builds.
-        configureCrashlytics()
-        AndroidDiagnosticsRecorder.init(this)
+        if (BuildConfig.FLAVOR.contains("google", ignoreCase = true)) configureCrashlytics()
         setupUncaughtExceptionHandler()
+        // Compiling diagnostic redaction patterns is independent of the first TV screen.
+        appScope.launch { AndroidDiagnosticsRecorder.init(this@TorveApp) }
 
         // Init ANR diagnostics (debug only — no-op in release)
         com.torve.android.debug.AnrDebugLogger.init(filesDir)
-        com.torve.android.debug.AnrDebugLogger.log("STARTUP Application.onCreate BEGIN")
+        com.torve.android.debug.AnrDebugLogger.log("STARTUP Application.onCreate BEGIN initMs=${android.os.SystemClock.elapsedRealtime() - applicationEnteredAtMs}")
 
         // Fire TV startup has proven sensitive to secondary-dex class resolution
         // when Koin module registration is pushed onto a worker thread. Keep DI
@@ -62,6 +85,10 @@ class TorveApp : Application() {
         }
         com.torve.android.debug.AnrDebugLogger.log("STARTUP startKoin END")
         ClientTrustSignalRegistry.setProvider(getKoin().get<ClientTrustSignalProvider>())
+        getKoin().get<TraktClient>().setPackagedCredentials(
+            clientId = BuildConfig.TRAKT_CLIENT_ID,
+            clientSecret = BuildConfig.TRAKT_CLIENT_SECRET,
+        )
         getKoin().get<MutableContentChannelProvider>().update(
             if (BuildConfig.FLAVOR.contains("google", ignoreCase = true)) "google_play" else null,
         )
@@ -70,16 +97,17 @@ class TorveApp : Application() {
 
         appScope.launch {
             val isTvBuild = BuildConfig.FLAVOR.contains("tv", ignoreCase = true)
-            if (isTvBuild) {
-                runCatching { CatalogWarmupWorker.cancel(this@TorveApp) }
-            }
-
             com.torve.android.debug.AnrDebugLogger.log("STARTUP DB pre-warm BEGIN")
             runCatching { getKoin().get<com.torve.db.TorveDatabase>() }
             com.torve.android.debug.AnrDebugLogger.log("STARTUP DB pre-warm END")
 
             // Non-critical deferred work.
-            kotlinx.coroutines.delay(NON_CRITICAL_STARTUP_DELAY_MS)
+            if (isTvBuild) {
+                // Avoid competing with initial composition for CPU, disk and DI locks.
+                kotlinx.coroutines.withTimeoutOrNull(15_000L) { tvUiReady.await() }
+                kotlinx.coroutines.delay(1_000L)
+            } else kotlinx.coroutines.delay(NON_CRITICAL_STARTUP_DELAY_MS)
+            com.torve.android.launcher.AndroidTvPlayNext.start(this@TorveApp, appScope)
             if (BuildConfig.HAS_BILLING && !com.torve.android.billing.isStripeFireTvBillingBuild()) {
                 launch { runCatching { getKoin().get<BillingManager>().initialize() } }
             }
@@ -87,18 +115,37 @@ class TorveApp : Application() {
                 TraktSyncWorker.schedule(this@TorveApp)
                 if (isTvBuild) {
                     CatalogWarmupWorker.cancel(this@TorveApp)
-                    EpgWarmupWorker.cancel(this@TorveApp)
+                    EpgWarmupWorker.schedule(this@TorveApp)
                 } else {
                     EpgWarmupWorker.schedule(this@TorveApp)
                     CatalogWarmupWorker.schedule(this@TorveApp)
                 }
                 DownloadWorker.ensureChannel(this@TorveApp)
+                com.torve.android.update.StoreUpdates.schedule(this@TorveApp)
+                if (usesVpsReleaseUpdates(BuildConfig.FLAVOR)) {
+                    AppUpdateWorker.schedule(this@TorveApp)
+                    AppUpdateWorker.checkNow(this@TorveApp)
+                } else {
+                    // Google Play owns delivery for Play-distributed builds. In
+                    // particular, Play's in-app update API is not supported on TV.
+                    AppUpdateWorker.cancel(this@TorveApp)
+                }
             }
             launch {
-                runCatching { getKoin().get<AccountSessionCoordinator>().restoreSession() }
-                runCatching { getKoin().get<com.torve.presentation.device.DeviceGovernanceViewModel>().fetchAccessState() }
-                runCatching { EpisodeNotificationWorker.scheduleIfEnabled(this@TorveApp) }
-                runCatching { getKoin().get<AccelerationInventorySyncService>().syncConnectedProviders() }
+                runCatching {
+                    getKoin().get<AccountSessionCoordinator>().restoreSession(
+                        promoteLegacyTvJellyfin = isTvBuild,
+                    )
+                }
+                // Independent account follow-up work must not form one long
+                // serial chain behind Panda's remote configuration hydration.
+                launch {
+                    runCatching { getKoin().get<AccelerationInventorySyncService>().syncConnectedProviders() }
+                }
+                launch {
+                    runCatching { getKoin().get<com.torve.presentation.device.DeviceGovernanceViewModel>().fetchAccessState() }
+                }
+                launch { runCatching { EpisodeNotificationWorker.scheduleIfEnabled(this@TorveApp) } }
             }
             launch { runCatching { androidx.media3.decoder.ffmpeg.FfmpegLibrary.isAvailable() } }
 
@@ -111,6 +158,17 @@ class TorveApp : Application() {
                     val init = getKoin()
                         .get<com.torve.android.providerhealth.AndroidProviderHealthInit>()
                     init.start()
+                }
+            }
+
+            // Keep the active profile's episode-alert preference scheduled.
+            launch {
+                val settingsNotifier = getKoin().get<com.torve.presentation.settings.SettingsRefreshNotifier>()
+                settingsNotifier.events.collect {
+                    // Changing profiles also emits this event. Never retain another
+                    // person's visible alert or leave their preference scheduled.
+                    androidx.core.app.NotificationManagerCompat.from(this@TorveApp).cancel(EpisodeNotificationWorker.NOTIFICATION_ID)
+                    runCatching { EpisodeNotificationWorker.scheduleIfEnabled(this@TorveApp) }
                 }
             }
 

@@ -1,5 +1,9 @@
 package com.torve.android.tv.components
 
+import com.torve.android.tv.components.tvSettingsLabel as localizedUiText
+
+import com.torve.presentation.watching.forPresentation
+
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
@@ -28,10 +32,14 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -50,6 +58,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
 import com.torve.android.R
+import com.torve.android.tv.focus.isTvPlaybackEpisodeFocusTargetReady
 import com.torve.android.ui.components.PreferredRatingPills
 import com.torve.android.ui.theme.*
 import com.torve.domain.model.Episode
@@ -68,6 +77,7 @@ import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.first
 
 @Composable
 fun TvEpisodePicker(
@@ -78,6 +88,7 @@ fun TvEpisodePicker(
     seasonDetailError: String? = null,
     watchedEpisodes: Set<String>,
     watchProgress: WatchProgress?,
+    availableInJellyfinEpisodes: Set<Pair<Int, Int>> = emptySet(),
     ratingPrefs: RatingDisplayPrefs = RatingDisplayPrefs(),
     seriesBackdropUrl: String? = null,
     seriesPosterUrl: String? = null,
@@ -91,6 +102,12 @@ fun TvEpisodePicker(
     onContentFocused: (FocusRequester) -> Unit,
     autoFocusFirstSeason: Boolean = false,
     resolvingEpisode: Pair<Int, Int>? = null,
+    preferredEpisode: Pair<Int, Int>? = null,
+    restoreFocusEpisode: Pair<Int, Int>? = null,
+    onEpisodeFocusRestored: () -> Unit = {},
+    isActive: Boolean = true,
+    heroFocusRequester: FocusRequester? = null,
+    hideUnwatchedSpoilers: Boolean = false,
 ) {
     val seasonsLabel = stringResource(R.string.tv_episodes_title)
     val seasonNumbers = remember(seasons) {
@@ -104,13 +121,42 @@ fun TvEpisodePicker(
         ?.let { seasonRequesters[it] }
         ?: fallbackSeasonRequester
     val selectedSeasonRequester = seasonRequesters[selectedSeason] ?: firstSeasonRequester
-    val firstEpisodeRequester = remember { FocusRequester() }
     val retryEpisodeRequester = remember { FocusRequester() }
+    val seasonsListState = rememberLazyListState()
     val episodesListState = rememberLazyListState()
     val scope = rememberCoroutineScope()
-    val selectedSeasonDetail = seasonDetail?.takeIf {
-        it.seasonNumber == selectedSeason || it.episodes.isNotEmpty()
+    val markSeasonWatchedRequester = remember { FocusRequester() }
+    var watchedActionHasFocus by remember { mutableStateOf(false) }
+    var focusedSeasonNumber by remember { mutableStateOf<Int?>(null) }
+    var focusedEpisodeNumber by remember(selectedSeason) { mutableStateOf<Int?>(null) }
+    var pendingWatchedFocusRestore by remember { mutableStateOf<SeasonWatchedFocusRestore?>(null) }
+
+    // Never render the previous season while a newly selected season is loading.
+    val selectedSeasonDetail = seasonDetail?.takeIf { it.seasonNumber == selectedSeason }
+    val episodeNumbers = remember(selectedSeason, selectedSeasonDetail?.episodes) {
+        selectedSeasonDetail?.episodes.orEmpty().map { it.episodeNumber }
     }
+    val episodeRequesters = remember(selectedSeason, episodeNumbers) {
+        episodeNumbers.associateWith { FocusRequester() }
+    }
+    val composedEpisodeNumbers = remember(selectedSeason) { mutableStateListOf<Int>() }
+    val fallbackEpisodeRequester = remember { FocusRequester() }
+    val firstEpisodeRequester = episodeNumbers.firstOrNull()
+        ?.let { episodeRequesters[it] }
+        ?: fallbackEpisodeRequester
+    val preferredEpisodeNumber = preferredEpisode
+        ?.takeIf { it.first == selectedSeason }
+        ?.second
+        ?.takeIf { it in episodeNumbers }
+    val preferredEpisodeRequester = preferredEpisodeNumber
+        ?.let { episodeRequesters[it] }
+        ?: firstEpisodeRequester
+    val resolvedRestoreEpisodeNumber = restoreFocusEpisode
+        ?.takeIf { it.first == selectedSeason }
+        ?.let { target ->
+            target.second.takeIf { it in episodeNumbers }
+                ?: episodeNumbers.minByOrNull { kotlin.math.abs(it - target.second) }
+        }
     val selectedSeasonEpisodeCount = selectedSeasonDetail
         ?.takeIf { it.seasonNumber == selectedSeason }
         ?.episodes
@@ -124,9 +170,99 @@ fun TvEpisodePicker(
     }
     val selectedSeasonFullyWatched = selectedSeasonEpisodeCount > 0 &&
         selectedSeasonWatchedCount >= selectedSeasonEpisodeCount
-    // Reset episode scroll whenever the season changes
-    androidx.compose.runtime.LaunchedEffect(selectedSeason) {
-        episodesListState.scrollToItem(0)
+
+    fun markSeasonWatched(season: Int, fromAction: Boolean) {
+        val count = if (season == selectedSeason) selectedSeasonEpisodeCount
+            else seasons.firstOrNull { it.seasonNumber == season }?.episodeCount ?: 0
+        if ((1..count).any { "s${season}e$it" !in watchedEpisodes }) {
+            pendingWatchedFocusRestore = SeasonWatchedFocusRestore(season, fromAction, watchedEpisodes)
+        }
+        onMarkSeasonWatched(season)
+    }
+    androidx.compose.runtime.LaunchedEffect(selectedSeason, seasonNumbers) {
+        if (watchedActionHasFocus || pendingWatchedFocusRestore != null) return@LaunchedEffect
+        val selectedIndex = seasonNumbers.indexOf(selectedSeason).coerceAtLeast(0)
+        seasonsListState.requestScrollToItem(selectedIndex)
+    }
+    // Show the resolved resume/first-unwatched episode without stealing focus
+    // from the detail page's current action.
+    androidx.compose.runtime.LaunchedEffect(selectedSeason, preferredEpisodeNumber, episodeNumbers) {
+        // A new Watch now target must not scroll the returning/focused episode
+        // out of composition, including after a watched-state mutation.
+        if (restoreFocusEpisode != null || focusedEpisodeNumber != null) return@LaunchedEffect
+        val preferredIndex = episodeNumbers.indexOf(preferredEpisodeNumber).takeIf { it >= 0 } ?: 0
+        episodesListState.requestScrollToItem(preferredIndex)
+    }
+    androidx.compose.runtime.LaunchedEffect(restoreFocusEpisode, selectedSeason, episodeNumbers, isLoadingSeasonDetail) {
+        if (isLoadingSeasonDetail) return@LaunchedEffect
+        val episodeNumber = resolvedRestoreEpisodeNumber ?: return@LaunchedEffect
+        val index = episodeNumbers.indexOf(episodeNumber)
+        if (index < 0) return@LaunchedEffect
+        // A row from the previous season can retain its layout while loading.
+        // Wait for this season's item keys before scrolling the requested card.
+        snapshotFlow { episodesListState.layoutInfo }.first { layout ->
+            layout.totalItemsCount > index && layout.visibleItemsInfo.any {
+                (it.key as? String)?.startsWith("ep_${selectedSeason}_") == true
+            }
+        }
+        episodesListState.requestScrollToItem(index)
+    }
+    val composedEpisodeSnapshot = composedEpisodeNumbers.toSet()
+    androidx.compose.runtime.LaunchedEffect(
+        restoreFocusEpisode,
+        selectedSeason,
+        resolvedRestoreEpisodeNumber,
+        composedEpisodeSnapshot,
+        isActive,
+        isLoadingSeasonDetail,
+    ) {
+        if (!isActive || isLoadingSeasonDetail) return@LaunchedEffect
+        val episodeNumber = resolvedRestoreEpisodeNumber ?: return@LaunchedEffect
+        if (
+            !isTvPlaybackEpisodeFocusTargetReady(
+                requestedEpisode = restoreFocusEpisode,
+                selectedSeason = selectedSeason,
+                resolvedEpisodeNumber = episodeNumber,
+                composedEpisodeNumbers = composedEpisodeSnapshot,
+            )
+        ) {
+            return@LaunchedEffect
+        }
+        val requester = episodeRequesters[episodeNumber] ?: return@LaunchedEffect
+        // Confirm focus after layout, then acknowledge once so remote input
+        // is immediately free to move away from the restored episode.
+        repeat(24) {
+            withFrameNanos { }
+            runCatching { requester.requestFocus() }
+            withFrameNanos { }
+            if (focusedEpisodeNumber == episodeNumber) {
+                onEpisodeFocusRestored()
+                return@LaunchedEffect
+            }
+            kotlinx.coroutines.delay(32)
+        }
+    }
+    androidx.compose.runtime.LaunchedEffect(pendingWatchedFocusRestore, watchedEpisodes, isActive) {
+        val origin = pendingWatchedFocusRestore ?: return@LaunchedEffect
+        if (!isActive || watchedEpisodes == origin.watchedBefore) return@LaunchedEffect
+        val restoreAction = origin.fromAction && selectedSeason == origin.season
+        val index = if (restoreAction) seasonNumbers.size + 1 else seasonNumbers.indexOf(origin.season)
+        if (index < 0) {
+            pendingWatchedFocusRestore = null
+            return@LaunchedEffect
+        }
+        seasonsListState.requestScrollToItem(index)
+        val requester = if (restoreAction) markSeasonWatchedRequester else seasonRequesters[origin.season]
+        repeat(24) {
+            withFrameNanos { }
+            requester?.let { runCatching { it.requestFocus() } }
+            withFrameNanos { }
+            if (if (restoreAction) watchedActionHasFocus else focusedSeasonNumber == origin.season) {
+                pendingWatchedFocusRestore = null
+                return@LaunchedEffect
+            }
+            kotlinx.coroutines.delay(32)
+        }
     }
     androidx.compose.runtime.LaunchedEffect(autoFocusFirstSeason) {
         if (autoFocusFirstSeason) {
@@ -136,10 +272,11 @@ fun TvEpisodePicker(
     }
     fun requestEpisodeAreaFocus() {
         scope.launch {
-            episodesListState.scrollToItem(0)
+            val preferredIndex = episodeNumbers.indexOf(preferredEpisodeNumber).takeIf { it >= 0 } ?: 0
+            episodesListState.scrollToItem(preferredIndex)
             kotlinx.coroutines.delay(80)
             val target = if (!selectedSeasonDetail?.episodes.isNullOrEmpty()) {
-                firstEpisodeRequester
+                preferredEpisodeRequester
             } else if (seasonDetailError != null && onRetrySeason != null) {
                 retryEpisodeRequester
             } else {
@@ -150,10 +287,24 @@ fun TvEpisodePicker(
     }
     Column(
         verticalArrangement = Arrangement.spacedBy(16.dp),
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .onPreviewKeyEvent { event ->
+                if (event.type == KeyEventType.KeyDown && event.key in listOf(
+                        Key.DirectionLeft, Key.DirectionRight, Key.DirectionUp, Key.DirectionDown,
+                    )
+                ) {
+                    // An asynchronous watched update must not undo a newer
+                    // navigation choice made with the remote.
+                    pendingWatchedFocusRestore = null
+                }
+                false
+            },
     ) {
         Text(
-            text = seasonsLabel,
+            text = localizedUiText(if (selectedSeasonEpisodeCount > 0) {
+                "$seasonsLabel · S$selectedSeason · $selectedSeasonWatchedCount of $selectedSeasonEpisodeCount watched"
+            } else seasonsLabel),
             style = MaterialTheme.typography.headlineSmall,
             color = Snow,
             fontWeight = FontWeight.SemiBold,
@@ -162,6 +313,7 @@ fun TvEpisodePicker(
 
         // Season tabs
         LazyRow(
+            state = seasonsListState,
             horizontalArrangement = Arrangement.spacedBy(10.dp),
             contentPadding = PaddingValues(end = 12.dp),
         ) {
@@ -175,6 +327,11 @@ fun TvEpisodePicker(
                     isSelected = season.seasonNumber == selectedSeason,
                     modifier = Modifier
                         .focusRequester(requester)
+                        .focusProperties { up = heroFocusRequester ?: FocusRequester.Default }
+                        .onFocusChanged {
+                            if (it.isFocused) focusedSeasonNumber = season.seasonNumber
+                            else if (focusedSeasonNumber == season.seasonNumber) focusedSeasonNumber = null
+                        }
                         .onPreviewKeyEvent { keyEvent ->
                             if (keyEvent.type == KeyEventType.KeyDown && keyEvent.key == Key.DirectionDown) {
                                 requestEpisodeAreaFocus()
@@ -183,30 +340,31 @@ fun TvEpisodePicker(
                         },
                     onFocused = { onContentFocused(requester) },
                     onClick = { onSeasonSelected(season.seasonNumber) },
-                    onLongClick = { onMarkSeasonWatched(season.seasonNumber) },
+                    onLongClick = { markSeasonWatched(season.seasonNumber, fromAction = false) },
                 )
             }
 
-            item(key = "season_action_separator_$selectedSeason") {
+            item(key = "season_action_separator") {
                 Spacer(Modifier.width(16.dp))
             }
 
-            item(key = "mark_season_watched_$selectedSeason") {
-                val requester = remember("mark_season_watched_$selectedSeason") { FocusRequester() }
+            item(key = "mark_season_watched") {
                 TvSeasonWatchedActionChip(
                     seasonNumber = selectedSeason,
                     isComplete = selectedSeasonFullyWatched,
-                    enabled = selectedSeasonEpisodeCount > 0 && !selectedSeasonFullyWatched,
+                    enabled = selectedSeasonEpisodeCount > 0,
                     modifier = Modifier
-                        .focusRequester(requester)
+                        .focusRequester(markSeasonWatchedRequester)
+                        .focusProperties { up = heroFocusRequester ?: FocusRequester.Default }
+                        .onFocusChanged { watchedActionHasFocus = it.isFocused }
                         .onPreviewKeyEvent { keyEvent ->
                             if (keyEvent.type == KeyEventType.KeyDown && keyEvent.key == Key.DirectionDown) {
                                 requestEpisodeAreaFocus()
                                 true
                             } else false
                         },
-                    onFocused = { onContentFocused(requester) },
-                    onClick = { onMarkSeasonWatched(selectedSeason) },
+                    onFocused = { onContentFocused(markSeasonWatchedRequester) },
+                    onClick = { markSeasonWatched(selectedSeason, fromAction = true) },
                 )
             }
         }
@@ -227,6 +385,16 @@ fun TvEpisodePicker(
                         items = selectedSeasonDetail.episodes,
                         key = { _, ep -> "ep_${selectedSeason}_${ep.episodeNumber}" },
                     ) { index, episode ->
+                        DisposableEffect(selectedSeason, episode.episodeNumber) {
+                            if (episode.episodeNumber !in composedEpisodeNumbers) {
+                                composedEpisodeNumbers.add(episode.episodeNumber)
+                            }
+                            onDispose {
+                                composedEpisodeNumbers.remove(episode.episodeNumber)
+                            }
+                        }
+                        val episodeRequester = episodeRequesters[episode.episodeNumber]
+                            ?: fallbackEpisodeRequester
                         val episodeKey = "s${selectedSeason}e${episode.episodeNumber}"
                         val isWatched = episodeKey in watchedEpisodes
                         val episodeProgress = if (
@@ -239,9 +407,11 @@ fun TvEpisodePicker(
                         }
 
                         TvEpisodeCard(
-                            episode = episode,
+                            episode = episode.forPresentation(hideUnwatchedSpoilers, isWatched),
                             seasonNumber = selectedSeason,
                             isWatched = isWatched,
+                            isAvailableInJellyfin =
+                                (selectedSeason to episode.episodeNumber) in availableInJellyfinEpisodes,
                             isResolving = resolvingEpisode == (selectedSeason to episode.episodeNumber),
                             progress = episodeProgress,
                             ratingPrefs = ratingPrefs,
@@ -251,7 +421,15 @@ fun TvEpisodePicker(
                             onClick = { onEpisodeSelected(selectedSeason, episode.episodeNumber) },
                             onLongClick = { onToggleEpisodeWatched(selectedSeason, episode.episodeNumber) },
                             modifier = Modifier
-                                .then(if (index == 0) Modifier.focusRequester(firstEpisodeRequester) else Modifier)
+                                .focusRequester(episodeRequester)
+                                .onFocusChanged { focusState ->
+                                    if (focusState.isFocused) {
+                                        focusedEpisodeNumber = episode.episodeNumber
+                                        onContentFocused(episodeRequester)
+                                    } else if (focusedEpisodeNumber == episode.episodeNumber) {
+                                        focusedEpisodeNumber = null
+                                    }
+                                }
                                 .focusProperties { up = selectedSeasonRequester },
                         )
                     }
@@ -260,8 +438,8 @@ fun TvEpisodePicker(
 
             seasonDetailError != null -> {
                 TvEpisodeEmptyState(
-                    title = "Couldn't load episodes.",
-                    subtitle = "Check the catalog source or try again.",
+                    title = localizedUiText("Couldn't load episodes."),
+                    subtitle = localizedUiText("Check the catalog source or try again."),
                     actionLabel = "Retry",
                     onAction = onRetrySeason,
                     actionFocusRequester = retryEpisodeRequester,
@@ -271,8 +449,8 @@ fun TvEpisodePicker(
 
             else -> {
                 TvEpisodeEmptyState(
-                    title = "Episode list unavailable.",
-                    subtitle = "This show was found, but the provider did not return episode metadata.",
+                    title = localizedUiText("Episode list unavailable."),
+                    subtitle = localizedUiText("This show was found, but the provider did not return episode metadata."),
                 )
             }
         }
@@ -292,27 +470,12 @@ private fun TvSeasonChip(
     var focused by remember { mutableStateOf(false) }
     var longPressHandled by remember { mutableStateOf(false) }
     val scale by animateFloatAsState(targetValue = if (focused) 1.05f else 1f, label = "seasonScale")
-    val borderColor by animateColorAsState(
-        targetValue = when {
-            focused -> AmberLight
-            isSelected -> Amber.copy(alpha = 0.67f)
-            else -> Steel.copy(alpha = 0.4f)
-        },
-        label = "seasonBorder",
-    )
-    val bgColor = when {
-        focused -> Gunmetal
-        isSelected -> Graphite
-        else -> Charcoal
-    }
 
     Box(
         modifier = modifier
             .zIndex(if (focused) 1f else 0f)
             .scale(scale)
-            .border(2.dp, borderColor, RoundedCornerShape(14.dp))
-            .clip(RoundedCornerShape(14.dp))
-            .background(bgColor)
+            .tvGlassControl(focused, selected = isSelected, cornerRadius = 14.dp)
             .onFocusChanged {
                 focused = it.isFocused
                 if (it.isFocused) onFocused()
@@ -359,6 +522,12 @@ private fun TvSeasonChip(
     }
 }
 
+private data class SeasonWatchedFocusRestore(
+    val season: Int,
+    val fromAction: Boolean,
+    val watchedBefore: Set<String>,
+)
+
 @Composable
 private fun TvEpisodeSkeletonRow() {
     LazyRow(
@@ -384,7 +553,7 @@ private fun TvEpisodeSkeletonRow() {
                 verticalArrangement = Arrangement.Bottom,
             ) {
                 Text(
-                    text = "Loading episodes...",
+                    text = localizedUiText("Loading episodes..."),
                     style = MaterialTheme.typography.labelLarge,
                     color = Silver,
                     maxLines = 1,
@@ -441,7 +610,6 @@ private fun TvEpisodeEmptyState(
                         focused = it.isFocused
                         if (it.isFocused) onActionFocused?.invoke()
                     }
-                    .focusable()
                     .clickable(
                         interactionSource = remember { MutableInteractionSource() },
                         indication = null,
@@ -472,14 +640,6 @@ private fun TvSeasonWatchedActionChip(
 ) {
     var focused by remember { mutableStateOf(false) }
     val scale by animateFloatAsState(targetValue = if (focused) 1.04f else 1f, label = "seasonWatchedScale")
-    val borderColor by animateColorAsState(
-        targetValue = when {
-            focused -> AmberLight
-            isComplete -> Amber.copy(alpha = 0.42f)
-            else -> Steel.copy(alpha = 0.4f)
-        },
-        label = "seasonWatchedBorder",
-    )
     val label = if (isComplete) {
         stringResource(R.string.tv_season_watched, seasonNumber)
     } else {
@@ -491,9 +651,7 @@ private fun TvSeasonWatchedActionChip(
             .zIndex(if (focused) 1f else 0f)
             .scale(scale)
             .focusProperties { canFocus = enabled }
-            .border(1.dp, borderColor, RoundedCornerShape(999.dp))
-            .clip(RoundedCornerShape(999.dp))
-            .background(if (focused) Amber.copy(alpha = 0.14f) else Charcoal.copy(alpha = 0.58f))
+            .tvGlassControl(focused, selected = isComplete, enabled = enabled, cornerRadius = 999.dp)
             .onFocusChanged {
                 focused = it.isFocused
                 if (it.isFocused) onFocused()
@@ -509,7 +667,7 @@ private fun TvSeasonWatchedActionChip(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
-            text = label,
+            text = localizedUiText(label),
             style = MaterialTheme.typography.labelLarge,
             color = if (enabled || isComplete) Snow else Silver,
             fontWeight = if (isComplete) FontWeight.SemiBold else FontWeight.Normal,
@@ -523,6 +681,7 @@ private fun TvEpisodeCard(
     episode: Episode,
     seasonNumber: Int,
     isWatched: Boolean,
+    isAvailableInJellyfin: Boolean,
     isResolving: Boolean,
     progress: Float?,
     ratingPrefs: RatingDisplayPrefs,
@@ -691,7 +850,7 @@ private fun TvEpisodeCard(
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text(
-                    text = "S$seasonNumber E${episode.episodeNumber}  ${episode.name.ifBlank { "Episode ${episode.episodeNumber}" }}",
+                    text = localizedUiText("S$seasonNumber E${episode.episodeNumber}  ${episode.name.ifBlank { "Episode ${episode.episodeNumber}" }}"),
                     style = MaterialTheme.typography.titleSmall,
                     color = Snow,
                     maxLines = 1,
@@ -761,7 +920,7 @@ private fun TvEpisodeCard(
         if (isWatched) {
             Box(
                 modifier = Modifier
-                    .align(Alignment.TopEnd)
+                    .align(Alignment.TopStart)
                     .padding(8.dp)
                     .background(Charcoal.copy(alpha = 0.8f), RoundedCornerShape(6.dp))
                     .padding(horizontal = 6.dp, vertical = 3.dp),
@@ -770,6 +929,23 @@ private fun TvEpisodeCard(
                     text = stringResource(R.string.tv_watched),
                     style = MaterialTheme.typography.labelSmall,
                     color = AmberLight,
+                )
+            }
+        }
+
+        if (isAvailableInJellyfin) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(8.dp)
+                    .background(Amber.copy(alpha = 0.88f), RoundedCornerShape(6.dp))
+                    .padding(horizontal = 7.dp, vertical = 3.dp),
+            ) {
+                Text(
+                    text = localizedUiText("In Jellyfin"),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = Obsidian,
+                    fontWeight = FontWeight.SemiBold,
                 )
             }
         }
@@ -808,19 +984,12 @@ private fun TvDownloadSeasonChip(
 ) {
     var focused by remember { mutableStateOf(false) }
     val scale by animateFloatAsState(targetValue = if (focused) 1.05f else 1f, label = "dlSeasonScale")
-    val borderColor by animateColorAsState(
-        targetValue = if (focused) AmberLight else Steel.copy(alpha = 0.4f),
-        label = "dlSeasonBorder",
-    )
-    val bgColor = if (focused) Gunmetal else Charcoal
 
     Row(
         modifier = modifier
             .zIndex(if (focused) 1f else 0f)
             .scale(scale)
-            .border(2.dp, borderColor, RoundedCornerShape(14.dp))
-            .clip(RoundedCornerShape(14.dp))
-            .background(bgColor)
+            .tvGlassControl(focused, selected = false, cornerRadius = 14.dp)
             .onFocusChanged {
                 focused = it.isFocused
                 if (it.isFocused) onFocused()

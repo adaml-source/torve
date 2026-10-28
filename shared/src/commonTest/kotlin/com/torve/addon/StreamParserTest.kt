@@ -8,8 +8,21 @@ import com.torve.data.addon.isUsenetStream
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
+import kotlinx.serialization.json.Json
 
 class StreamParserTest {
+    @Test
+    fun parse_preservesOpaqueEpisodeGroupAndConfiguredAddonOrigin() {
+        val stream = Json.decodeFromString<StremioStream>("""{
+            "title":"Episode 2", "url":"https://video.example/2.mp4",
+            "behaviorHints":{"bingeGroup":"  provider|1080p|DE|H264  "}
+        }""")
+        val parsed = StreamParser.parse(stream, "Provider", "https://addon.example/config-a")
+        assertEquals("provider|1080p|DE|H264", parsed.bingeGroup)
+        assertEquals("https://addon.example/config-a", parsed.addonBaseUrl)
+        assertNull(StreamParser.parse(stream.copy(behaviorHints = StemioBehaviorHints(bingeGroup = " \t"))).bingeGroup)
+        assertNull(StreamParser.parse(stream.copy(behaviorHints = null)).bingeGroup)
+    }
 
     @Test
     fun parse_torrentioStream() {

@@ -1,5 +1,7 @@
 package com.torve.android.ui.player
 
+import com.torve.android.ui.community.parityLabel as localizedUiText
+
 import android.os.SystemClock
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.animateColorAsState
@@ -8,10 +10,12 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusable
+import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -31,6 +35,7 @@ import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -41,12 +46,14 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
@@ -57,6 +64,12 @@ import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.disabled
+import androidx.compose.ui.semantics.onClick
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.torve.android.R
@@ -70,11 +83,21 @@ import com.torve.android.ui.theme.Charcoal
 import com.torve.android.ui.theme.Graphite
 import com.torve.android.ui.theme.Gunmetal
 import com.torve.android.ui.theme.Obsidian
+import com.torve.android.ui.theme.Sapphire
 import com.torve.android.ui.theme.Silver
 import com.torve.android.ui.theme.Snow
 import com.torve.data.subtitles.languageInfo
+import com.torve.data.subtitles.SubtitleEvidence
+import com.torve.data.subtitles.SubtitleEvidenceState
+import com.torve.data.subtitles.SubtitleMatchQuality
+import com.torve.data.subtitles.SubtitleMatchTier
+import com.torve.data.subtitles.SubtitleSortMode
+import com.torve.data.subtitles.humanReadableSubtitleName
+import com.torve.data.subtitles.parseSubtitleRelease
+import com.torve.data.subtitles.subtitleLanguagesMatch
 import com.torve.domain.player.TrackDescription
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 private enum class TrackTab {
     SUBTITLES,
@@ -173,7 +196,7 @@ fun TvTrackSelectionOverlay(
                     if (onSubtitleDelay != null) {
                         item(key = "subtitle_delay") {
                             TvTrackRow(
-                                label = "Subtitle Delay",
+                                label = localizedUiText("Subtitle Delay"),
                                 isSelected = false,
                                 leadingIcon = Icons.Default.Timer,
                                 onClick = { dismissKey++; onSubtitleDelay() },
@@ -194,7 +217,7 @@ fun TvTrackSelectionOverlay(
                     if (audioTracks.isEmpty()) {
                         item(key = "no_audio_tracks") {
                             Text(
-                                text = "No audio tracks available.",
+                                text = localizedUiText("No audio tracks available."),
                                 color = Silver,
                                 style = MaterialTheme.typography.bodyMedium,
                                 modifier = Modifier.padding(vertical = 12.dp, horizontal = 8.dp),
@@ -221,179 +244,36 @@ fun TvTrackSelectionOverlay(
 @Composable
 fun TvAudioDelayOverlay(
     currentDelayMs: Int,
+    onPreviewDelay: (Int) -> Unit,
     onSave: (Int) -> Unit,
     onReset: () -> Unit,
     onDismiss: () -> Unit,
-) {
-    BackHandler(onBack = onDismiss)
+) = TvDelayAdjustmentStrip(
+    title = stringResource(R.string.player_audio_delay),
+    currentDelayMs = currentDelayMs,
+    range = -2000..2000,
+    onPreviewDelay = onPreviewDelay,
+    onSave = onSave,
+    onReset = onReset,
+    onDismiss = onDismiss,
+)
 
-    var localDelay by remember(currentDelayMs) { mutableIntStateOf(currentDelayMs) }
-    val sliderFocusRequester = remember { FocusRequester() }
-    var dismissKey by remember { mutableIntStateOf(0) }
-
-    LaunchedEffect(Unit) {
-        requestFocusWithRetry(sliderFocusRequester)
-    }
-
-    LaunchedEffect(dismissKey) {
-        delay(3_000)
-        onDismiss()
-    }
-
-    val delayLabel = stringResource(R.string.player_audio_delay_value, localDelay)
-
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .onPreviewKeyEvent { dismissKey++; false }
-            .background(Obsidian.copy(alpha = 0.95f)),
-        contentAlignment = Alignment.Center,
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth(0.76f)
-                .clip(RoundedCornerShape(18.dp))
-                .background(Charcoal)
-                .padding(horizontal = 28.dp, vertical = 24.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp),
-        ) {
-            Text(
-                text = stringResource(R.string.player_audio_delay),
-                style = MaterialTheme.typography.headlineSmall,
-                color = Snow,
-                fontWeight = FontWeight.Bold,
-            )
-            Text(
-                text = "Left/Right adjusts by 100 ms. Save applies and closes.",
-                style = MaterialTheme.typography.bodySmall,
-                color = Silver,
-            )
-            TvDpadSlider(
-                value = localDelay,
-                range = -2000..2000,
-                step = 100,
-                label = stringResource(R.string.player_audio_delay),
-                formatValue = { delayLabel },
-                focusRequester = sliderFocusRequester,
-                onValueChange = { value ->
-                    localDelay = value
-                },
-                onCenterClick = {
-                    onSave(localDelay)
-                },
-            )
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                TvOverlayActionButton(
-                    label = "Save",
-                    selected = true,
-                    modifier = Modifier.weight(1f),
-                    onClick = { onSave(localDelay) },
-                )
-                TvOverlayActionButton(
-                    label = stringResource(R.string.common_reset),
-                    modifier = Modifier.weight(1f),
-                    onClick = {
-                        localDelay = 0
-                        onReset()
-                    },
-                )
-                TvOverlayActionButton(
-                    label = stringResource(R.string.common_close),
-                    modifier = Modifier.weight(1f),
-                    onClick = onDismiss,
-                )
-            }
-            Text(
-                text = "Use positive values if audio is ahead, negative if audio is behind.",
-                style = MaterialTheme.typography.bodySmall,
-                color = Silver,
-            )
-        }
-    }
-}
 @Composable
 fun TvSubtitleDelayOverlay(
     currentDelayMs: Int,
     onSave: (Int) -> Unit,
     onReset: () -> Unit,
     onDismiss: () -> Unit,
-) {
-    BackHandler(onBack = onDismiss)
-    var localDelay by remember(currentDelayMs) { mutableIntStateOf(currentDelayMs) }
-    val sliderFocusRequester = remember { FocusRequester() }
-    var dismissKey by remember { mutableIntStateOf(0) }
-
-    LaunchedEffect(Unit) { requestFocusWithRetry(sliderFocusRequester) }
-    LaunchedEffect(dismissKey) { delay(3_000); onDismiss() }
-
-    val delayLabel = run {
-        val sign = if (localDelay >= 0) "+" else ""
-        "$sign${localDelay / 1000}.${(kotlin.math.abs(localDelay) % 1000) / 100}s"
-    }
-
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .onPreviewKeyEvent { dismissKey++; false }
-            .background(Obsidian.copy(alpha = 0.95f)),
-        contentAlignment = Alignment.Center,
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth(0.76f)
-                .clip(RoundedCornerShape(18.dp))
-                .background(Charcoal)
-                .padding(horizontal = 28.dp, vertical = 24.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp),
-        ) {
-            Text(
-                text = "Subtitle Delay",
-                style = MaterialTheme.typography.headlineSmall,
-                color = Snow,
-                fontWeight = FontWeight.Bold,
-            )
-            Text(
-                text = "Left/Right adjusts by 100 ms. Positive = subtitles appear later.",
-                style = MaterialTheme.typography.bodySmall,
-                color = Silver,
-            )
-            TvDpadSlider(
-                value = localDelay,
-                range = -10000..10000,
-                step = 100,
-                label = "Subtitle Delay",
-                formatValue = { delayLabel },
-                focusRequester = sliderFocusRequester,
-                onValueChange = { localDelay = it },
-                onCenterClick = { onSave(localDelay) },
-            )
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                TvOverlayActionButton(
-                    label = "Save",
-                    selected = true,
-                    modifier = Modifier.weight(1f),
-                    onClick = { onSave(localDelay) },
-                )
-                TvOverlayActionButton(
-                    label = stringResource(R.string.common_reset),
-                    modifier = Modifier.weight(1f),
-                    onClick = { localDelay = 0; onReset() },
-                )
-                TvOverlayActionButton(
-                    label = stringResource(R.string.common_close),
-                    modifier = Modifier.weight(1f),
-                    onClick = onDismiss,
-                )
-            }
-        }
-    }
-}
+    onPreviewDelay: ((Int) -> Unit)? = null,
+) = TvDelayAdjustmentStrip(
+    title = localizedUiText("Subtitle delay"),
+    currentDelayMs = currentDelayMs,
+    range = -10000..10000,
+    onPreviewDelay = { onPreviewDelay?.invoke(it) },
+    onSave = onSave,
+    onReset = onReset,
+    onDismiss = onDismiss,
+)
 
 @Composable
 fun TvEqualizerOverlay(
@@ -444,7 +324,7 @@ fun TvEqualizerOverlay(
                 fontWeight = FontWeight.Bold,
             )
             Text(
-                text = "Use D-pad Left/Right to adjust. Back closes.",
+                text = localizedUiText("Use D-pad Left/Right to adjust. Back closes."),
                 style = MaterialTheme.typography.bodySmall,
                 color = Silver,
                 modifier = Modifier.padding(top = 6.dp, bottom = 14.dp),
@@ -469,7 +349,7 @@ fun TvEqualizerOverlay(
 
                 item(key = "preset_header") {
                     Text(
-                        text = "Presets",
+                        text = localizedUiText("Presets"),
                         style = MaterialTheme.typography.titleMedium,
                         color = Snow,
                         modifier = Modifier.padding(top = 4.dp, bottom = 2.dp),
@@ -494,7 +374,7 @@ fun TvEqualizerOverlay(
 
                 item(key = "bands_header") {
                     Text(
-                        text = "Bands",
+                        text = localizedUiText("Bands"),
                         style = MaterialTheme.typography.titleMedium,
                         color = Snow,
                         modifier = Modifier.padding(top = 8.dp, bottom = 2.dp),
@@ -659,7 +539,7 @@ fun TvDpadSlider(
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         Text(
-            text = label,
+            text = localizedUiText(label),
             style = MaterialTheme.typography.titleSmall,
             color = if (enabled) Snow else Silver,
         )
@@ -760,7 +640,7 @@ private fun TvTrackRow(
                 )
             }
             Text(
-                text = label,
+                text = localizedUiText(label),
                 style = MaterialTheme.typography.bodyLarge,
                 color = if (isSelected || focused) Snow else Silver,
             )
@@ -836,7 +716,7 @@ private fun TvOverlayTabChip(
             .padding(horizontal = 18.dp, vertical = 10.dp),
     ) {
         Text(
-            text = label,
+            text = localizedUiText(label),
             style = MaterialTheme.typography.titleMedium,
             color = if (isSelected || focused) Snow else Silver,
             fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
@@ -896,7 +776,7 @@ private fun TvOverlayActionButton(
         horizontalArrangement = Arrangement.SpaceBetween,
     ) {
         Text(
-            text = label,
+            text = localizedUiText(label),
             style = MaterialTheme.typography.bodyLarge,
             color = if (focused || selected) Snow else Silver,
             fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
@@ -1036,37 +916,812 @@ data class SubtitleCandidate(
     val directUrl: String? = null,
     val mimeType: String? = null,
     val osFileId: Int? = null,
-    val downloadCount: Int = 0,
-    val fromTrusted: Boolean = false,
-    val hearingImpaired: Boolean = false,
-    val aiTranslated: Boolean = false,
-    val ratings: Float = 0f,
+    val releaseName: String? = null,
+    val provider: String,
+    val fps: Double? = null,
+    val downloadCount: Int? = null,
+    val recentDownloadCount: Int? = null,
+    val fromTrusted: Boolean? = null,
+    val uploaderName: String? = null,
+    val uploaderRank: String? = null,
+    val hearingImpaired: Boolean? = null,
+    val forced: Boolean? = null,
+    val aiTranslated: Boolean? = null,
+    val machineTranslated: Boolean? = null,
+    val ratings: Double? = null,
+    val voteCount: Int? = null,
+    val uploadDate: String? = null,
+    val matchTier: SubtitleMatchTier,
+    val matchScore: Int,
+    val qualityScore: Int,
+    val rankingReasons: List<String> = emptyList(),
+    val contentIdentityScore: Int = 0,
+    val releaseMatchScore: Int? = null,
+    val syncConfidenceScore: Int = matchScore,
+    val matchQuality: SubtitleMatchQuality = SubtitleMatchQuality.POSSIBLE,
+    val matchExplanation: String = "Release information unavailable",
+    val evidence: List<SubtitleEvidence> = emptyList(),
+    val subtitleFormat: String? = null,
+    val sourceType: String? = null,
+    val resolutionHeight: Int? = null,
+    val videoCodec: String? = null,
+    val releaseGroup: String? = null,
 )
 
 sealed class SubtitleFetchState {
     data object Idle : SubtitleFetchState()
     data object Loading : SubtitleFetchState()
-    data class Results(val subtitles: List<SubtitleCandidate>) : SubtitleFetchState()
+    data class Results(
+        val subtitles: List<SubtitleCandidate>,
+        val matchingRelease: String,
+        val movieHashAvailable: Boolean,
+        val hasStrongMatch: Boolean,
+        val providerStatus: String,
+        val openSubtitlesPageLimit: Int,
+        val canLoadMore: Boolean,
+        val isLoadingMore: Boolean = false,
+    ) : SubtitleFetchState()
     data object NoKey : SubtitleFetchState()
     data object Empty : SubtitleFetchState()
     data object Error : SubtitleFetchState()
 }
 
+private data class SubtitleDisplayEntry(
+    val section: String,
+    val key: String,
+    val candidate: SubtitleCandidate,
+)
+
 @Composable
 fun TvSubtitleSearchOverlay(
     state: SubtitleFetchState,
     onSelect: (SubtitleCandidate) -> Unit,
+    onLoadMore: () -> Unit,
     onDismiss: () -> Unit,
+    preferredLanguage: String? = null,
+) {
+    BackHandler(onBack = onDismiss)
+    val releaseFocusKey = (state as? SubtitleFetchState.Results)?.matchingRelease ?: state::class.simpleName
+    val filterKeys = remember {
+        listOf("sort", "load-more", "strong", "trusted", "automated", "rating", "sdh", "forced", "poor", "rejected")
+    }
+    val filterRequesters = remember { List(filterKeys.size) { FocusRequester() } }
+    val languageRequesterStore = remember { mutableMapOf<String, FocusRequester>() }
+    val resultRequesterStore = remember { mutableMapOf<String, FocusRequester>() }
+    val filterListState = rememberLazyListState()
+    val languageListState = rememberLazyListState()
+    val resultListState = rememberLazyListState()
+    val focusScope = rememberCoroutineScope()
+
+    var selectedLanguage by remember(releaseFocusKey) { mutableStateOf<String?>(null) }
+    var preferredLanguageApplied by remember(releaseFocusKey) { mutableStateOf(false) }
+    var strongOnly by remember(releaseFocusKey) { mutableStateOf(false) }
+    var trustedOnly by remember(releaseFocusKey) { mutableStateOf(false) }
+    var hearingImpairedOnly by remember(releaseFocusKey) { mutableStateOf(false) }
+    var forcedOnly by remember(releaseFocusKey) { mutableStateOf(false) }
+    var excludeAutomated by remember(releaseFocusKey) { mutableStateOf(false) }
+    var minimumRating by remember(releaseFocusKey) { mutableStateOf<Double?>(null) }
+    var showPoorMatches by remember(releaseFocusKey) { mutableStateOf(true) }
+    var showRejected by remember(releaseFocusKey) { mutableStateOf(false) }
+    var sortMode by remember(releaseFocusKey) { mutableStateOf(SubtitleSortMode.SMART_MATCH) }
+    var focusedCandidate by remember(releaseFocusKey) { mutableStateOf<SubtitleCandidate?>(null) }
+    var focusedResultKey by remember(releaseFocusKey) { mutableStateOf<String?>(null) }
+    var focusedResultIndex by remember(releaseFocusKey) { mutableIntStateOf(0) }
+    var activeFocusTarget by remember(releaseFocusKey) { mutableStateOf<SubtitlePickerFocusTarget?>(null) }
+    var confirmedFocusTarget by remember(releaseFocusKey) { mutableStateOf<SubtitlePickerFocusTarget?>(null) }
+    var focusRequestSequence by remember(releaseFocusKey) { mutableIntStateOf(0) }
+    var lastControlTarget by remember(releaseFocusKey) {
+        mutableStateOf(SubtitlePickerFocusTarget(SubtitlePickerFocusRow.FILTERS, 0))
+    }
+    var initialFocusSeen by remember(releaseFocusKey) { mutableStateOf(false) }
+
+    Box(
+        modifier = Modifier.fillMaxSize().background(Obsidian.copy(alpha = 0.96f)),
+        contentAlignment = Alignment.Center,
+    ) {
+        Column(
+            modifier = Modifier.fillMaxSize().padding(horizontal = 32.dp, vertical = 12.dp),
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+                modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp),
+            ) {
+                Text(
+                    text = stringResource(R.string.player_download_subtitles),
+                    style = MaterialTheme.typography.titleLarge,
+                    color = Snow,
+                    fontWeight = FontWeight.Bold,
+                )
+                Text(localizedUiText("Smart Match · OpenSubtitles + Addons"), style = MaterialTheme.typography.bodySmall, color = Silver)
+            }
+
+            when (state) {
+                SubtitleFetchState.Loading -> SubtitlePickerMessage(localizedUiText("Searching for subtitles…"), onDismiss, showProgress = true)
+                SubtitleFetchState.NoKey -> SubtitlePickerMessage(
+                    localizedUiText("No subtitle source available.\n\nInstall a subtitle addon, or add an OpenSubtitles.com API key in Settings → Advanced."),
+                    onDismiss,
+                )
+                SubtitleFetchState.Error -> SubtitlePickerMessage(
+                    localizedUiText("Subtitle search failed.\nCheck your connection, subtitle addons, and OpenSubtitles key."),
+                    onDismiss,
+                )
+                SubtitleFetchState.Empty -> SubtitlePickerMessage(
+                    localizedUiText("No subtitles found for this title from the configured providers."),
+                    onDismiss,
+                )
+                SubtitleFetchState.Idle -> Unit
+                is SubtitleFetchState.Results -> {
+                    val languages = remember(state.subtitles, preferredLanguage) {
+                        state.subtitles
+                            .map { it.languageCode to "${it.flagEmoji} ${it.languageName}" }
+                            .distinctBy { it.first }
+                            .sortedWith(
+                                compareByDescending<Pair<String, String>> {
+                                    subtitleLanguagesMatch(it.first, preferredLanguage)
+                                }.thenBy { it.second },
+                            )
+                    }
+                    val preferredCode = languages.firstOrNull {
+                        subtitleLanguagesMatch(it.first, preferredLanguage)
+                    }?.first
+                    val languageOptions = remember(languages) {
+                        listOf<Pair<String?, String>>(null to "All languages") + languages
+                    }
+                    val languageRowCount = languageOptions.size.takeIf { it > 1 } ?: 0
+                    val languageRequesters = languageOptions.map { (code, _) ->
+                        languageRequesterStore.getOrPut(code ?: "all") { FocusRequester() }
+                    }
+                    val filtered = remember(
+                        state.subtitles,
+                        selectedLanguage,
+                        strongOnly,
+                        trustedOnly,
+                        hearingImpairedOnly,
+                        forcedOnly,
+                        excludeAutomated,
+                        minimumRating,
+                        showPoorMatches,
+                        showRejected,
+                        sortMode,
+                    ) {
+                        val accepted = state.subtitles.filter { subtitle ->
+                            (selectedLanguage == null || subtitleLanguagesMatch(subtitle.languageCode, selectedLanguage)) &&
+                                (!strongOnly || subtitle.matchTier.priority <= SubtitleMatchTier.STRONG_RELEASE_MATCH.priority) &&
+                                (!trustedOnly || subtitle.fromTrusted == true) &&
+                                (!hearingImpairedOnly || subtitle.hearingImpaired == true) &&
+                                (!forcedOnly || subtitle.forced == true) &&
+                                (!excludeAutomated || (subtitle.aiTranslated != true && subtitle.machineTranslated != true)) &&
+                                (minimumRating == null || (subtitle.ratings ?: -1.0) >= minimumRating!!) &&
+                                (showPoorMatches || subtitle.matchTier != SubtitleMatchTier.POOR_MATCH) &&
+                                (showRejected || subtitle.matchTier != SubtitleMatchTier.REJECTED)
+                        }
+                        when (sortMode) {
+                            SubtitleSortMode.SMART_MATCH -> accepted
+                            SubtitleSortMode.RATING -> accepted.sortedWith(
+                                compareByDescending<SubtitleCandidate> { it.qualityScore }.thenBy { it.matchTier.priority },
+                            )
+                            SubtitleSortMode.DOWNLOADS -> accepted.sortedWith(
+                                compareByDescending<SubtitleCandidate> { it.downloadCount ?: -1 }.thenBy { it.matchTier.priority },
+                            )
+                            SubtitleSortMode.NEWEST -> accepted.sortedWith(
+                                compareByDescending<SubtitleCandidate> { it.uploadDate.orEmpty() }.thenBy { it.matchTier.priority },
+                            )
+                        }
+                    }
+                    val displayEntries = remember(filtered) {
+                        listOf(
+                            "BEST MATCHES" to filtered.filter {
+                                it.matchTier.priority <= SubtitleMatchTier.STRONG_RELEASE_MATCH.priority
+                            },
+                            "MORE RESULTS" to filtered.filter {
+                                it.matchTier in setOf(SubtitleMatchTier.COMPATIBLE_RELEASE, SubtitleMatchTier.GENERIC_MATCH)
+                            },
+                            "POOR RELEASE MATCHES" to filtered.filter { it.matchTier == SubtitleMatchTier.POOR_MATCH },
+                            "REJECTED — WRONG TITLE OR EPISODE" to filtered.filter {
+                                it.matchTier == SubtitleMatchTier.REJECTED
+                            },
+                        ).flatMap { (section, values) ->
+                            values.map { SubtitleDisplayEntry(section, subtitleCandidateKey(it), it) }
+                        }
+                    }
+                    val resultRequesters = displayEntries.map {
+                        resultRequesterStore.getOrPut(it.key) { FocusRequester() }
+                    }
+                    val loadMoreEnabled = state.canLoadMore && !state.isLoadingMore
+                    val enabledFilters = remember(loadMoreEnabled) {
+                        filterKeys.indices.filterTo(mutableSetOf()) { it != 1 || loadMoreEnabled }
+                    }
+                    val focusGraph = SubtitlePickerFocusGraph(
+                        filterCount = filterKeys.size,
+                        enabledFilterIndexes = enabledFilters,
+                        languageCount = languageRowCount,
+                        resultCount = displayEntries.size,
+                        resultExitTarget = lastControlTarget,
+                    )
+
+                    fun requestFocus(target: SubtitlePickerFocusTarget) {
+                        focusRequestSequence += 1
+                        val requestSequence = focusRequestSequence
+                        focusScope.launch {
+                            val requester = when (target.row) {
+                                SubtitlePickerFocusRow.FILTERS -> {
+                                    val index = target.index.coerceIn(filterKeys.indices)
+                                    filterRequesters[index]
+                                }
+                                SubtitlePickerFocusRow.LANGUAGES -> {
+                                    if (languageRowCount == 0) return@launch
+                                    val index = target.index.coerceIn(0, languageRowCount - 1)
+                                    languageRequesters[index]
+                                }
+                                SubtitlePickerFocusRow.RESULTS -> {
+                                    if (displayEntries.isEmpty()) return@launch
+                                    val index = target.index.coerceIn(displayEntries.indices)
+                                    resultRequesters[index]
+                                }
+                            }
+                            // Focus an already-visible neighbour without first
+                            // moving the lazy viewport. This avoids disposing the
+                            // very chip that is about to receive focus.
+                            requestFocusSafely(requester)
+                            delay(16)
+                            if (focusRequestSequence != requestSequence || confirmedFocusTarget == target) {
+                                return@launch
+                            }
+                            when (target.row) {
+                                SubtitlePickerFocusRow.FILTERS -> filterListState.scrollToItem(target.index.coerceIn(filterKeys.indices))
+                                SubtitlePickerFocusRow.LANGUAGES -> languageListState.scrollToItem(target.index.coerceIn(0, languageRowCount - 1))
+                                SubtitlePickerFocusRow.RESULTS -> resultListState.scrollToItem(target.index.coerceIn(displayEntries.indices))
+                            }
+                            // Lazy containers may dispose and recreate the target
+                            // while scrolling. Retry across frames, but cancel as
+                            // soon as a newer D-pad move supersedes this request.
+                            repeat(24) {
+                                if (focusRequestSequence != requestSequence || confirmedFocusTarget == target) {
+                                    return@launch
+                                }
+                                requestFocusSafely(requester)
+                                delay(50)
+                            }
+                        }
+                    }
+
+                    fun navigate(target: SubtitlePickerFocusTarget, direction: SubtitlePickerDirection) {
+                        // Advance the logical cursor synchronously. Fire remotes
+                        // can deliver another key before a LazyRow scroll/focus
+                        // request reaches the next frame; using the logical
+                        // cursor keeps rapid LEFT/RIGHT/UP/DOWN presses ordered.
+                        val origin = activeFocusTarget?.takeIf { it.row == target.row } ?: target
+                        val destination = focusGraph.move(origin, direction)
+                        activeFocusTarget = destination
+                        requestFocus(destination)
+                    }
+
+                    LaunchedEffect(releaseFocusKey, preferredCode, languageRowCount) {
+                        if (!preferredLanguageApplied) {
+                            selectedLanguage = preferredCode
+                            preferredLanguageApplied = true
+                        }
+                        focusedCandidate = focusedCandidate ?: displayEntries.firstOrNull()?.candidate
+                        if (!initialFocusSeen) {
+                            val preferredIndex = preferredCode?.let { code ->
+                                languageOptions.indexOfFirst { it.first == code }.takeIf { it >= 0 }
+                            }
+                            val target = preferredIndex
+                                ?.let { SubtitlePickerFocusTarget(SubtitlePickerFocusRow.LANGUAGES, it) }
+                                ?: SubtitlePickerFocusTarget(SubtitlePickerFocusRow.FILTERS, 0)
+                            // Cold Fire TV launches can take several seconds to
+                            // attach and focus the window. Retry until a node
+                            // confirms focus rather than treating requestFocus()
+                            // returning normally as success.
+                            repeat(80) {
+                                when (target.row) {
+                                    SubtitlePickerFocusRow.LANGUAGES -> requestFocusSafely(languageRequesters.getOrNull(target.index))
+                                    SubtitlePickerFocusRow.FILTERS -> requestFocusSafely(filterRequesters.getOrNull(target.index))
+                                    SubtitlePickerFocusRow.RESULTS -> Unit
+                                }
+                                delay(100)
+                                if (initialFocusSeen) return@LaunchedEffect
+                            }
+                        }
+                    }
+
+                    LaunchedEffect(loadMoreEnabled) {
+                        if (!loadMoreEnabled && activeFocusTarget == SubtitlePickerFocusTarget(SubtitlePickerFocusRow.FILTERS, 1)) {
+                            requestFocus(SubtitlePickerFocusTarget(SubtitlePickerFocusRow.FILTERS, 2))
+                        }
+                    }
+
+                    val displayKeys = displayEntries.map { it.key }
+                    LaunchedEffect(displayKeys) {
+                        if (activeFocusTarget?.row == SubtitlePickerFocusRow.RESULTS) {
+                            val retainedIndex = focusedResultKey?.let(displayKeys::indexOf) ?: -1
+                            if (retainedIndex >= 0) {
+                                activeFocusTarget = SubtitlePickerFocusTarget(SubtitlePickerFocusRow.RESULTS, retainedIndex)
+                                focusedResultIndex = retainedIndex
+                            } else if (displayEntries.isNotEmpty()) {
+                                requestFocus(
+                                    SubtitlePickerFocusTarget(
+                                        SubtitlePickerFocusRow.RESULTS,
+                                        focusedResultIndex.coerceIn(displayEntries.indices),
+                                    ),
+                                )
+                            } else {
+                                requestFocus(lastControlTarget)
+                            }
+                        }
+                    }
+
+                    Text(localizedUiText("MATCHING AGAINST"), color = Amber, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                    Text(
+                        text = state.matchingRelease,
+                        color = Snow,
+                        style = MaterialTheme.typography.bodyMedium,
+                        maxLines = 1,
+                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                    )
+                    Text(
+                        text = localizedUiText(if (state.movieHashAvailable) "Exact-file hash available" else "Release-name matching (file hash unavailable)"),
+                        color = Silver,
+                        style = MaterialTheme.typography.labelSmall,
+                    )
+                    Text(
+                        text = state.providerStatus,
+                        color = Silver,
+                        style = MaterialTheme.typography.labelSmall,
+                        maxLines = 1,
+                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                        modifier = Modifier.padding(bottom = 3.dp),
+                    )
+                    if (!state.hasStrongMatch) {
+                        Text(
+                            localizedUiText("No strong release match found. Showing best available subtitles."),
+                            color = AmberLight,
+                            style = MaterialTheme.typography.labelMedium,
+                            modifier = Modifier.padding(bottom = 3.dp),
+                        )
+                    }
+
+                    LazyRow(
+                        state = filterListState,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        modifier = Modifier.fillMaxWidth().padding(bottom = 3.dp).focusGroup(),
+                    ) {
+                        items(filterKeys.size, key = { filterKeys[it] }) { index ->
+                            val label = subtitleFilterLabel(index, sortMode, minimumRating, state)
+                            val selected = subtitleFilterSelected(
+                                index,
+                                strongOnly,
+                                trustedOnly,
+                                excludeAutomated,
+                                minimumRating,
+                                hearingImpairedOnly,
+                                forcedOnly,
+                                showPoorMatches,
+                                showRejected,
+                            )
+                            val target = SubtitlePickerFocusTarget(SubtitlePickerFocusRow.FILTERS, index)
+                            SubtitleFilterPill(
+                                label = label,
+                                isSelected = selected,
+                                enabled = index != 1 || loadMoreEnabled,
+                                modifier = Modifier.focusRequester(filterRequesters[index]),
+                                onFocused = {
+                                    activeFocusTarget = target
+                                    confirmedFocusTarget = target
+                                    lastControlTarget = target
+                                    focusedResultKey = null
+                                    initialFocusSeen = true
+                                },
+                                onLeft = { navigate(target, SubtitlePickerDirection.LEFT) },
+                                onRight = { navigate(target, SubtitlePickerDirection.RIGHT) },
+                                onUp = { navigate(target, SubtitlePickerDirection.UP) },
+                                onDown = { navigate(target, SubtitlePickerDirection.DOWN) },
+                                onClick = {
+                                    when (index) {
+                                        0 -> sortMode = SubtitleSortMode.entries[(sortMode.ordinal + 1) % SubtitleSortMode.entries.size]
+                                        1 -> onLoadMore()
+                                        2 -> strongOnly = !strongOnly
+                                        3 -> trustedOnly = !trustedOnly
+                                        4 -> excludeAutomated = !excludeAutomated
+                                        5 -> minimumRating = when (minimumRating) { null -> 8.0; 8.0 -> 9.0; else -> null }
+                                        6 -> hearingImpairedOnly = !hearingImpairedOnly
+                                        7 -> forcedOnly = !forcedOnly
+                                        8 -> showPoorMatches = !showPoorMatches
+                                        9 -> showRejected = !showRejected
+                                    }
+                                },
+                            )
+                        }
+                    }
+
+                    if (languageRowCount > 0) {
+                        LazyRow(
+                            state = languageListState,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            modifier = Modifier.fillMaxWidth().padding(bottom = 3.dp).focusGroup(),
+                        ) {
+                            items(languageOptions.size, key = { languageOptions[it].first ?: "all" }) { index ->
+                                val (code, label) = languageOptions[index]
+                                val target = SubtitlePickerFocusTarget(SubtitlePickerFocusRow.LANGUAGES, index)
+                                SubtitleFilterPill(
+                                    label = label,
+                                    isSelected = if (code == null) selectedLanguage == null else subtitleLanguagesMatch(selectedLanguage, code),
+                                    modifier = Modifier.focusRequester(languageRequesters[index]),
+                                    onFocused = {
+                                        activeFocusTarget = target
+                                        confirmedFocusTarget = target
+                                        lastControlTarget = target
+                                        focusedResultKey = null
+                                        initialFocusSeen = true
+                                    },
+                                    onLeft = { navigate(target, SubtitlePickerDirection.LEFT) },
+                                    onRight = { navigate(target, SubtitlePickerDirection.RIGHT) },
+                                    onUp = { navigate(target, SubtitlePickerDirection.UP) },
+                                    onDown = { navigate(target, SubtitlePickerDirection.DOWN) },
+                                    onClick = {
+                                        selectedLanguage = if (code != null && subtitleLanguagesMatch(selectedLanguage, code)) null else code
+                                    },
+                                )
+                            }
+                        }
+                    }
+
+                    LazyColumn(
+                        state = resultListState,
+                        modifier = Modifier.fillMaxWidth().weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(2.dp),
+                    ) {
+                        itemsIndexed(displayEntries, key = { _, entry -> entry.key }) { index, entry ->
+                            Column {
+                                if (index == 0 || displayEntries[index - 1].section != entry.section) {
+                                    Text(entry.section, color = Amber, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+                                }
+                                val target = SubtitlePickerFocusTarget(SubtitlePickerFocusRow.RESULTS, index)
+                                SmartSubtitleResultRow(
+                                    candidate = entry.candidate,
+                                    modifier = Modifier.focusRequester(resultRequesters[index]),
+                                    onFocused = {
+                                        focusedCandidate = entry.candidate
+                                        focusedResultKey = entry.key
+                                        focusedResultIndex = index
+                                        activeFocusTarget = target
+                                        confirmedFocusTarget = target
+                                        initialFocusSeen = true
+                                    },
+                                    onNavigate = { navigate(target, it) },
+                                    onClick = { onSelect(entry.candidate) },
+                                    enabled = entry.candidate.matchTier != SubtitleMatchTier.REJECTED,
+                                )
+                            }
+                        }
+                        if (displayEntries.isEmpty()) {
+                            item {
+                                Text(
+                                    localizedUiText(if (state.isLoadingMore) "Searching additional OpenSubtitles pages…"
+                                    else "No subtitles match the active filters. Choose Search more or relax a filter."),
+                                    color = Silver,
+                                )
+                            }
+                        }
+                    }
+
+                    focusedCandidate?.let { candidate ->
+                        val explanation = candidate.evidence.take(7).joinToString("  ·  ") {
+                            val marker = when (it.state) {
+                                SubtitleEvidenceState.MATCH -> "✓"
+                                SubtitleEvidenceState.UNKNOWN -> "?"
+                                SubtitleEvidenceState.MISMATCH -> "✕"
+                            }
+                            "$marker ${it.description}"
+                        }.ifBlank { candidate.matchExplanation }
+                        Text(
+                            text = localizedUiText("Why this matches  ·  $explanation"),
+                            color = Silver,
+                            style = MaterialTheme.typography.labelSmall,
+                            maxLines = 2,
+                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                            modifier = Modifier.padding(top = 3.dp),
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ColumnScope.SubtitlePickerMessage(
+    message: String,
+    onDismiss: () -> Unit,
+    showProgress: Boolean = false,
+) {
+    val requester = remember { FocusRequester() }
+    var focusSeen by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        repeat(80) {
+            requestFocusSafely(requester)
+            delay(100)
+            if (focusSeen) return@LaunchedEffect
+        }
+    }
+    Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            if (showProgress) {
+                CircularProgressIndicator(color = Amber, modifier = Modifier.size(48.dp))
+                Spacer(Modifier.height(16.dp))
+            }
+            Text(
+                localizedUiText(message),
+                color = Silver,
+                style = MaterialTheme.typography.bodyLarge,
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+            )
+            Spacer(Modifier.height(16.dp))
+            com.torve.android.ui.components.BackButton(onClick = onDismiss,
+                modifier = Modifier.focusRequester(requester), onFocused = { focusSeen = true })
+        }
+    }
+}
+
+private fun subtitleFilterLabel(
+    index: Int,
+    sortMode: SubtitleSortMode,
+    minimumRating: Double?,
+    state: SubtitleFetchState.Results,
+): String = when (index) {
+    0 -> when (sortMode) {
+        SubtitleSortMode.SMART_MATCH -> "Smart Match"
+        SubtitleSortMode.RATING -> "Rating"
+        SubtitleSortMode.DOWNLOADS -> "Downloads"
+        SubtitleSortMode.NEWEST -> "Newest"
+    }
+    1 -> when {
+        state.isLoadingMore -> "Searching more…"
+        state.canLoadMore -> "Search more"
+        else -> "All available pages loaded"
+    }
+    2 -> "Strong only"
+    3 -> "Trusted"
+    4 -> "Exclude AI/MT"
+    5 -> minimumRating?.let { "Rating ${it.toInt()}+" } ?: "Any rating"
+    6 -> "SDH"
+    7 -> "Forced"
+    8 -> "Include poor"
+    else -> "Show rejected"
+}
+
+private fun subtitleFilterSelected(
+    index: Int,
+    strongOnly: Boolean,
+    trustedOnly: Boolean,
+    excludeAutomated: Boolean,
+    minimumRating: Double?,
+    hearingImpairedOnly: Boolean,
+    forcedOnly: Boolean,
+    showPoorMatches: Boolean,
+    showRejected: Boolean,
+): Boolean = when (index) {
+    0 -> true
+    1 -> false
+    2 -> strongOnly
+    3 -> trustedOnly
+    4 -> excludeAutomated
+    5 -> minimumRating != null
+    6 -> hearingImpairedOnly
+    7 -> forcedOnly
+    8 -> showPoorMatches
+    else -> showRejected
+}
+
+private fun subtitleCandidateKey(candidate: SubtitleCandidate): String = listOf(
+    candidate.provider,
+    candidate.osFileId?.toString().orEmpty(),
+    candidate.directUrl.orEmpty(),
+    candidate.releaseName.orEmpty(),
+    candidate.displayLabel,
+    candidate.languageCode,
+).joinToString("|")
+
+private fun displaySubtitleSourceType(value: String?): String? = when (value?.lowercase()) {
+    "web-dl" -> "WEB-DL"
+    "webrip" -> "WEBRip"
+    "bluray" -> "BluRay"
+    "bdrip" -> "BDRip"
+    "hdtv" -> "HDTV"
+    "dvdrip" -> "DVDRip"
+    "remux" -> "REMUX"
+    null, "" -> null
+    else -> value
+}
+
+private fun displaySubtitleCodec(value: String?): String? = when (value?.lowercase()) {
+    "h264", "x264", "avc" -> "x264"
+    "h265", "x265", "hevc" -> "HEVC"
+    "av1" -> "AV1"
+    null, "" -> null
+    else -> value
+}
+
+@Composable
+private fun SmartSubtitleResultRow(
+    candidate: SubtitleCandidate,
+    modifier: Modifier = Modifier,
+    onFocused: () -> Unit,
+    onNavigate: (SubtitlePickerDirection) -> Unit,
+    onClick: () -> Unit,
+    enabled: Boolean,
+) {
+    val reduceMotion = rememberTvReduceMotionPreference()
+    var focused by remember { mutableStateOf(false) }
+    val scale by animateFloatAsState(
+        targetValue = if (reduceMotion) 1f else if (focused) 1.02f else 1f,
+        label = "smartSubtitleScale",
+    )
+    val background by animateColorAsState(
+        targetValue = if (focused) Amber else Graphite.copy(alpha = 0.75f),
+        label = "smartSubtitleBackground",
+    )
+    val primary = if (focused) Obsidian else Snow
+    val secondary = if (focused) Obsidian.copy(alpha = 0.78f) else Silver
+    val humanRelease = humanReadableSubtitleName(candidate.releaseName)
+        ?: humanReadableSubtitleName(candidate.displayLabel)
+        ?: humanReadableSubtitleName(
+            candidate.directUrl?.substringBefore('?')?.substringAfterLast('/'),
+        )
+    val sourceSummary = listOfNotNull(
+        displaySubtitleSourceType(candidate.sourceType),
+        candidate.resolutionHeight?.let { "${it}p" },
+        displaySubtitleCodec(candidate.videoCodec),
+        candidate.releaseGroup,
+    ).distinct().joinToString(" · ").ifBlank { null }
+    val reputation = buildList {
+        candidate.ratings?.let { rating ->
+            add(buildString {
+                append("★ ${String.format("%.1f", rating)}")
+                candidate.voteCount?.let { append(" ($it)") }
+            })
+        }
+        candidate.downloadCount?.let { add("${compactCount(it)} downloads") }
+        if (candidate.fromTrusted == true) add("Trusted")
+        if (candidate.hearingImpaired == true) add("SDH")
+        if (candidate.forced == true) add("Forced")
+        if (candidate.aiTranslated == true) add("AI translated")
+        if (candidate.machineTranslated == true) add("Machine translated")
+    }
+
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .scale(scale)
+            .onFocusChanged {
+                focused = it.isFocused
+                if (it.isFocused) onFocused()
+            }
+            .onPreviewKeyEvent { event ->
+                if (event.type != KeyEventType.KeyDown) {
+                    false
+                } else when (event.key) {
+                    Key.DirectionLeft -> { onNavigate(SubtitlePickerDirection.LEFT); true }
+                    Key.DirectionRight -> { onNavigate(SubtitlePickerDirection.RIGHT); true }
+                    Key.DirectionUp -> { onNavigate(SubtitlePickerDirection.UP); true }
+                    Key.DirectionDown -> { onNavigate(SubtitlePickerDirection.DOWN); true }
+                    else -> if (isConfirmKey(event.key)) {
+                        if (enabled) onClick()
+                        true
+                    } else {
+                        false
+                    }
+                }
+            }
+            .focusable()
+            .semantics(mergeDescendants = true) {
+                role = Role.Button
+                if (enabled) onClick(action = { onClick(); true }) else disabled()
+            }
+            .clip(RoundedCornerShape(10.dp))
+            .border(
+                width = if (focused) 2.dp else 1.dp,
+                color = if (focused) Snow else Color.Transparent,
+                shape = RoundedCornerShape(10.dp),
+            )
+            .background(background)
+            .padding(horizontal = 14.dp, vertical = 7.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(9.dp)) {
+            Text(
+                "${candidate.flagEmoji}  ${candidate.languageName}",
+                style = MaterialTheme.typography.titleSmall,
+                color = primary,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Text(
+                localizedUiText(candidate.matchQuality.displayLabel),
+                color = if (focused) Obsidian else Amber,
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.Bold,
+            )
+            if (!enabled) Text(localizedUiText("NOT SELECTABLE"), color = secondary, style = MaterialTheme.typography.labelSmall)
+        }
+        Text(
+            candidate.matchExplanation,
+            color = secondary,
+            style = MaterialTheme.typography.bodySmall,
+            maxLines = 1,
+            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+        )
+        (humanRelease ?: sourceSummary)?.let { releaseOrSource ->
+            Text(
+                releaseOrSource,
+                color = secondary,
+                style = MaterialTheme.typography.labelSmall,
+                maxLines = 1,
+                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+            )
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            if (humanRelease != null && sourceSummary != null) {
+                Text(sourceSummary, color = secondary, style = MaterialTheme.typography.labelSmall)
+            }
+            reputation.forEach { Text(it, color = secondary, style = MaterialTheme.typography.labelSmall) }
+            candidate.fps?.let { Text("$it FPS", color = secondary, style = MaterialTheme.typography.labelSmall) }
+            candidate.subtitleFormat?.let { Text(it.uppercase(), color = secondary, style = MaterialTheme.typography.labelSmall) }
+            Text(candidate.provider, color = secondary, style = MaterialTheme.typography.labelSmall)
+        }
+    }
+}
+
+@Composable
+private fun LegacyTvSubtitleSearchOverlay(
+    state: SubtitleFetchState,
+    onSelect: (SubtitleCandidate) -> Unit,
+    onLoadMore: () -> Unit,
+    onDismiss: () -> Unit,
+    preferredLanguage: String? = null,
 ) {
     BackHandler(onBack = onDismiss)
     val firstRowRequester = remember { FocusRequester() }
+    val loadMoreRequester = remember { FocusRequester() }
+    val strongFilterRequester = remember { FocusRequester() }
+    val firstLanguageRequester = remember { FocusRequester() }
     var selectedLanguage by remember { mutableStateOf<String?>(null) }
+    var strongOnly by remember { mutableStateOf(false) }
+    var trustedOnly by remember { mutableStateOf(false) }
+    var hearingImpairedOnly by remember { mutableStateOf(false) }
+    var forcedOnly by remember { mutableStateOf(false) }
+    var excludeAutomated by remember { mutableStateOf(false) }
+    var minimumRating by remember { mutableStateOf<Double?>(null) }
+    var showPoorMatches by remember { mutableStateOf(true) }
+    var showRejected by remember { mutableStateOf(false) }
+    var sortMode by remember { mutableStateOf(SubtitleSortMode.SMART_MATCH) }
+    var focusedCandidate by remember { mutableStateOf<SubtitleCandidate?>(null) }
+    var focusedFilterKey by remember { mutableStateOf<String?>(null) }
+    val releaseFocusKey = (state as? SubtitleFetchState.Results)?.matchingRelease ?: state::class.simpleName
+    var initialSortFocusSeen by remember(releaseFocusKey) { mutableStateOf(false) }
 
-    LaunchedEffect(state) {
-        if (state is SubtitleFetchState.Results && state.subtitles.isNotEmpty()) {
+    LaunchedEffect(releaseFocusKey) {
+        if (state is SubtitleFetchState.Results) {
             selectedLanguage = null
-            delay(150)
-            runCatching { firstRowRequester.requestFocus() }
+            focusedCandidate = state.subtitles.firstOrNull()
+            // The result branch and its LazyRow may not be attached during the
+            // first composition frame (especially on slower Fire TV devices).
+            // Keep trying until the sort pill confirms that it received focus,
+            // then stop so a fast D-pad action cannot be stolen back.
+            initialSortFocusSeen = false
+            repeat(8) {
+                requestFocusSafely(firstRowRequester)
+                delay(50)
+                if (initialSortFocusSeen) return@LaunchedEffect
+            }
+        }
+    }
+
+    val loadMoreIsFocusable = (state as? SubtitleFetchState.Results)
+        ?.let { it.canLoadMore && !it.isLoadingMore }
+        ?: false
+    LaunchedEffect(loadMoreIsFocusable) {
+        if (!loadMoreIsFocusable && focusedFilterKey == "load-more") {
+            requestFocusWithRetry(strongFilterRequester)
         }
     }
 
@@ -1074,7 +1729,34 @@ fun TvSubtitleSearchOverlay(
         modifier = Modifier
             .fillMaxSize()
             .background(Obsidian.copy(alpha = 0.96f))
-            .onPreviewKeyEvent { false },
+            .onPreviewKeyEvent { event ->
+                if (event.type != KeyEventType.KeyDown) {
+                    false
+                } else when {
+                    focusedFilterKey == "sort" && event.key == Key.DirectionRight -> {
+                        requestFocusSafely(if (loadMoreIsFocusable) loadMoreRequester else strongFilterRequester)
+                        true
+                    }
+                    focusedFilterKey == "load-more" && event.key == Key.DirectionLeft -> {
+                        requestFocusSafely(firstRowRequester)
+                        true
+                    }
+                    focusedFilterKey == "load-more" && event.key == Key.DirectionRight -> {
+                        requestFocusSafely(strongFilterRequester)
+                        true
+                    }
+                    focusedFilterKey == "strong" && event.key == Key.DirectionLeft -> {
+                        requestFocusSafely(if (loadMoreIsFocusable) loadMoreRequester else firstRowRequester)
+                        true
+                    }
+                    focusedFilterKey == "load-more" && isConfirmKey(event.key) &&
+                        state is SubtitleFetchState.Results && state.canLoadMore && !state.isLoadingMore -> {
+                        onLoadMore()
+                        true
+                    }
+                    else -> false
+                }
+            },
         contentAlignment = Alignment.Center,
     ) {
         Column(
@@ -1094,7 +1776,7 @@ fun TvSubtitleSearchOverlay(
                     fontWeight = FontWeight.Bold,
                 )
                 Text(
-                    text = "OpenSubtitles.com",
+                    text = localizedUiText("Smart Match · OpenSubtitles + Addons"),
                     style = MaterialTheme.typography.bodySmall,
                     color = Silver,
                 )
@@ -1106,14 +1788,14 @@ fun TvSubtitleSearchOverlay(
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
                             CircularProgressIndicator(color = Amber, modifier = Modifier.size(48.dp))
                             Spacer(Modifier.height(16.dp))
-                            Text("Searching for subtitles…", color = Silver, style = MaterialTheme.typography.bodyLarge)
+                            Text(localizedUiText("Searching for subtitles…"), color = Silver, style = MaterialTheme.typography.bodyLarge)
                         }
                     }
                 }
                 SubtitleFetchState.NoKey -> {
                     Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
                         Text(
-                            "No subtitle source available.\n\nEither install a subtitle addon in Settings → Addons,\nor add an OpenSubtitles.com API key in Settings → Advanced.",
+                            localizedUiText("No subtitle source available.\n\nEither install a subtitle addon in Settings → Addons,\nor add an OpenSubtitles.com API key in Settings → Advanced."),
                             color = Silver,
                             style = MaterialTheme.typography.bodyLarge,
                             textAlign = androidx.compose.ui.text.style.TextAlign.Center,
@@ -1123,7 +1805,7 @@ fun TvSubtitleSearchOverlay(
                 SubtitleFetchState.Error -> {
                     Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
                         Text(
-                            "Subtitle search failed.\nCheck your internet connection and OpenSubtitles API key in Settings.",
+                            localizedUiText("Subtitle search failed.\nCheck your connection, subtitle addons, and OpenSubtitles key."),
                             color = Silver,
                             style = MaterialTheme.typography.bodyLarge,
                             textAlign = androidx.compose.ui.text.style.TextAlign.Center,
@@ -1133,7 +1815,7 @@ fun TvSubtitleSearchOverlay(
                 SubtitleFetchState.Empty -> {
                     Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
                         Text(
-                            "No subtitles found for this title on OpenSubtitles.com.",
+                            localizedUiText("No subtitles found for this title from the configured providers."),
                             color = Silver,
                             style = MaterialTheme.typography.bodyLarge,
                             textAlign = androidx.compose.ui.text.style.TextAlign.Center,
@@ -1146,31 +1828,203 @@ fun TvSubtitleSearchOverlay(
                             .map { it.languageCode to "${it.flagEmoji} ${it.languageName}" }
                             .distinctBy { it.first }
                     }
-                    val filtered = remember(state.subtitles, selectedLanguage) {
-                        if (selectedLanguage == null) state.subtitles
-                        else state.subtitles.filter { it.languageCode == selectedLanguage }
+                    val filtered = remember(
+                        state.subtitles,
+                        selectedLanguage,
+                        strongOnly,
+                        trustedOnly,
+                        hearingImpairedOnly,
+                        forcedOnly,
+                        excludeAutomated,
+                        minimumRating,
+                        showPoorMatches,
+                        showRejected,
+                        sortMode,
+                    ) {
+                        val accepted = state.subtitles.filter { subtitle ->
+                            (selectedLanguage == null || subtitle.languageCode == selectedLanguage) &&
+                                (!strongOnly || subtitle.matchTier.priority <= SubtitleMatchTier.STRONG_RELEASE_MATCH.priority) &&
+                                (!trustedOnly || subtitle.fromTrusted == true) &&
+                                (!hearingImpairedOnly || subtitle.hearingImpaired == true) &&
+                                (!forcedOnly || subtitle.forced == true) &&
+                                (!excludeAutomated || (subtitle.aiTranslated != true && subtitle.machineTranslated != true)) &&
+                                (minimumRating == null || (subtitle.ratings ?: -1.0) >= minimumRating!!) &&
+                                (showPoorMatches || subtitle.matchTier != SubtitleMatchTier.POOR_MATCH) &&
+                                (showRejected || subtitle.matchTier != SubtitleMatchTier.REJECTED)
+                        }
+                        when (sortMode) {
+                            SubtitleSortMode.SMART_MATCH -> accepted
+                            SubtitleSortMode.RATING -> accepted.sortedWith(
+                                compareByDescending<SubtitleCandidate> { it.qualityScore }.thenBy { it.matchTier.priority },
+                            )
+                            SubtitleSortMode.DOWNLOADS -> accepted.sortedWith(
+                                compareByDescending<SubtitleCandidate> { it.downloadCount ?: -1 }.thenBy { it.matchTier.priority },
+                            )
+                            SubtitleSortMode.NEWEST -> accepted.sortedWith(
+                                compareByDescending<SubtitleCandidate> { it.uploadDate.orEmpty() }.thenBy { it.matchTier.priority },
+                            )
+                        }
+                    }
+
+                    Text(
+                        text = localizedUiText("MATCHING AGAINST"),
+                        color = Amber,
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Bold,
+                    )
+                    Text(
+                        text = state.matchingRelease,
+                        color = Snow,
+                        style = MaterialTheme.typography.bodyMedium,
+                        maxLines = 1,
+                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                    )
+                    Text(
+                        text = localizedUiText(if (state.movieHashAvailable) "Exact-file hash available" else "Release-name matching (file hash unavailable)"),
+                        color = Silver,
+                        style = MaterialTheme.typography.labelSmall,
+                        modifier = Modifier.padding(bottom = 3.dp),
+                    )
+                    Text(
+                        text = state.providerStatus,
+                        color = Silver,
+                        style = MaterialTheme.typography.labelSmall,
+                        maxLines = 1,
+                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                        modifier = Modifier.padding(bottom = 3.dp),
+                    )
+                    if (!state.hasStrongMatch) {
+                        Text(
+                            text = localizedUiText("No strong release match found. Showing best available subtitles."),
+                            color = AmberLight,
+                            style = MaterialTheme.typography.labelMedium,
+                            modifier = Modifier.padding(bottom = 3.dp),
+                        )
+                    }
+
+                    val moveToLanguageRow = if (languages.size > 1) {
+                        Modifier.focusProperties { down = firstLanguageRequester }
+                    } else {
+                        Modifier
+                    }
+
+                    LazyRow(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = 3.dp)
+                            .focusGroup(),
+                        state = rememberLazyListState(),
+                    ) {
+                        item(key = "sort") {
+                            SubtitleFilterPill(
+                                label = localizedUiText(when (sortMode) {
+                                    SubtitleSortMode.SMART_MATCH -> "Smart Match"
+                                    SubtitleSortMode.RATING -> "Rating"
+                                    SubtitleSortMode.DOWNLOADS -> "Downloads"
+                                    SubtitleSortMode.NEWEST -> "Newest"
+                                }),
+                                isSelected = true,
+                                modifier = Modifier
+                                    .focusRequester(firstRowRequester)
+                                    .focusProperties {
+                                        right = if (loadMoreIsFocusable) loadMoreRequester else strongFilterRequester
+                                    }
+                                    .then(moveToLanguageRow),
+                                onFocused = {
+                                    focusedFilterKey = "sort"
+                                    initialSortFocusSeen = true
+                                },
+                                onRight = {
+                                    requestFocusSafely(if (loadMoreIsFocusable) loadMoreRequester else strongFilterRequester)
+                                },
+                                onClick = {
+                                    sortMode = SubtitleSortMode.entries[(sortMode.ordinal + 1) % SubtitleSortMode.entries.size]
+                                },
+                            )
+                        }
+                        item(key = "load-more") {
+                            SubtitleFilterPill(
+                                label = localizedUiText(when {
+                                    state.isLoadingMore -> "Searching more…"
+                                    state.canLoadMore -> "Search more"
+                                    else -> "All available pages loaded"
+                                }),
+                                isSelected = false,
+                                modifier = Modifier
+                                    .focusRequester(loadMoreRequester)
+                                    .focusProperties {
+                                        left = firstRowRequester
+                                        right = strongFilterRequester
+                                    }
+                                    .then(moveToLanguageRow),
+                                enabled = state.canLoadMore && !state.isLoadingMore,
+                                onFocused = { focusedFilterKey = "load-more" },
+                                onLeft = { requestFocusSafely(firstRowRequester) },
+                                onRight = { requestFocusSafely(strongFilterRequester) },
+                                onClick = onLoadMore,
+                            )
+                        }
+                        item(key = "strong") {
+                            SubtitleFilterPill(
+                                localizedUiText("Strong only"),
+                                strongOnly,
+                                modifier = Modifier
+                                    .focusRequester(strongFilterRequester)
+                                    .focusProperties {
+                                        left = if (loadMoreIsFocusable) loadMoreRequester else firstRowRequester
+                                    }
+                                    .then(moveToLanguageRow),
+                                onFocused = { focusedFilterKey = "strong" },
+                                onLeft = {
+                                    requestFocusSafely(if (loadMoreIsFocusable) loadMoreRequester else firstRowRequester)
+                                },
+                                onClick = { strongOnly = !strongOnly },
+                            )
+                        }
+                        item(key = "trusted") { SubtitleFilterPill(localizedUiText("Trusted"), trustedOnly, modifier = moveToLanguageRow, onClick = { trustedOnly = !trustedOnly }) }
+                        item(key = "automated") { SubtitleFilterPill(localizedUiText("Exclude AI/MT"), excludeAutomated, modifier = moveToLanguageRow, onClick = { excludeAutomated = !excludeAutomated }) }
+                        item(key = "rating") {
+                            SubtitleFilterPill(
+                                localizedUiText(minimumRating?.let { "Rating ${it.toInt()}+" } ?: "Any rating"),
+                                minimumRating != null,
+                                modifier = moveToLanguageRow,
+                                onClick = { minimumRating = when (minimumRating) { null -> 8.0; 8.0 -> 9.0; else -> null } },
+                            )
+                        }
+                        item(key = "sdh") { SubtitleFilterPill(localizedUiText("SDH"), hearingImpairedOnly, modifier = moveToLanguageRow, onClick = { hearingImpairedOnly = !hearingImpairedOnly }) }
+                        item(key = "forced") { SubtitleFilterPill(localizedUiText("Forced"), forcedOnly, modifier = moveToLanguageRow, onClick = { forcedOnly = !forcedOnly }) }
+                        item(key = "poor") { SubtitleFilterPill(localizedUiText("Include poor"), showPoorMatches, modifier = moveToLanguageRow, onClick = { showPoorMatches = !showPoorMatches }) }
+                        item(key = "rejected") { SubtitleFilterPill(localizedUiText("Show rejected"), showRejected, modifier = moveToLanguageRow, onClick = { showRejected = !showRejected }) }
                     }
 
                     if (languages.size > 1) {
                         LazyRow(
                             horizontalArrangement = Arrangement.spacedBy(6.dp),
-                            modifier = Modifier.fillMaxWidth().padding(bottom = 4.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(bottom = 3.dp)
+                                .focusGroup(),
                             state = rememberLazyListState(),
                         ) {
                             item(key = "all") {
                                 SubtitleFilterPill(
-                                    label = "All",
-                                    isSelected = selectedLanguage == null,
-                                    modifier = if (selectedLanguage == null) Modifier.focusRequester(firstRowRequester) else Modifier,
+                                    localizedUiText("All languages"),
+                                    selectedLanguage == null,
+                                    modifier = Modifier
+                                        .focusRequester(firstLanguageRequester)
+                                        .focusProperties { up = firstRowRequester },
                                     onClick = { selectedLanguage = null },
                                 )
                             }
                             items(languages, key = { it.first }) { (code, label) ->
                                 SubtitleFilterPill(
-                                    label = label,
-                                    isSelected = selectedLanguage == code,
-                                    modifier = if (selectedLanguage == code) Modifier.focusRequester(firstRowRequester) else Modifier,
-                                    onClick = { selectedLanguage = if (selectedLanguage == code) null else code },
+                                    label,
+                                    selectedLanguage == code,
+                                    modifier = Modifier.focusProperties { up = firstRowRequester },
+                                    onClick = {
+                                        selectedLanguage = if (selectedLanguage == code) null else code
+                                    },
                                 )
                             }
                         }
@@ -1180,14 +2034,49 @@ fun TvSubtitleSearchOverlay(
                         modifier = Modifier.fillMaxWidth().weight(1f),
                         verticalArrangement = Arrangement.spacedBy(2.dp),
                     ) {
-                        itemsIndexed(filtered, key = { idx, sub -> "$idx-${sub.osFileId}-${sub.directUrl}" }) { idx, sub ->
-                            SubtitleResultRow(
-                                index = idx + 1,
-                                candidate = sub,
-                                modifier = if (idx == 0) Modifier.focusRequester(firstRowRequester) else Modifier,
-                                onClick = { onSelect(sub) },
+                        val best = filtered.filter { it.matchTier.priority <= SubtitleMatchTier.STRONG_RELEASE_MATCH.priority }
+                        val more = filtered.filter { it.matchTier in setOf(SubtitleMatchTier.COMPATIBLE_RELEASE, SubtitleMatchTier.GENERIC_MATCH) }
+                        val poor = filtered.filter { it.matchTier == SubtitleMatchTier.POOR_MATCH }
+                        val rejected = filtered.filter { it.matchTier == SubtitleMatchTier.REJECTED }
+                        fun addSection(label: String, values: List<SubtitleCandidate>) {
+                            if (values.isEmpty()) return
+                            item(key = "header-$label") {
+                                Text(localizedUiText(label), color = Amber, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+                            }
+                            itemsIndexed(values, key = { idx, sub -> "$label-$idx-${sub.osFileId}-${sub.directUrl}" }) { idx, sub ->
+                                SubtitleResultRow(
+                                    index = idx + 1,
+                                    candidate = sub,
+                                    onFocused = { focusedCandidate = sub },
+                                    onClick = { onSelect(sub) },
+                                    enabled = sub.matchTier != SubtitleMatchTier.REJECTED,
+                                )
+                            }
+                        }
+                        addSection("BEST MATCHES", best)
+                        addSection("MORE RESULTS", more)
+                        addSection("POOR RELEASE MATCHES", poor)
+                        addSection("REJECTED — WRONG TITLE OR EPISODE", rejected)
+                        if (filtered.isEmpty()) item {
+                            Text(
+                                localizedUiText(if (state.isLoadingMore) "Searching additional OpenSubtitles pages…"
+                                else "No subtitles match the active filters. Choose Search more or relax a filter."),
+                                color = Silver,
                             )
                         }
+                    }
+                    focusedCandidate?.let { candidate ->
+                        Text(
+                            text = localizedUiText(buildString {
+                                append(if (candidate.rankingReasons.any { it.startsWith("-") }) "Match evidence: " else "Why Torve ranked this: ")
+                                append(candidate.rankingReasons.take(4).joinToString("  ·  "))
+                            }),
+                            color = Silver,
+                            style = MaterialTheme.typography.labelSmall,
+                            maxLines = 2,
+                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                            modifier = Modifier.padding(top = 3.dp),
+                        )
                     }
                 }
                 SubtitleFetchState.Idle -> { /* nothing shown */ }
@@ -1394,32 +2283,75 @@ private fun SubtitleFilterPill(
     label: String,
     isSelected: Boolean,
     modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    onLeft: (() -> Unit)? = null,
+    onRight: (() -> Unit)? = null,
+    onUp: (() -> Unit)? = null,
+    onDown: (() -> Unit)? = null,
+    onFocused: (() -> Unit)? = null,
     onClick: () -> Unit,
 ) {
     var isFocused by remember { mutableStateOf(false) }
     val bg by animateColorAsState(
-        targetValue = if (isFocused || isSelected) Amber else Graphite,
+        targetValue = when {
+            !enabled -> Graphite.copy(alpha = 0.45f)
+            isFocused -> Sapphire
+            isSelected -> Amber
+            else -> Graphite
+        },
         label = "pillBg",
     )
+    val shape = RoundedCornerShape(50)
     Box(
         modifier = modifier
-            .onFocusChanged { isFocused = it.isFocused }
-            .focusable()
-            .onPreviewKeyEvent { ev ->
-                if (ev.type == KeyEventType.KeyDown && isConfirmKey(ev.key)) { onClick(); true } else false
+            .onFocusChanged {
+                isFocused = it.isFocused
+                if (it.isFocused) onFocused?.invoke()
             }
-            .clickable(
-                interactionSource = remember { MutableInteractionSource() },
-                indication = null,
-                onClick = onClick,
+            .onPreviewKeyEvent { ev ->
+                if (!enabled || ev.type != KeyEventType.KeyDown) {
+                    false
+                } else when {
+                    isConfirmKey(ev.key) -> { onClick(); true }
+                    ev.key == Key.DirectionLeft && onLeft != null -> { onLeft(); true }
+                    ev.key == Key.DirectionRight && onRight != null -> { onRight(); true }
+                    ev.key == Key.DirectionUp && onUp != null -> { onUp(); true }
+                    ev.key == Key.DirectionDown && onDown != null -> { onDown(); true }
+                    else -> false
+                }
+            }
+            // Keep one explicit focus target. Relying on clickable's implicit
+            // focus handling is not reliable in directional focus search on Fire TV.
+            .focusable(enabled = enabled)
+            .semantics(mergeDescendants = true) {
+                role = Role.Button
+                selected = isSelected
+                if (enabled) {
+                    onClick(action = { onClick(); true })
+                } else {
+                    disabled()
+                }
+            }
+            .clip(shape)
+            .border(
+                width = if (isFocused) 2.dp else 1.dp,
+                color = when {
+                    isFocused -> Snow
+                    isSelected -> AmberLight
+                    else -> Color.Transparent
+                },
+                shape = shape,
             )
-            .clip(RoundedCornerShape(50))
             .background(bg)
             .padding(horizontal = 14.dp, vertical = 5.dp),
     ) {
         Text(
-            text = label,
-            color = if (isFocused || isSelected) Obsidian else Silver,
+            text = if (isSelected) "✓ $label" else label,
+            color = when {
+                !enabled -> Silver.copy(alpha = 0.45f)
+                isFocused || isSelected -> Obsidian
+                else -> Silver
+            },
             style = MaterialTheme.typography.labelLarge,
             fontWeight = FontWeight.Bold,
         )
@@ -1431,7 +2363,9 @@ private fun SubtitleResultRow(
     index: Int,
     candidate: SubtitleCandidate,
     modifier: Modifier = Modifier,
+    onFocused: () -> Unit,
     onClick: () -> Unit,
+    enabled: Boolean = true,
 ) {
     val reduceMotion = rememberTvReduceMotionPreference()
     var focused by remember { mutableStateOf(false) }
@@ -1442,18 +2376,6 @@ private fun SubtitleResultRow(
     )
     val textColor = if (focused) Obsidian else Snow
     val subColor = if (focused) Obsidian.copy(alpha = 0.75f) else Silver
-
-    // Star rating: API returns 0-10; display as filled stars out of 5
-    val stars = if (candidate.ratings > 0f) {
-        val full = (candidate.ratings / 2f).coerceIn(0f, 5f)
-        buildString {
-            val fullStars = full.toInt()
-            val half = full - fullStars >= 0.5f
-            repeat(fullStars) { append('★') }
-            if (half && fullStars < 5) append('½')
-            repeat((5 - fullStars - (if (half) 1 else 0)).coerceAtLeast(0)) { append('☆') }
-        }
-    } else null
 
     // Bottom-line label: prefer the subtitle's own label if it's meaningful,
     // then a filename from the URL, then "Subtitle N" so rows are always distinct.
@@ -1471,12 +2393,19 @@ private fun SubtitleResultRow(
         modifier = modifier
             .fillMaxWidth()
             .scale(scale)
-            .onFocusChanged { focused = it.isFocused }
+            .onFocusChanged {
+                focused = it.isFocused
+                if (it.isFocused) onFocused()
+            }
             .focusable()
             .onPreviewKeyEvent { ev ->
-                if (ev.type == KeyEventType.KeyDown && isConfirmKey(ev.key)) { onClick(); true } else false
+                if (ev.type == KeyEventType.KeyDown && isConfirmKey(ev.key)) {
+                    if (enabled) onClick()
+                    true
+                } else false
             }
             .clickable(
+                enabled = enabled,
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null,
                 onClick = onClick,
@@ -1485,7 +2414,6 @@ private fun SubtitleResultRow(
             .background(bg)
             .padding(horizontal = 14.dp, vertical = 8.dp),
     ) {
-        // Top line: flag + language name + badges
         Row(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -1496,15 +2424,39 @@ private fun SubtitleResultRow(
                 color = textColor,
                 fontWeight = FontWeight.SemiBold,
             )
-            if (candidate.fromTrusted) {
-                Text("✓", color = if (focused) Obsidian else Amber, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+            Text(
+                text = localizedUiText(candidate.matchTier.displayLabel),
+                color = if (focused) Obsidian else Amber,
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.Bold,
+            )
+            Text(
+                text = localizedUiText("Match ${candidate.matchScore}/100"),
+                color = subColor,
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.SemiBold,
+            )
+            if (!enabled) {
+                Text(
+                    text = localizedUiText("NOT SELECTABLE"),
+                    color = if (focused) Obsidian else Silver,
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.Bold,
+                )
             }
-            if (candidate.hearingImpaired) {
-                Text("SDH", color = subColor, style = MaterialTheme.typography.labelSmall)
+            if (candidate.fromTrusted == true) {
+                Text(localizedUiText("✓ Trusted"), color = if (focused) Obsidian else Amber, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
             }
-            if (candidate.aiTranslated) {
-                Text("AI", color = subColor, style = MaterialTheme.typography.labelSmall)
+            if (candidate.hearingImpaired == true) {
+                Text(localizedUiText("SDH"), color = subColor, style = MaterialTheme.typography.labelSmall)
             }
+            if (candidate.forced == true) {
+                Text(localizedUiText("Forced"), color = subColor, style = MaterialTheme.typography.labelSmall)
+            }
+            if (candidate.aiTranslated == true) {
+                Text(localizedUiText("AI"), color = subColor, style = MaterialTheme.typography.labelSmall)
+            }
+            if (candidate.machineTranslated == true) Text(localizedUiText("MT"), color = subColor, style = MaterialTheme.typography.labelSmall)
         }
         Row(
             verticalAlignment = Alignment.CenterVertically,
@@ -1519,22 +2471,49 @@ private fun SubtitleResultRow(
                 maxLines = 1,
                 overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
             )
-            if (stars != null) {
+            candidate.ratings?.let { rating ->
                 Text(
-                    text = stars,
+                    text = localizedUiText(buildString {
+                        append(String.format("%.1f ★", rating))
+                        candidate.voteCount?.let { append(" ($it votes)") }
+                    }),
                     style = MaterialTheme.typography.labelSmall,
                     color = if (focused) Obsidian else Amber,
                 )
             }
-            if (candidate.downloadCount > 0) {
+            candidate.downloadCount?.let { downloads ->
                 Text(
-                    text = "↓${candidate.downloadCount}",
+                    text = localizedUiText("${compactCount(downloads)} downloads"),
                     style = MaterialTheme.typography.labelSmall,
                     color = subColor,
                 )
             }
         }
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier.padding(top = 2.dp),
+        ) {
+            candidate.releaseName?.takeIf(String::isNotBlank)?.let { release ->
+                Text(
+                    text = release,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = subColor,
+                    maxLines = 1,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
+                )
+            }
+            candidate.fps?.let { Text("$it FPS", color = subColor, style = MaterialTheme.typography.labelSmall) }
+            Text(candidate.provider, color = subColor, style = MaterialTheme.typography.labelSmall)
+        }
     }
+}
+
+private fun compactCount(value: Int): String = when {
+    value >= 1_000_000 -> String.format("%.1fM", value / 1_000_000.0)
+    value >= 1_000 -> String.format("%.1fK", value / 1_000.0)
+    else -> value.toString()
 }
 
 private suspend fun requestFocusWithRetry(requester: FocusRequester?) {

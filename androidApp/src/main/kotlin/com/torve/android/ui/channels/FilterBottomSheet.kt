@@ -1,6 +1,10 @@
 package com.torve.android.ui.channels
 
+import com.torve.android.ui.community.parityLabel as localizedUiText
+
 import androidx.compose.foundation.background
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -16,7 +20,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
+import com.torve.android.ui.system.TorveModalBottomSheet as ModalBottomSheet
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
@@ -62,6 +66,7 @@ fun FilterBottomSheet(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
                 .padding(horizontal = 24.dp, vertical = 16.dp),
         ) {
             Text(
@@ -82,13 +87,13 @@ fun FilterBottomSheet(
                         onClick = { onFilterSelected(filter) },
                         label = {
                             Text(
-                                when (filter) {
+                                localizedUiText(when (filter) {
                                     ChannelsFilterType.ALL -> "All"
                                     ChannelsFilterType.HD -> "HD"
                                     ChannelsFilterType.FHD -> "FHD"
                                     ChannelsFilterType.UHD -> "4K / UHD"
                                     ChannelsFilterType.FAVORITES -> "Favorites"
-                                },
+                                }),
                                 style = MaterialTheme.typography.labelLarge,
                             )
                         },
@@ -129,12 +134,12 @@ fun FilterBottomSheet(
                         onClick = { onSortSelected(sort) },
                         label = {
                             Text(
-                                when (sort) {
+                                localizedUiText(when (sort) {
                                     ChannelsSortType.DEFAULT -> "Default"
                                     ChannelsSortType.NAME_AZ -> "Name A-Z"
                                     ChannelsSortType.NAME_ZA -> "Name Z-A"
                                     ChannelsSortType.RECENTLY_ADDED -> "Recently Added"
-                                },
+                                }),
                                 style = MaterialTheme.typography.labelLarge,
                             )
                         },

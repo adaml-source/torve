@@ -1,0 +1,18 @@
+-- Split legacy outboxes inside SQLite, before any application observer can
+-- select the oversized preference row into an Android CursorWindow.
+INSERT OR REPLACE INTO preference (user_id, key, value)
+WITH RECURSIVE ledger_chunk_starts(user_id, chunk_start, total) AS (
+    SELECT user_id, 0, length(value) FROM preference
+    WHERE key = 'household_sync_ledger_v1'
+    UNION ALL
+    SELECT user_id, chunk_start + 16384, total FROM ledger_chunk_starts
+    WHERE chunk_start + 16384 < total
+)
+SELECT source.user_id,
+    'household_sync_ledger_v2:' || printf('%08d', ledger_chunk_starts.chunk_start / 16384),
+    substr(source.value, ledger_chunk_starts.chunk_start + 1, 16384)
+FROM ledger_chunk_starts JOIN preference AS source
+    ON source.user_id = ledger_chunk_starts.user_id
+WHERE source.key = 'household_sync_ledger_v1';
+
+DELETE FROM preference WHERE key = 'household_sync_ledger_v1';

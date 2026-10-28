@@ -1,0 +1,62 @@
+[
+  {
+    "file": "charge-poster.jpg",
+    "source": "https://studio.blender.org/files/public/thumbnail/34/34b00ffed48256e3a873c31c574e8f08/34b00ffed48256e3a873c31c574e8f08.jpg",
+    "bytes": 218095,
+    "sha256": "d77d284fc4b2dd3f1cd04137479c0c0e7db611a10ecd56bc700d5dfa3e91e81a"
+  },
+  {
+    "file": "spring-poster.jpg",
+    "source": "https://studio.blender.org/files/public/thumbnail/b5/b5b96c3ca39745d4bc46b62e72c51bf4/b5b96c3ca39745d4bc46b62e72c51bf4.jpg",
+    "bytes": 278463,
+    "sha256": "17d4ea5dde1ad5e2ff5fe58d5cc0547bcd117d1ecff52261d0482c9686905994"
+  },
+  {
+    "file": "sprite-fright-poster.jpg",
+    "source": "https://studio.blender.org/files/public/thumbnail/59/5927dc487d457a39f4439d0423675c7c/5927dc487d457a39f4439d0423675c7c.jpg",
+    "bytes": 251495,
+    "sha256": "b0bb418015b6433ecef0cc5d016cc508d1f5a6a5a85bce741c7934ce5d8b1c3b"
+  },
+  {
+    "file": "wing-it-poster.png",
+    "source": "https://studio.blender.org/files/public/thumbnail/e8/e8d9792830d14f07d2285767ccee7e41/e8d9792830d14f07d2285767ccee7e41.png",
+    "bytes": 2227268,
+    "sha256": "c89b3a6b461ee10d59ca3a910b17941a32ad6fa0759fd6b5856e01b4fd69e9e6"
+  },
+  {
+    "file": "sintel-poster.jpg",
+    "source": "https://durian.blender.org/wp-content/uploads/2010/09/sintel_poster.jpg",
+    "bytes": 457811,
+    "sha256": "7bfeaaa9e69df11188d5520b002196ea127275c482880b84c5b875d5addcb67b"
+  },
+  {
+    "file": "tears-of-steel-poster.jpg",
+    "source": "https://mango.blender.org/wp-content/uploads/2012/09/tos-poster.jpg",
+    "bytes": 310965,
+    "sha256": "36026117a18090517738f88b1de67b1d0fc399902e239c6f0c8818d29d8e14ec"
+  },
+  {
+    "file": "charge-scene.png",
+    "source": "https://studio.blender.org/files/public/header/project/f6/76/f67601c6f69b2d7f65a5e5d97e73c4d7.png",
+    "bytes": 2606674,
+    "sha256": "9cc7ed8980295bd28fdad993fdde5e20f510bda237e92dc3bd2fdd12fb59b276"
+  },
+  {
+    "file": "spring-scene.png",
+    "source": "https://studio.blender.org/files/public/header/project/e5/0f/e50f13c31a485f3a05d4983f1b4ab7ee.png",
+    "bytes": 2020967,
+    "sha256": "4be70d1908a74b74c099ff5ff476ff359522427762b6e275fcac7bfb0b61a31f"
+  },
+  {
+    "file": "sprite-fright-scene.jpg",
+    "source": "https://studio.blender.org/files/public/header/project/ff/3d/ff3d8a8048e767cbc92d6489404924b2.jpg",
+    "bytes": 395316,
+    "sha256": "d4138acb0eb65c3c6dcb4d52f5b9d8a7d96d1928d3ea8d539470b25ca09f6db3"
+  },
+  {
+    "file": "tears-of-steel-scene.jpg",
+    "source": "https://mango.blender.org/wp-content/gallery/4k-renders/01_thom_celia_bridge.jpg",
+    "bytes": 215282,
+    "sha256": "7e70c2177da7f175992a38d369f220a9af0ab68fc9cca9ee35103786bfc2a3ac"
+  }
+]

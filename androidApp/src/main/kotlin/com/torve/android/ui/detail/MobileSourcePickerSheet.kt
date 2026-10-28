@@ -1,5 +1,7 @@
 package com.torve.android.ui.detail
 
+import com.torve.android.ui.community.parityLabel as localizedUiText
+
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -10,7 +12,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
+import com.torve.android.ui.system.TorveModalBottomSheet as ModalBottomSheet
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
@@ -47,7 +49,7 @@ fun MobileSourcePickerSheet(
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             Text(
-                text = "Choose source",
+                text = localizedUiText("Choose source"),
                 style = MaterialTheme.typography.titleLarge,
                 color = Snow,
                 fontWeight = FontWeight.Bold,
@@ -65,7 +67,7 @@ fun MobileSourcePickerSheet(
             if (!state.canAutoPlay) {
                 Spacer(Modifier.height(4.dp))
                 Text(
-                    text = "No source is ready right now. Add a download or configure a provider.",
+                    text = localizedUiText("No source is ready right now. Add a download or configure a provider."),
                     style = MaterialTheme.typography.bodySmall,
                     color = Torve.colors.textSecondary,
                 )
@@ -87,13 +89,13 @@ private fun MobileSourceRow(
         verticalArrangement = Arrangement.spacedBy(3.dp),
     ) {
         Text(
-            text = "${option.label} - ${option.tier.displayLabel()}",
+            text = "${option.label} - ${localizedUiText(option.tier.displayLabel())}",
             style = MaterialTheme.typography.titleSmall,
             color = if (option.tier == TvSourceTier.BEST) Amber else Snow,
             fontWeight = FontWeight.SemiBold,
         )
         Text(
-            text = option.hint,
+            text = localizedUiText(option.hint),
             style = MaterialTheme.typography.bodySmall,
             color = Torve.colors.textSecondary,
         )

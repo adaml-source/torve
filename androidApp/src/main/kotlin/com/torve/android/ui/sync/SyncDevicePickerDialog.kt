@@ -1,5 +1,7 @@
 package com.torve.android.ui.sync
 
+import com.torve.android.ui.community.parityLabel as localizedUiText
+
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -24,6 +26,7 @@ fun SyncDevicePickerDialog(
     devices: List<SyncDeviceDto>,
     onSelectDevice: (SyncDeviceDto) -> Unit,
     onDismiss: () -> Unit,
+    onManageDevices: (() -> Unit)? = null,
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -59,6 +62,11 @@ fun SyncDevicePickerDialog(
         confirmButton = {
             TextButton(onClick = onDismiss) {
                 Text(stringResource(R.string.common_close))
+            }
+        },
+        dismissButton = {
+            onManageDevices?.let { manage ->
+                TextButton(onClick = { onDismiss(); manage() }) { Text(localizedUiText("Devices & TV settings")) }
             }
         },
     )

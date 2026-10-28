@@ -35,9 +35,27 @@ sealed class StreamReadiness {
 data class StreamFetchResult(
     val streams: List<ParsedStream>,
     val filterFeedback: StreamRuntimeFilterFeedback = StreamRuntimeFilterFeedback(),
+    val providerStats: List<com.torve.domain.model.ProviderSourceStat> = emptyList(),
+    val sourceErrors: List<String> = emptyList(),
 )
 
 interface StreamRepository {
+    suspend fun hasConfiguredUsenetSources(): Boolean = false
+    /** Partial batches obey the same source, profile and runtime filters as the final result. */
+    suspend fun fetchStreamsProgressively(
+        type: MediaType,
+        imdbId: String,
+        contentId: String? = null,
+        title: String? = null,
+        season: Int? = null,
+        episode: Int? = null,
+        addons: List<InstalledAddon> = emptyList(),
+        debridAccounts: Map<DebridServiceType, String> = emptyMap(),
+        preferences: StreamPreferences = StreamPreferences(),
+        fetchPolicy: StreamFetchPolicy = StreamFetchPolicy.FULL,
+        onPartialResults: suspend (StreamFetchResult) -> Unit,
+    ): StreamFetchResult = fetchStreamsWithFeedback(type, imdbId, contentId, title, season, episode, addons, debridAccounts, preferences, fetchPolicy)
+
     /**
      * Fetch available streams from all configured addons for a given media item.
      * When [addons], [debridAccounts], or [preferences] are provided, the full
@@ -128,6 +146,14 @@ interface StreamRepository {
         val (provider, key) = providers.entries.firstOrNull()?.toPair() ?: (null to "")
         return resolveStream(stream, provider, key)
     }
+
+    /**
+     * Carry the selected title/source approval into a URL obtained by a trusted
+     * native provider recovery or Usenet resolver. Production implementations
+     * require a source fetched in the current profile; this never grants access
+     * based on a file name or an arbitrary URL alone.
+     */
+    suspend fun authorizePreparedStream(stream: ParsedStream, resolved: ResolvedStream): ResolvedStream = resolved
 
     suspend fun reportPlaybackOutcome(
         stream: ParsedStream,

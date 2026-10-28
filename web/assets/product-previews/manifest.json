@@ -1,0 +1,73 @@
+{
+  "created": "2026-10-12",
+  "type": "Recreated website previews, not native device captures",
+  "source": "tools/website/preview-screens.html, preview-screens.js, preview-screens.css",
+  "artwork_credits": "/credits.html",
+  "artwork_manifest": "../open-films/catalog.json",
+  "screens": [
+    {
+      "file": "phone-discover.jpg",
+      "dimensions": [
+        540,
+        1090
+      ],
+      "render_url": "/tools/website/preview-screens.html?device=phone&screen=discover"
+    },
+    {
+      "file": "phone-watchlist.jpg",
+      "dimensions": [
+        540,
+        1090
+      ],
+      "render_url": "/tools/website/preview-screens.html?device=phone&screen=watchlist"
+    },
+    {
+      "file": "phone-search.jpg",
+      "dimensions": [
+        540,
+        1090
+      ],
+      "render_url": "/tools/website/preview-screens.html?device=phone&screen=search"
+    },
+    {
+      "file": "phone-tv.jpg",
+      "dimensions": [
+        540,
+        1090
+      ],
+      "render_url": "/tools/website/preview-screens.html?device=phone&screen=tv"
+    },
+    {
+      "file": "tv-discover.jpg",
+      "dimensions": [
+        1440,
+        810
+      ],
+      "render_url": "/tools/website/preview-screens.html?device=tv&screen=discover"
+    },
+    {
+      "file": "tv-watchlist.jpg",
+      "dimensions": [
+        1440,
+        810
+      ],
+      "render_url": "/tools/website/preview-screens.html?device=tv&screen=watchlist"
+    },
+    {
+      "file": "tv-search.jpg",
+      "dimensions": [
+        1440,
+        810
+      ],
+      "render_url": "/tools/website/preview-screens.html?device=tv&screen=search"
+    },
+    {
+      "file": "tv-tv.jpg",
+      "dimensions": [
+        1440,
+        810
+      ],
+      "render_url": "/tools/website/preview-screens.html?device=tv&screen=tv"
+    }
+  ]
+}

@@ -14,6 +14,7 @@ enum class AccessTier {
 
 enum class PremiumFeatureAccess {
     FREE,
+    @Deprecated("Paid feature gates were removed; retained for source compatibility.")
     PREMIUM_LOCKED_VISIBLE,
 }
 
@@ -140,62 +141,62 @@ object PremiumAccess {
         PremiumFeature.TRAILER_PLAYBACK to PremiumFeaturePolicy(PremiumFeatureAccess.FREE, R.string.premium_trailer_playback),
 
         // Premium account / personalization
-        PremiumFeature.ACCOUNT_SETUP to PremiumFeaturePolicy(PremiumFeatureAccess.PREMIUM_LOCKED_VISIBLE, R.string.premium_account_setup),
-        PremiumFeature.ACCOUNT_SIGN_IN_OUT_FOR_CLOUD to PremiumFeaturePolicy(PremiumFeatureAccess.PREMIUM_LOCKED_VISIBLE, R.string.premium_cloud_sign_in),
-        PremiumFeature.SYNC_WATCH_HISTORY to PremiumFeaturePolicy(PremiumFeatureAccess.PREMIUM_LOCKED_VISIBLE, R.string.premium_synced_history),
-        PremiumFeature.SYNC_WATCHLIST to PremiumFeaturePolicy(PremiumFeatureAccess.PREMIUM_LOCKED_VISIBLE, R.string.premium_synced_watchlist),
-        PremiumFeature.SYNC_FAVORITES to PremiumFeaturePolicy(PremiumFeatureAccess.PREMIUM_LOCKED_VISIBLE, R.string.premium_synced_favorites),
-        PremiumFeature.SYNC_CUSTOM_LAYOUTS to PremiumFeaturePolicy(PremiumFeatureAccess.PREMIUM_LOCKED_VISIBLE, R.string.premium_custom_layout_sync),
-        PremiumFeature.CROSS_DEVICE_SYNC to PremiumFeaturePolicy(PremiumFeatureAccess.PREMIUM_LOCKED_VISIBLE, R.string.premium_cross_device_sync),
-        PremiumFeature.CLOUD_BACKUP_RESTORE to PremiumFeaturePolicy(PremiumFeatureAccess.PREMIUM_LOCKED_VISIBLE, R.string.premium_cloud_backup),
+        PremiumFeature.ACCOUNT_SETUP to PremiumFeaturePolicy(PremiumFeatureAccess.FREE, R.string.premium_account_setup),
+        PremiumFeature.ACCOUNT_SIGN_IN_OUT_FOR_CLOUD to PremiumFeaturePolicy(PremiumFeatureAccess.FREE, R.string.premium_cloud_sign_in),
+        PremiumFeature.SYNC_WATCH_HISTORY to PremiumFeaturePolicy(PremiumFeatureAccess.FREE, R.string.premium_synced_history),
+        PremiumFeature.SYNC_WATCHLIST to PremiumFeaturePolicy(PremiumFeatureAccess.FREE, R.string.premium_synced_watchlist),
+        PremiumFeature.SYNC_FAVORITES to PremiumFeaturePolicy(PremiumFeatureAccess.FREE, R.string.premium_synced_favorites),
+        PremiumFeature.SYNC_CUSTOM_LAYOUTS to PremiumFeaturePolicy(PremiumFeatureAccess.FREE, R.string.premium_custom_layout_sync),
+        PremiumFeature.CROSS_DEVICE_SYNC to PremiumFeaturePolicy(PremiumFeatureAccess.FREE, R.string.premium_cross_device_sync),
+        PremiumFeature.CLOUD_BACKUP_RESTORE to PremiumFeaturePolicy(PremiumFeatureAccess.FREE, R.string.premium_cloud_backup),
 
         // Device / pairing — management is free for authenticated users;
         // creating new pairings and cross-device sync stay premium.
         PremiumFeature.PHONE_PAIRING to PremiumFeaturePolicy(PremiumFeatureAccess.FREE, R.string.premium_phone_pairing),
         PremiumFeature.DEVICE_LINKING to PremiumFeaturePolicy(PremiumFeatureAccess.FREE, R.string.premium_device_linking),
-        PremiumFeature.DEVICE_SYNC to PremiumFeaturePolicy(PremiumFeatureAccess.PREMIUM_LOCKED_VISIBLE, R.string.premium_device_sync),
-        PremiumFeature.TV_PHONE_CONTINUATION to PremiumFeaturePolicy(PremiumFeatureAccess.PREMIUM_LOCKED_VISIBLE, R.string.premium_tv_phone_continuation),
-        PremiumFeature.QR_PAIRING to PremiumFeaturePolicy(PremiumFeatureAccess.PREMIUM_LOCKED_VISIBLE, R.string.premium_qr_pairing),
+        PremiumFeature.DEVICE_SYNC to PremiumFeaturePolicy(PremiumFeatureAccess.FREE, R.string.premium_device_sync),
+        PremiumFeature.TV_PHONE_CONTINUATION to PremiumFeaturePolicy(PremiumFeatureAccess.FREE, R.string.premium_tv_phone_continuation),
+        PremiumFeature.QR_PAIRING to PremiumFeaturePolicy(PremiumFeatureAccess.FREE, R.string.premium_qr_pairing),
 
         // Premium library / persistence
         PremiumFeature.WATCHLIST_EDIT to PremiumFeaturePolicy(PremiumFeatureAccess.FREE, R.string.premium_watchlist_editing),
         PremiumFeature.FAVORITES_EDIT to PremiumFeaturePolicy(PremiumFeatureAccess.FREE, R.string.premium_favorites_editing),
-        PremiumFeature.WATCHED_STATUS_EDIT to PremiumFeaturePolicy(PremiumFeatureAccess.PREMIUM_LOCKED_VISIBLE, R.string.premium_watched_state),
-        PremiumFeature.TRAKT_LIST_MANAGER to PremiumFeaturePolicy(PremiumFeatureAccess.PREMIUM_LOCKED_VISIBLE, R.string.premium_trakt_lists),
-        PremiumFeature.FAVORITES_MANAGER to PremiumFeaturePolicy(PremiumFeatureAccess.PREMIUM_LOCKED_VISIBLE, R.string.premium_favorites_manager),
-        PremiumFeature.PERSISTENT_COLLECTIONS to PremiumFeaturePolicy(PremiumFeatureAccess.PREMIUM_LOCKED_VISIBLE, R.string.premium_persistent_collections),
+        PremiumFeature.WATCHED_STATUS_EDIT to PremiumFeaturePolicy(PremiumFeatureAccess.FREE, R.string.premium_watched_state),
+        PremiumFeature.TRAKT_LIST_MANAGER to PremiumFeaturePolicy(PremiumFeatureAccess.FREE, R.string.premium_trakt_lists),
+        PremiumFeature.FAVORITES_MANAGER to PremiumFeaturePolicy(PremiumFeatureAccess.FREE, R.string.premium_favorites_manager),
+        PremiumFeature.PERSISTENT_COLLECTIONS to PremiumFeaturePolicy(PremiumFeatureAccess.FREE, R.string.premium_persistent_collections),
 
         // Premium integrations / setup
-        PremiumFeature.TRAKT_CONNECT to PremiumFeaturePolicy(PremiumFeatureAccess.PREMIUM_LOCKED_VISIBLE, R.string.premium_trakt_connect),
-        PremiumFeature.SIMKL_CONNECT to PremiumFeaturePolicy(PremiumFeatureAccess.PREMIUM_LOCKED_VISIBLE, R.string.premium_simkl_connect),
-        PremiumFeature.JELLYFIN_SETUP to PremiumFeaturePolicy(PremiumFeatureAccess.PREMIUM_LOCKED_VISIBLE, R.string.premium_jellyfin_setup),
-        PremiumFeature.PLEX_SETUP to PremiumFeaturePolicy(PremiumFeatureAccess.PREMIUM_LOCKED_VISIBLE, R.string.premium_plex_setup),
-        PremiumFeature.KODI_SETUP to PremiumFeaturePolicy(PremiumFeatureAccess.PREMIUM_LOCKED_VISIBLE, R.string.premium_kodi_setup),
-        PremiumFeature.OMDB_SETUP to PremiumFeaturePolicy(PremiumFeatureAccess.PREMIUM_LOCKED_VISIBLE, R.string.premium_omdb_setup),
-        PremiumFeature.MDBLIST_SETUP to PremiumFeaturePolicy(PremiumFeatureAccess.PREMIUM_LOCKED_VISIBLE, R.string.premium_mdblist_setup),
-        PremiumFeature.AI_PROVIDER_SETUP to PremiumFeaturePolicy(PremiumFeatureAccess.PREMIUM_LOCKED_VISIBLE, R.string.premium_ai_provider_setup),
-        PremiumFeature.CLOUD_PROVIDER_SETUP to PremiumFeaturePolicy(PremiumFeatureAccess.PREMIUM_LOCKED_VISIBLE, R.string.premium_cloud_provider_setup),
-        PremiumFeature.ADDON_INSTALL_AND_MANAGEMENT to PremiumFeaturePolicy(PremiumFeatureAccess.PREMIUM_LOCKED_VISIBLE, R.string.premium_addon_management),
+        PremiumFeature.TRAKT_CONNECT to PremiumFeaturePolicy(PremiumFeatureAccess.FREE, R.string.premium_trakt_connect),
+        PremiumFeature.SIMKL_CONNECT to PremiumFeaturePolicy(PremiumFeatureAccess.FREE, R.string.premium_simkl_connect),
+        PremiumFeature.JELLYFIN_SETUP to PremiumFeaturePolicy(PremiumFeatureAccess.FREE, R.string.premium_jellyfin_setup),
+        PremiumFeature.PLEX_SETUP to PremiumFeaturePolicy(PremiumFeatureAccess.FREE, R.string.premium_plex_setup),
+        PremiumFeature.KODI_SETUP to PremiumFeaturePolicy(PremiumFeatureAccess.FREE, R.string.premium_kodi_setup),
+        PremiumFeature.OMDB_SETUP to PremiumFeaturePolicy(PremiumFeatureAccess.FREE, R.string.premium_omdb_setup),
+        PremiumFeature.MDBLIST_SETUP to PremiumFeaturePolicy(PremiumFeatureAccess.FREE, R.string.premium_mdblist_setup),
+        PremiumFeature.AI_PROVIDER_SETUP to PremiumFeaturePolicy(PremiumFeatureAccess.FREE, R.string.premium_ai_provider_setup),
+        PremiumFeature.CLOUD_PROVIDER_SETUP to PremiumFeaturePolicy(PremiumFeatureAccess.FREE, R.string.premium_cloud_provider_setup),
+        PremiumFeature.ADDON_INSTALL_AND_MANAGEMENT to PremiumFeaturePolicy(PremiumFeatureAccess.FREE, R.string.premium_addon_management),
 
         // Premium advanced / power-user tools
-        PremiumFeature.DIAGNOSTICS to PremiumFeaturePolicy(PremiumFeatureAccess.PREMIUM_LOCKED_VISIBLE, R.string.premium_diagnostics),
-        PremiumFeature.DEBUG_TOOLS to PremiumFeaturePolicy(PremiumFeatureAccess.PREMIUM_LOCKED_VISIBLE, R.string.premium_debug_tools),
-        PremiumFeature.PROVIDER_TESTS to PremiumFeaturePolicy(PremiumFeatureAccess.PREMIUM_LOCKED_VISIBLE, R.string.premium_provider_tests),
-        PremiumFeature.METADATA_REFRESH_AND_REBUILD to PremiumFeaturePolicy(PremiumFeatureAccess.PREMIUM_LOCKED_VISIBLE, R.string.premium_metadata_rebuild),
-        PremiumFeature.REMATCH_PROVIDER to PremiumFeaturePolicy(PremiumFeatureAccess.PREMIUM_LOCKED_VISIBLE, R.string.premium_provider_rematch),
-        PremiumFeature.CUSTOM_SOURCE_MANAGEMENT to PremiumFeaturePolicy(PremiumFeatureAccess.PREMIUM_LOCKED_VISIBLE, R.string.premium_custom_sources),
-        PremiumFeature.ADVANCED_CONNECTION_CONFIGURATION to PremiumFeaturePolicy(PremiumFeatureAccess.PREMIUM_LOCKED_VISIBLE, R.string.premium_advanced_connections),
-        PremiumFeature.DEVELOPER_EVENT_LOGS to PremiumFeaturePolicy(PremiumFeatureAccess.PREMIUM_LOCKED_VISIBLE, R.string.premium_developer_logs),
+        PremiumFeature.DIAGNOSTICS to PremiumFeaturePolicy(PremiumFeatureAccess.FREE, R.string.premium_diagnostics),
+        PremiumFeature.DEBUG_TOOLS to PremiumFeaturePolicy(PremiumFeatureAccess.FREE, R.string.premium_debug_tools),
+        PremiumFeature.PROVIDER_TESTS to PremiumFeaturePolicy(PremiumFeatureAccess.FREE, R.string.premium_provider_tests),
+        PremiumFeature.METADATA_REFRESH_AND_REBUILD to PremiumFeaturePolicy(PremiumFeatureAccess.FREE, R.string.premium_metadata_rebuild),
+        PremiumFeature.REMATCH_PROVIDER to PremiumFeaturePolicy(PremiumFeatureAccess.FREE, R.string.premium_provider_rematch),
+        PremiumFeature.CUSTOM_SOURCE_MANAGEMENT to PremiumFeaturePolicy(PremiumFeatureAccess.FREE, R.string.premium_custom_sources),
+        PremiumFeature.ADVANCED_CONNECTION_CONFIGURATION to PremiumFeaturePolicy(PremiumFeatureAccess.FREE, R.string.premium_advanced_connections),
+        PremiumFeature.DEVELOPER_EVENT_LOGS to PremiumFeaturePolicy(PremiumFeatureAccess.FREE, R.string.premium_developer_logs),
 
         // Optional premium monetization features
-        PremiumFeature.AI_SEARCH_ADVANCED to PremiumFeaturePolicy(PremiumFeatureAccess.PREMIUM_LOCKED_VISIBLE, R.string.premium_ai_search),
-        PremiumFeature.ADVANCED_RECOMMENDATIONS to PremiumFeaturePolicy(PremiumFeatureAccess.PREMIUM_LOCKED_VISIBLE, R.string.premium_advanced_recommendations),
-        PremiumFeature.MORE_LIKE_THIS_PREMIUM to PremiumFeaturePolicy(PremiumFeatureAccess.PREMIUM_LOCKED_VISIBLE, R.string.premium_more_like_this),
-        PremiumFeature.CHOOSE_SOURCE_PREMIUM to PremiumFeaturePolicy(PremiumFeatureAccess.PREMIUM_LOCKED_VISIBLE, R.string.premium_choose_source),
+        PremiumFeature.AI_SEARCH_ADVANCED to PremiumFeaturePolicy(PremiumFeatureAccess.FREE, R.string.premium_ai_search),
+        PremiumFeature.ADVANCED_RECOMMENDATIONS to PremiumFeaturePolicy(PremiumFeatureAccess.FREE, R.string.premium_advanced_recommendations),
+        PremiumFeature.MORE_LIKE_THIS_PREMIUM to PremiumFeaturePolicy(PremiumFeatureAccess.FREE, R.string.premium_more_like_this),
+        PremiumFeature.CHOOSE_SOURCE_PREMIUM to PremiumFeaturePolicy(PremiumFeatureAccess.FREE, R.string.premium_choose_source),
 
         // Existing gates
-        PremiumFeature.STREAM_PLAYBACK to PremiumFeaturePolicy(PremiumFeatureAccess.PREMIUM_LOCKED_VISIBLE, R.string.premium_stream_playback),
-        PremiumFeature.DOWNLOADS to PremiumFeaturePolicy(PremiumFeatureAccess.PREMIUM_LOCKED_VISIBLE, R.string.premium_downloads),
+        PremiumFeature.STREAM_PLAYBACK to PremiumFeaturePolicy(PremiumFeatureAccess.FREE, R.string.premium_stream_playback),
+        PremiumFeature.DOWNLOADS to PremiumFeaturePolicy(PremiumFeatureAccess.FREE, R.string.premium_downloads),
     )
 
     fun tierFrom(isLifetimeEntitled: Boolean): AccessTier {

@@ -201,6 +201,68 @@ class RecordingSchedulerTest {
     }
 
     @Test
+    fun `series pass persists future matches and skips conflicts`() = runTest {
+        val repo = InMemoryRecordingRepository()
+        repo.upsert(
+            Recording(
+                id = "existing",
+                playlistId = "p1",
+                channelId = "other",
+                channelName = "Other",
+                streamUrl = "http://other",
+                programmeTitle = "Existing",
+                startMs = now + ms(120),
+                endMs = now + ms(240),
+                createdAtMs = now,
+            ),
+        )
+        val resolver = SeriesPassResolver { pass, _ ->
+            listOf(
+                Recording(
+                    id = "episode-conflict",
+                    playlistId = pass.playlistId,
+                    channelId = pass.channelId,
+                    channelName = "BBC",
+                    streamUrl = "http://series",
+                    programmeTitle = "Sherlock S01E01",
+                    startMs = now + ms(150),
+                    endMs = now + ms(210),
+                    createdAtMs = now,
+                ),
+                Recording(
+                    id = "episode-accepted",
+                    playlistId = pass.playlistId,
+                    channelId = pass.channelId,
+                    channelName = "BBC",
+                    streamUrl = "http://series",
+                    programmeTitle = "Sherlock S01E02",
+                    startMs = now + ms(300),
+                    endMs = now + ms(360),
+                    createdAtMs = now,
+                ),
+            )
+        }
+        val scheduler = RecordingScheduler(repo, nowMs = { now }, passResolver = resolver)
+        val pass = RecordingSeriesPass(
+            id = "pass-1",
+            playlistId = "p1",
+            channelId = "bbc",
+            titleMatch = "Sherlock",
+            createdAtMs = now,
+        )
+
+        val result = assertIs<RecordingScheduler.ScheduleResult.SeriesScheduled>(
+            scheduler.scheduleSeriesPass(pass),
+        )
+        assertEquals(1, result.recordings.size)
+        assertEquals(1, result.skippedConflicts)
+        assertEquals("pass-1", result.recordings.single().seriesPassId)
+        assertEquals(RecordingScheduleKind.SERIES, result.recordings.single().scheduleKind)
+        assertNotNull(repo.get("episode-accepted"))
+        assertNull(repo.get("episode-conflict"))
+    }
+
+    @Test
     fun conflictsReportsOverlappingPairs() = runTest {
         val repo = InMemoryRecordingRepository()
         var ids = 0

@@ -12,10 +12,16 @@ import com.torve.domain.model.ShelfType
 import com.torve.domain.model.dedupeByStableKey
 import com.torve.domain.repository.MetadataRepository
 import com.torve.platform.torveVerboseLog
+import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.Deferred
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.supervisorScope
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.datetime.Clock
@@ -31,8 +37,10 @@ private fun List<MediaItem>.filterUpcomingMovieReleases(today: String = todayIso
         releaseDate != null && releaseDate >= today
     }
 
-private const val HOME_RAIL_PREFETCH_PAGES = 2
-private const val HOME_UPCOMING_PREFETCH_PAGES = 5
+// First paint only needs the first page. Destination screens load deeper
+// pages as the user browses instead of making Home wait for them at startup.
+private const val HOME_RAIL_PREFETCH_PAGES = 1
+private const val HOME_UPCOMING_PREFETCH_PAGES = 1
 private const val METADATA_LIST_TTL_MS = 30 * 60 * 1000L
 private const val METADATA_DETAIL_TTL_MS = 12 * 60 * 60 * 1000L
 private const val METADATA_CACHE_MAX_ENTRIES = 320
@@ -51,6 +59,7 @@ class HomeShelvesUnavailableException(
 
 class MetadataRepositoryImpl(
     private val api: TmdbApiClient,
+    private val family: com.torve.data.profile.FamilyControls? = null,
 ) : MetadataRepository {
     private val providerLogosBackendBaseUrl: String = "" // Set your backend base URL when available.
     private val metadataCacheMutex = Mutex()
@@ -65,6 +74,7 @@ class MetadataRepositoryImpl(
     private fun metadataCacheKey(endpoint: String, vararg parts: Any?): String =
         buildString {
             append(endpoint)
+            append('|').append(api.resolvedContentLanguage().lowercase())
             parts.forEach { part ->
                 append('|')
                 append(part?.toString()?.replace("|", "%7C") ?: "-")
@@ -78,16 +88,18 @@ class MetadataRepositoryImpl(
         fetch: suspend () -> T,
     ): T = coroutineScope {
         val now = Clock.System.now().toEpochMilliseconds()
-        metadataCacheMutex.withLock {
-            metadataCache[key]?.takeIf { now - it.storedAtMs <= ttlMs }?.let { entry ->
+        val cached = metadataCacheMutex.withLock {
+            metadataCache[key]?.takeIf { now - it.storedAtMs <= if (it.value == null) minOf(ttlMs, 60_000L) else ttlMs }?.let { entry ->
                 torveVerboseLog { "metadata_cache_hit key=$key" }
-                return@coroutineScope entry.value as T
+                entry
             }
         }
+        // Certification performs I/O. Never hold the shared metadata lock while awaiting it.
+        if (cached != null) return@coroutineScope prepareFamilyValue(cached.value) as T
 
         var created = false
         val deferred = metadataCacheMutex.withLock {
-            metadataInFlight[key]?.also {
+            metadataInFlight[key]?.takeUnless { it.isCancelled }?.also {
                 torveVerboseLog { "metadata_inflight_join key=$key" }
             } ?: async {
                 torveVerboseLog { "metadata_cache_miss key=$key" }
@@ -109,21 +121,70 @@ class MetadataRepositoryImpl(
                         metadataCache.remove(evictedKey)
                         torveVerboseLog { "metadata_cache_eviction key=$evictedKey" }
                     }
-                    metadataInFlight.remove(key)
+                    if (metadataInFlight[key] === deferred) metadataInFlight.remove(key)
                 }
             }
-            value as T
+            prepareFamilyValue(value) as T
         } catch (t: Throwable) {
             if (created) {
-                metadataCacheMutex.withLock {
-                    metadataInFlight.remove(key)
+                withContext(NonCancellable) {
+                    metadataCacheMutex.withLock {
+                        if (metadataInFlight[key] === deferred) metadataInFlight.remove(key)
+                    }
                 }
+            }
+            // The request owner may have left its screen while another consumer
+            // still needs this result. Retry only that active consumer's lookup.
+            if (!created && t is CancellationException && currentCoroutineContext().isActive) {
+                return@coroutineScope cachedMetadata(key, ttlMs, fetch)
             }
             throw t
         }
     }
 
+    private suspend fun prepareFamilyValue(value: Any?): Any? {
+        val gate = family ?: return value
+        gate.initialize()
+        if (!gate.state.value.contentRestricted) return value
+        return when (value) {
+            is MediaItem -> gate.prepare(listOf(value)).firstOrNull() ?: error("This title is not available in this profile.")
+            is PagedResult -> value.copy(items = gate.prepare(value.items))
+            is List<*> -> when {
+                value.all { it is MediaItem } -> gate.prepare(value.filterIsInstance<MediaItem>())
+                value.all { it is CatalogShelf } -> value.filterIsInstance<CatalogShelf>().mapNotNull { shelf ->
+                    val items = gate.prepare(shelf.items)
+                    if (items.isEmpty()) null else shelf.copy(items = items)
+                }
+                else -> value
+            }
+            else -> value
+        }
+    }
+
+    private suspend fun kidsRules(): com.torve.domain.model.KidsProfileRules? {
+        family?.initialize()
+        return family?.state?.value?.effectiveKidsRules
+    }
+
+    // Discovery is a candidate search, never an age-verification shortcut. Every
+    // returned title still passes prepareFamilyValue and its official certificates.
+    private fun movieCandidateRating(rules: com.torve.domain.model.KidsProfileRules): String? {
+        val ratings = when (rules.ratingCountry.uppercase()) {
+            "US" -> listOf("G", "PG", "PG-13", "R", "NC-17")
+            "DE" -> listOf("0", "6", "12", "16", "18")
+            "GB" -> listOf("U", "PG", "12A", "15", "18")
+            "FR" -> listOf("U", "10", "12", "16", "18")
+            "AU" -> listOf("G", "PG", "M", "MA15+", "R18+")
+            else -> return null
+        }
+        return ratings.lastOrNull { rating ->
+            com.torve.domain.model.FamilyPolicy.minimumAge(com.torve.domain.model.AgeCertification(rules.ratingCountry, rating))
+                ?.let { it <= rules.maximumAge } == true
+        }
+    }
+
     override suspend fun getTrending(type: String, page: Int): List<MediaItem> {
+        if (kidsRules() != null) return discover(type, page = page).items
         val cacheKey = metadataCacheKey("getTrending", type, page)
         return cachedMetadata(cacheKey, METADATA_LIST_TTL_MS) {
         torveVerboseLog { "CONTENT_REPO fetch_start source=trending type=$type page=$page" }
@@ -147,6 +208,7 @@ class MetadataRepositoryImpl(
     }
 
     override suspend fun getPopular(type: String, page: Int): List<MediaItem> {
+        if (kidsRules() != null) return discover(type, page = page, sortBy = "popularity.desc").items
         val cacheKey = metadataCacheKey("getPopular", type, page)
         return cachedMetadata(cacheKey, METADATA_LIST_TTL_MS) {
         torveVerboseLog { "CONTENT_REPO fetch_start source=popular type=$type page=$page" }
@@ -169,38 +231,7 @@ class MetadataRepositoryImpl(
         }
     }
 
-    override suspend fun getTopRated(type: String, page: Int): List<MediaItem> {
-        val cacheKey = metadataCacheKey("getTopRated", type, page)
-        return cachedMetadata(cacheKey, METADATA_LIST_TTL_MS) {
-        torveVerboseLog { "CONTENT_REPO fetch_start source=top_rated type=$type page=$page" }
-        try {
-            val items = if (type == "tv") {
-                api.discoverTv(
-                    page = page,
-                    sortBy = "vote_average.desc",
-                    minRating = 7.0f,
-                    requestCategory = "catalog.top_rated.$type.page_$page",
-                ).results.map { TmdbMappers.tvToMediaItem(it) }
-            } else {
-                api.discoverMovies(
-                    page = page,
-                    sortBy = "vote_average.desc",
-                    minRating = 7.0f,
-                    requestCategory = "catalog.top_rated.$type.page_$page",
-                ).results.map { TmdbMappers.movieToMediaItem(it) }
-            }
-            torveVerboseLog {
-                "CONTENT_REPO fetch_success source=top_rated type=$type page=$page items=${items.size}"
-            }
-            items
-        } catch (e: Exception) {
-            torveVerboseLog {
-                "CONTENT_REPO fetch_failure source=top_rated type=$type page=$page ${e::class.simpleName}: ${sanitizeNetworkDiagnosticText(e.message)}"
-            }
-            throw e
-        }
-        }
-    }
+    override suspend fun getTopRated(type: String, page: Int): List<MediaItem> = getTopRatedPaged(type, page).items
 
     override suspend fun getUpcoming(page: Int): List<MediaItem> {
         val cacheKey = metadataCacheKey("getUpcoming", page)
@@ -210,6 +241,14 @@ class MetadataRepositoryImpl(
             .map { TmdbMappers.movieToMediaItem(it) }
             .filterUpcomingMovieReleases()
         }
+    }
+
+    override suspend fun getUpcomingPaged(page: Int): PagedResult = cachedMetadata(
+        metadataCacheKey("getUpcomingPaged", page), METADATA_LIST_TTL_MS,
+    ) {
+        val response = api.getUpcoming(page, requestCategory = "catalog.upcoming_paged.movie.page_$page")
+        PagedResult(response.results.map { TmdbMappers.movieToMediaItem(it) }.filterUpcomingMovieReleases(),
+            response.page, response.totalPages, response.totalResults)
     }
 
     override suspend fun getNowPlaying(page: Int): List<MediaItem> {
@@ -256,12 +295,12 @@ class MetadataRepositoryImpl(
     }
 
     override suspend fun getDetail(type: String, id: Int): MediaItem {
-        val cacheKey = metadataCacheKey("getDetail", type, id)
+        val cacheKey = metadataCacheKey("getDetail:v2", type, id)
         return cachedMetadata(cacheKey, METADATA_DETAIL_TTL_MS) {
         if (type == "movie") {
-            TmdbMappers.movieToMediaItem(api.getMovieDetail(id))
+            TmdbMappers.movieToMediaItem(api.getMovieDetail(id), api.resolvedContentLanguage())
         } else {
-            TmdbMappers.tvToMediaItem(api.getTvDetail(id))
+            TmdbMappers.tvToMediaItem(api.getTvDetail(id), api.resolvedContentLanguage())
         }
         }
     }
@@ -289,13 +328,13 @@ class MetadataRepositoryImpl(
     }
 
     override suspend fun getPersonCredits(personId: Int): List<MediaItem> {
-        val cacheKey = metadataCacheKey("getPersonCredits", personId)
+        val cacheKey = metadataCacheKey("getPersonCredits:v2", personId)
         return cachedMetadata(cacheKey, METADATA_DETAIL_TTL_MS) {
         val credits = api.getPersonCredits(personId)
         val castItems = credits.cast.map { TmdbMappers.personCreditToMediaItem(it) }
         val crewItems = credits.crew.map { TmdbMappers.personCrewCreditToMediaItem(it) }
         (castItems + crewItems)
-            .distinctBy { it.tmdbId }
+            .distinctBy { "${it.type}:${it.tmdbId}:${it.creditIsCrew}" }
             .sortedByDescending { it.popularity ?: 0.0 }
         }
     }
@@ -367,6 +406,7 @@ class MetadataRepositoryImpl(
     }
 
     override suspend fun getTrendingPaged(type: String, page: Int): PagedResult {
+        if (kidsRules() != null) return discover(type, page = page, sortBy = "popularity.desc")
         val cacheKey = metadataCacheKey("getTrendingPaged", type, page)
         return cachedMetadata(cacheKey, METADATA_LIST_TTL_MS) {
         torveVerboseLog { "CONTENT_REPO fetch_start source=trending_paged type=$type page=$page" }
@@ -402,6 +442,7 @@ class MetadataRepositoryImpl(
     }
 
     override suspend fun getPopularPaged(type: String, page: Int): PagedResult {
+        if (kidsRules() != null) return discover(type, page = page, sortBy = "popularity.desc")
         val cacheKey = metadataCacheKey("getPopularPaged", type, page)
         return cachedMetadata(cacheKey, METADATA_LIST_TTL_MS) {
         torveVerboseLog { "CONTENT_REPO fetch_start source=popular_paged type=$type page=$page" }
@@ -437,17 +478,13 @@ class MetadataRepositoryImpl(
     }
 
     override suspend fun getTopRatedPaged(type: String, page: Int): PagedResult {
+        if (kidsRules() != null) return discover(type, page = page, sortBy = "vote_average.desc")
         val cacheKey = metadataCacheKey("getTopRatedPaged", type, page)
         return cachedMetadata(cacheKey, METADATA_LIST_TTL_MS) {
         torveVerboseLog { "CONTENT_REPO fetch_start source=top_rated_paged type=$type page=$page" }
         try {
             val result = if (type == "tv") {
-                val resp = api.discoverTv(
-                    page = page,
-                    sortBy = "vote_average.desc",
-                    minRating = 7.0f,
-                    requestCategory = "catalog.top_rated_paged.$type.page_$page",
-                )
+                val resp = api.getTopRatedTv(page = page, requestCategory = "catalog.top_rated_paged.$type.page_$page")
                 PagedResult(
                     items = resp.results.map { TmdbMappers.tvToMediaItem(it) },
                     page = resp.page,
@@ -455,12 +492,7 @@ class MetadataRepositoryImpl(
                     totalResults = resp.totalResults,
                 )
             } else {
-                val resp = api.discoverMovies(
-                    page = page,
-                    sortBy = "vote_average.desc",
-                    minRating = 7.0f,
-                    requestCategory = "catalog.top_rated_paged.$type.page_$page",
-                )
+                val resp = api.getTopRated("movie", page = page, requestCategory = "catalog.top_rated_paged.$type.page_$page")
                 PagedResult(
                     items = resp.results.map { TmdbMappers.movieToMediaItem(it) },
                     page = resp.page,
@@ -502,61 +534,25 @@ class MetadataRepositoryImpl(
         withWatchProviders: String?,
         watchRegion: String?,
         withKeywords: String?,
+        withCompanies: String?,
     ): PagedResult {
-        val cacheKey = metadataCacheKey(
-            "discover",
-            type,
-            page,
-            sortBy,
-            withGenres,
-            minRating,
-            year,
-            yearTo,
-            runtimeGte,
-            runtimeLte,
-            originCountries,
-            originalLanguage,
-            certification,
-            certificationGte,
-            certificationLte,
-            certificationCountry,
-            withCast,
-            withCrew,
-            withWatchProviders,
-            watchRegion,
-            withKeywords,
-        )
-        return cachedMetadata(cacheKey, METADATA_LIST_TTL_MS) {
-        if (type == "tv") {
-            val resp = api.discoverTv(
-                page,
+        val rules = kidsRules()
+        // TMDB supports movie certification queries; TV discovery has no equivalent.
+        // Start unfiltered young profiles in Kids/Family TV, then verify each title.
+        // Explicit genre choices remain intact (e.g. a G-rated documentary search).
+        val candidateGenres = withGenres ?: if (type == "tv" && rules != null && rules.maximumAge < 13) "10762|10751" else null
+        val candidateRating = rules?.takeIf { certification == null && certificationGte == null && certificationLte == null }
+            ?.let(::movieCandidateRating)
+        val candidateCountry = if (candidateRating != null) rules?.ratingCountry else certificationCountry
+        val candidateMaximum = candidateRating ?: certificationLte
+        suspend fun sourcePage(sourcePage: Int): PagedResult {
+            val cacheKey = metadataCacheKey(
+                if (rules != null) "family-discover-v3" else "discover",
+                if (withWatchProviders.isNullOrBlank()) "all" else "streaming-only-v1",
+                type,
+                sourcePage,
                 sortBy,
-                withGenres,
-                minRating,
-                year,
-                yearTo,
-                runtimeGte,
-                runtimeLte,
-                originCountries,
-                originalLanguage,
-                withCast,
-                withCrew,
-                withWatchProviders,
-                watchRegion,
-                withKeywords,
-                requestCategory = "catalog.discover.$type.page_$page",
-            )
-            PagedResult(
-                items = resp.results.map { TmdbMappers.tvToMediaItem(it) },
-                page = resp.page,
-                totalPages = resp.totalPages,
-                totalResults = resp.totalResults,
-            )
-        } else {
-            val resp = api.discoverMovies(
-                page,
-                sortBy,
-                withGenres,
+                candidateGenres,
                 minRating,
                 year,
                 yearTo,
@@ -566,23 +562,90 @@ class MetadataRepositoryImpl(
                 originalLanguage,
                 certification,
                 certificationGte,
-                certificationLte,
-                certificationCountry,
+                candidateMaximum,
+                candidateCountry,
                 withCast,
                 withCrew,
                 withWatchProviders,
                 watchRegion,
                 withKeywords,
-                requestCategory = "catalog.discover.$type.page_$page",
+                withCompanies,
             )
-            PagedResult(
-                items = resp.results.map { TmdbMappers.movieToMediaItem(it) },
-                page = resp.page,
-                totalPages = resp.totalPages,
-                totalResults = resp.totalResults,
-            )
+            return cachedMetadata(cacheKey, METADATA_LIST_TTL_MS) {
+            if (type == "tv") {
+                val resp = api.discoverTv(
+                    sourcePage,
+                    sortBy,
+                    candidateGenres,
+                    minRating,
+                    year,
+                    yearTo,
+                    runtimeGte,
+                    runtimeLte,
+                    originCountries,
+                    originalLanguage,
+                    withCast,
+                    withCrew,
+                    withWatchProviders,
+                    watchRegion,
+                    withKeywords,
+                    withCompanies,
+                    requestCategory = "catalog.discover.$type.page_$sourcePage",
+                    minimumVoteCount = if (rules != null) { if (sortBy == "vote_average.desc") 20 else 0 } else null,
+                )
+                PagedResult(
+                    items = resp.results.map { TmdbMappers.tvToMediaItem(it) },
+                    page = resp.page,
+                    totalPages = resp.totalPages,
+                    totalResults = resp.totalResults,
+                )
+            } else {
+                val resp = api.discoverMovies(
+                    sourcePage,
+                    sortBy,
+                    candidateGenres,
+                    minRating,
+                    year,
+                    yearTo,
+                    runtimeGte,
+                    runtimeLte,
+                    originCountries,
+                    originalLanguage,
+                    certification,
+                    certificationGte,
+                    candidateMaximum,
+                    candidateCountry,
+                    withCast,
+                    withCrew,
+                    withWatchProviders,
+                    watchRegion,
+                    withKeywords,
+                    withCompanies,
+                    requestCategory = "catalog.discover.$type.page_$sourcePage",
+                    minimumVoteCount = if (rules != null) { if (sortBy == "vote_average.desc") 20 else 0 } else null,
+                )
+                PagedResult(
+                    items = resp.results.map { TmdbMappers.movieToMediaItem(it) },
+                    page = resp.page,
+                    totalPages = resp.totalPages,
+                    totalResults = resp.totalResults,
+                )
+            }
         }
         }
+
+        if (rules == null) return sourcePage(page)
+        val verified = LinkedHashMap<String, MediaItem>()
+        var cursor = page
+        var last: PagedResult
+        var scanned = 0
+        do {
+            last = sourcePage(cursor)
+            last.items.forEach { item -> val key = "${item.type}:${item.tmdbId ?: item.id}"; if (key !in verified) verified[key] = item }
+            cursor = last.page + 1
+            scanned++
+        } while (verified.isEmpty() && last.page < last.totalPages && scanned < 4)
+        return last.copy(items = verified.values.toList())
     }
 
     override suspend fun searchKeywords(query: String): List<TmdbKeyword> {
@@ -624,10 +687,87 @@ class MetadataRepositoryImpl(
         }
     }
 
+    override fun titleSuggestions(query: String, type: String?): Flow<List<MediaItem>> = channelFlow {
+        val key = metadataCacheKey("titleSuggestions:v1", query.trim().lowercase(), type)
+        val items = cachedMetadata(key, METADATA_LIST_TTL_MS) {
+            kotlinx.coroutines.withTimeout(2_000) {
+                val completions = api.titleCompletions(query).filter { type == null || it.mediaType == type }
+                val resolved = mutableMapOf<String, MediaItem>()
+                val resultMutex = Mutex()
+                supervisorScope {
+                    completions.map { completion -> async {
+                        try {
+                            val item = cachedMetadata(metadataCacheKey("completionTitle", completion.id), METADATA_DETAIL_TTL_MS) {
+                                findByImdbId(completion.id, completion.mediaType)
+                            }?.takeIf { type == null || (it.type == MediaType.SERIES) == (type == "tv") }
+                            if (item != null) resultMutex.withLock {
+                                resolved[completion.id] = item
+                                send(completions.mapNotNull { resolved[it.id] })
+                            }
+                            item
+                        } catch (e: CancellationException) { throw e } catch (_: Exception) { null }
+                    } }.mapNotNull { it.await() }
+                }
+            }
+        }
+        send(items)
+    }
+
     override suspend fun searchPerson(query: String, page: Int): List<PersonSummary> {
         val cacheKey = metadataCacheKey("searchPerson", query.trim().lowercase(), page)
         return cachedMetadata(cacheKey, METADATA_LIST_TTL_MS) {
             api.searchPerson(query, page).results.map { TmdbMappers.personSummaryToDomain(it) }
+        }
+    }
+
+    override suspend fun getWatchProviderNames(type: String, region: String): Map<Int, String> {
+        val cacheKey = metadataCacheKey("getWatchProviderNames", type, region)
+        return cachedMetadata(cacheKey, METADATA_DETAIL_TTL_MS) {
+            api.getWatchProviders(type, region).results.associate { provider ->
+                provider.providerId to provider.providerName
+            }
+        }
+    }
+
+    override suspend fun getWatchProviderCandidates(type: String): List<com.torve.domain.model.StreamingProviderCandidate> {
+        val cacheKey = metadataCacheKey("getWatchProviderCandidates", type)
+        return cachedMetadata(cacheKey, METADATA_DETAIL_TTL_MS) {
+            api.getWatchProviders(type, region = null).results.map { provider ->
+                com.torve.domain.model.StreamingProviderCandidate(
+                    id = provider.providerId,
+                    name = provider.providerName,
+                    regions = provider.displayPriorities.keys
+                        .asSequence()
+                        .map { it.trim().uppercase() }
+                        .filter { it.length == 2 }
+                        .toSet(),
+                )
+            }
+        }
+    }
+
+    override suspend fun getTitleWatchProviderCandidates(
+        type: String,
+        tmdbId: Int,
+    ): List<com.torve.domain.model.StreamingProviderCandidate> {
+        val cacheKey = metadataCacheKey("getTitleWatchProviderCandidates", type, tmdbId)
+        return cachedMetadata(cacheKey, METADATA_DETAIL_TTL_MS) {
+            api.getTitleWatchProviders(type, tmdbId).results
+                .flatMap { (region, providers) ->
+                    (providers.flatrate + providers.free + providers.ads)
+                        .distinctBy { it.providerId }
+                        .map { provider ->
+                            Triple(provider.providerId, provider.providerName, region.trim().uppercase())
+                        }
+                }
+                .groupBy { it.first to it.second }
+                .map { (provider, entries) ->
+                    com.torve.domain.model.StreamingProviderCandidate(
+                        id = provider.first,
+                        name = provider.second,
+                        regions = entries.map { it.third }.filter { it.length == 2 }.toSet(),
+                    )
+                }
         }
     }
 
@@ -650,199 +790,94 @@ class MetadataRepositoryImpl(
 
     override suspend fun getLogoUrl(type: String, tmdbId: Int): String? {
         val cacheKey = metadataCacheKey("getLogoUrl", type, tmdbId)
-        return cachedMetadata(cacheKey, METADATA_DETAIL_TTL_MS) {
-        try {
-            val images = api.getImages(type, tmdbId)
-            TmdbMappers.bestLogoPath(images)?.let { TmdbMappers.logoUrl(it) }
+        return try {
+            cachedMetadata(cacheKey, METADATA_DETAIL_TTL_MS) {
+                val images = api.getImages(type, tmdbId)
+                TmdbMappers.bestLogoPath(images, api.resolvedContentLanguage())?.let { TmdbMappers.logoUrl(it) }
+            }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
         } catch (_: Exception) {
+            // Keep the nullable contract, without caching a failed connection as no artwork.
             null
-        }
         }
     }
 
-    override suspend fun getHomeShelves(): List<CatalogShelf> = cachedMetadata(
-        key = metadataCacheKey("getHomeShelves"),
-        ttlMs = METADATA_LIST_TTL_MS,
-    ) {
-        supervisorScope {
-        torveVerboseLog { "CONTENT_REPO fetch_start source=home_shelves" }
-        suspend fun <T> homeRequest(label: String, block: suspend () -> T): Result<T> {
-            return try {
-                Result.success(block())
-            } catch (e: Exception) {
-                val sanitized = sanitizeNetworkDiagnosticText(e.message)
-                torveVerboseLog {
-                    "CONTENT_REPO fetch_failure source=home_shelves segment=$label ${e::class.simpleName}: $sanitized"
+    override suspend fun getHomeShelves(): List<CatalogShelf> = homeShelves().last()
+
+    override fun homeShelves(): Flow<List<CatalogShelf>> = channelFlow {
+        if (kidsRules() == null) { send(generalHomeShelves { send(it) }); return@channelFlow }
+        val rows = listOf(
+            Triple("trending-movies", "Trending Movies", "movie"),
+            Triple("trending-tv", "Trending TV Shows", "tv"),
+            Triple("popular-movies", "Popular Movies", "movie"),
+            Triple("popular-tv", "Popular TV Shows", "tv"),
+            Triple("top-rated", "Top Rated", "movie"),
+            Triple("now-playing", "Now Playing", "movie"),
+            Triple("upcoming", "Upcoming", "movie"),
+        )
+        val available = linkedMapOf<String, CatalogShelf>()
+        val cursors = mutableMapOf<String, Int>()
+        val exhausted = mutableSetOf<String>()
+        suspend fun page(id: String, type: String, cursor: Int): PagedResult = when (id) {
+            "now-playing" -> getNowPlaying(cursor).let { PagedResult(it, cursor, if (cursor < 20) 20 else cursor, it.size) }
+            "upcoming" -> getUpcomingPaged(cursor)
+            else -> discover(type, page = cursor, sortBy = if (id == "top-rated") "vote_average.desc" else "popularity.desc")
+        }
+        // Keep first-paint verification ahead of optional rows. A slow upcoming
+        // title must not occupy the certification queue before the first rail.
+        for ((id, title, type) in rows) {
+            val items = try {
+                val first = page(id, type, 1)
+                cursors[id] = first.page + 1
+                if (first.page >= first.totalPages) exhausted += id
+                first.items
+            } catch (cancelled: CancellationException) { throw cancelled }
+            catch (_: Exception) { emptyList() }
+            if (items.isNotEmpty()) {
+                available[id] = CatalogShelf(id = id, title = title, items = items, type = ShelfType.POSTER)
+                send(available.values.toList())
+            }
+        }
+        if (available.isEmpty()) send(emptyList())
+        // First paint above remains small and fast. Fill each rail afterwards,
+        // carrying the raw source cursor across empty age-filtered pages.
+        for ((id, title, type) in rows) {
+            var cursor = cursors[id] ?: 1
+            while ((available[id]?.items?.size ?: 0) < 20 && cursor <= 20 && id !in exhausted) {
+                val more = try { page(id, type, cursor) }
+                    catch (cancelled: CancellationException) { throw cancelled }
+                    catch (_: Exception) { break }
+                cursor = maxOf(cursor + 1, more.page + 1)
+                if (more.page >= more.totalPages) exhausted += id
+                val existing = available[id]?.items.orEmpty()
+                val merged = (existing + more.items).dedupeByStableKey().take(20)
+                if (merged.size > existing.size) {
+                    available[id] = CatalogShelf(id, title, merged, ShelfType.POSTER)
+                    send(available.values.toList())
                 }
-                Result.failure(IllegalStateException("$label=${sanitized ?: e::class.simpleName}"))
             }
         }
+    }
 
-        suspend fun <T> homePages(pageCount: Int, block: suspend (Int) -> List<T>): List<T> =
-            (1..pageCount).flatMap { page -> block(page) }
-
-        val trendingMovies = async {
-            homeRequest("trending_movies") {
-                homePages(HOME_RAIL_PREFETCH_PAGES) { page ->
-                    api.getTrending("movie", page = page, requestCategory = "home.trending_movies.page_$page").results
-                }.map { TmdbMappers.movieToMediaItem(it) }.dedupeByStableKey()
-            }
+    private suspend fun generalHomeShelves(publish: suspend (List<CatalogShelf>) -> Unit): List<CatalogShelf> = cachedMetadata(
+        key = metadataCacheKey("getHomeShelves"), ttlMs = METADATA_LIST_TTL_MS,
+    ) {
+        fun request(id: String, title: String, type: ShelfType = ShelfType.POSTER,
+                    fetch: suspend () -> List<MediaItem>): suspend () -> CatalogShelf? = {
+            CatalogShelf(id, title, fetch().dedupeByStableKey().take(20), type)
         }
-        val trendingTv = async {
-            homeRequest("trending_tv") {
-                homePages(HOME_RAIL_PREFETCH_PAGES) { page ->
-                    api.getTrendingTv(page = page, requestCategory = "home.trending_tv.page_$page").results
-                }.map { TmdbMappers.tvToMediaItem(it) }.dedupeByStableKey()
-            }
-        }
-        val nowPlaying = async {
-            homeRequest("now_playing") {
-                homePages(HOME_RAIL_PREFETCH_PAGES) { page ->
-                    api.getNowPlaying(page = page, requestCategory = "home.now_playing.page_$page").results
-                }.map { TmdbMappers.movieToMediaItem(it) }.dedupeByStableKey()
-            }
-        }
-        val popularMovies = async {
-            homeRequest("popular_movies") {
-                homePages(HOME_RAIL_PREFETCH_PAGES) { page ->
-                    api.getPopular("movie", page = page, requestCategory = "home.popular_movies.page_$page").results
-                }.map { TmdbMappers.movieToMediaItem(it) }.dedupeByStableKey()
-            }
-        }
-        val upcoming = async {
-            homeRequest("upcoming") {
-                homePages(HOME_UPCOMING_PREFETCH_PAGES) { page ->
-                    api.getUpcoming(page = page, requestCategory = "home.upcoming.page_$page").results
-                }.map { TmdbMappers.movieToMediaItem(it) }
-                    .filterUpcomingMovieReleases()
-                    .dedupeByStableKey()
-            }
-        }
-        val popularTv = async {
-            homeRequest("popular_tv") {
-                homePages(HOME_RAIL_PREFETCH_PAGES) { page ->
-                    api.getPopularTv(page = page, requestCategory = "home.popular_tv.page_$page").results
-                }.map { TmdbMappers.tvToMediaItem(it) }.dedupeByStableKey()
-            }
-        }
-        val topRated = async {
-            homeRequest("top_rated") {
-                homePages(HOME_RAIL_PREFETCH_PAGES) { page ->
-                    api.discoverMovies(
-                        page = page,
-                        sortBy = "vote_average.desc",
-                        minRating = 7.0f,
-                        requestCategory = "home.top_rated.page_$page",
-                    ).results
-                }.map { TmdbMappers.movieToMediaItem(it) }.dedupeByStableKey()
-            }
-        }
-        val airingToday = async {
-            homeRequest("airing_today") {
-                homePages(HOME_RAIL_PREFETCH_PAGES) { page ->
-                    api.getAiringToday(page = page, requestCategory = "home.airing_today.page_$page").results
-                }.map { TmdbMappers.tvToMediaItem(it) }.dedupeByStableKey()
-            }
-        }
-        val failedSegments = mutableListOf<String>()
-
-        fun <T> consume(result: Result<T>): T? {
-            result.exceptionOrNull()?.message?.let(failedSegments::add)
-            return result.getOrNull()
-        }
-
-        val shelves = buildList {
-            consume(trendingMovies.await())?.takeIf { it.isNotEmpty() }?.let { items ->
-                add(
-                    CatalogShelf(
-                        id = "trending-movies",
-                        title = "Trending Movies",
-                        items = items,
-                        type = ShelfType.POSTER,
-                    ),
-                )
-            }
-            consume(trendingTv.await())?.takeIf { it.isNotEmpty() }?.let { items ->
-                add(
-                    CatalogShelf(
-                        id = "trending-tv",
-                        title = "Trending TV Shows",
-                        items = items,
-                        type = ShelfType.POSTER,
-                    ),
-                )
-            }
-            consume(nowPlaying.await())?.takeIf { it.isNotEmpty() }?.let { items ->
-                add(
-                    CatalogShelf(
-                        id = "now-playing",
-                        title = "Now Playing",
-                        items = items,
-                        type = ShelfType.LANDSCAPE,
-                    ),
-                )
-            }
-            consume(popularMovies.await())?.takeIf { it.isNotEmpty() }?.let { items ->
-                add(
-                    CatalogShelf(
-                        id = "popular-movies",
-                        title = "Popular Movies",
-                        items = items,
-                        type = ShelfType.POSTER,
-                    ),
-                )
-            }
-            consume(upcoming.await())?.takeIf { it.isNotEmpty() }?.let { items ->
-                add(
-                    CatalogShelf(
-                        id = "upcoming",
-                        title = "Upcoming",
-                        items = items,
-                        type = ShelfType.POSTER,
-                    ),
-                )
-            }
-            consume(popularTv.await())?.takeIf { it.isNotEmpty() }?.let { items ->
-                add(
-                    CatalogShelf(
-                        id = "popular-tv",
-                        title = "Popular TV Shows",
-                        items = items,
-                        type = ShelfType.POSTER,
-                    ),
-                )
-            }
-            consume(topRated.await())?.takeIf { it.isNotEmpty() }?.let { items ->
-                add(
-                    CatalogShelf(
-                        id = "top-rated",
-                        title = "Top Rated",
-                        items = items,
-                        type = ShelfType.POSTER,
-                    ),
-                )
-            }
-            consume(airingToday.await())?.takeIf { it.isNotEmpty() }?.let { items ->
-                add(
-                    CatalogShelf(
-                        id = "airing-today",
-                        title = "Airing Today",
-                        items = items,
-                        type = ShelfType.POSTER,
-                    ),
-                )
-            }
-        }
-        if (shelves.isEmpty()) {
-            torveVerboseLog {
-                "CONTENT_REPO fetch_failure source=home_shelves segment=all message=all_home_segments_failed failures=${failedSegments.joinToString()}"
-            }
-            throw HomeShelvesUnavailableException(failedSegments)
-        }
-        torveVerboseLog {
-            "CONTENT_REPO fetch_success source=home_shelves shelves=${shelves.size}"
-        }
+        val shelves = com.torve.presentation.home.loadHomeRows(listOf(
+            request("trending-movies", "Trending Movies") { api.getTrending("movie", page = 1, requestCategory = "home.trending_movies.page_1").results.map { TmdbMappers.movieToMediaItem(it) } },
+            request("trending-tv", "Trending TV Shows") { api.getTrendingTv(page = 1, requestCategory = "home.trending_tv.page_1").results.map { TmdbMappers.tvToMediaItem(it) } },
+            request("now-playing", "Now Playing", ShelfType.LANDSCAPE) { api.getNowPlaying(page = 1, requestCategory = "home.now_playing.page_1").results.map { TmdbMappers.movieToMediaItem(it) } },
+            request("popular-movies", "Popular Movies") { api.getPopular("movie", page = 1, requestCategory = "home.popular_movies.page_1").results.map { TmdbMappers.movieToMediaItem(it) } },
+            request("upcoming", "Upcoming") { api.getUpcoming(page = 1, requestCategory = "home.upcoming.page_1").results.map { TmdbMappers.movieToMediaItem(it) }.filterUpcomingMovieReleases() },
+            request("popular-tv", "Popular TV Shows") { api.getPopularTv(page = 1, requestCategory = "home.popular_tv.page_1").results.map { TmdbMappers.tvToMediaItem(it) } },
+            request("top-rated", "Top Rated") { api.getTopRated("movie", page = 1, requestCategory = "home.top_rated.page_1").results.map { TmdbMappers.movieToMediaItem(it) } },
+            request("airing-today", "Airing Today") { api.getAiringToday(page = 1, requestCategory = "home.airing_today.page_1").results.map { TmdbMappers.tvToMediaItem(it) } },
+        ), publish = publish)
+        if (shelves.isEmpty()) throw HomeShelvesUnavailableException(listOf("No Home source completed within its startup budget"))
         shelves
-        }
     }
 }

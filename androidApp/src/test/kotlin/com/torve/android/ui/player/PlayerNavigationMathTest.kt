@@ -32,6 +32,22 @@ class PlayerNavigationMathTest {
     }
 
     @Test
+    fun tvBackAction_dismissesThenHidesThenExitsDeterministically() {
+        assertEquals(
+            PlayerNavigationMath.TvBackAction.CONSUMED,
+            PlayerNavigationMath.tvBackAction(overlayConsumed = true, controlsVisible = true),
+        )
+        assertEquals(
+            PlayerNavigationMath.TvBackAction.HIDE_CONTROLS,
+            PlayerNavigationMath.tvBackAction(overlayConsumed = false, controlsVisible = true),
+        )
+        assertEquals(
+            PlayerNavigationMath.TvBackAction.EXIT_PLAYER,
+            PlayerNavigationMath.tvBackAction(overlayConsumed = false, controlsVisible = false),
+        )
+    }
+
+    @Test
     fun nextProgressiveSkipStepIndex_resetsAndAdvancesByBurst() {
         assertEquals(
             0,

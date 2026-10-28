@@ -50,10 +50,20 @@ data class ClientIntegrityAttestation(
     val generatedAtEpochMillis: Long = Clock.System.now().toEpochMilliseconds(),
 )
 
+@Serializable
+data class ClientIntegrityChallenge(
+    val enabled: Boolean = false,
+    val challenge: String = "",
+    @SerialName("request_hash") val requestHash: String = "",
+    @SerialName("cloud_project_number") val cloudProjectNumber: Long = 0,
+)
+
 interface ClientTrustSignalProvider {
     suspend fun currentSignal(includeIntegrityToken: Boolean = false): ClientTrustSignal
 
     suspend fun currentIntegrityAttestation(): ClientIntegrityAttestation? = null
+
+    suspend fun currentIntegrityAttestation(challenge: ClientIntegrityChallenge): ClientIntegrityAttestation? = null
 }
 
 object NoOpClientTrustSignalProvider : ClientTrustSignalProvider {

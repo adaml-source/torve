@@ -209,8 +209,8 @@ fun desktopNotify(title: String, body: String) {
 /**
  * Process-wide UpdateChecker singleton. Created once at startup with the
  * release version; surfaces (banner, File menu) read the same instance.
- * Disabled (no-op) when neither `TORVE_UPDATE_REPO` nor `TORVE_UPDATE_FEED`
- * is set in the environment.
+ * Disabled (no-op) only when neither a packaged feed nor a runtime override
+ * is configured. Production packages bake in the official Torve feed.
  */
 @Volatile
 internal var globalUpdateChecker: com.torve.desktop.updates.UpdateChecker? = null
@@ -249,6 +249,17 @@ private val launchFullscreen: Boolean =
         ?: System.getProperty("torve.desktop.loginFullscreenPreview", "true").toBoolean()
 
 fun main() {
+    if (!com.torve.desktop.launch.acquireDesktopSingleInstance()) {
+        if (!java.awt.GraphicsEnvironment.isHeadless()) {
+            javax.swing.JOptionPane.showMessageDialog(
+                null,
+                "Torve is already running.",
+                "Torve",
+                javax.swing.JOptionPane.INFORMATION_MESSAGE,
+            )
+        }
+        return
+    }
     // Splash BEFORE application { ... } starts composing. The Compose
     // Window won't become visible for ~350ms, and even then the
     // iconify dance briefly minimizes/restores it -- showing the
@@ -387,7 +398,7 @@ fun main() {
         },
         title = "${releaseInfo.appName} ${releaseInfo.versionLabel}",
         state = windowState,
-        undecorated = false,
+        undecorated = windowState.placement == WindowPlacement.Fullscreen,
         resizable = windowState.placement != WindowPlacement.Fullscreen,
         visible = windowVisible,
     ) {
@@ -407,6 +418,20 @@ fun main() {
             val shouldBeResizable = windowState.placement != WindowPlacement.Fullscreen
             if (window.isResizable != shouldBeResizable) {
                 window.isResizable = shouldBeResizable
+            }
+            com.torve.desktop.platform.DesktopBorderlessFullscreen.apply(
+                frame = window,
+                fullscreen = windowState.placement == WindowPlacement.Fullscreen,
+            )
+        }
+
+        LaunchedEffect(windowVisible, windowState.placement) {
+            if (windowVisible) {
+                val fullscreen = windowState.placement == WindowPlacement.Fullscreen
+                kotlinx.coroutines.delay(50)
+                com.torve.desktop.platform.DesktopBorderlessFullscreen.apply(window, fullscreen)
+                kotlinx.coroutines.delay(250)
+                com.torve.desktop.platform.DesktopBorderlessFullscreen.apply(window, fullscreen)
             }
         }
 
@@ -511,62 +536,64 @@ fun main() {
         }
 
         // Window-attached MenuBar - Compose Desktop maps this to native NSMenu
-        // on macOS automatically. Keyboard accelerators MUST be declared
-        // per-item via `shortcut = KeyShortcut(...)`. They are NOT inferred
-        // from menu structure.
+        // on macOS automatically. Keep it out of Windows fullscreen: on that
+        // platform it can still paint as a native menu strip above the content,
+        // which makes "fullscreen" look like a normal framed app window.
         val runtime = (bootstrapState as? BootstrapState.Ready)?.runtime
         val playPauseShortcut = if (isMac) KeyShortcut(Key.Spacebar) else primaryAccel(Key.K)
         val isFullscreen = windowState.placement == WindowPlacement.Fullscreen
-        MenuBar {
-            Menu("File") {
-                Item("Check for Updates...", onClick = {
-                    @OptIn(DelicateCoroutinesApi::class)
-                    globalUpdateChecker?.let { checker ->
-                        GlobalScope.launch {
-                            val result = checker.check()
-                            if (result is com.torve.desktop.updates.UpdateChecker.Result.UpToDate) {
-                                desktopNotify("Torve", "You're on the latest version.")
+        if (!isFullscreen || isMac) {
+            MenuBar {
+                Menu("File") {
+                    Item("Check for Updates...", onClick = {
+                        @OptIn(DelicateCoroutinesApi::class)
+                        globalUpdateChecker?.let { checker ->
+                            GlobalScope.launch {
+                                val result = checker.check()
+                                if (result is com.torve.desktop.updates.UpdateChecker.Result.UpToDate) {
+                                    desktopNotify("Torve", "You're on the latest version.")
+                                }
                             }
+                        } ?: desktopNotify("Torve", "Update channel isn't configured for this build.")
+                    })
+                    Item("Quit Torve", shortcut = primaryAccel(Key.Q), onClick = ::exitApplication)
+                }
+                Menu("Playback") {
+                    Item(
+                        "Play / Pause",
+                        shortcut = playPauseShortcut,
+                        onClick = {
+                            val player = runtime?.playerController ?: return@Item
+                            val phase = player.state.value.phase
+                            if (phase == com.torve.desktop.playback.DesktopPlayerPhase.PLAYING) player.pause()
+                            else player.play()
+                        },
+                    )
+                    Item(
+                        "Stop",
+                        onClick = { runtime?.playerController?.stop() },
+                    )
+                }
+                Menu("Window") {
+                    Item("Hide to Tray", shortcut = nonMacAccel(Key.W), onClick = { windowVisible = false })
+                    Item("Maximize", shortcut = nonMacAccel(Key.M), onClick = {
+                        windowState.placement = WindowPlacement.Maximized
+                    })
+                    Item(if (isFullscreen) "Exit Fullscreen" else "Fullscreen", shortcut = fullscreenAccel(), onClick = {
+                        windowState.placement = if (isFullscreen) {
+                            WindowPlacement.Floating
+                        } else {
+                            WindowPlacement.Fullscreen
                         }
-                    } ?: desktopNotify("Torve", "Update channel isn't configured for this build.")
-                })
-                Item("Quit Torve", shortcut = primaryAccel(Key.Q), onClick = ::exitApplication)
-            }
-            Menu("Playback") {
-                Item(
-                    "Play / Pause",
-                    shortcut = playPauseShortcut,
-                    onClick = {
-                        val player = runtime?.playerController ?: return@Item
-                        val phase = player.state.value.phase
-                        if (phase == com.torve.desktop.playback.DesktopPlayerPhase.PLAYING) player.pause()
-                        else player.play()
-                    },
-                )
-                Item(
-                    "Stop",
-                    onClick = { runtime?.playerController?.stop() },
-                )
-            }
-            Menu("Window") {
-                Item("Hide to Tray", shortcut = nonMacAccel(Key.W), onClick = { windowVisible = false })
-                Item("Maximize", shortcut = nonMacAccel(Key.M), onClick = {
-                    windowState.placement = WindowPlacement.Maximized
-                })
-                Item(if (isFullscreen) "Exit Fullscreen" else "Fullscreen", shortcut = fullscreenAccel(), onClick = {
-                    windowState.placement = if (isFullscreen) {
-                        WindowPlacement.Floating
-                    } else {
-                        WindowPlacement.Fullscreen
-                    }
-                })
-            }
-            Menu("Help") {
-                Item("About Torve", onClick = {
-                    runCatching {
-                        java.awt.Desktop.getDesktop().browse(java.net.URI("https://torve.app"))
-                    }
-                })
+                    })
+                }
+                Menu("Help") {
+                    Item("About Torve", onClick = {
+                        runCatching {
+                            java.awt.Desktop.getDesktop().browse(java.net.URI("https://torve.app"))
+                        }
+                    })
+                }
             }
         }
 
@@ -639,6 +666,7 @@ private fun bootstrapDesktop(): BootstrapState {
             bulkDownloadManager = bulkDownloadManager,
             streamRepository = streamRepository,
             settingsViewModel = settingsViewModel,
+            userIdProvider = koin.get<com.torve.data.auth.UserIdProvider>(),
         )
         downloadManager.onDownloadsChanged = {
             downloadViewModel.loadDownloads()
@@ -701,16 +729,20 @@ private fun bootstrapDesktop(): BootstrapState {
                 playbackEngine = playbackEngine,
                 localFirstPlaybackRouter = koin.get<com.torve.desktop.lanlibrary.LocalFirstPlaybackRouter>(),
                 telemetry = koin.get<com.torve.domain.telemetry.TelemetryEmitter>(),
+                jellyfinLibrary = koin.get<com.torve.data.integrations.JellyfinLibraryOverlayService>(),
+                userIds = koin.get<com.torve.data.auth.UserIdProvider>(),
             ),
             libraryDetailController = DesktopSearchController(
                 metadataRepository = metadataRepository,
                 ratingsEnricher = koin.get<com.torve.data.mdblist.RatingsEnricher>(),
                 integrationSecretStore = koin.get<com.torve.domain.integrations.IntegrationSecretStore>(),
+                mediaLifecycleService = koin.get<com.torve.domain.integrations.MediaLifecycleService>(),
             ),
             searchController = DesktopSearchController(
                 metadataRepository = metadataRepository,
                 ratingsEnricher = koin.get<com.torve.data.mdblist.RatingsEnricher>(),
                 integrationSecretStore = koin.get<com.torve.domain.integrations.IntegrationSecretStore>(),
+                mediaLifecycleService = koin.get<com.torve.domain.integrations.MediaLifecycleService>(),
             ),
             channelRepository = channelRepository,
             channelsViewModel = channelsViewModel,

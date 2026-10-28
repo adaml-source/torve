@@ -1,0 +1,25 @@
+services:
+  support:
+    build:
+      context: ../..
+      dockerfile: discord_support/Dockerfile
+    env_file: /etc/torve-support/bot.env
+    ports:
+      - "127.0.0.1:8012:8012"
+    volumes:
+      - support-data:/data
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    tmpfs: [/tmp:size=64m]
+    pids_limit: 64
+    mem_limit: 512m
+    cpus: 0.75
+    restart: unless-stopped
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8012/ready', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+volumes:
+  support-data:

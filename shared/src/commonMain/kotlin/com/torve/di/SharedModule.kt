@@ -15,6 +15,7 @@ import com.torve.data.availability.TmdbAvailabilityProvider
 import com.torve.data.addon.AddonSyncService
 import com.torve.data.addon.CatalogAggregator
 import com.torve.data.addon.StreamAggregator
+import com.torve.data.addon.StreamContinuationSelector
 import com.torve.data.addon.StreamScorer
 import com.torve.data.addon.StreamSelector
 import com.torve.data.addon.StremioAddonClient
@@ -22,8 +23,6 @@ import com.torve.data.addon.SubtitleAggregator
 import com.torve.data.addon.StreamRepositoryImpl
 import com.torve.data.auth.AuthClient
 import com.torve.data.auth.UserIdProvider
-import com.torve.data.beta.BetaProgramApi
-import com.torve.data.beta.BetaProgramRepositoryImpl
 import com.torve.data.ai.AiSuggestClient
 import com.torve.data.ai.KeywordSearchService
 import com.torve.data.billing.BillingApi
@@ -48,6 +47,8 @@ import com.torve.data.profile.ProfileRepositoryImpl
 import com.torve.data.shelf.ShelfConfigRepositoryImpl
 import com.torve.data.kodi.KodiClient
 import com.torve.data.pairing.PairingApi
+import com.torve.data.panda.pandaProviderId
+import com.torve.data.panda.readPandaDebridActivationSnapshot
 import com.torve.data.channels.CatchupResolver
 import com.torve.data.channels.EpgParser
 import com.torve.data.channels.ChannelRepositoryImpl
@@ -61,9 +62,11 @@ import com.torve.data.ratings.OmdbClient
 import com.torve.data.simkl.SimklClient
 import com.torve.data.metadata.MetadataRepositoryImpl
 import com.torve.data.metadata.TmdbApiClient
+import com.torve.data.metadata.tmdbExtensionSelection
 import com.torve.data.network.HttpClientFactory
 import com.torve.data.progress.PreferencesRepositoryImpl
 import com.torve.data.progress.WatchProgressRepositoryImpl
+import com.torve.data.playback.PlaybackSegmentRepositoryImpl
 import com.torve.data.stats.WatchSessionRecorder
 import com.torve.data.stats.WatchStatsRepositoryImpl
 import com.torve.data.subscription.RebateCodeApi
@@ -86,7 +89,6 @@ import com.torve.presentation.player.TraktScrobbler
 import com.torve.db.TorveDatabase
 import com.torve.domain.repository.AddonRepository
 import com.torve.domain.repository.AvailabilityRepository
-import com.torve.domain.repository.BetaProgramRepository
 import com.torve.domain.repository.DownloadRepository
 import com.torve.domain.repository.ChannelRepository
 import com.torve.domain.repository.DeviceLocalSettingsRepository
@@ -95,10 +97,16 @@ import com.torve.domain.repository.MediaFavoritesRepository
 import com.torve.domain.repository.ProfileRepository
 import com.torve.domain.repository.ShelfConfigRepository
 import com.torve.domain.repository.PreferencesRepository
+import com.torve.presentation.settings.isHealthProviderEnabled
 import com.torve.domain.repository.StreamRepository
 import com.torve.domain.repository.SubscriptionRepository
 import com.torve.domain.repository.WatchHistoryRepository
 import com.torve.domain.repository.WatchProgressRepository
+import com.torve.domain.repository.PlaybackSegmentRepository
+import com.torve.domain.player.PlaybackSegmentEngine
+import com.torve.data.playback.IntroDbSegmentMarkerProvider
+import com.torve.data.playback.SkipDbSegmentMarkerProvider
+import com.torve.data.playback.TheIntroDbSegmentMarkerProvider
 import com.torve.domain.repository.WatchlistRepository
 import com.torve.domain.stats.WatchStatsEngine
 import com.torve.domain.stats.WatchStatsRepository
@@ -106,7 +114,6 @@ import com.torve.domain.sync.SyncRepository
 import com.torve.platform.DatabaseDriverFactory
 import com.torve.presentation.addon.AddonViewModel
 import com.torve.presentation.calendar.CalendarViewModel
-import com.torve.presentation.beta.BetaProgramViewModel
 import com.torve.presentation.detail.DetailViewModel
 import com.torve.presentation.detail.PersonViewModel
 import com.torve.presentation.download.DownloadCatalogueViewModel
@@ -148,6 +155,7 @@ val sharedModule = module {
     single { TorveDatabase(get()) }
 
     // TMDB
+    single { com.torve.data.metadata.TmdbUserCredentials(get()) { get<com.torve.data.auth.UserIdProvider>().currentDataUserId() } }
     single {
         val localSettings = get<DeviceLocalSettingsRepository>()
         val rawLang = kotlinx.coroutines.runBlocking { localSettings.getString("app_language") }
@@ -159,11 +167,20 @@ val sharedModule = module {
             }
         }
         torveVerboseLog { "TMDB_INIT rawLang=$rawLang initialLang=$initialLang" }
-        TmdbApiClient(get(named("tmdbHttpClient"))).also {
+        TmdbApiClient(get(named("tmdbHttpClient")), apiKeyProvider = {
+            get<com.torve.data.metadata.TmdbUserCredentials>().read() ?: com.torve.data.metadata.tmdbApiKey()
+        }, requestAllowed = { endpoint ->
+            val ageLookup = endpoint.matches(Regex("^/(movie/[1-9][0-9]*/release_dates|tv/[1-9][0-9]*/content_ratings|find/tt[0-9]+)$"))
+            (ageLookup && get<com.torve.data.profile.FamilyControls>().state.value.contentRestricted) ||
+                get<PreferencesRepository>().tmdbExtensionSelection().permits(endpoint)
+        }).also {
             it.contentLanguage = initialLang
         }
     }
-    single<MetadataRepository> { MetadataRepositoryImpl(get()) }
+    single<MetadataRepository> { MetadataRepositoryImpl(get(), family = get()) }
+    single { com.torve.data.metadata.LocalizedMediaRepository(get(), enrichmentAllowed = {
+        get<PreferencesRepository>().tmdbExtensionSelection().enrichment
+    }) }
     single<AvailabilityProvider> { TmdbAvailabilityProvider(get()) }
     single<AvailabilityRepository> { AvailabilityRepositoryImpl(get(), get(), get()) }
 
@@ -172,7 +189,7 @@ val sharedModule = module {
     single { KeywordSearchService(get(), get()) }
 
     // Stremio Addons
-    single { StremioAddonClient(get(), get()) }
+    single { StremioAddonClient(get(), get(), family = get()) }
 
     single {
         AccelerationApi(
@@ -181,6 +198,7 @@ val sharedModule = module {
             json = get(),
             baseUrlProvider = { com.torve.data.auth.AuthClient.DEFAULT_BASE_URL },
             channelProvider = get(),
+            parentGrantProvider = { get<com.torve.data.profile.FamilyControls>().parentGrant() },
         )
     }
 
@@ -188,8 +206,12 @@ val sharedModule = module {
     single {
         val client = DebridClient(get(), get(), get())
         val secretStore: com.torve.domain.integrations.IntegrationSecretStore = get()
+        val preferences: com.torve.domain.repository.PreferencesRepository = get()
         val settingsRefreshNotifier: com.torve.presentation.settings.SettingsRefreshNotifier = get()
         client.rdTokenRefresher = com.torve.data.debrid.RdTokenRefresher {
+            if (
+                "realdebrid" in preferences.readPandaDebridActivationSnapshot().disconnectedProviderIds
+            ) return@RdTokenRefresher null
             val refreshToken = secretStore.get(com.torve.domain.integrations.IntegrationSecretKey.DEBRID_RD_REFRESH_TOKEN)
             val clientId = secretStore.get(com.torve.domain.integrations.IntegrationSecretKey.DEBRID_RD_CLIENT_ID)
             val clientSecret = secretStore.get(com.torve.domain.integrations.IntegrationSecretKey.DEBRID_RD_CLIENT_SECRET)
@@ -200,6 +222,9 @@ val sharedModule = module {
             }
             try {
                 val tokens = client.rdRefreshAccessToken(refreshToken, clientId, clientSecret)
+                if (
+                    "realdebrid" in preferences.readPandaDebridActivationSnapshot().disconnectedProviderIds
+                ) return@RdTokenRefresher null
                 torveVerboseLog { "TORVE_RD: refresh succeeded newTokenLength=${tokens.accessToken.length}" }
                 secretStore.put(com.torve.domain.integrations.IntegrationSecretKey.DEBRID_API_KEY_REAL_DEBRID, tokens.accessToken)
                 secretStore.put(com.torve.domain.integrations.IntegrationSecretKey.DEBRID_RD_REFRESH_TOKEN, tokens.refreshToken)
@@ -213,30 +238,60 @@ val sharedModule = module {
         client
     }
 
-    // Library Overlay (Jellyfin + Plex → composite router)
-    single { JellyfinLibraryOverlayService(get(), get(), get()) }
+    // Library Overlay (Jellyfin + Plex â†’ composite router)
+    single { JellyfinLibraryOverlayService(get(), get(), get(), family = get()) }
     single { PlexLibraryOverlayService(get(), get(), get()) }
     single<LibraryOverlayService> { CompositeLibraryOverlayService(get(), get(), get(), get()) }
+    single<com.torve.domain.integrations.MediaLifecycleService> {
+        com.torve.data.integrations.SeerrMediaLifecycleService(get(), get(), get())
+    }
+    single { com.torve.presentation.library.LibraryRequestMonitor(get(), get(), get()) }
+    single<com.torve.domain.integrations.AutomationInstanceRepository> {
+        com.torve.data.integrations.PrefsAutomationInstanceRepository(get(), get())
+    }
+    single<com.torve.data.integrations.AutomationAdminClient> {
+        com.torve.data.integrations.ServarrAdminClient(get(), get())
+    }
+    single { com.torve.data.integrations.AutomationAccountSyncService(get(), get(), get(), userIds = get()) }
 
     // Trakt
     single<TraktAuthScopeProvider> { PersistedTraktAuthScopeProvider(get()) }
     single { TraktClient(get(), get(), authScopeProvider = get()) }
+    single { com.torve.presentation.detail.ContentCommunity(get(), get()) }
     single { TraktTokenStore(get(), get()) }
-    single { TraktAuthorizedApi(get(), get(), authScopeProvider = get()) }
-    single<TraktSyncRepository> { TraktSyncRepositoryImpl(get(), get(), get(), get()) }
+    single { com.torve.data.profile.SharedTraktConnection(get(), get(), get(), get()) }
+    single { TraktAuthorizedApi(get(), get(), authScopeProvider = get(),
+        personalScopeProvider = { get<UserIdProvider>().currentDataUserId() },
+        calendarPreferences = get(), calendarUserIds = get(),
+        accountTokens = { get<com.torve.data.profile.SharedTraktConnection>().latest() },
+        publishTokens = { old, next -> get<com.torve.data.profile.SharedTraktConnection>().publish(old, next) }) }
+    single<TraktSyncRepository> { TraktSyncRepositoryImpl(get(), get(), get(), get(),
+        ownerScopeProvider = { get<UserIdProvider>().currentDataUserId() }) }
     factory { TraktScrobbler(get(), get()) }
 
+    single { com.torve.data.trakt.SearchListsRepository(get(), get(), get(), get(), get(), get(), get(), get(), get()) }
+    factory { com.torve.presentation.search.SearchCollectionsViewModel(get(), get(), get(), get(), get(), get(), get()) }
+
     // SIMKL
-    single { SimklClient(get()) }
+    single { com.torve.data.simkl.SimklMutationJournal(get(), get(), get()) }
+    single { SimklClient(get(), get()) }
 
     // MDBList
     single { MdbListApi(get()) }
-    single { MdbListRepository(get(), get()) }
+    single { MdbListRepository(get(), get(), get()) }
     single { RatingsCacheRepository(get()) }
 
     // OMDB + Ratings
     single { OmdbClient(get(), get(), get()) }
-    single { RatingsEnricher(get(), get(), get(), get(), get()) }
+    single {
+        com.torve.data.ratings.BackendRatingsApi(
+            httpClient = get(),
+            baseUrlProvider = { com.torve.data.auth.AuthClient.DEFAULT_BASE_URL },
+            accessTokenProvider = { get<com.torve.data.auth.AuthClient>().getValidAccessToken() },
+        )
+    }
+    single { com.torve.data.ratings.CinemetaImdbRatingsApi(get()) }
+    single { RatingsEnricher(get(), get(), get(), get(), get(), get(), get()) }
 
     // Catalog top-cache: pre-paginated top-1000 per genre (movie/tv).
     single { com.torve.data.catalog.CatalogTopCacheRepository(get(), get()) }
@@ -250,6 +305,7 @@ val sharedModule = module {
     single { KodiClient(get()) }
 
     // Auth & Entitlements
+    single { com.torve.data.device.DeviceActivityApi(get(), get()) }
     single {
         val baseUrlProvider = { com.torve.data.auth.AuthClient.DEFAULT_BASE_URL }
         AuthClient(
@@ -282,18 +338,15 @@ val sharedModule = module {
         )
     }
     single {
-        BetaProgramApi(
-            httpClient = get(),
-            authClient = get(),
-            baseUrlProvider = { com.torve.data.auth.AuthClient.DEFAULT_BASE_URL },
-            installationIdProvider = { get<com.torve.domain.device.DeviceIdProvider>().getDeviceId() },
-        )
-    }
-    single {
         com.torve.data.security.TrustSignalsApi(
             httpClient = get(),
             baseUrlProvider = { com.torve.data.auth.AuthClient.DEFAULT_BASE_URL },
             installationIdProvider = { get<com.torve.domain.device.DeviceIdProvider>().getDeviceId() },
+            integrityMonitor = com.torve.data.security.PlayIntegrityMonitor(
+                httpClient = get(),
+                baseUrlProvider = { com.torve.data.auth.AuthClient.DEFAULT_BASE_URL },
+                preferences = get(),
+            ),
         )
     }
     single {
@@ -307,17 +360,25 @@ val sharedModule = module {
     // Parsers
     single { M3uParser() }
     single { EpgParser() }
-    single { CatchupResolver() }
+    single { CatchupResolver { from, to -> get<com.torve.data.profile.FamilyControls>().inheritPlayback(from, to) } }
 
     // Xtream Codes
     single { XtreamClient(get(), get()) }
 
     // Scoring & Aggregation
     single { StreamScorer() }
-    single { StreamSelector(get()) }
+    single { StreamContinuationSelector() }
+    single { StreamSelector(get(), get()) }
     single { CatalogAggregator(get()) }
     single { SubtitleAggregator(get()) }
     single { com.torve.data.subtitles.OpenSubtitlesClient(get(), get()) }
+    single { com.torve.data.subtitles.OpenSubtitlesHashService(get()) }
+    single { com.torve.data.subtitles.SubtitleDownloadValidator(get()) }
+    single { com.torve.data.subtitles.SubtitleIntelligence() }
+    single { com.torve.data.subtitles.SubtitleSearchCache() }
+    single {
+        com.torve.data.subtitles.SubtitleDiscoveryService(get(), get(), get(), get(), get())
+    }
     single { StreamAggregator(get(), get(), get()) }
 
     // Stream Repository
@@ -330,21 +391,67 @@ val sharedModule = module {
             httpClient = get(),
             telemetry = get(),
             preferencesRepository = get(),
-            subscriptionRepository = get(),
+            subscriptionRepository = get(), family = get(),
+            configuredUsenet = get(),
         )
     }
-    single { AccelerationInventorySyncService(get(), get(), get()) }
+    single {
+        val prefs = get<com.torve.domain.repository.PreferencesRepository>()
+        AccelerationInventorySyncService(get(), get(), get()) { provider ->
+            prefs.readPandaDebridActivationSnapshot().isEnabled(provider.pandaProviderId())
+        }
+    }
 
     // User ID provider for DB scoping. Uses a lazy AuthClient lookup so it can be
     // wired into PreferencesRepositoryImpl without forming a circular dependency
     // (AuthClient itself depends on DeviceLocalSettingsRepository).
-    single { UserIdProvider { get() } }
+    single { com.torve.data.profile.ProfileReadCache(get()) }
+    single {
+        val profiles: com.torve.data.profile.ProfileReadCache = get()
+        UserIdProvider(activeProfileIdProvider = profiles::activeProfileId, authClientProvider = { get() })
+    }
+    single { com.torve.data.simkl.SimklSyncService(get(), get(), get(), get(), get(), get()) }
+    single {
+        val metadata: MetadataRepository = get()
+        val prefs: PreferencesRepository = get()
+        val addons: AddonRepository = get()
+        val client: StremioAddonClient = get()
+        com.torve.presentation.watching.WatchingHubViewModel(get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(),
+            ratingsEnricher = getOrNull(), integrationSecretStore = getOrNull(), family = get(), showMetadata = { seed ->
+                val selection = prefs.tmdbExtensionSelection()
+                com.torve.presentation.watching.resolveWatchingMetadata(seed, addons.getEnabledAddons(),
+                    fetchMeta = { addon, type, id -> kotlinx.coroutines.withTimeoutOrNull(12_000L) {
+                        client.fetchMeta(addon.manifestUrl.removeSuffix("/manifest.json").trimEnd('/'), type, id).meta
+                    } }, tmdbAllowed = selection.catalogue || selection.enrichment, fetchTmdb = { item ->
+                        val id = item.tmdbId ?: item.imdbId?.let { metadata.findByImdbId(it, "tv")?.tmdbId }
+                        id?.let { metadata.getDetail("tv", it) }
+                    })
+            })
+    }
+    factory { com.torve.presentation.lists.TraktListsViewModel(get(), get(), get()) }
 
     // Watch Progress
     single<WatchProgressRepository> { WatchProgressRepositoryImpl(get(), get(), get(), get(), get(), get(), get()) }
     single { WatchStatsEngine() }
     single<WatchStatsRepository> { WatchStatsRepositoryImpl(get(), get(), get(), get(), get()) }
-    single { WatchSessionRecorder(get(), currentUserId = { get<UserIdProvider>().currentUserId() }) }
+    single { WatchSessionRecorder(get(), currentUserId = { get<UserIdProvider>().currentDataUserId() }) }
+    single<PlaybackSegmentRepository> { PlaybackSegmentRepositoryImpl(get(), get()) }
+    single { IntroDbSegmentMarkerProvider(httpClient = get()) }
+    single { SkipDbSegmentMarkerProvider(httpClient = get()) }
+    single { TheIntroDbSegmentMarkerProvider(httpClient = get()) }
+    single {
+        PlaybackSegmentEngine(
+            repository = get(),
+            providers = listOf(
+                get<SkipDbSegmentMarkerProvider>(),
+                get<IntroDbSegmentMarkerProvider>(),
+                get<TheIntroDbSegmentMarkerProvider>(),
+            ),
+        )
+    }
+
+    single { com.torve.data.replays.WebReplayCatalogue.create(getKoin()) }
+    single { com.torve.data.replays.ReplayPlaybackStore.create(getKoin()) }
 
     // Preferences / Settings sync
     single<DeviceLocalSettingsRepository> { PreferencesRepositoryImpl(get(), get()) }
@@ -355,6 +462,8 @@ val sharedModule = module {
             get(),
             baseUrlProvider = { com.torve.data.auth.AuthClient.DEFAULT_BASE_URL },
             channelProvider = get(),
+            parentGrantProvider = { get<com.torve.data.profile.FamilyControls>().parentGrant() },
+            profileIdProvider = { get<UserIdProvider>().currentProfileId() },
             installationIdProvider = { get<com.torve.domain.device.DeviceIdProvider>().getDeviceId() },
         )
     }
@@ -370,6 +479,7 @@ val sharedModule = module {
     single<MediaFavoritesRepository> { MediaFavoritesRepositoryImpl(get(), get(), get(), get()) }
     single<PreferencesRepository> { AccountAwarePreferencesRepository(get(), get(), get()) }
     single { SettingsRefreshNotifier() }
+    single { com.torve.data.catalog.CatalogGroupRepository(get(), get()) }
     single { DeviceRegistrationNotifier() }
     single { AddonPolicyRepository(get(), get()) }
     single {
@@ -399,10 +509,11 @@ val sharedModule = module {
             invalidationCoordinator = get(),
         )
     }
-    single { ContentPolicyFilter() }
+    single { com.torve.presentation.catalog.WatchedDiscoveryFilter(get(), get(), get(), get(), get(), get()) }
+    single { ContentPolicyFilter(get(), get()) }
 
     // Addon Repository
-    single<AddonRepository> { AddonRepositoryImpl(get(), get(), get(), get()) }
+    single<AddonRepository> { AddonRepositoryImpl(get(), get(), get(), get(), family = get()) }
     single {
         AddonSyncService(
             accessTokenProvider = { get<AuthClient>().getValidAccessToken() },
@@ -416,10 +527,10 @@ val sharedModule = module {
     }
 
     // Channel Repository
-    single<ChannelRepository> { ChannelRepositoryImpl(get(), get(), get(), get(), get(), get(), get()) }
+    single<ChannelRepository> { com.torve.data.profile.FamilyChannelRepository(ChannelRepositoryImpl(get(), get(), get(), get(), get(), get(), get(), get(), get()), get()) }
 
     // Download Repository
-    single<DownloadRepository> { DownloadRepositoryImpl(get(), get()) }
+    single<DownloadRepository> { DownloadRepositoryImpl(get(), get(), family = get()) }
 
     // Bulk Download Manager
     single { BulkDownloadManager(get(), get(), get(), get()) }
@@ -428,7 +539,34 @@ val sharedModule = module {
     single { DownloadCatalogueBuilder() }
 
     // Profile Repository
-    single<ProfileRepository> { ProfileRepositoryImpl(get(), get()) }
+    single { com.torve.data.profile.HouseholdSyncService(get(), get(), get(), get(), get()) }
+    single {
+        val auth: com.torve.data.auth.AuthClient = get()
+        val ids: com.torve.data.auth.UserIdProvider = get()
+        val household: com.torve.data.profile.HouseholdSyncService = get()
+        com.torve.data.profile.CloudLibraryBackups(get(), object : com.torve.data.profile.CloudBackupIdentity {
+            override fun account() = ids.currentUserIdOrNull()
+            override fun dataOwner() = ids.currentDataUserId()
+            override suspend fun token(expectedAccount: String) = auth.getValidAccessTokenForUser(expectedAccount)
+        }, object : com.torve.data.profile.CloudBackupPayloads {
+            override suspend fun export(expectedAccount: String) = household.exportLibraryBackup(expectedAccount)
+            override suspend fun restore(payload: String, expectedAccount: String) = household.restoreLibraryBackup(payload, expectedAccount)
+        })
+    }
+
+    single<com.torve.data.profile.FamilyPolicyRemote> { com.torve.data.profile.FamilyPolicyApi(get(), get(), { AuthClient.DEFAULT_BASE_URL }, { get<com.torve.domain.device.DeviceIdProvider>().getDeviceId() }) }
+    single { com.torve.data.profile.FamilyControls(get(), get(), get<UserIdProvider>(), get(), lookup = { item ->
+        val proof = get<TmdbApiClient>().familyCertificationProof(item)
+        proof.first?.let { get<com.torve.data.profile.FamilyControls>().rememberCanonicalIdentity(item, it) }
+        proof.second
+    }, profileRatingLimit = {
+        val ids = get<UserIdProvider>()
+        get<com.torve.data.profile.ProfileReadCache>().ratingLimit(ids.currentUserId(), ids.currentProfileId())
+    }, remote = get(), verifyAccount = { email, password ->
+        val auth = get<AuthClient>()
+        if (auth.login(email, password).success) auth.authUserFlow.value?.id else null
+    }) }
+    single<ProfileRepository> { ProfileRepositoryImpl(get(), get(), get(), syncProvider = { get() }, familyProvider = { get() }, restoreConnections = { get<AccountSessionCoordinator>().onProfileChanged() }) }
 
     // Shelf Config Repository
     single<ShelfConfigRepository> { ShelfConfigRepositoryImpl(get(), get()) }
@@ -436,7 +574,6 @@ val sharedModule = module {
     // Subscription
     single { RebateCodeApi(get()) }
     single<SubscriptionRepository> { SubscriptionRepositoryImpl(get(), get(), get(), get(), get()) }
-    single<BetaProgramRepository> { BetaProgramRepositoryImpl(get(), get(), get()) }
 
     // Watchlist Repository
     single<WatchlistRepository> { WatchlistRepositoryImpl(get(), get(), get(), get(), get(), get(), get(), get()) }
@@ -457,16 +594,22 @@ val sharedModule = module {
     // Cross-platform Newznab + TorBox usenet plumbing for the shared
     // Sports surface (and future Adult / NZB-Movies surfaces). Both
     // are stateless, thread-safe wrappers around the shared Ktor
-    // HttpClient — single() is fine.
+    // HttpClient â€” single() is fine.
     single { com.torve.data.usenet.NewznabClient(httpClient = get()) }
     single { com.torve.data.usenet.TorBoxUsenetClient(httpClient = get()) }
+    single { com.torve.data.usenet.AccountUsenetSourceSettings(
+        session = { get<com.torve.presentation.session.AccountSessionCoordinator>() }, api = get(), ids = get()) }
+    single { com.torve.data.usenet.ConfiguredUsenetSources(
+        newznab = get(), torbox = get(),
+        readSettings = { get<com.torve.data.usenet.AccountUsenetSourceSettings>().read() },
+        currentOwner = { get<UserIdProvider>().currentDataUserId() }) }
     factory {
         com.torve.presentation.pairing.TvPairingSignInViewModel(
             pairingApi = get(),
             authClient = get(),
         )
     }
-    single { AccountSessionCoordinator(get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get()) }
+    single { AccountSessionCoordinator(get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), userIdProvider = get(), householdSyncProvider = { get() }) }
 
     // Provider-health primitives. Repository hydrates from prefs on first
     // load; the coordinator holds in-memory checker registrations and is
@@ -474,7 +617,13 @@ val sharedModule = module {
     single<com.torve.domain.providerhealth.ProviderHealthRepository> {
         com.torve.data.providerhealth.PrefsBackedProviderHealthRepository(get())
     }
-    single { com.torve.presentation.providerhealth.ProviderHealthCoordinator(get()) }
+    single {
+        val featurePrefs = get<PreferencesRepository>()
+        val featureHealth = get<com.torve.domain.providerhealth.ProviderHealthRepository>()
+        com.torve.presentation.providerhealth.ProviderHealthCoordinator(get(),
+            isProviderEnabled = { key -> featurePrefs.isHealthProviderEnabled(key,
+                featureHealth.entries.value.firstOrNull { it.providerKey == key }?.category) })
+    }
     // Auto-rerun every checker when SettingsRefreshNotifier ticks
     // (Panda save success, Debrid token rotation, etc.). Both Desktop
     // and Android init launch a single long-running collector.
@@ -486,7 +635,7 @@ val sharedModule = module {
     }
     single { com.torve.presentation.setup.SetupIntentsViewModel(get()) }
 
-    // ── Credential-first setup wizard (Prompt 7B) ─────────────────
+    // â”€â”€ Credential-first setup wizard (Prompt 7B) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     // The four IntentValidators delegate to existing clients/state
     // singletons so the wizard's verdict matches what the rest of the
     // app sees. Validators are bound as singles so platform code can
@@ -590,7 +739,7 @@ val sharedModule = module {
         )
     }
 
-    // Phase 3 Sub-pass 1 — credential-transfer apply path. The
+    // Phase 3 Sub-pass 1 â€” credential-transfer apply path. The
     // protocol and crypto engine binding lives per-platform (desktop
     // wires JvmTransferCryptoEngine + SecretsTransferProtocol).
     single { com.torve.domain.transfer.ConsumedNonceStore(prefs = get()) }
@@ -606,7 +755,7 @@ val sharedModule = module {
             channelRepo = get(),
         )
     }
-    // Phase 3 — backend relay client for credential transfer. Binding
+    // Phase 3 â€” backend relay client for credential transfer. Binding
     // here is platform-agnostic; if the backend lacks `/api/v1/transfer/*`,
     // the client returns Unavailable and the UI degrades to manual paste.
     single<com.torve.data.transfer.TransferRelayApi> {
@@ -635,7 +784,7 @@ val sharedModule = module {
         )
     }
     factory {
-        // Platform tag — read from DeviceIdProvider so we don't need an
+        // Platform tag â€” read from DeviceIdProvider so we don't need an
         // expect/actual just for a string.
         val platformTag = runCatching { get<com.torve.domain.device.DeviceIdProvider>().getPlatform() }
             .getOrElse { "unknown" }
@@ -678,15 +827,15 @@ val sharedModule = module {
         )
     }
 
-    // Source-availability primitives — Phase 3 Slice A + Prompt 8.
+    // Source-availability primitives â€” Phase 3 Slice A + Prompt 8.
     // Real providers covering every "owned" playback path the user can
     // launch from a search result. Aggregator fans out in parallel and
     // caches results in-process so re-renders stay cheap.
     single { com.torve.data.sourceavailability.LocalDownloadSourceAvailabilityProvider(get()) }
     single { com.torve.data.sourceavailability.PlexSourceAvailabilityProvider(get(), get(), get()) }
     single { com.torve.data.sourceavailability.JellyfinSourceAvailabilityProvider(get(), get(), get()) }
-    // Shared resolver: tmdbId → imdb id. Cached per-process by
-    // MetadataRepository — calls TMDB only when the imdb id isn't in
+    // Shared resolver: tmdbId â†’ imdb id. Cached per-process by
+    // MetadataRepository â€” calls TMDB only when the imdb id isn't in
     // the local catalog. Returns null on any failure (the providers
     // treat null as UNCONFIGURED-silent).
     single<suspend (Int, com.torve.domain.model.MediaType) -> String?>(
@@ -708,10 +857,14 @@ val sharedModule = module {
         })
     }
     single {
+        val prefs = get<com.torve.domain.repository.PreferencesRepository>()
         com.torve.data.sourceavailability.DebridCacheSourceAvailabilityProvider(
             streamRepository = get(),
             secretStore = get(),
             tmdbToImdbResolver = get(qualifier = named("availability.tmdb_to_imdb")),
+            isProviderEnabled = { provider ->
+                prefs.readPandaDebridActivationSnapshot().isEnabled(provider.pandaProviderId())
+            },
         )
     }
     single {
@@ -728,9 +881,12 @@ val sharedModule = module {
             tmdbToImdbResolver = get(qualifier = named("availability.tmdb_to_imdb")),
         )
     }
+    single { com.torve.presentation.channels.ChannelsStateRelay() }
     single {
         com.torve.data.sourceavailability.IptvLiveSourceAvailabilityProvider(
-            channelsStateSource = { get<ChannelsViewModel>().state.value },
+            channelsStateSource = {
+                get<com.torve.presentation.channels.ChannelsStateRelay>().snapshot()
+            },
             titleSource = get(qualifier = named("availability.tmdb_to_title")),
         )
     }
@@ -754,15 +910,54 @@ val sharedModule = module {
         )
     }
 
-    // ── IPTV recording / EPG correction (Prompt 10 / 10B) ───────
+    // â”€â”€ IPTV recording / EPG correction (Prompt 10 / 10B) â”€â”€â”€â”€â”€â”€â”€
     // Repository binding lives per-platform (desktop uses
     // FileBackedRecordingRepository); shared keeps the scheduler
     // single + presentation VMs + the EPG correction repo.
     single {
         com.torve.data.recording.EpgCorrectionRepository(prefs = get())
     }
+    single<com.torve.domain.recording.SeriesPassResolver> {
+        val channels = get<com.torve.domain.repository.ChannelRepository>()
+        val recordings = get<com.torve.domain.recording.RecordingRepository>()
+        com.torve.domain.recording.EpgSeriesPassResolver(
+            programmesForChannel = { playlistId, channelId ->
+                val channel = channels.getChannels(playlistId).firstOrNull {
+                    it.url == channelId ||
+                        it.tvgId == channelId ||
+                        com.torve.domain.model.channelMatchesIdentity(it, channelId)
+                }
+                channels.getProgrammes(
+                    channel?.let { com.torve.domain.model.stableChannelId(it) } ?: channelId,
+                )
+            },
+            existingRecordingsForPass = { passId ->
+                recordings.listAll().filter { it.seriesPassId == passId }
+            },
+            channelNameForId = { playlistId, channelId ->
+                channels.getChannels(playlistId).firstOrNull {
+                    it.url == channelId ||
+                        it.tvgId == channelId ||
+                        com.torve.domain.model.channelMatchesIdentity(it, channelId)
+                }?.name
+            },
+            streamUrlForChannelId = { playlistId, channelId ->
+                channels.getChannels(playlistId).firstOrNull {
+                    it.url == channelId ||
+                        it.tvgId == channelId ||
+                        com.torve.domain.model.channelMatchesIdentity(it, channelId)
+                }?.url
+            },
+        )
+    }
     single {
-        com.torve.domain.recording.RecordingScheduler(repository = get())
+        com.torve.domain.recording.RecordingScheduler(
+            repository = get(),
+            passResolver = get(),
+        )
+    }
+    single {
+        com.torve.data.recording.RecordingSeriesPassStore(preferences = get())
     }
     single {
         com.torve.presentation.recording.RecordingsViewModel(
@@ -773,6 +968,7 @@ val sharedModule = module {
             // before recording lands there).
             starter = getOrNull()
                 ?: object : com.torve.presentation.recording.RecordingStarter {},
+            seriesPassStore = get(),
         )
     }
     single {
@@ -781,7 +977,7 @@ val sharedModule = module {
         )
     }
 
-    // ── LAN hub registry (Prompt 9 / 9B) ─────────────────────────
+    // â”€â”€ LAN hub registry (Prompt 9 / 9B) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     // Backend-assisted discovery + secret fetch. Shared between desktop
     // (publisher) and TV / mobile (consumer). Defensive: every call
     // degrades gracefully on a missing backend.
@@ -806,8 +1002,8 @@ val sharedModule = module {
         )
     }
 
-    // ── TV-Home outcome aggregator + one-click router (Prompt 11B) ──
-    // Consumed by the Android TV layer. Pure presentation — no Compose
+    // â”€â”€ TV-Home outcome aggregator + one-click router (Prompt 11B) â”€â”€
+    // Consumed by the Android TV layer. Pure presentation â€” no Compose
     // deps so the wiring stays unit-testable.
     single {
         com.torve.presentation.tvhome.TvHomeOutcomeViewModel(
@@ -815,7 +1011,6 @@ val sharedModule = module {
             availabilityAggregator = get(),
             lanLibraryConsumer = get(),
             providerHealthCoordinator = get(),
-            channelsViewModel = get(),
         )
     }
     single {
@@ -825,14 +1020,26 @@ val sharedModule = module {
     }
 
     // Use Cases
-    factory { GetRecommendationsUseCase(get(), get()) }
+    factory { GetRecommendationsUseCase(get(), get(), get(), get(), get(), get()) }
     factory { MoodMatcher(get()) }
 
-    // ViewModels — singletons share state across screens (e.g. TvRoot ↔ TvIptvScreen).
+    // ViewModels â€” singletons share state across screens (e.g. TvRoot â†” TvIptvScreen).
     // The database is pre-warmed on a background thread in TorveApp.onCreate so the
     // first koinInject() doesn't block the main thread with schema DDL.
-    single { HomeViewModel(get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get()) }
-    single { SearchViewModel(get(), get(), get(), get(), get(), get(), get()) }
+    single { HomeViewModel(get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), get(), searchLists = get()) }
+    single {
+        SearchViewModel(
+            metadataRepo = get(),
+            prefsRepo = get(),
+            contentPolicyRepository = get(),
+            contentPolicyFilter = get(),
+            invalidationCoordinator = get(),
+            ratingsEnricher = get(),
+            integrationSecretStore = get(),
+            profileRepository = get(),
+            aiResolver = com.torve.presentation.search.ConfiguredSearchAiResolver(get(), get(), get()),
+        )
+    }
     factory {
         DetailViewModel(
             get(), get(), get(), get(), get(), get(), get(), get(), get(),
@@ -842,21 +1049,36 @@ val sharedModule = module {
             usenetJobPoller = get(),
             telemetry = get(),
             watchStateRemoteSource = getOrNull(),
+            sourceTrackInspector = getOrNull(),
+            libraryRequestMonitor = getOrNull(),
             watchSessionRecorder = get(),
-        )
+            mediaLifecycleService = getOrNull(),
+            profileRepository = get(),
+        ).also { vm ->
+            // Every platform uses the same saved accounts and stream preferences.
+            // Resolve lazily so constructing a detail screen cannot create a cycle.
+            vm.setSettingsProvider { get<SettingsViewModel>() }
+        }
     }
-    factoryOf(::PersonViewModel)
+    factory { PersonViewModel(get(), get(), get(), get(), family = get()) }
     single {
         SettingsViewModel(
             get(), get(), get(), get(), get(), get(), get(), get(), get(), get(),
             get(), get(), get(), get(), get(), get(), get(), get(), get(), get(),
             get(),
+            mediaLifecycleService = getOrNull(),
+            simklSyncService = get(),
+            configuredUsenet = get(),
         ).also { vm ->
-            // Wire integration save callback — breaks circular dep by using lazy resolution.
-            vm.onIntegrationSaved = { type, credential, label ->
-                get<AccountSessionCoordinator>().saveIntegrationToBackend(type, credential, label)
+            // Wire integration save callback â€” breaks circular dep by using lazy resolution.
+            vm.onOptionalFeaturesChanged = { get<com.torve.presentation.providerhealth.ProviderHealthCoordinator>().reconcileDisabledProviders() }
+            vm.onIntegrationSaved = { type, credential, label, config ->
+                get<AccountSessionCoordinator>().saveIntegrationToBackend(type, credential, label, config)
             }
-            // Sync app language → TMDB content language.
+            vm.onIntegrationDeleted = { type ->
+                get<AccountSessionCoordinator>().deleteIntegrationFromBackend(type)
+            }
+            // Sync app language â†’ TMDB content language.
             val tmdb = get<TmdbApiClient>()
             vm.onLanguageChanged = { language ->
                 tmdb.contentLanguage = language.code.takeIf { it != "en" }
@@ -876,14 +1098,15 @@ val sharedModule = module {
         )
     }
     single { com.torve.data.panda.PandaApiClient(get(), get()) }
-    // Singleton mirror so provider-health checkers can read the Panda
-    // wizard's current config without holding a (factory-bound) VM
-    // reference. The VM publishes its `_state` here on every update.
+    // Singleton mirror so provider-health checkers can read the latest Panda config.
     single { com.torve.presentation.panda.PandaConfigStateStore() }
-    factory {
+    // Keep one account-scoped activation projection so startup, mobile, TV, and
+    // desktop cannot race independent cached copies of the same Panda config.
+    single {
         com.torve.presentation.panda.PandaSetupViewModel(
             get(), get(), get(), get(), get(), get(), get(), get(),
             configStateStore = get(),
+            userIdProvider = get(),
         )
     }
     // NzbDAV / Usenet-resolver data layer. Talks only to the Torve backend;
@@ -895,7 +1118,14 @@ val sharedModule = module {
             authClient = get(),
             baseUrlProvider = { com.torve.data.auth.AuthClient.DEFAULT_BASE_URL },
             installationIdProvider = { get<com.torve.domain.device.DeviceIdProvider>().getDeviceId() },
+            parentGrantProvider = { get<com.torve.data.profile.FamilyControls>().parentGrant() },
         )
+    }
+    factory {
+        com.torve.presentation.integrations.AutomationSettingsViewModel(get(), get(), get(), get())
+    }
+    factory {
+        com.torve.presentation.integrations.AutomationAdministrationViewModel(get(), get())
     }
     single {
         com.torve.data.support.SupportApi(
@@ -911,7 +1141,7 @@ val sharedModule = module {
             secretStore = get(),
         )
     }
-    // Analytics surface. Default is a no-op sink — feature code can emit
+    // Analytics surface. Default is a no-op sink â€” feature code can emit
     // safely and a real backend integration can swap this without VM or
     // coordinator changes. See com.torve.domain.telemetry.TelemetryEmitter.
     //
@@ -952,20 +1182,24 @@ val sharedModule = module {
             // build time + emit health to drive the stale banner.
             epgCorrectionRepository = get(),
             epgCorrectionViewModel = get(),
+            stateRelay = get(), family = get(),
         )
     }
     factory {
         CalendarViewModel(
             traktApi = get(),
             tokenStore = get(),
-            prefsRepo = get(),
+            prefsRepo = get(), family = get(),
         )
     }
-    factory { DownloadViewModel(get(), contentPolicyRepository = get(), contentPolicyFilter = ContentPolicyFilter()) }
-    factory { DownloadCatalogueViewModel(get(), get(), get(), get(), contentPolicyRepository = get(), contentPolicyFilter = ContentPolicyFilter()) }
-    factoryOf(::ProfileViewModel)
+    factory { DownloadViewModel(get(), contentPolicyRepository = get(), contentPolicyFilter = get()) }
+    factory { DownloadCatalogueViewModel(get(), get(), get(), get(), contentPolicyRepository = get(), contentPolicyFilter = get()) }
+    factory { ProfileViewModel(profileRepo = get(), family = get()) }
+    single { com.torve.data.profile.FamilySourceProvisioner(get(), get(), get(), get()) }
+    single { com.torve.data.profile.ProfileConnectionCopier(get(), get(), get(), get(), get(), get()) }
+    factory { com.torve.presentation.profile.FamilyControlsViewModel(get(), get(), { MetadataRepositoryImpl(get<TmdbApiClient>()) }, { get() }, { get() }, { get() }, provisionSources = { id, rules -> get<com.torve.data.profile.FamilySourceProvisioner>().provision(id, rules) }, copier = get(), syncProfiles = { get<com.torve.data.profile.HouseholdSyncService>().refresh(force = true) }) }
     // Singleton so NavGraph, PaywallScreen, and all other screens share
-    // the same premium state — avoids stale locks after purchase/login.
+    // the same premium state â€” avoids stale locks after purchase/login.
     single {
         SubscriptionViewModel(
             subscriptionRepo = get(),
@@ -999,12 +1233,24 @@ val sharedModule = module {
             invalidationCoordinator = get(),
             ratingsEnricher = getOrNull(),
             integrationSecretStore = getOrNull(),
-            traktApi = getOrNull(),
+            traktApi = getOrNull(), searchLists = get(),
         )
     }
-    single { BetaProgramViewModel(get(), get()) }
     factory { SensitiveMaterialSettingsViewModel(get()) }
-    factory { com.torve.presentation.jellyfin.JellyfinBrowserViewModel(get()) }
+    // One paged library cache is shared by TV/mobile surfaces. Recreating this
+    // per composition can download the same large Jellyfin library repeatedly.
+    single { com.torve.presentation.jellyfin.JellyfinBrowserViewModel(get(), get(), family = get()) }
+    factory {
+        com.torve.presentation.library.PermanentLibraryViewModel(
+            lifecycleService = get(),
+            instanceRepository = get(),
+            adminClient = get(),
+            telemetry = get(),
+            metadataRepository = get(),
+            requestMonitor = get(),
+            featurePreferences = get(),
+        )
+    }
 }
 
 /**

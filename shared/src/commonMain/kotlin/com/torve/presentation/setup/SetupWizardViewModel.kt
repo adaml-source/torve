@@ -238,6 +238,8 @@ class SetupWizardViewModel(
         scope.launch {
             _state.update { it.copy(traktLoading = true, traktError = null) }
             try {
+                val current = _state.value
+                traktClient.setCredentials(current.traktClientId, current.traktClientSecret)
                 val code = traktClient.getDeviceCode()
                 _state.update { it.copy(traktDeviceCode = code, traktLoading = false) }
                 pollTraktDevice(code)
@@ -391,6 +393,7 @@ class SetupWizardViewModel(
                 integrationSecretStore.put(IntegrationSecretKey.TRAKT_CLIENT_SECRET, s.traktClientSecret)
                 prefsRepo.remove("trakt_client_secret")
             }
+            traktClient.setCredentials(s.traktClientId, s.traktClientSecret)
         }
 
         // Mark setup as complete

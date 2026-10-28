@@ -110,6 +110,7 @@ class SetupIntentsViewModelTest {
         val row = repo.entries.value.single()
         assertEquals(ProviderHealthStatus.RED, row.status)
         assertEquals(99L, row.lastCheckedAt)
-        assertTrue(row.message?.contains("boom") == true, "expected 'boom' in message: ${row.message}")
+        assertEquals("Could not check this connection. Try again.", row.message)
+        assertTrue(row.message?.contains("boom") == false, "Internal exception details must not reach the settings UI")
     }
 }

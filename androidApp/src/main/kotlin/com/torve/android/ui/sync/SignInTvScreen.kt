@@ -105,12 +105,7 @@ fun SignInTvScreen(
             TopAppBar(
                 title = { Text(stringResource(R.string.sign_in_tv_title)) },
                 navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(
-                            Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = stringResource(R.string.common_back),
-                        )
-                    }
+                    com.torve.android.ui.components.BackButton(onClick = onBack)
                 },
             )
         },

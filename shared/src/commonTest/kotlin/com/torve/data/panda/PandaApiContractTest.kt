@@ -304,6 +304,28 @@ class PandaApiContractTest {
         assertEquals("tb-key", dto.debridConnections[1].apiKey)
     }
 
+    @Test
+    fun configRecordPreservesExplicitDisabledConnection() {
+        val record = json.decodeFromString<PandaConfigRecord>(
+            """
+            {
+              "config_id": "cfg123",
+              "config": {
+                "debridService": "realdebrid",
+                "debridApiKey": "[redacted]",
+                "debridConnections": [
+                  {"provider":"realdebrid","apiKey":"[redacted]","enabled":false}
+                ]
+              },
+              "updated_at": "2026-08-13T12:00:00Z"
+            }
+            """.trimIndent(),
+        )
+
+        assertEquals(false, record.config?.debridConnections?.single()?.enabled)
+        assertEquals(false, record.config?.debridActivationState()?.get("realdebrid"))
+    }
+
     // ── API Key Request ──
 
     @Test

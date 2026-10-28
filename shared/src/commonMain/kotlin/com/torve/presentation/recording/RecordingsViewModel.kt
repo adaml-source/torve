@@ -4,7 +4,9 @@ import com.torve.domain.recording.Recording
 import com.torve.domain.recording.RecordingMetadataSnapshot
 import com.torve.domain.recording.RecordingRepository
 import com.torve.domain.recording.RecordingScheduler
+import com.torve.domain.recording.RecordingSeriesPass
 import com.torve.domain.recording.RecordingStatus
+import com.torve.data.recording.RecordingSeriesPassStore
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -48,10 +50,19 @@ class RecordingsViewModel(
     private val scheduler: RecordingScheduler,
     private val repository: RecordingRepository,
     private val starter: RecordingStarter = object : RecordingStarter {},
+    private val seriesPassStore: RecordingSeriesPassStore? = null,
     private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
 ) {
 
     private val _conflict = MutableStateFlow<PendingConflict?>(null)
+    val seriesPasses: StateFlow<List<RecordingSeriesPass>> = seriesPassStore?.passes
+        ?: MutableStateFlow(emptyList())
+
+    init {
+        scope.launch {
+            seriesPassStore?.load()
+        }
+    }
 
     /** Hot list of every recording, sorted by start time. */
     val state: StateFlow<RecordingsUiState> = combine(
@@ -152,6 +163,9 @@ class RecordingsViewModel(
                         runCatching { starter.runNow(outcome.recording) }
                     }
                 }
+                is RecordingScheduler.ScheduleResult.SeriesScheduled -> {
+                    _conflict.value = null
+                }
                 is RecordingScheduler.ScheduleResult.Invalid,
                 RecordingScheduler.ScheduleResult.InThePast -> {
                     // The user-facing copy is rendered from the
@@ -194,6 +208,39 @@ class RecordingsViewModel(
             if (!stopped) {
                 scheduler.cancel(id)
             }
+        }
+    }
+
+    fun scheduleSeriesPass(
+        pass: RecordingSeriesPass,
+        onResult: (RecordingScheduler.ScheduleResult) -> Unit = {},
+    ) {
+        scope.launch {
+            val result = scheduler.scheduleSeriesPass(pass)
+            if (result is RecordingScheduler.ScheduleResult.SeriesScheduled) {
+                seriesPassStore?.upsert(pass)
+            }
+            onResult(result)
+        }
+    }
+
+    /** Re-expand saved rules after guide data changes; existing programme rows are de-duplicated. */
+    fun materializeSeriesPasses() {
+        scope.launch {
+            val passes = seriesPassStore?.load().orEmpty()
+            passes.forEach { pass -> scheduler.scheduleSeriesPass(pass) }
+        }
+    }
+
+    fun cancelSeriesPass(passId: String) {
+        scope.launch {
+            seriesPassStore?.remove(passId)
+            repository.listAll()
+                .filter {
+                    it.seriesPassId == passId &&
+                        it.status in setOf(RecordingStatus.SCHEDULED, RecordingStatus.RECORDING)
+                }
+                .forEach { cancel(it.id) }
         }
     }
 

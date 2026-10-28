@@ -51,6 +51,7 @@ internal suspend fun repairDuplicatePlaylistsForUser(
     loadXtreamPassword: suspend (String) -> String?,
     saveXtreamPassword: suspend (String, String) -> Unit,
     removeXtreamPassword: suspend (String) -> Unit,
+    preferredPlaylistIds: Set<String> = emptySet(),
 ): DuplicatePlaylistRepairResult {
     val rows = database.torveQueries.getAllPlaylists(userId = userId).executeAsList()
     val groups = duplicatePlaylistGroups(rows)
@@ -73,7 +74,7 @@ internal suspend fun repairDuplicatePlaylistsForUser(
             val selectedId = database.torveQueries
                 .getPreference(userId = userId, key = KEY_CHANNELS_SELECTED_PLAYLIST)
                 .executeAsOneOrNull()
-            val winner = chooseDuplicateWinner(candidates, selectedId)
+            val winner = chooseDuplicateWinner(candidates, selectedId, preferredPlaylistIds)
             val losers = candidates.filterNot { it.row.id == winner.row.id }
             if (losers.isEmpty()) return@forEach
 
@@ -196,9 +197,11 @@ private fun TorveDatabase.repairCandidate(
 private fun chooseDuplicateWinner(
     candidates: List<DuplicateRepairCandidate>,
     selectedId: String?,
+    preferredPlaylistIds: Set<String>,
 ): DuplicateRepairCandidate {
     return candidates.maxWith(
-        compareBy<DuplicateRepairCandidate> { if (it.row.id == selectedId) 1 else 0 }
+        compareBy<DuplicateRepairCandidate> { if (it.row.id in preferredPlaylistIds) 1 else 0 }
+            .thenBy { if (it.row.id == selectedId) 1 else 0 }
             .thenBy { it.channelCount }
             .thenBy { if (!it.row.epg_url.isNullOrBlank()) 1 else 0 }
             .thenBy { it.epgProgrammeCount }
@@ -327,7 +330,7 @@ private fun TorveDatabase.copyEpgSnapshot(
         playlistId = source.row.id,
         generationId = sourceGeneration,
     ).executeAsList().forEach { row ->
-        torveQueries.insertEpgProgramme(
+        torveQueries.insertEpgProgrammeWithDetails(
             user_id = userId,
             playlist_id = winner.row.id,
             generation_id = winnerGeneration,
@@ -337,6 +340,8 @@ private fun TorveDatabase.copyEpgSnapshot(
             start_time = row.start_time,
             end_time = row.end_time,
             title = row.title,
+            sub_title = row.sub_title,
+            description = row.description,
         )
     }
     torveQueries.setPreference(

@@ -10,9 +10,23 @@ import com.torve.domain.model.ResolvedStream
 import com.torve.domain.model.Season
 import com.torve.domain.model.StartupCandidate
 import com.torve.domain.model.WatchProgress
+import com.torve.domain.integrations.MediaLifecycleStatus
 
 /** Canonical key for episode tracking — single source of truth. */
 fun episodeKey(season: Int, episode: Int): String = "s${season}e${episode}"
+
+/** Pure selection policy shared by the detail model and regression tests. */
+internal fun firstUnwatchedEpisode(
+    seasons: List<com.torve.domain.model.Season>,
+    watchedEpisodes: Set<String>,
+): Pair<Int, Int>? = seasons
+    .asSequence()
+    .filter { it.seasonNumber > 0 }
+    .sortedBy { it.seasonNumber }
+    .flatMap { season ->
+        (1..season.episodeCount).asSequence().map { episode -> season.seasonNumber to episode }
+    }
+    .firstOrNull { (season, episode) -> episodeKey(season, episode) !in watchedEpisodes }
 
 /**
  * UI-facing snapshot of an in-flight "preparing" session. The VM owns the
@@ -38,6 +52,14 @@ enum class NextEpisodeMode {
     PLAY_FROM_START,
 }
 
+/** A background availability check must never look like a user-submitted request. */
+enum class MediaLifecycleOperation {
+    CHECK_AVAILABILITY,
+    REQUEST,
+    RETRY,
+    REMOVE,
+}
+
 data class NextEpisodeInfo(
     val season: Int,
     val episode: Int,
@@ -57,6 +79,8 @@ data class NextEpisodeInfo(
 }
 
 data class DetailUiState(
+    val returnToPrimaryRequestId: Int = 0,
+    val hideUnwatchedSpoilers: Boolean = false,
     val isLoading: Boolean = true,
     val mediaItem: MediaItem? = null,
     val similar: List<MediaItem> = emptyList(),
@@ -68,9 +92,11 @@ data class DetailUiState(
     val error: String? = null,
     // Streams
     val streams: List<ParsedStream> = emptyList(),
+    val sourceStatistics: List<com.torve.domain.model.ProviderSourceStat> = emptyList(),
     val startupCandidates: List<StartupCandidate> = emptyList(),
     val isLoadingStreams: Boolean = false,
     val isLoadingMoreSources: Boolean = false,
+    val isInspectingSourceLanguages: Boolean = false,
     val streamsError: String? = null,
     val streamsErrorHint: String? = null,
     val streamFilterHiddenCount: Int = 0,
@@ -105,6 +131,13 @@ data class DetailUiState(
     // Episode tracking: keys like "s1e1", "s1e2", etc.
     val watchedEpisodes: Set<String> = emptySet(),
     val isInLibrary: Boolean = false,
+    // Seerr -> Sonarr/Radarr permanent-library lifecycle. Kept separate from
+    // stream availability because the user can Play now while this progresses.
+    val mediaLifecycleStatus: MediaLifecycleStatus? = null,
+    val isLoadingMediaLifecycle: Boolean = false,
+    val mediaLifecycleOperation: MediaLifecycleOperation = MediaLifecycleOperation.CHECK_AVAILABILITY,
+    val mediaLifecycleError: String? = null,
+    val mediaLifecycleMessage: String? = null,
     // Track what we're fetching streams for (for download labeling)
     val streamContextSeason: Int? = null,
     val streamContextEpisode: Int? = null,
@@ -147,13 +180,37 @@ data class DetailUiState(
     val primaryPlayLabel: String
         get() = when {
             mediaItem?.type == com.torve.domain.model.MediaType.SERIES && nextEpisode != null -> nextEpisode.label
-            watchProgress != null && watchProgress.progressPercent > 0.02f && watchProgress.progressPercent < 0.9f -> {
+            watchProgress != null && watchProgress.progressPercent > 0.02f && !watchProgress.isWatched() -> {
                 val stamp = formatHms(watchProgress.positionMs)
                 if (stamp != null) "Resume from $stamp" else "Resume"
             }
             else -> "Play"
-        }
+    }
 }
+
+/** Terminal preparation failures must release every blocking playback flag. */
+internal fun DetailUiState.withPreparingFailure(reason: String): DetailUiState = copy(
+    preparing = null,
+    isResolving = false,
+    autoPlayMessage = null,
+    showStreamPicker = streams.isNotEmpty(),
+    resolveError = reason,
+)
+
+/** Cancel also invalidates a ready handoff that the UI has not consumed yet. */
+internal fun DetailUiState.withSourceLookupCancelled(): DetailUiState = copy(
+    preparing = null,
+    isLoadingStreams = false,
+    isLoadingMoreSources = false,
+    isResolving = false,
+    resolvedStream = null,
+    usenetPlaybackIntent = null,
+    autoPlayMessage = null,
+    streamsError = null,
+    streamsErrorHint = null,
+    resolveError = null,
+    showStreamPicker = streams.isNotEmpty(),
+)
 
 /**
  * Format a position in milliseconds as `h:mm:ss` (or `m:ss` when under an
@@ -172,3 +229,10 @@ private fun formatHms(positionMs: Long): String? {
         "${minutes}:${seconds.toString().padStart(2, '0')}"
     }
 }
+
+/** Leaving a detail route must not carry an open picker or a ready playback intent into its next appearance. */
+internal fun DetailUiState.withSourcePresentationClosed(): DetailUiState = withSourceLookupCancelled().copy(
+    showStreamPicker = false, streams = emptyList(), sourceStatistics = emptyList(), startupCandidates = emptyList(),
+    streamFilterHiddenCount = 0, autoPlayStream = null, autoPlayFailed = false,
+    usenetCandidates = emptyMap(), isInspectingSourceLanguages = false,
+)

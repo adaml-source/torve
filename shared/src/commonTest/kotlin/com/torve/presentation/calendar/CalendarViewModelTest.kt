@@ -25,6 +25,37 @@ class CalendarViewModelTest {
     private val dispatcher = StandardTestDispatcher()
 
     @Test
+    fun saved_calendar_is_visible_while_first_network_request_is_still_pending() = runTest(dispatcher) {
+        val response = CompletableDeferred<TraktCalendarResult>()
+        val episode = sampleEpisode()
+        val dataSource = FakeCalendarDataSource().apply {
+            saved = TraktCalendarResult(listOf(episode), isStale = true)
+            enqueueDeferred(response)
+        }
+        val viewModel = newViewModel(dataSource)
+        runCurrent()
+        assertEquals(listOf(episode), viewModel.state.value.episodes)
+        assertFalse(viewModel.state.value.isLoading)
+        assertEquals(1, dataSource.calendarCalls)
+        response.complete(TraktCalendarResult(listOf(sampleEpisode("Updated show")), isStale = false))
+        advanceUntilIdle()
+        assertEquals("Updated show", viewModel.state.value.episodes.single().showTitle)
+    }
+
+    @Test
+    fun disconnect_clears_previously_visible_calendar() = runTest(dispatcher) {
+        val dataSource = FakeCalendarDataSource().apply { enqueueSuccess(listOf(sampleEpisode())) }
+        val viewModel = newViewModel(dataSource)
+        advanceUntilIdle()
+        dataSource.token = null
+        viewModel.refresh()
+        advanceUntilIdle()
+        assertTrue(viewModel.state.value.episodes.isEmpty())
+        assertTrue(viewModel.state.value.groupedEpisodes.isEmpty())
+        assertFalse(viewModel.state.value.traktConnected)
+    }
+
+    @Test
     fun blank_token_does_not_call_calendar_and_shows_connect_state() = runTest(dispatcher) {
         val dataSource = FakeCalendarDataSource(token = null)
         val viewModel = newViewModel(dataSource)
@@ -262,6 +293,7 @@ private class FakeCalendarDataSource(
     var token: String? = "token",
 ) : CalendarDataSource {
     private val responses = mutableListOf<suspend () -> TraktCalendarResult>()
+    var saved: TraktCalendarResult? = null
     val requestedDays = mutableListOf<Int>()
     var calendarCalls = 0
         private set
@@ -283,6 +315,7 @@ private class FakeCalendarDataSource(
     }
 
     override suspend fun accessToken(): String? = token
+    override suspend fun cachedCalendar(days: Int): TraktCalendarResult? = saved
 
     override suspend fun getCalendar(days: Int): TraktCalendarResult {
         calendarCalls++

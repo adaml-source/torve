@@ -31,4 +31,10 @@ object TvNotificationQueue {
     }
 }
 
+internal fun shouldClearTvNotification(
+    active: TvNotification?,
+    clearRequest: TvNotification,
+): Boolean = clearRequest.clear &&
+    (clearRequest.tag == null || active?.tag == clearRequest.tag)
+
 private const val DEFAULT_DURATION_MS = 2_400L

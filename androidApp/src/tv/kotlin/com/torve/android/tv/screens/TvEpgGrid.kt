@@ -1,10 +1,17 @@
 package com.torve.android.tv.screens
 
+import com.torve.android.tv.components.tvSettingsLabel as localizedUiText
+
+import com.torve.android.tv.components.tvLiquidGlass
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.focusGroup
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.gestures.LocalBringIntoViewSpec
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -14,14 +21,21 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.size
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Star
+import androidx.compose.material3.Icon
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -40,8 +54,11 @@ import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
-import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -49,7 +66,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.tv.material3.ClickableSurfaceDefaults
 import androidx.tv.material3.Surface
-import coil3.compose.AsyncImage
 import com.torve.android.R
 import com.torve.android.ui.theme.Amber
 import com.torve.android.ui.theme.Ash
@@ -63,6 +79,8 @@ import com.torve.domain.model.Channel
 import com.torve.domain.model.EnrichedChannel
 import com.torve.domain.model.EpgProgramme
 import com.torve.domain.model.programmesForEpgChannel
+import com.torve.presentation.channels.guideProgrammeSlots
+import com.torve.domain.model.stableChannelId
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -70,25 +88,25 @@ import kotlinx.coroutines.delay
 
 internal const val IPTV_EPG_WINDOW_HOURS = 2
 private const val EPG_SLOT_MINUTES = 30
-private const val EPG_SLOT_WIDTH_DP = 300
 private const val EPG_CHANNEL_COL_WIDTH_DP = 178
-private const val EPG_ROW_HEIGHT_DP = 46
+private const val EPG_ROW_HEIGHT_DP = 48
+private const val CHANNEL_LIST_ROW_HEIGHT_DP = 48
 private val epgTimeFormat = SimpleDateFormat("HH:mm", Locale.getDefault())
 private val epgDateFormat = SimpleDateFormat("EEE, MMM d", Locale.getDefault())
 
 // Navigation tuning
 private const val VERTICAL_DEBOUNCE_MS = 120L
 private const val FOCUS_SETTLE_MS = 40L
-// Vertical safe band: don't scroll if the target row is within this
-// many rows of the viewport edges. Only scroll when it would leave view.
-private const val VERTICAL_SAFE_MARGIN_ROWS = 1
 
-private data class EpgWindowCell(
+internal data class EpgWindowCell(
     val startMs: Long,
     val endMs: Long,
     val programme: EpgProgramme?,
-)
+) {
+    fun isCurrentAt(nowMs: Long): Boolean = programme != null && nowMs >= startMs && nowMs < endMs
+}
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 internal fun TvEpgGrid(
     channels: List<EnrichedChannel>,
@@ -107,15 +125,47 @@ internal fun TvEpgGrid(
     onGridCellFocused: (rowIndex: Int, colIndex: Int) -> Unit,
     onMoveVertical: (delta: Int) -> Unit,
     onChannelPlay: (Channel) -> Unit,
+    onProgrammeActions: (Channel, EpgProgramme?) -> Unit,
     onTimeForward: () -> Unit,
     modifier: Modifier = Modifier,
     channelColumnWidth: Dp = EPG_CHANNEL_COL_WIDTH_DP.dp,
+    showGuide: Boolean? = null,
+    favoriteIds: Set<String> = emptySet(),
+    showEmptyMessage: Boolean = true,
+    onGridFocusRequester: (FocusRequester) -> Unit = {},
+    focusCenterInRoot: Float? = null,
 ) {
+    var rowViewportTop by remember { mutableFloatStateOf(0f) }
+    var rowViewportHeight by remember { mutableFloatStateOf(0f) }
+    val rowHeightPx = with(LocalDensity.current) { EPG_ROW_HEIGHT_DP.dp.toPx() }
+    val rowCenter = (focusCenterInRoot?.minus(rowViewportTop) ?: (rowViewportHeight / 2f))
+        .coerceIn(0f, rowViewportHeight)
+    val centerBringIntoViewSpec = remember(rowCenter) {
+        TvChannelCenterBringIntoViewSpec(rowCenter.takeIf { it > 0f })
+    }
+    CompositionLocalProvider(LocalBringIntoViewSpec provides centerBringIntoViewSpec) {
+    BoxWithConstraints(modifier) {
     val slotMillis = EPG_SLOT_MINUTES * 60_000L
     val slotCount = ((windowEndMs - windowStartMs) / slotMillis).toInt().coerceAtLeast(1)
-    val timelineWidth = (slotCount * EPG_SLOT_WIDTH_DP).dp
+    val timelineWidth = (maxWidth - channelColumnWidth).coerceAtLeast(1.dp)
+    val slotWidth = timelineWidth / slotCount
     val listState = rememberLazyListState()
     var nowMs by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    val guideCoverageCount = remember(channels, guideProgrammes, playlistId) {
+        channels.count { enriched ->
+            val lookupPlaylistId = enriched.channel.playlistId
+                .takeIf { it.isNotBlank() }
+                ?: playlistId.orEmpty()
+            programmesForEpgChannel(
+                programmesByChannelKey = guideProgrammes,
+                playlistId = lookupPlaylistId,
+                channel = enriched.channel,
+            ).isNotEmpty()
+        }
+    }
+    val useChannelListLayout = showGuide?.not() ?: (!isGuideLoading &&
+        channels.isNotEmpty() &&
+        guideCoverageCount * 5 < channels.size)
 
     LaunchedEffect(Unit) {
         while (true) {
@@ -128,43 +178,20 @@ internal fun TvEpgGrid(
     val targetCol = focusColIndex.coerceAtLeast(0)
     var lastVerticalMoveMs by remember { mutableLongStateOf(0L) }
 
-    // Gentle scroll: only scroll when the target row is outside the visible
-    // viewport with a small margin. Never snap the target to the top.
-    LaunchedEffect(focusRequestToken, targetRow, channels.size) {
-        if (channels.isEmpty()) return@LaunchedEffect
-        val firstVisible = listState.firstVisibleItemIndex
-        val visibleCount = listState.layoutInfo.visibleItemsInfo.size
-        val lastVisible = firstVisible + visibleCount - 1
-        val safeTop = firstVisible + VERTICAL_SAFE_MARGIN_ROWS
-        val safeBottom = lastVisible - VERTICAL_SAFE_MARGIN_ROWS
-        when {
-            // Target is above the safe band — scroll up just enough
-            targetRow < safeTop -> {
-                val scrollTo = (targetRow - VERTICAL_SAFE_MARGIN_ROWS).coerceAtLeast(0)
-                runCatching { listState.animateScrollToItem(scrollTo) }
-            }
-            // Target is below the safe band — scroll down just enough
-            targetRow > safeBottom -> {
-                val scrollTo = (targetRow - visibleCount + VERTICAL_SAFE_MARGIN_ROWS + 1)
-                    .coerceIn(0, (channels.size - visibleCount).coerceAtLeast(0))
-                runCatching { listState.animateScrollToItem(scrollTo) }
-            }
-            // Target is within safe band — no scroll needed
+    // Compose an offscreen restored row before its requester runs. Visible rows
+    // use the same centre pivot for channel lists and the programme guide.
+    LaunchedEffect(focusRequestToken, targetRow, channels.size, isFocusEnabled) {
+        if (channels.isEmpty() || !isFocusEnabled) return@LaunchedEffect
+        val layout = listState.layoutInfo
+        if (layout.visibleItemsInfo.none { it.index == targetRow }) {
+            val centerOffset = (rowCenter - rowHeightPx / 2f - layout.beforeContentPadding).toInt()
+            runCatching { listState.scrollToItem(targetRow, -centerOffset) }
         }
     }
 
     Column(
-        modifier = modifier
-            .clip(RoundedCornerShape(26.dp))
-            .background(
-                Brush.verticalGradient(
-                    colors = listOf(
-                        Charcoal.copy(alpha = 0.72f),
-                        Obsidian.copy(alpha = 0.92f),
-                    ),
-                ),
-            )
-            .border(1.dp, Steel.copy(alpha = 0.28f), RoundedCornerShape(26.dp))
+        modifier = Modifier.fillMaxSize()
+            .tvLiquidGlass(cornerRadius = 16.dp, quiet = true, baseTint = Obsidian.copy(alpha = .24f))
             .onPreviewKeyEvent { event ->
                 // Serialize vertical navigation at the grid level.
                 // Debounce prevents stacked DPAD events from causing double-jumps.
@@ -182,14 +209,36 @@ internal fun TvEpgGrid(
             }
             .focusGroup(),
     ) {
-        EpgTimeHeader(
-            windowStartMs = windowStartMs,
-            slotCount = slotCount,
-            slotMillis = slotMillis,
-            channelColumnWidth = channelColumnWidth,
-        )
+        if (useChannelListLayout) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(24.dp)
+                    .background(Obsidian.copy(alpha = 0.78f))
+                    .padding(horizontal = 18.dp),
+                contentAlignment = Alignment.CenterStart,
+            ) {
+                Text(
+                    text = stringResource(R.string.tv_live_channels_list),
+                    color = Snow,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.SemiBold,
+                )
+            }
+        } else {
+            EpgTimeHeader(
+                windowStartMs = windowStartMs,
+                slotCount = slotCount,
+                slotMillis = slotMillis,
+                channelColumnWidth = channelColumnWidth,
+                slotWidth = slotWidth,
+                nowMs = nowMs,
+                windowEndMs = windowEndMs,
+            )
+        }
 
         if (channels.isEmpty()) {
+            if (showEmptyMessage) {
             Box(
                 modifier = Modifier.fillMaxSize(),
                 contentAlignment = Alignment.Center,
@@ -200,17 +249,22 @@ internal fun TvEpgGrid(
                     fontSize = 14.sp,
                 )
             }
-            return
+            }
+            return@Column
         }
 
         Box(modifier = Modifier.fillMaxSize()) {
             LazyColumn(
                 state = listState,
-                modifier = Modifier.fillMaxSize(),
+                modifier = Modifier.fillMaxSize().testTag("channels-row-viewport")
+                    .onGloballyPositioned {
+                        rowViewportTop = it.positionInRoot().y
+                        rowViewportHeight = it.size.height.toFloat()
+                    },
             ) {
                 itemsIndexed(
                     items = channels,
-                    key = { index, enriched -> "${enriched.channel.url}#$index" },
+                    key = { _, enriched -> tvChannelBrowseKey(enriched.channel) },
                 ) { rowIndex, enriched ->
                     val programmes = remember(enriched.channel, guideProgrammes, playlistId) {
                         val lookupPlaylistId = enriched.channel.playlistId
@@ -222,74 +276,196 @@ internal fun TvEpgGrid(
                             channel = enriched.channel,
                         )
                     }
-                    val cells = remember(programmes, windowStartMs, windowEndMs) {
-                        buildWindowCells(
-                            programmes = programmes,
+                    if (useChannelListLayout) {
+                        val currentProgramme = programmes.firstOrNull {
+                            nowMs >= it.startTime && nowMs < it.endTime
+                        }
+                        val nextProgramme = programmes.firstOrNull { it.startTime > nowMs }
+                        CompactChannelRow(
+                            rowNumber = rowIndex + 1,
+                            channel = enriched,
+                            programme = currentProgramme,
+                            rowIndex = rowIndex,
+                            focusTargetRow = targetRow,
+                            focusRequestToken = focusRequestToken,
+                            isFocusEnabled = isFocusEnabled,
+                            isFavorite = stableChannelId(enriched.channel) in favoriteIds,
+                            onFocused = { onChannelFocused(enriched.copy(currentProgramme = currentProgramme, nextProgramme = nextProgramme), currentProgramme) },
+                            onGridCellFocused = { onGridCellFocused(rowIndex, 0) },
+                            onFocusRequester = onGridFocusRequester,
+                            onPlay = {
+                                if (tvChannelPresentation(enriched.channel).status == TvChannelEventStatus.FINISHED)
+                                    onProgrammeActions(enriched.channel, currentProgramme)
+                                else onChannelPlay(enriched.channel)
+                            },
+                            onOpenActions = { onProgrammeActions(enriched.channel, currentProgramme) },
+                        )
+                    } else {
+                        val cells = remember(programmes, windowStartMs, windowEndMs) {
+                            buildWindowCells(
+                                programmes = programmes,
+                                windowStartMs = windowStartMs,
+                                windowEndMs = windowEndMs,
+                            )
+                        }
+                        EpgChannelRow(
+                            rowNumber = rowIndex + 1,
+                            channel = enriched,
+                            cells = cells,
+                            channelColumnWidth = channelColumnWidth,
                             windowStartMs = windowStartMs,
                             windowEndMs = windowEndMs,
+                            timelineWidth = timelineWidth,
+                            canPageBackward = canPageBackward,
+                            canPageForward = canPageForward,
+                            rowIndex = rowIndex,
+                            focusTargetRow = targetRow,
+                            focusTargetCol = targetCol,
+                            focusRequestToken = focusRequestToken,
+                            isFocusEnabled = isFocusEnabled,
+                            isGuideLoading = isGuideLoading,
+                            nowMs = nowMs,
+                            onChannelFocused = { programme -> onChannelFocused(enriched.copy(
+                                currentProgramme = programmes.firstOrNull { nowMs >= it.startTime && nowMs < it.endTime },
+                                nextProgramme = programmes.firstOrNull { it.startTime > nowMs }), programme) },
+                            onGridCellFocused = { colIndex ->
+                                onGridCellFocused(rowIndex, colIndex)
+                            },
+                            onFocusRequester = onGridFocusRequester,
+                            onChannelPlay = { onChannelPlay(enriched.channel) },
+                            onProgrammeActions = { programme ->
+                                onProgrammeActions(enriched.channel, programme)
+                            },
+                            onTimeForward = onTimeForward,
                         )
                     }
-                    EpgChannelRow(
-                        rowNumber = rowIndex + 1,
-                        channel = enriched,
-                        cells = cells,
-                        channelColumnWidth = channelColumnWidth,
-                        windowStartMs = windowStartMs,
-                        windowEndMs = windowEndMs,
-                        timelineWidth = timelineWidth,
-                        canPageBackward = canPageBackward,
-                        canPageForward = canPageForward,
-                        rowIndex = rowIndex,
-                        focusTargetRow = targetRow,
-                        focusTargetCol = targetCol,
-                        focusRequestToken = focusRequestToken,
-                        isFocusEnabled = isFocusEnabled,
-                        isGuideLoading = isGuideLoading,
-                        nowMs = nowMs,
-                        onChannelFocused = { programme -> onChannelFocused(enriched, programme) },
-                        onGridCellFocused = { colIndex ->
-                            onGridCellFocused(rowIndex, colIndex)
-                        },
-                        onChannelPlay = { onChannelPlay(enriched.channel) },
-                        onTimeForward = onTimeForward,
-                    )
                 }
             }
 
-            if (nowMs in windowStartMs..windowEndMs) {
+            if (!useChannelListLayout && nowMs in windowStartMs..windowEndMs) {
                 val nowFraction = ((nowMs - windowStartMs).toFloat() / (windowEndMs - windowStartMs).toFloat())
                     .coerceIn(0f, 1f)
                 val nowOffsetDp = timelineWidth * nowFraction
-                Column(
+                Box(
                     modifier = Modifier
-                        .offset(x = channelColumnWidth + nowOffsetDp, y = (-24).dp)
-                        .width(42.dp)
-                        .fillMaxHeight(),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(999.dp))
-                            .background(Amber)
-                            .padding(horizontal = 5.dp, vertical = 1.dp),
-                    ) {
-                        Text(
-                            text = epgTimeFormat.format(Date(nowMs)),
-                            color = Obsidian,
-                            fontSize = 9.sp,
-                            fontWeight = FontWeight.Bold,
-                            maxLines = 1,
-                            softWrap = false,
-                        )
-                    }
-                    Box(
-                        modifier = Modifier
-                            .width(1.dp)
-                            .fillMaxHeight()
-                            .background(Amber.copy(alpha = 0.86f)),
-                    )
+                        .testTag("epg_current_time_line")
+                        .offset(x = channelColumnWidth + nowOffsetDp, y = 0.dp)
+                        .width(1.dp)
+                        .fillMaxHeight()
+                        .background(Amber.copy(alpha = 0.86f)),
+                )
+            }
+        }
+    }
+    }
+    }
+}
+
+@Composable
+private fun CompactChannelRow(
+    rowNumber: Int,
+    channel: EnrichedChannel,
+    programme: EpgProgramme?,
+    rowIndex: Int,
+    focusTargetRow: Int,
+    focusRequestToken: Int,
+    isFocusEnabled: Boolean,
+    onFocused: () -> Unit,
+    onGridCellFocused: () -> Unit,
+    onFocusRequester: (FocusRequester) -> Unit,
+    onPlay: () -> Unit,
+    onOpenActions: () -> Unit,
+    isFavorite: Boolean,
+) {
+    val focusRequester = remember { FocusRequester() }
+    var isFocused by remember { mutableStateOf(false) }
+    val display = remember(channel.channel) { tvChannelPresentation(channel.channel) }
+
+    LaunchedEffect(focusRequestToken, focusTargetRow, rowIndex, isFocusEnabled) {
+        if (!isFocusEnabled || rowIndex != focusTargetRow) return@LaunchedEffect
+        delay(FOCUS_SETTLE_MS)
+        runCatching { focusRequester.requestFocus() }
+    }
+
+    Surface(
+        onClick = onPlay,
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(CHANNEL_LIST_ROW_HEIGHT_DP.dp)
+            .padding(horizontal = 5.dp, vertical = 3.dp)
+            .focusRequester(focusRequester)
+            .focusProperties { canFocus = isFocusEnabled }
+            .onFocusChanged {
+                isFocused = it.isFocused
+                if (it.isFocused) {
+                    onFocused()
+                    onGridCellFocused()
+                    onFocusRequester(focusRequester)
                 }
             }
+            .onPreviewKeyEvent { event ->
+                if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+                when (event.key) {
+                    Key.Menu -> {
+                        onOpenActions()
+                        true
+                    }
+                    else -> false
+                }
+            },
+        shape = ClickableSurfaceDefaults.shape(RoundedCornerShape(10.dp)),
+        colors = ClickableSurfaceDefaults.colors(
+            containerColor = Color.Transparent,
+            focusedContainerColor = Color.Transparent,
+        ),
+        scale = ClickableSurfaceDefaults.scale(focusedScale = 1f),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxSize()
+                .tvLiquidGlass(isFocused, cornerRadius = 10.dp, focusScale = 1f, quiet = true)
+                .padding(horizontal = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text(
+                text = (channel.channel.channelNumber ?: rowNumber).toString(),
+                color = Ash,
+                fontSize = 11.sp,
+                maxLines = 1,
+                softWrap = false,
+                modifier = Modifier.widthIn(min = 40.dp).testTag("channel_number:${channel.channel.channelNumber ?: rowNumber}"),
+            )
+            TvChannelLogo(channel.channel, size = 32.dp)
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = display.title,
+                    color = Snow,
+                    fontSize = 13.sp,
+                    lineHeight = 16.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                val subtitle = programme?.title?.takeIf { it.isNotBlank() }
+                    ?: listOfNotNull(display.detail, display.startMs?.let {
+                        SimpleDateFormat("EEE d MMM · HH:mm", Locale.getDefault()).format(Date(it))
+                    }).joinToString(" · ").takeIf(String::isNotBlank)
+                    ?: tvChannelCountry(channel.channel)?.let { resolveCountryName(it) ?: it }
+                if (subtitle != null) Text(
+                    text = subtitle,
+                    color = Silver,
+                    fontSize = 10.sp,
+                    lineHeight = 12.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            if (display.status.label.isNotBlank()) Text(display.status.label,
+                color = if (display.status == TvChannelEventStatus.LIVE) Color(0xFF8ED6B1) else Silver,
+                fontSize = 10.sp, maxLines = 1)
+            display.quality?.let { QualityBadge(it) }
+            if (isFavorite) Icon(Icons.Filled.Star, contentDescription = localizedUiText("Favorite channel"), tint = Amber, modifier = Modifier.size(14.dp))
         }
     }
 }
@@ -300,11 +476,19 @@ private fun EpgTimeHeader(
     slotCount: Int,
     slotMillis: Long,
     channelColumnWidth: Dp,
+    slotWidth: Dp,
+    nowMs: Long,
+    windowEndMs: Long,
 ) {
+    val timelineWidth = slotWidth * slotCount
+    val showNow = windowEndMs > windowStartMs && nowMs in windowStartMs..windowEndMs
+    val nowFraction = ((nowMs - windowStartMs).toFloat() / (windowEndMs - windowStartMs).coerceAtLeast(1).toFloat()).coerceIn(0f, 1f)
+    val badgeWidth = 42.dp.coerceAtMost(timelineWidth)
+    val badgeLeft = (timelineWidth * nowFraction - badgeWidth / 2).coerceIn(0.dp, (timelineWidth - badgeWidth).coerceAtLeast(0.dp))
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .height(34.dp)
+            .height(26.dp)
             .background(Obsidian.copy(alpha = 0.78f)),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -320,17 +504,19 @@ private fun EpgTimeHeader(
                 text = epgDateFormat.format(Date(windowStartMs)),
                 color = Snow,
                 fontSize = 12.sp,
+                lineHeight = 15.sp,
                 fontWeight = FontWeight.SemiBold,
                 maxLines = 1,
                 softWrap = false,
             )
         }
+        Box(Modifier.width(timelineWidth).fillMaxHeight().testTag("epg_timeline")) {
         Row {
             repeat(slotCount) { index ->
                 val slotStart = windowStartMs + index * slotMillis
                 Box(
                     modifier = Modifier
-                        .width(EPG_SLOT_WIDTH_DP.dp)
+                        .width(slotWidth)
                         .fillMaxHeight()
                         .background(
                             if (index % 2 == 0) Charcoal.copy(alpha = 0.34f)
@@ -338,7 +524,8 @@ private fun EpgTimeHeader(
                         ),
                     contentAlignment = Alignment.CenterStart,
                 ) {
-                    Text(
+                    val labelLeft = slotWidth * index + 8.dp
+                    if (!showNow || labelLeft + 40.dp <= badgeLeft || labelLeft >= badgeLeft + badgeWidth) Text(
                         text = epgTimeFormat.format(Date(slotStart)),
                         color = Silver,
                         fontSize = 12.sp,
@@ -349,6 +536,13 @@ private fun EpgTimeHeader(
                     )
                 }
             }
+        }
+        if (showNow) Box(Modifier.offset(x = badgeLeft).width(badgeWidth).height(20.dp)
+            .align(Alignment.CenterStart).testTag("epg_current_time")
+            .background(Amber, RoundedCornerShape(6.dp)), contentAlignment = Alignment.Center) {
+            Text(epgTimeFormat.format(Date(nowMs)), color = Obsidian, fontSize = 11.sp,
+                lineHeight = 14.sp, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false)
+        }
         }
     }
 }
@@ -373,7 +567,9 @@ private fun EpgChannelRow(
     nowMs: Long,
     onChannelFocused: (EpgProgramme?) -> Unit,
     onGridCellFocused: (colIndex: Int) -> Unit,
+    onFocusRequester: (FocusRequester) -> Unit,
     onChannelPlay: () -> Unit,
+    onProgrammeActions: (EpgProgramme?) -> Unit,
     onTimeForward: () -> Unit,
 ) {
     Row(
@@ -387,7 +583,7 @@ private fun EpgChannelRow(
                 .width(channelColumnWidth)
                 .fillMaxHeight()
                 .background(Obsidian.copy(alpha = 0.44f))
-                .padding(horizontal = 12.dp),
+                .padding(horizontal = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             val channelNumber = channel.channel.channelNumber ?: rowNumber
@@ -397,31 +593,14 @@ private fun EpgChannelRow(
                 fontSize = 11.sp,
                 maxLines = 1,
                 softWrap = false,
-                modifier = Modifier.width(32.dp),
+                modifier = Modifier.widthIn(min = 40.dp).testTag("channel_number:$channelNumber"),
             )
-            channel.channel.tvgLogo?.let { logo ->
-                Box(
-                    modifier = Modifier
-                        .width(42.dp)
-                        .height(22.dp)
-                        .clip(RoundedCornerShape(7.dp))
-                        .background(Charcoal.copy(alpha = 0.26f)),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    AsyncImage(
-                        model = logo,
-                        contentDescription = null,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .fillMaxHeight(),
-                        contentScale = ContentScale.Fit,
-                    )
-                }
-            }
+            TvChannelLogo(channel.channel, size = 26.dp)
             Text(
-                text = channel.channel.name,
+                text = remember(channel.channel) { tvChannelPresentation(channel.channel).title },
                 color = Snow,
                 fontSize = 12.sp,
+                lineHeight = 15.sp,
                 maxLines = 1,
                 softWrap = false,
                 overflow = TextOverflow.Ellipsis,
@@ -444,12 +623,12 @@ private fun EpgChannelRow(
             cells.forEachIndexed { index, cell ->
                 val cellFraction = ((cell.endMs - cell.startMs).toFloat() / (windowEndMs - windowStartMs).toFloat())
                     .coerceIn(0f, 1f)
-                val cellWidth = (timelineWidth * cellFraction).coerceAtLeast(48.dp)
+                val cellWidth = (timelineWidth * cellFraction).coerceAtLeast(1.dp)
                 EpgProgrammeCell(
                     programme = cell.programme,
                     fallbackTitle = if (isGuideLoading) "Loading schedule" else "Schedule unavailable",
                     width = cellWidth,
-                    isNow = cell.programme?.let { it.startTime <= nowMs && it.endTime > nowMs } == true,
+                    isNow = cell.isCurrentAt(nowMs),
                     isLastFocusableCell = index == cells.lastIndex,
                     canPageForward = canPageForward,
                     applyFocusTarget = rowIndex == focusTargetRow && index == targetColForRow,
@@ -457,7 +636,12 @@ private fun EpgChannelRow(
                     isFocusEnabled = isFocusEnabled,
                     onFocused = { onChannelFocused(cell.programme) },
                     onCellFocused = { onGridCellFocused(index) },
-                    onPlay = onChannelPlay,
+                    onFocusRequester = onFocusRequester,
+                    onPlay = {
+                        if (tvProgrammeNeedsDetails(cell.programme, System.currentTimeMillis())) onProgrammeActions(cell.programme)
+                        else onChannelPlay()
+                    },
+                    onOpenActions = { onProgrammeActions(cell.programme) },
                     onTimeForward = onTimeForward,
                 )
             }
@@ -478,7 +662,9 @@ private fun EpgProgrammeCell(
     isFocusEnabled: Boolean,
     onFocused: () -> Unit,
     onCellFocused: () -> Unit,
+    onFocusRequester: (FocusRequester) -> Unit,
     onPlay: () -> Unit,
+    onOpenActions: () -> Unit,
     onTimeForward: () -> Unit,
 ) {
     val cellFocusRequester = remember { FocusRequester() }
@@ -487,7 +673,7 @@ private fun EpgProgrammeCell(
     // Single focus request per cell: only fires when this cell becomes the
     // explicit target. The short settle delay lets the LazyColumn compose
     // the target row before we request focus.
-    LaunchedEffect(focusRequestToken, applyFocusTarget) {
+    LaunchedEffect(focusRequestToken, applyFocusTarget, isFocusEnabled) {
         if (!isFocusEnabled || !applyFocusTarget) return@LaunchedEffect
         delay(FOCUS_SETTLE_MS)
         runCatching { cellFocusRequester.requestFocus() }
@@ -506,13 +692,14 @@ private fun EpgProgrammeCell(
                 if (it.isFocused) {
                     onFocused()
                     onCellFocused()
+                    onFocusRequester(cellFocusRequester)
                 }
             }
             .onPreviewKeyEvent { event ->
                 if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
                 when (event.key) {
-                    Key.DirectionCenter, Key.Enter, Key.NumPadEnter -> {
-                        onPlay()
+                    Key.Menu -> {
+                        onOpenActions()
                         true
                     }
 
@@ -529,40 +716,17 @@ private fun EpgProgrammeCell(
                     else -> false
                 }
             },
-        shape = ClickableSurfaceDefaults.shape(RoundedCornerShape(14.dp)),
+        shape = ClickableSurfaceDefaults.shape(RoundedCornerShape(9.dp)),
         colors = ClickableSurfaceDefaults.colors(
-            containerColor = if (isNow) Graphite.copy(alpha = 0.58f) else Graphite.copy(alpha = 0.46f),
-            focusedContainerColor = Amber.copy(alpha = 0.24f),
+            containerColor = Color.Transparent,
+            focusedContainerColor = Color.Transparent,
         ),
         scale = ClickableSurfaceDefaults.scale(focusedScale = 1f),
     ) {
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .border(
-                    width = if (isFocused) 2.dp else 1.dp,
-                    color = when {
-                        isFocused -> Amber
-                        isNow -> Amber.copy(alpha = 0.22f)
-                        else -> Steel.copy(alpha = 0.16f)
-                    },
-                    shape = RoundedCornerShape(14.dp),
-                )
-                .background(
-                    if (isFocused) {
-                        Brush.radialGradient(
-                            colors = listOf(
-                                Amber.copy(alpha = 0.22f),
-                                Color.Transparent,
-                            ),
-                        )
-                    } else {
-                        Brush.verticalGradient(
-                            colors = listOf(Color.Transparent, Obsidian.copy(alpha = 0.22f)),
-                        )
-                    },
-                    RoundedCornerShape(14.dp),
-                )
+                .tvLiquidGlass(isFocused, selected = isNow, cornerRadius = 9.dp, focusScale = 1f, quiet = true)
                 .padding(horizontal = 10.dp, vertical = 4.dp),
         ) {
             Text(
@@ -587,7 +751,7 @@ private fun EpgProgrammeCell(
     }
 }
 
-private fun buildWindowCells(
+internal fun buildWindowCells(
     programmes: List<EpgProgramme>,
     windowStartMs: Long,
     windowEndMs: Long,
@@ -600,11 +764,13 @@ private fun buildWindowCells(
     var cursor = windowStartMs
     var hadVisibleProgramme = false
 
-    programmes.forEach { programme ->
-        if (programme.endTime <= windowStartMs) return@forEach
-        if (programme.startTime >= windowEndMs) return@forEach
-        val start = programme.startTime.coerceAtLeast(windowStartMs)
-        val end = programme.endTime.coerceAtMost(windowEndMs)
+    // Feed entries may overlap or repeat. Lay out non-overlapping display slots, while
+    // retaining original programme times for details and replay.
+    guideProgrammeSlots(programmes).forEach { slot ->
+        if (slot.endTime <= windowStartMs) return@forEach
+        if (slot.startTime >= windowEndMs) return@forEach
+        val start = slot.startTime.coerceAtLeast(windowStartMs)
+        val end = slot.endTime.coerceAtMost(windowEndMs)
         if (end <= start) return@forEach
         hadVisibleProgramme = true
         if (start > cursor) {
@@ -617,7 +783,7 @@ private fun buildWindowCells(
         cells += EpgWindowCell(
             startMs = start,
             endMs = end,
-            programme = programme,
+            programme = slot.programme,
         )
         cursor = end
     }

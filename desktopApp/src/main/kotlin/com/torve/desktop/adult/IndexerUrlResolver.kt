@@ -9,11 +9,13 @@ package com.torve.desktop.adult
  *
  * Keep this in sync with the indexer list Panda's schema accepts -
  * currently `nzbgeek`, `scenenzbs`, `dognzb`, `nzbplanet`, `custom`.
+ * `scenenzbs` is the legacy Panda key; the service now lives at
+ * treasure-maps.com but keeps Newznab compatibility.
  */
 object IndexerUrlResolver {
 
     private val builtIns: Map<String, String> = mapOf(
-        "scenenzbs" to "https://scenenzbs.com",
+        "scenenzbs" to "https://treasure-maps.com",
         "nzbgeek" to "https://api.nzbgeek.info",
         "dognzb" to "https://api.dognzb.cr",
         "nzbplanet" to "https://nzbplanet.net",

@@ -1,5 +1,7 @@
 package com.torve.android.ui.discover
 
+import com.torve.android.ui.community.parityLabel as localizedUiText
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -99,7 +101,7 @@ fun DiscoverScreen(
                         inactiveBorderColor = Gunmetal,
                     ),
                 ) {
-                    Text(tab.label, style = MaterialTheme.typography.labelLarge)
+                    Text(localizedUiText(tab.label), style = MaterialTheme.typography.labelLarge)
                 }
             }
         }
@@ -113,7 +115,7 @@ fun DiscoverScreen(
                 contentAlignment = Alignment.Center,
             ) {
                 Text(
-                    "Channels available in the Channels tab",
+                    localizedUiText("Channels available in the Channels tab"),
                     style = MaterialTheme.typography.bodyMedium,
                     color = Torve.colors.textSecondary,
                 )
@@ -142,13 +144,13 @@ fun DiscoverScreen(
                     ) {
                         Column {
                             Text(
-                                "What should I watch?",
+                                localizedUiText("What should I watch?"),
                                 style = MaterialTheme.typography.titleLarge,
                                 color = Obsidian,
                                 fontWeight = FontWeight.Bold,
                             )
                             Text(
-                                "Pick a mood, get recommendations",
+                                localizedUiText("Pick a mood, get recommendations"),
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = Obsidian.copy(alpha = 0.7f),
                             )
@@ -159,7 +161,7 @@ fun DiscoverScreen(
                 // Section header
                 item(span = { GridItemSpan(maxLineSpan) }) {
                     Text(
-                        "Browse by Genre",
+                        localizedUiText("Browse by Genre"),
                         style = MaterialTheme.typography.titleMedium,
                         color = Amber,
                         fontWeight = FontWeight.SemiBold,

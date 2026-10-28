@@ -44,6 +44,7 @@ class UsenetApi(
     private val authClient: AuthClient,
     private val baseUrlProvider: () -> String,
     private val installationIdProvider: () -> String? = { null },
+    private val parentGrantProvider: () -> String? = { null },
 ) {
     private fun baseUrl() = baseUrlProvider().trimEnd('/')
 
@@ -59,6 +60,7 @@ class UsenetApi(
         installationIdProvider()?.takeIf { it.isNotBlank() }?.let {
             header("X-Torve-Installation-Id", it)
         }
+        parentGrantProvider()?.let { header("X-Torve-Parent-Grant", it) }
         trustHeaders?.appendTo(this)
     }
 

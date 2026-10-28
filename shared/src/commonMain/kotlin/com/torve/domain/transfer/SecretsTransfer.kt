@@ -22,6 +22,7 @@ enum class SecretCategory {
     TRAKT_SIMKL,
     AI_KEYS,
     PANDA,
+    ARR_STACK,
 }
 
 /** One key/value record from the sender's IntegrationSecretStore. */

@@ -1,0 +1,23 @@
+{
+  "id": "com.torve.demo.catalogue",
+  "version": "1.0.0",
+  "name": "Demo Catalogue",
+  "description": "Public testing extension using original synthetic media only.",
+  "resources": [
+    "catalog",
+    "meta"
+  ],
+  "types": [
+    "movie"
+  ],
+  "idPrefixes": [
+    "torve-original-"
+  ],
+  "catalogs": [
+    {
+      "type": "movie",
+      "id": "original-tests",
+      "name": "Original test videos"
+    }
+  ]
+}

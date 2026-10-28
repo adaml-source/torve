@@ -67,6 +67,8 @@ fun QrScannerView(
     val onDetected by rememberUpdatedState(onQrDetected)
     val executor = remember { Executors.newSingleThreadExecutor() }
     val scanner = remember {
+        // TV skips ML Kit's eager ContentProvider at process launch.
+        com.google.mlkit.common.MlKit.initialize(context.applicationContext)
         BarcodeScanning.getClient(
             BarcodeScannerOptions.Builder()
                 .setBarcodeFormats(Barcode.FORMAT_QR_CODE)

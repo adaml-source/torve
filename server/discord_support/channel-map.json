@@ -1,0 +1,262 @@
+{
+  "reviewed_on": "2026-10-25",
+  "server": "Torve Media Community",
+  "guild_id": "1507992418358919338",
+  "status": "restructure_applied_and_verified_bot_not_deployed",
+  "channels": [
+    {
+      "category": "START HERE",
+      "name": "announcements",
+      "id": "1508057632550817792",
+      "type": "announcement",
+      "proposed_action": "keep",
+      "destination": "START HERE/announcements",
+      "applied_action": "keep",
+      "applied_location": "START HERE/announcements"
+    },
+    {
+      "category": "START HERE",
+      "name": "rules",
+      "id": "1508008547294904441",
+      "type": "text",
+      "proposed_action": "rename",
+      "destination": "START HERE/start-here",
+      "applied_action": "rename",
+      "applied_location": "START HERE/start-here"
+    },
+    {
+      "category": "START HERE",
+      "name": "downloads",
+      "id": "1508048731117719695",
+      "type": "text",
+      "proposed_action": "merge_archive",
+      "destination": "START HERE/start-here",
+      "applied_action": "archive_preserve_history",
+      "applied_location": "ARCHIVE/downloads"
+    },
+    {
+      "category": "START HERE",
+      "name": "faq",
+      "id": "1508057663601115180",
+      "type": "text",
+      "proposed_action": "merge_archive",
+      "destination": "START HERE/start-here",
+      "applied_action": "archive_preserve_history",
+      "applied_location": "ARCHIVE/faq"
+    },
+    {
+      "category": "START HERE",
+      "name": "new-members",
+      "id": "1507992419138801716",
+      "type": "text",
+      "proposed_action": "archive",
+      "destination": null,
+      "applied_action": "archive_preserve_history",
+      "applied_location": "ARCHIVE/new-members"
+    },
+    {
+      "category": "GENERAL",
+      "name": "general",
+      "id": "1508057781297741884",
+      "type": "text",
+      "proposed_action": "rename_move",
+      "destination": "SUPPORT/help",
+      "applied_action": "rename_move",
+      "applied_location": "SUPPORT/help"
+    },
+    {
+      "category": "GENERAL",
+      "name": "show-your-setup",
+      "id": "1508057830903517294",
+      "type": "forum",
+      "proposed_action": "archive",
+      "destination": null,
+      "applied_action": "archive_preserve_history",
+      "applied_location": "ARCHIVE/show-your-setup"
+    },
+    {
+      "category": "GENERAL",
+      "name": "suggestions",
+      "id": "1508057892094476458",
+      "type": "forum",
+      "proposed_action": "merge_archive",
+      "destination": "SUPPORT/support",
+      "applied_action": "archive_preserve_history",
+      "applied_location": "ARCHIVE/suggestions"
+    },
+    {
+      "category": "GENERAL",
+      "name": "bugs",
+      "id": "1508057928005845102",
+      "type": "forum",
+      "proposed_action": "rename_move",
+      "destination": "SUPPORT/support",
+      "applied_action": "rename_move",
+      "applied_location": "SUPPORT/support"
+    },
+    {
+      "category": "SETUP HELP",
+      "name": "android-tv",
+      "id": "1508058056297021530",
+      "type": "text",
+      "proposed_action": "merge_archive",
+      "destination": "SUPPORT/support",
+      "applied_action": "archive_preserve_history",
+      "applied_location": "ARCHIVE/android-tv"
+    },
+    {
+      "category": "SETUP HELP",
+      "name": "fire-tv",
+      "id": "1508058164270989472",
+      "type": "text",
+      "proposed_action": "merge_archive",
+      "destination": "SUPPORT/support",
+      "applied_action": "archive_preserve_history",
+      "applied_location": "ARCHIVE/fire-tv"
+    },
+    {
+      "category": "SETUP HELP",
+      "name": "windows",
+      "id": "1508058191534096515",
+      "type": "text",
+      "proposed_action": "merge_archive",
+      "destination": "SUPPORT/support",
+      "applied_action": "archive_preserve_history",
+      "applied_location": "ARCHIVE/windows"
+    },
+    {
+      "category": "SETUP HELP",
+      "name": "mobile",
+      "id": "1508058220563005551",
+      "type": "text",
+      "proposed_action": "merge_archive",
+      "destination": "SUPPORT/support",
+      "applied_action": "archive_preserve_history",
+      "applied_location": "ARCHIVE/mobile"
+    },
+    {
+      "category": "INTEGRATIONS",
+      "name": "iptv-epg",
+      "id": "1508058298325143612",
+      "type": "text",
+      "proposed_action": "merge_archive",
+      "destination": "SUPPORT/support",
+      "applied_action": "archive_preserve_history",
+      "applied_location": "ARCHIVE/iptv-epg"
+    },
+    {
+      "category": "INTEGRATIONS",
+      "name": "stremio-addons",
+      "id": "1508058326980886590",
+      "type": "text",
+      "proposed_action": "merge_archive",
+      "destination": "SUPPORT/support",
+      "applied_action": "archive_preserve_history",
+      "applied_location": "ARCHIVE/stremio-addons"
+    },
+    {
+      "category": "INTEGRATIONS",
+      "name": "usenet-debrid",
+      "id": "1508058351894921256",
+      "type": "text",
+      "proposed_action": "merge_archive",
+      "destination": "SUPPORT/support",
+      "applied_action": "archive_preserve_history",
+      "applied_location": "ARCHIVE/usenet-debrid"
+    },
+    {
+      "category": "INTEGRATIONS",
+      "name": "plex-jellyfin-kodi",
+      "id": "1508058392336535585",
+      "type": "text",
+      "proposed_action": "merge_archive",
+      "destination": "SUPPORT/support",
+      "applied_action": "archive_preserve_history",
+      "applied_location": "ARCHIVE/plex-jellyfin-kodi"
+    },
+    {
+      "category": "BETA",
+      "name": "beta-info",
+      "id": "1508058459797585981",
+      "type": "text",
+      "proposed_action": "keep_revise",
+      "destination": "BETA/beta-info",
+      "applied_action": "keep_revise",
+      "applied_location": "BETA/beta-info"
+    },
+    {
+      "category": "BETA",
+      "name": "beta-feedback",
+      "id": "1508060137045233695",
+      "type": "forum",
+      "proposed_action": "keep",
+      "destination": "BETA/beta-feedback",
+      "applied_action": "keep",
+      "applied_location": "BETA/beta-feedback"
+    },
+    {
+      "category": "STAFF",
+      "name": "mod-log",
+      "id": "1508009782504587394",
+      "type": "text",
+      "proposed_action": "keep",
+      "destination": "STAFF/mod-log",
+      "applied_action": "keep",
+      "applied_location": "STAFF/mod-log"
+    },
+    {
+      "category": "STAFF",
+      "name": "staff-chat",
+      "id": "1508057376547405855",
+      "type": "text",
+      "proposed_action": "keep",
+      "destination": "STAFF/staff-chat",
+      "applied_action": "keep",
+      "applied_location": "STAFF/staff-chat"
+    },
+    {
+      "category": "STAFF",
+      "name": "reddit-outreach",
+      "id": "1508057695679152229",
+      "type": "text",
+      "proposed_action": "archive",
+      "destination": null,
+      "applied_action": "archive_preserve_history",
+      "applied_location": "ARCHIVE/reddit-outreach"
+    }
+  ],
+  "new_channels": [
+    {
+      "name": "support-queue",
+      "category": "STAFF",
+      "type": "text",
+      "id": "1563813545911787580",
+      "permission": "private_staff_only_support_bot_not_installed"
+    }
+  ],
+  "before": {
+    "categories": 6,
+    "channels": 22,
+    "public": 17,
+    "beta": 2,
+    "staff": 3
+  },
+  "after_proposed": {
+    "public_active": 4,
+    "beta_active": 2,
+    "staff_active": 3,
+    "archived": 14,
+    "physical_channels_including_archives": 23
+  },
+  "permission_overwrites": "Full private before/after snapshots verified on VPS. All 14 archives exactly match staff-only category policy; original role permissions restored; beta exceptions unchanged.",
+  "applied_on": "2026-10-25",
+  "deployment_result": "DEPLOYMENT-RESULT.md",
+  "after_applied": {
+    "public_active": 4,
+    "beta_active": 2,
+    "staff_active": 3,
+    "archived": 14,
+    "physical_channels_including_archives": 23,
+    "categories": 5
+  }
+}

@@ -14,6 +14,9 @@ import androidx.compose.material3.IconButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.getValue
+import com.pierfrancescosoffritti.androidyoutubeplayer.core.player.PlayerConstants
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -23,7 +26,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.torve.android.R
 import androidx.compose.ui.viewinterop.AndroidView
-import androidx.compose.ui.window.Dialog
+import com.torve.android.remote.TorveRemoteDialog as Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.pierfrancescosoffritti.androidyoutubeplayer.core.player.YouTubePlayer
 import com.pierfrancescosoffritti.androidyoutubeplayer.core.player.listeners.AbstractYouTubePlayerListener
@@ -37,7 +40,9 @@ fun TrailerPlayerDialog(
 ) {
     val context = LocalContext.current
     val lifecycle = LocalLifecycleOwner.current.lifecycle
-    val playerView = remember {
+    val dismiss by rememberUpdatedState(onDismiss)
+    val openExternal by rememberUpdatedState(onOpenExternal)
+    val playerView = remember(youtubeKey) {
         YouTubePlayerView(context).apply {
             layoutParams = ViewGroup.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
@@ -71,12 +76,20 @@ fun TrailerPlayerDialog(
                                 youTubePlayer.loadVideo(youtubeKey, 0f)
                             }
 
+                            override fun onStateChange(youTubePlayer: YouTubePlayer, state: PlayerConstants.PlayerState) {
+                                if (state == PlayerConstants.PlayerState.ENDED) {
+                                    youTubePlayer.pause()
+                                    dismiss()
+                                }
+                            }
+
                             override fun onError(
                                 youTubePlayer: YouTubePlayer,
                                 error: com.pierfrancescosoffritti.androidyoutubeplayer.core.player.PlayerConstants.PlayerError,
                             ) {
-                                onDismiss()
-                                onOpenExternal()
+                                youTubePlayer.pause()
+                                dismiss()
+                                openExternal()
                             }
                         })
 
@@ -90,7 +103,7 @@ fun TrailerPlayerDialog(
                 modifier = Modifier
                     .align(Alignment.TopEnd)
                     .padding(8.dp)
-                    .size(36.dp)
+                    .size(48.dp)
                     .background(Color.Black.copy(alpha = 0.6f), CircleShape),
             ) {
                 Icon(

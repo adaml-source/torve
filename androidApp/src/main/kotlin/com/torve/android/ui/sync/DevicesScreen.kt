@@ -1,5 +1,7 @@
 package com.torve.android.ui.sync
 
+import com.torve.android.ui.community.parityLabel as localizedUiText
+
 import android.widget.Toast
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -8,6 +10,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -51,6 +54,7 @@ import org.koin.compose.koinInject
 fun DevicesScreen(
     onBack: () -> Unit,
     onDeviceLimitReached: () -> Unit = {},
+    onOpenRemote: () -> Unit = {},
     syncCoordinator: SyncCoordinator = koinInject(),
 ) {
     val state by syncCoordinator.state.collectAsState()
@@ -63,10 +67,15 @@ fun DevicesScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(16.dp),
+            .statusBarsPadding()
+            .padding(horizontal = 16.dp, vertical = 4.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Text(stringResource(R.string.devices_paired_title), style = MaterialTheme.typography.headlineMedium)
+        Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+            com.torve.android.ui.components.BackButton(onClick = onBack)
+            Text(stringResource(R.string.devices_paired_title), style = MaterialTheme.typography.titleLarge)
+        }
+        OutlinedButton(onClick = onOpenRemote) { Text(localizedUiText("TV companion & remote")) }
         Text(
             text = stringResource(R.string.devices_paired_desc),
             style = MaterialTheme.typography.bodyMedium,
@@ -120,7 +129,7 @@ fun DevicesScreen(
                         },
                         modifier = Modifier.fillMaxWidth(),
                     ) {
-                        Text("Scan TV sign-in QR")
+                        Text(localizedUiText("Scan TV sign-in QR"))
                     }
                 } else {
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -234,9 +243,7 @@ fun DevicesScreen(
         }
 
         Spacer(modifier = Modifier.height(4.dp))
-        OutlinedButton(onClick = onBack) {
-            Text(stringResource(R.string.common_back))
-        }
+        com.torve.android.ui.components.BackButton(onClick = onBack)
     }
 }
 
@@ -263,7 +270,7 @@ private fun PairedDeviceCard(
                 SecureChannelState.PAIRED_REVOKED -> stringResource(R.string.devices_state_revoked) to MaterialTheme.colorScheme.error
                 SecureChannelState.NOT_PAIRED -> "Not paired" to MaterialTheme.colorScheme.onSurfaceVariant
             }
-            Text(text = statusText, style = MaterialTheme.typography.bodySmall, color = statusColor)
+            Text(text = localizedUiText(statusText), style = MaterialTheme.typography.bodySmall, color = statusColor)
 
             if (device.revokedAt != null) {
                 Text(text = stringResource(R.string.devices_revoked_at, device.revokedAt ?: ""), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)

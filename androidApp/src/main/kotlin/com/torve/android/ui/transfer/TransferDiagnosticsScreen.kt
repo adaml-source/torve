@@ -1,5 +1,7 @@
 package com.torve.android.ui.transfer
 
+import com.torve.android.ui.community.parityLabel as localizedUiText
+
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -72,9 +74,7 @@ fun TransferDiagnosticsScreen(
             TopAppBar(
                 title = { Text(stringResource(R.string.diag_transfer_title)) },
                 navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
-                    }
+                    com.torve.android.ui.components.BackButton(onClick = onBack)
                 },
             )
         },
@@ -90,14 +90,14 @@ fun TransferDiagnosticsScreen(
             Spacer(Modifier.height(0.dp))
 
             TransferStatusBanner(
-                title = "Read-only diagnostics",
+                title = localizedUiText("Read-only diagnostics"),
                 body = stringResource(R.string.diag_transfer_redaction_note),
                 tone = TransferBannerTone.Info,
             )
 
             val s = snapshot
             if (s == null) {
-                Text("Loading…", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(localizedUiText("Loading…"), color = MaterialTheme.colorScheme.onSurfaceVariant)
             } else {
                 StatusCard(s)
                 LastAttemptCard(s.lastAttempt)
@@ -144,11 +144,11 @@ private fun StatusCard(s: TransferDiagnosticsSnapshot) {
         ) {
             Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Text(stringResource(R.string.diag_transfer_crypto), modifier = Modifier.weight(1f))
-                StatusPill(if (s.cryptoEngineAvailable) "Ready" else "Missing", s.cryptoEngineAvailable)
+                StatusPill(localizedUiText(if (s.cryptoEngineAvailable) "Ready" else "Missing"), s.cryptoEngineAvailable)
             }
             Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Text(stringResource(R.string.diag_transfer_signed_in), modifier = Modifier.weight(1f))
-                StatusPill(if (s.signedIn) "Signed in" else "Signed out", s.signedIn)
+                StatusPill(localizedUiText(if (s.signedIn) "Signed in" else "Signed out"), s.signedIn)
             }
             Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Text(stringResource(R.string.diag_transfer_relay), modifier = Modifier.weight(1f))
@@ -190,16 +190,16 @@ private fun LastAttemptCard(record: TransferAttemptRecord?) {
                 )
             } else {
                 Text(
-                    text = "Direction: ${roleLabel(record.role)}",
+                    text = localizedUiText("Direction: ${roleLabel(record.role)}"),
                     style = MaterialTheme.typography.bodySmall,
                 )
                 Text(
-                    text = "Status: ${outcomeLabel(record.outcome)}",
+                    text = localizedUiText("Status: ${outcomeLabel(record.outcome)}"),
                     style = MaterialTheme.typography.bodySmall,
                 )
                 record.errorCategory?.let {
                     Text(
-                        text = "Reason: ${it.value}",
+                        text = localizedUiText("Reason: ${it.value}"),
                         style = MaterialTheme.typography.bodySmall,
                     )
                 }
@@ -230,7 +230,7 @@ private fun StatusPill(label: String, ok: Boolean, neutral: Boolean = false) {
         shape = RoundedCornerShape(999.dp),
     ) {
         Text(
-            label,
+            localizedUiText(label),
             color = onContainer,
             style = MaterialTheme.typography.labelSmall,
             fontWeight = FontWeight.SemiBold,

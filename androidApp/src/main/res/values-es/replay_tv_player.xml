@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="replay_highlight_tv_playback">Los resúmenes se abren a pantalla completa en YouTube o SmartTube. Pulsa Atrás para volver aquí.</string>
+    <string name="replay_highlight_tv_missing_player">Instala YouTube o SmartTube para reproducir los resúmenes a pantalla completa.</string>
+</resources>

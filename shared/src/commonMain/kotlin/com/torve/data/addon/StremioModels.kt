@@ -25,6 +25,7 @@ data class StremioStream(
     val magnet: String? = null,
     val ytId: String? = null,
     val behaviorHints: StemioBehaviorHints? = null,
+    val description: String? = null,
 )
 
 @Serializable
@@ -33,6 +34,11 @@ data class StemioBehaviorHints(
     val filename: String? = null,
     val countryWhitelist: List<String>? = null,
     val notWebReady: Boolean? = null,
+    val service: String? = null,
+    val cached: Boolean? = null,
+    val videoSize: Long? = null,
+    val seeders: Int? = null,
+    val indexer: String? = null,
 )
 
 data class ParsedStream(
@@ -51,8 +57,12 @@ data class ParsedStream(
     val score: Int = 0,
     val hdr: String? = null,
     val audioCodec: String? = null,
-    /** Language codes parsed from Panda's 🗣️ tag (e.g. ["DE", "EN"]). Empty if none. */
+    /** Audio language codes from source metadata or release tags. Empty when unknown. */
     val languages: List<String> = emptyList(),
+    /** Subtitle languages explicitly advertised by the source; never assumed from audio. */
+    val subtitleLanguages: List<String> = emptyList(),
+    /** Actual container tracks were inspected. Even an empty list overrides release hints. */
+    val trackLanguagesVerified: Boolean = false,
     val recentSuccessCount: Int = 0,
     val lastSuccessfulResolveAt: Long? = null,
     val accelerationMemoryId: String? = null,
@@ -82,6 +92,13 @@ data class ParsedStream(
      * USENET_NZBDAV `ParsedStream` instances must populate this field.
      */
     val usenetCandidate: com.torve.data.usenet.model.UsenetCandidatePayload? = null,
+    /** Opaque add-on variant identifier shared by episodes; scoped by [addonBaseUrl]. */
+    val bingeGroup: String? = null,
+    /** Download service declared by the extension, independent of its indexer/name. */
+    val downloadService: String? = null,
+    val fileName: String? = null,
+    /** Explicit saved NZB connection, independent of extension installations. */
+    val configuredNzb: com.torve.data.usenet.ConfiguredNzbSource? = null,
 )
 
 enum class ResolvableStreamKind {
@@ -103,8 +120,9 @@ fun ParsedStream.isPandaStream(): Boolean =
         addonBaseUrl?.contains("panda.torve.app", ignoreCase = true) == true
 
 fun ParsedStream.isUsenetStream(): Boolean =
-    accelerationProvenanceKind == CandidateProvenanceKind.USENET_NZBDAV ||
+    configuredNzb != null || accelerationProvenanceKind == CandidateProvenanceKind.USENET_NZBDAV ||
         accelerationProviderType?.contains("usenet", ignoreCase = true) == true ||
+        addonName.containsUsenetMarker() ||
         source.containsUsenetMarker() ||
         title.containsUsenetMarker() ||
         directUrl?.contains("/nzb/", ignoreCase = true) == true ||
@@ -293,7 +311,15 @@ data class StremioMeta(
     val videos: List<StremioVideo> = emptyList(),
     val links: List<StremioLink> = emptyList(),
     val trailers: List<StremioTrailer> = emptyList(),
+    @SerialName("imdb_id") val imdbId: String? = null,
+    @SerialName("app_extras") val appExtras: StremioAppExtras? = null,
 )
+
+@Serializable
+data class StremioAppExtras(val cast: List<StremioAppCast> = emptyList())
+
+@Serializable
+data class StremioAppCast(val name: String = "", val character: String? = null, val photo: String? = null)
 
 @Serializable
 data class StremioVideo(
@@ -332,4 +358,6 @@ data class StremioSubtitle(
     val url: String,
     val lang: String = "",
     val label: String? = null,
+    /** Populated by Torve's aggregator; absent in raw Stremio responses. */
+    val provider: String? = null,
 )

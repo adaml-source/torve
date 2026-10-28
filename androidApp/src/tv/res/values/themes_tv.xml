@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.Torve.TvSplash" parent="Theme.Torve">
+        <item name="android:windowBackground">@drawable/tv_startup_background</item>
+    </style>
+</resources>

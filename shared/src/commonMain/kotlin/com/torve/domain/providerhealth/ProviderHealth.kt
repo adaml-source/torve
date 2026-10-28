@@ -22,6 +22,7 @@ enum class ProviderHealthCategory {
     TRAKT,
     SIMKL,
     PLAYBACK,
+    REQUEST_MANAGER,
 }
 
 /**
@@ -43,6 +44,15 @@ enum class ProviderHealthStatus {
     RED,
     UNCONFIGURED,
     UNKNOWN,
+}
+
+/** A verified failure reason. Older cached entries may have no reason. */
+@Serializable
+enum class ProviderHealthFailure {
+    AUTH_REJECTED,
+    UNREACHABLE,
+    SETUP_INCOMPLETE,
+    MIXED,
 }
 
 /**
@@ -71,4 +81,6 @@ data class ProviderHealthEntry(
      * an inline action button with this label.
      */
     val nextAction: String? = null,
+    /** Derived from a service response, never guessed from its display message. */
+    val failure: ProviderHealthFailure? = null,
 )

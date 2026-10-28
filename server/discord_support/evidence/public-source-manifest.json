@@ -1,0 +1,20 @@
+[
+  {
+    "url": "https://torve.app/support.html",
+    "status": 200,
+    "reviewed_on": "2026-10-25",
+    "sha256": "262948a5f6450cba3b61c9be603c272ceeaec952d1beed359d2b051bbabc9628"
+  },
+  {
+    "url": "https://torve.app/firetv.html",
+    "status": 200,
+    "reviewed_on": "2026-10-25",
+    "sha256": "8852f8a6be04d669c6d585b9b95a1ca8600bdb627ada630e6a1e759713b08899"
+  },
+  {
+    "url": "https://torve.app/download.html",
+    "status": 200,
+    "reviewed_on": "2026-10-25",
+    "sha256": "68f127d640fcbfee508dc1ac687a5ae25349b29fc4568511564abfff4f8b779f"
+  }
+]

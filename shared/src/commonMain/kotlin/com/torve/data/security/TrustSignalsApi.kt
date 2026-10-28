@@ -13,11 +13,17 @@ import io.ktor.http.contentType
 import io.ktor.http.isSuccess
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.encodeToJsonElement
 
 class TrustSignalsApi(
     private val httpClient: HttpClient,
     private val baseUrlProvider: () -> String,
     private val installationIdProvider: () -> String? = { null },
+    private val integrityMonitor: PlayIntegrityMonitor? = null,
 ) {
     private fun baseUrl() = baseUrlProvider().trimEnd('/')
 
@@ -30,20 +36,21 @@ class TrustSignalsApi(
             ClientTrustSignalRegistry.provider.currentSignal(includeIntegrityToken = false)
         }.getOrNull() ?: return false
         val trustHeaders = ClientTrustHeaders.capture()
-        return runCatching {
+        val posted = runCatching {
             httpClient.post("${baseUrl()}/me/trust-signals") {
                 bearerAuth(accessToken)
                 appendInstallationHeader(installationId)
                 trustHeaders?.appendTo(this)
                 contentType(ContentType.Application.Json)
                 setBody(
-                    TrustSignalSubmitRequest(
-                        eventType = eventType,
-                        trustSignal = signal,
-                    ),
+                    JsonObject(Json.encodeToJsonElement(signal).jsonObject +
+                        ("event_type" to JsonPrimitive(eventType))),
                 )
             }.status.isSuccess()
         }.getOrDefault(false)
+        integrityMonitor?.observe(token = accessToken, event = eventType,
+            installationId = installationId ?: installationIdProvider(), signal = signal)
+        return posted
     }
 
     private fun io.ktor.client.request.HttpRequestBuilder.appendInstallationHeader(

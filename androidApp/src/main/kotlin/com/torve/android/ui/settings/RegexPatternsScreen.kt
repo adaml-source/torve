@@ -1,5 +1,7 @@
 package com.torve.android.ui.settings
 
+import com.torve.android.ui.community.parityLabel as localizedUiText
+
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -142,7 +144,7 @@ fun RegexPatternsScreen(
                 stringResource(R.string.regex_title),
                 style = MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.Bold,
-                color = Snow,
+                color = MaterialTheme.colorScheme.onSurface,
                 modifier = Modifier.weight(1f),
             )
             IconButton(onClick = { viewModel.addRegexPattern() }) {
@@ -153,7 +155,7 @@ fun RegexPatternsScreen(
         Text(
             stringResource(R.string.regex_filter_desc),
             style = MaterialTheme.typography.bodySmall,
-            color = Silver,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp),
         )
         Text(
@@ -209,11 +211,11 @@ fun RegexPatternsScreen(
                             Toast.makeText(context, context.getString(R.string.regex_added, label), Toast.LENGTH_SHORT).show()
                         }
                     },
-                    label = { Text(label, fontSize = 12.sp) },
+                    label = { Text(localizedUiText(label), fontSize = 12.sp) },
                     colors = FilterChipDefaults.filterChipColors(
                         selectedContainerColor = Amber,
                         selectedLabelColor = Obsidian,
-                        containerColor = Gunmetal,
+                        containerColor = MaterialTheme.colorScheme.surface,
                         labelColor = Snow,
                     ),
                 )
@@ -262,7 +264,7 @@ private fun RegexPatternRow(
                 placeholder = { Text(stringResource(R.string.regex_label_hint), style = MaterialTheme.typography.bodySmall) },
                 modifier = Modifier.weight(1f),
                 singleLine = true,
-                textStyle = MaterialTheme.typography.bodySmall.copy(color = Snow),
+                textStyle = MaterialTheme.typography.bodySmall.copy(color = MaterialTheme.colorScheme.onSurface),
                 shape = RoundedCornerShape(8.dp),
                 colors = OutlinedTextFieldDefaults.colors(
                     focusedBorderColor = Amber,
@@ -298,9 +300,9 @@ private fun RegexPatternRow(
             singleLine = true,
             isError = patternError != null,
             supportingText = patternError?.let { message ->
-                { Text(message, color = Ruby, style = MaterialTheme.typography.labelSmall) }
+                { Text(localizedUiText(message), color = Ruby, style = MaterialTheme.typography.labelSmall) }
             },
-            textStyle = MaterialTheme.typography.bodySmall.copy(color = Snow),
+            textStyle = MaterialTheme.typography.bodySmall.copy(color = MaterialTheme.colorScheme.onSurface),
             shape = RoundedCornerShape(8.dp),
             colors = OutlinedTextFieldDefaults.colors(
                 focusedBorderColor = Amber,

@@ -95,54 +95,11 @@ fun PandaSourcesStep(
                     val checked = source.id in state.enabledSources
                     val attachEntryFocus = !firstFocusableAttached && entryFocusRequester != null
                     if (attachEntryFocus) firstFocusableAttached = true
-                    val interactionSource = remember(source.id) { MutableInteractionSource() }
-                    val isFocused by interactionSource.collectIsFocusedAsState()
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .then(
-                                if (attachEntryFocus) {
-                                    Modifier.focusRequester(entryFocusRequester)
-                                } else {
-                                    Modifier
-                                },
-                            )
-                            .clip(RoundedCornerShape(10.dp))
-                            .background(if (checked) Amber.copy(alpha = 0.08f) else Gunmetal)
-                            .border(
-                                width = if (isFocused) 2.dp else 1.dp,
-                                color = if (isFocused) Amber else Steel.copy(alpha = 0.25f),
-                                shape = RoundedCornerShape(10.dp),
-                            )
-                            .clickable(
-                                interactionSource = interactionSource,
-                                indication = null,
-                            ) { viewModel.toggleSource(source.id) }
-                            .padding(horizontal = 12.dp, vertical = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Checkbox(
-                            checked = checked,
-                            onCheckedChange = { viewModel.toggleSource(source.id) },
-                            colors = CheckboxDefaults.colors(
-                                checkedColor = Amber,
-                                uncheckedColor = Steel,
-                            ),
-                        )
-                        Column(Modifier.weight(1f)) {
-                            Text(
-                                source.name,
-                                style = MaterialTheme.typography.bodyMedium,
-                                fontWeight = FontWeight.Medium,
-                                color = Snow,
-                            )
-                            Text(
-                                source.description,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = Silver,
-                            )
-                        }
-                    }
+                    PandaChoiceCard(
+                        title = source.name, description = source.description, selected = checked,
+                        onClick = { viewModel.toggleSource(source.id) },
+                        modifier = if (attachEntryFocus) Modifier.focusRequester(entryFocusRequester!!) else Modifier,
+                    )
                 }
             }
 

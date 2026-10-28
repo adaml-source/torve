@@ -62,7 +62,7 @@ class AddonProviderHealthChecker(
     private fun base(): ProviderHealthEntry = ProviderHealthEntry(
         category = ProviderHealthCategory.ADDON,
         providerKey = providerKey,
-        label = "Stremio addons",
+        label = "External extensions",
         status = ProviderHealthStatus.UNKNOWN,
     )
 }

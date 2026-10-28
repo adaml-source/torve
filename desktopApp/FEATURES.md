@@ -4,6 +4,16 @@ Snapshot of every shipped desktop-only feature, organised so you can find:
 the user-facing surface, the file that owns it, and the platform-specific
 mechanism it relies on.
 
+The Windows 1.6.0 candidate adds desktop entry points for Your Shows/Calendar,
+household profiles, catalog groups, Trakt personal lists, playback presets,
+independent sync status, optional service controls, recommendation feedback,
+episode alerts and WebDAV files. It also updates guide normalization,
+authenticated Jellyfin playback, detail/source session retention and download
+profile scoping. The implementation, acceptance criteria, validation status and
+remaining runtime checks are recorded in
+[`docs/torve-windows-upgrade-1.6.0.json`](../docs/torve-windows-upgrade-1.6.0.json).
+That ledger distinguishes a local candidate from a published release.
+
 > Cross-platform features (catalog, search, watchlist, sync, account access,
 > KMP business logic) live in `shared/` and apply to every Torve client.
 > They are intentionally **not** listed here — this document is the desktop
@@ -31,7 +41,7 @@ mechanism it relies on.
 | Feature | Where | Notes |
 |---|---|---|
 | Sentry crash reporting | `desktop/diagnostics/SentryBootstrap.kt` | DSN read at runtime from `TORVE_SENTRY_DSN`. No DSN → no SDK init → zero traffic. Crashes tagged with `thread.kind` (awt/compose/coroutine/vlc/other). PII off, max 50 breadcrumbs, no perf tracing yet. |
-| In-app update checker | `desktop/updates/UpdateChecker.kt` | Auto-detects feed format. Source: `TORVE_UPDATE_FEED` (full URL) wins, then `TORVE_UPDATE_REPO` (`owner/name` for GitHub Releases). Parses both Sparkle/WinSparkle appcast XML and GitHub Releases JSON. |
+| In-app update checker | `desktop/updates/UpdateChecker.kt` | Auto-detects feed format. Packaged releases use the official Torve appcast; `TORVE_UPDATE_FEED` (full URL) or `TORVE_UPDATE_REPO` (`owner/name`) can override it for QA. Parses both Sparkle/WinSparkle appcast XML and GitHub Releases JSON. |
 | Update banner | `desktop/updates/UpdateBanner.kt` | Slim pill at top-center when a newer release is detected. **View release** opens the URL in the system browser; **Dismiss** hides per-session. |
 | Update preferences | `desktop/updates/UpdateCheckerPreferences.kt` | Properties file under `desktopDataDir()`. Stores `autoCheckOnLaunch`. Toggle exposed in Settings → Diagnostics & Updates. |
 | Diagnostics & Updates settings card | `desktop/ui/v2/settings/V2SettingsPage.kt` | Live read-only state of Sentry + update channel, env-var names with **Copy** buttons, "Check for updates now" trigger, auto-check toggle. |
@@ -161,7 +171,7 @@ painted over by a heavyweight peer.
 | Native installer scaffolding | `desktopApp/build.gradle.kts:nativeDistributions` | All targets declared: Windows EXE/MSI, macOS DMG, Linux DEB/AppImage. Per-OS metadata (UpgradeUUID, bundleID, Linux package name, app categories). macOS code-signing + notarization wired through `TORVE_MAC_*` env vars. Run `./gradlew :desktopApp:packageDmg` / `packageMsi` / `packageDeb` / `packageAppImage` on the appropriate host. |
 | Bundled VLC runtime (Windows) | `desktopApp/runtime/windows/vlc/` | Optional drop-in libvlc + plugins so end-users don't need a system VLC install. |
 | jpackage prereq check | `desktopApp/build.gradle.kts:verifyWindowsPackagingPrereqs` | Validates a JDK with jpackage exists; gates package tasks. |
-| Sample appcast generator | `desktopApp/build.gradle.kts:generateSampleAppcast` | `./gradlew :desktopApp:generateSampleAppcast` writes `release/appcast.sample.xml`. Edit version + URL, host on CDN, set `TORVE_UPDATE_FEED` to enable in-app update detection. |
+| Sample appcast generator | `desktopApp/build.gradle.kts:generateSampleAppcast` | `./gradlew :desktopApp:generateSampleAppcast` writes `release/appcast.sample.xml`. Production packages use `https://api.torve.app/releases/appcast.xml`; `TORVE_UPDATE_FEED` can override it for staging. |
 | WINDOWS_PACKAGING.md | `desktopApp/WINDOWS_PACKAGING.md` | Manual packaging checklist. |
 
 ---

@@ -40,12 +40,9 @@ import org.koin.mp.KoinPlatform
 private const val PREF_KEY_PANDA_NUDGE_DISMISSED = "panda_setup_nudge_dismissed"
 
 /**
- * Desktop counterpart to the mobile PandaSetupNudgeCard. Visibility
+ * Desktop streaming-source setup nudge. Visibility
  * predicates - all must be true:
- *  - [eligible] = true. Panda completion needs the addon catalog, which
- *    is premium-gated, so nudging users who can't actually finish the
- *    flow is misleading. Callers usually compute this as
- *    `signedIn AND emailVerified AND accessTier != FREE`.
+ *  - [eligible] = true (normally signed in and email verified).
  *  - Panda not already configured.
  *  - User hasn't clicked the dismiss button (persisted via the shared
  *    [PreferencesRepository] under [PREF_KEY_PANDA_NUDGE_DISMISSED]).
@@ -93,17 +90,17 @@ fun DesktopPandaSetupNudgeCard(
         )
         Column(modifier = Modifier.weight(1f)) {
             Text(
-                text = "Set up Panda",
+                text = "Set up streaming sources",
                 color = colors.textPrimary,
                 fontWeight = FontWeight.SemiBold,
             )
             Spacer(Modifier.height(2.dp))
             Text(
-                text = "Easiest way to enable Torve's core source discovery - a guided wizard wires debrid + Usenet for you.",
+                text = "Connect Debrid or Usenet with guided checks. You can change or repair each connection later.",
                 color = colors.textSecondary,
             )
             Spacer(Modifier.height(10.dp))
-            TorvePrimaryButton(text = "Set up Panda", onClick = onSetupClick)
+            TorvePrimaryButton(text = "Open streaming setup", onClick = onSetupClick)
         }
         IconButton(
             onClick = {

@@ -1,12 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <!-- App -->
-    <string name="app_name">Torve</string>
+    <string name="app_name">"Torve"</string>
     <string name="widget_description">Affiche votre liste de visionnage en cours</string>
     <string name="widget_name">Reprendre le visionnage</string>
 
     <!-- Navigation -->
-    <string name="nav_home">Accueil</string>
+    <string name="nav_home">"Home"</string>
     <string name="nav_movies">Films</string>
     <string name="nav_tv_shows">Séries TV</string>
     <string name="nav_channels">TV en direct</string>
@@ -99,7 +99,7 @@
     <string name="settings_scrobble_desc">Suivi automatique de ce que vous regardez</string>
     <string name="settings_api_status">API : %1$s</string>
 
-    <string name="settings_simkl">SIMKL</string>
+    <string name="settings_simkl">"SIMKL"</string>
     <string name="settings_connect_simkl">Connecter SIMKL</string>
 
     <string name="settings_live_tv">Chaînes</string>
@@ -346,7 +346,7 @@
     <string name="integrations_open_browser">Ouvrir dans le navigateur</string>
 
     <!-- MDBList Screen -->
-    <string name="mdblist_title">MDBList</string>
+    <string name="mdblist_title">"MDBList"</string>
     <string name="mdblist_api_key_hint">Obtenez votre clé API gratuite sur mdblist.com/preferences</string>
     <string name="mdblist_enter_key">Entrez la clé API MDBList</string>
     <string name="mdblist_saved">Enregistré</string>
@@ -450,10 +450,10 @@
     <string name="addon_category_subtitles">Sous-titres</string>
 
     <!-- Manage Panda Screen -->
-    <string name="manage_panda_title">Panda</string>
-    <string name="manage_panda_not_installed">Panda n\'est pas encore installé. Installez-le pour obtenir une configuration de streaming guidée avec une configuration côté serveur.</string>
-    <string name="manage_panda_install">Installer Panda</string>
-    <string name="manage_panda_remove">Supprimer Panda</string>
+    <string name="manage_panda_title">Sources de streaming</string>
+    <string name="manage_panda_not_installed">Les sources de streaming ne sont pas encore configurées. Lancez l’assistant pour connecter Debrid ou Usenet.</string>
+    <string name="manage_panda_install">Configurer les sources</string>
+    <string name="manage_panda_remove">Supprimer la configuration des sources</string>
     <string name="manage_panda_open_config">Ouvrir la configuration</string>
     <string name="manage_panda_enabled">Activé</string>
     <string name="manage_panda_version">Version %1$s</string>
@@ -463,7 +463,7 @@
     <!-- Panda Native Setup -->
     <string name="panda_setup_title">Configurer Panda</string>
     <string name="panda_setup_provider_title">Choisissez votre fournisseur</string>
-    <string name="panda_setup_provider_desc">Sélectionnez le service debrid que vous souhaitez utiliser avec Panda.</string>
+    <string name="panda_setup_provider_desc">Sélectionnez le service debrid que vous souhaitez utiliser avec Torve.</string>
     <string name="panda_setup_auth_title">Connecter %1$s</string>
     <string name="panda_setup_auth_oauth">Se connecter avec le navigateur</string>
     <string name="panda_setup_auth_apikey">Entrer la clé API</string>
@@ -485,7 +485,7 @@
     <string name="panda_setup_review_save">Enregistrer &amp; Installer</string>
     <string name="panda_setup_review_update">Mettre à jour la configuration</string>
     <string name="panda_setup_review_saving">Enregistrement…</string>
-    <string name="panda_setup_review_success">Panda installé et prêt.</string>
+    <string name="panda_setup_review_success">Les sources de streaming sont connectées et prêtes.</string>
     <string name="panda_setup_review_done">Terminé</string>
     <string name="panda_setup_web_fallback">Configurer sur le web à la place</string>
     <string name="panda_setup_reconfigure">Reconfigurer</string>
@@ -499,11 +499,11 @@
     <string name="panda_language_any">Toutes</string>
 
     <!-- Panda Usenet Setup -->
-    <string name="panda_setup_usenet_title">Usenet</string>
+    <string name="panda_setup_usenet_title">"Usenet"</string>
     <string name="panda_setup_usenet_desc">Configurez Usenet pour des sources de streaming supplémentaires. Easynews offre la configuration la plus simple avec le streaming HTTP direct.</string>
     <string name="panda_setup_usenet_enable">Activer Usenet</string>
     <string name="panda_setup_usenet_provider">Fournisseur Usenet</string>
-    <string name="panda_setup_usenet_easynews">Easynews</string>
+    <string name="panda_setup_usenet_easynews">"Easynews"</string>
     <string name="panda_setup_usenet_easynews_desc">Streaming HTTP direct avec recherche intégrée. Aucun indexer requis.</string>
     <string name="panda_setup_usenet_generic">NNTP générique</string>
     <string name="panda_setup_usenet_generic_desc">N\'importe quel fournisseur Usenet. Nécessite un indexer NZB et un client de téléchargement.</string>
@@ -513,12 +513,12 @@
     <string name="panda_setup_usenet_password">Mot de passe</string>
     <string name="panda_setup_usenet_ssl">Utiliser SSL</string>
     <string name="panda_setup_usenet_connections">Connexions</string>
-    <string name="panda_setup_usenet_indexer">Indexer NZB</string>
+    <string name="panda_setup_usenet_indexer">"Indexer NZB"</string>
     <string name="panda_setup_usenet_indexer_key">Clé API de l\'indexer</string>
     <string name="panda_setup_usenet_indexer_url">URL personnalisée de l\'indexer</string>
     <string name="panda_setup_usenet_client">Client de téléchargement</string>
     <string name="panda_setup_sources_title">Sources torrent</string>
-    <string name="panda_setup_sources_desc">Choisis les sources torrent que Panda doit rechercher. Les paramètres par défaut conviennent à la plupart des utilisateurs.</string>
+    <string name="panda_setup_sources_desc">Choisis les sources torrent que Torve doit rechercher. Les paramètres par défaut conviennent à la plupart des utilisateurs.</string>
     <string name="panda_setup_usenet_indexer_none">Aucun</string>
     <string name="panda_setup_usenet_indexer_custom">URL personnalisée</string>
     <string name="panda_setup_usenet_client_none">Aucun</string>
@@ -529,8 +529,8 @@
     <string name="panda_setup_usenet_client_pass">Mot de passe du client</string>
     <string name="panda_setup_usenet_client_key">Clé API du client</string>
     <string name="panda_setup_usenet_add_indexer">Ajouter un autre indexeur</string>
-    <string name="panda_setup_review_usenet">Usenet</string>
-    <string name="panda_setup_review_indexer">Indexer NZB</string>
+    <string name="panda_setup_review_usenet">"Usenet"</string>
+    <string name="panda_setup_review_indexer">"Indexer NZB"</string>
     <string name="panda_setup_review_client">Client de téléchargement</string>
 
     <!-- Category Manager Sheet -->
@@ -850,7 +850,7 @@
     <string name="tv_settings_section_account">Compte</string>
     <string name="tv_settings_section_app">App</string>
     <string name="tv_settings_section_about">À propos</string>
-    <string name="tv_settings_trakt">Trakt</string>
+    <string name="tv_settings_trakt">"Trakt"</string>
     <string name="tv_settings_phone_pairing">Appairage téléphone</string>
     <string name="tv_settings_language">Langue</string>
     <string name="tv_settings_playback_quality">Qualité de lecture</string>
@@ -966,7 +966,7 @@
     <string name="tv_settings_mode_ios_desc">Appairez votre iPhone pour synchroniser les paramètres</string>
     <string name="tv_settings_mode_tv_only">TV uniquement — pas d\'app mobile</string>
     <string name="tv_settings_mode_tv_only_desc">Configurez tout directement sur votre TV</string>
-    <string name="tv_settings_simkl">SIMKL</string>
+    <string name="tv_settings_simkl">"SIMKL"</string>
     <string name="tv_settings_sync_note">Pour personnaliser la disposition d\'accueil, les styles de cartes et les sources de notes — configurez dans l\'app et appuyez sur Sync.</string>
 
     <!-- TV Detail -->
@@ -985,20 +985,20 @@
 
     <!-- TV Settings: Integrations -->
     <string name="tv_settings_section_integrations">Intégrations</string>
-    <string name="tv_settings_omdb">OMDB</string>
+    <string name="tv_settings_omdb">"OMDB"</string>
     <string name="tv_settings_omdb_api_key">Clé API OMDB</string>
     <string name="tv_settings_omdb_test">Tester OMDB</string>
-    <string name="tv_settings_mdblist">MDBList</string>
+    <string name="tv_settings_mdblist">"MDBList"</string>
     <string name="tv_settings_mdblist_api_key">Clé API MDBList</string>
-    <string name="tv_settings_jellyfin">Jellyfin</string>
+    <string name="tv_settings_jellyfin">"Jellyfin"</string>
     <string name="tv_settings_jellyfin_url">URL du serveur Jellyfin</string>
     <string name="tv_settings_jellyfin_api_key">Clé API Jellyfin</string>
     <string name="tv_settings_jellyfin_test">Tester Jellyfin</string>
-    <string name="tv_settings_plex">Plex</string>
+    <string name="tv_settings_plex">"Plex"</string>
     <string name="tv_settings_plex_url">URL du serveur Plex</string>
     <string name="tv_settings_plex_token">Token d\'accès Plex</string>
     <string name="tv_settings_plex_test">Tester Plex</string>
-    <string name="tv_settings_kodi">Kodi</string>
+    <string name="tv_settings_kodi">"Kodi"</string>
     <string name="tv_settings_kodi_name">Nom</string>
     <string name="tv_settings_kodi_ip">Hôte / IP</string>
     <string name="tv_settings_kodi_port">Port</string>
@@ -1043,6 +1043,7 @@
     <!-- TV Ratings Settings -->
     <string name="tv_ratings_title">Sources de notes</string>
     <string name="tv_ratings_show_on_detail">Afficher les notes sur la page de détails</string>
+    <string name="tv_ratings_show_on_posters">Afficher les notes sur les affiches</string>
     <string name="tv_ratings_show_torve_score">Afficher le score Torve</string>
     <string name="tv_ratings_section_sources">Sources de notes</string>
     <string name="tv_ratings_max_on_cards">Max. notes sur les cartes</string>
@@ -1121,7 +1122,7 @@
     <string name="tv_settings_section_profile_signin">Profil et connexion</string>
 
     <!-- Missing keys (Part 1) -->
-    <string name="watchlist_jellyfin">Jellyfin</string>
+    <string name="watchlist_jellyfin">"Jellyfin"</string>
     <string name="jellyfin_library_empty">Aucun élément trouvé sur votre serveur Jellyfin</string>
     <string name="jellyfin_not_connected">Connectez votre serveur Jellyfin dans Paramètres → Intégrations</string>
     <string name="tv_settings_cat_account">Compte</string>
@@ -1604,7 +1605,7 @@
     <string name="paywall_recurring_label">No billing</string>
     <string name="paywall_choose_monthly">Continue</string>
     <string name="paywall_choose_lifetime">Continue</string>
-    <string name="paywall_retry_verification">Refresh access</string>
+    <string name="paywall_retry_verification">"Actualiser l’accès"</string>
     <string name="premium_refresh_access">Actualiser l\'accès</string>
     <string name="paywall_needs_verification_title">Verify your email to use Torve on this device</string>
     <string name="paywall_needs_verification_body">Verify your email to keep your account secure on this device.</string>
@@ -1657,8 +1658,8 @@
     <string name="setup_feature_download">Enregistrez des médias pour l\'accès hors ligne</string>
     <string name="setup_cloud_desc">Connectez votre service d\'optimisation de streaming pour une lecture plus rapide.</string>
     <string name="setup_panda_title">Configuration recommandée</string>
-    <string name="setup_panda_desc">Utilisez Panda pour la configuration la plus simple. Vous y configurez fournisseurs, debrid et qualité dans un seul parcours guidé.</string>
-    <string name="setup_panda_open_setup">Ouvrir la configuration Panda</string>
+    <string name="setup_panda_desc">Connectez Debrid ou Usenet et choisissez la qualité dans un seul parcours guidé.</string>
+    <string name="setup_panda_open_setup">Configurer les sources de streaming</string>
     <string name="setup_panda_advanced">Configuration manuelle avancée</string>
     <string name="setup_panda_advanced_desc">Continuez à utiliser ici la configuration directe du fournisseur et de la clé API si vous voulez un contrôle manuel maximal.</string>
     <string name="legal_document_loading">Chargement du document…</string>
@@ -1765,7 +1766,7 @@
     <string name="usenet_playback_link_expired">Lien de lecture expiré, actualisation</string>
 
     <!-- NzbDAV integration card -->
-    <string name="integrations_nzbdav_title">NzbDAV</string>
+    <string name="integrations_nzbdav_title">"NzbDAV"</string>
     <string name="integrations_nzbdav_desc">Torve utilise votre instance NzbDAV pour diffuser des sources Usenet. La connexion est gérée par le backend de Torve.</string>
     <string name="integrations_nzbdav_base_url">URL de base</string>
     <string name="integrations_nzbdav_api_key">Clé API</string>
@@ -1901,9 +1902,9 @@
     <string name="verify_gate_body_email">Nous avons envoyé un lien de confirmation à %1$s. Confirmez-le, puis poursuivez la configuration.</string>
     <string name="verify_gate_confirmed">J’ai confirmé mon e-mail</string>
     <string name="verify_gate_send_again">Renvoyer l’e-mail</string>
-    <string name="verify_gate_next">Ensuite : choisissez comment regarder. Utilisez Panda pour Debrid/Usenet, ajoutez IPTV pour la TV en direct ou connectez Plex/Jellyfin.</string>
+    <string name="verify_gate_next">Ensuite : choisissez comment regarder. Connectez Debrid ou Usenet, ajoutez IPTV pour la TV en direct ou connectez Plex/Jellyfin.</string>
     <string name="verify_gate_different_account">Utiliser un autre compte</string>
-    <string name="panda_setup_nudge_title">Configurer Panda</string>
+    <string name="panda_setup_nudge_title">Configurer les sources de streaming</string>
     <string name="panda_setup_nudge_body">Le moyen le plus simple d’activer la découverte de sources Torve : un assistant configure Debrid + Usenet pour vous.</string>
     <string name="voice_input_no_input">Aucune saisie vocale détectée</string>
     <string name="voice_input_unavailable">La saisie vocale n’est pas disponible sur cet appareil</string>
@@ -2012,7 +2013,7 @@
     <string name="transfer_auto_import_unavailable_body">%1$s Utilisez le champ de collage ci-dessous.</string>
     <string name="transfer_category_debrid">Debrid</string>
     <string name="transfer_category_debrid_desc">Jetons Real-Debrid, AllDebrid, Premiumize, TorBox et OAuth RD.</string>
-    <string name="transfer_category_iptv">IPTV</string>
+    <string name="transfer_category_iptv">"IPTV"</string>
     <string name="transfer_category_iptv_desc">Listes Xtream et M3U avec leurs identifiants.</string>
     <string name="transfer_category_plex_jellyfin">Plex / Jellyfin</string>
     <string name="transfer_category_plex_jellyfin_desc">Jeton Plex et clé API Jellyfin, avec leurs URL serveur.</string>
@@ -2078,4 +2079,284 @@
     <string name="transfer_skipped_unknown_keys">Clés inconnues ignorées : %1$s.</string>
     <string name="transfer_skipped_config_keys">Clés de configuration ignorées car absentes de la liste autorisée du destinataire : %1$s.</string>
     <string name="transfer_import_missing_companion_config">Identifiants importés, mais configuration complémentaire manquante pour : %1$s. Renseignez l’URL serveur correspondante dans les paramètres pour terminer la configuration.</string>
+    <!-- Ajouts pour la configuration, la lecture, le diagnostic et l’automatisation -->
+    <string name="nav_search">Rechercher</string>
+    <string name="nav_more">Plus</string>
+    <string name="home_outcome_tagline">Trouvez-le. Lisez la meilleure source disponible.</string>
+    <string name="detail_add_watchlist">Ajouter à la liste de suivi</string>
+    <string name="detail_remove_watchlist">Retirer de la liste de suivi</string>
+    <string name="detail_add_favorites">Ajouter aux favoris</string>
+    <string name="detail_remove_favorites">Retirer des favoris</string>
+    <string name="settings_min_size_per_hour">Taille minimale de la source par heure (Mo)</string>
+    <string name="settings_min_size_per_hour_hint">Par exemple, 2048 signifie qu’un épisode de 30 minutes doit faire au moins 1 Go.</string>
+    <string name="settings_preferred_audio_languages">Langues audio préférées</string>
+    <string name="settings_preferred_audio_languages_hint">Codes de langue dans l’ordre, par exemple : en, fr</string>
+    <string name="settings_next_episode_timing">Déclenchement de l’épisode suivant</string>
+    <string name="settings_next_episode_preparation">Préparation de l’épisode suivant</string>
+    <string name="settings_source_language_match">Correspondance de langue des sources</string>
+    <string name="settings_unknown_source_size">Sources de taille inconnue</string>
+    <string name="settings_source_fallback">Lorsqu’aucune source ne correspond</string>
+    <string name="settings_preload_buffer_seconds">Tampon de préchargement (secondes)</string>
+    <string name="settings_preload_max_mb">Données de préchargement maximales (Mo)</string>
+    <string name="settings_preload_wifi_only">Préparer uniquement en Wi-Fi/Ethernet</string>
+    <string name="settings_preload_wifi_only_desc">Ne pas résoudre ni mettre en mémoire tampon l’épisode suivant via les données mobiles.</string>
+    <string name="settings_refresh_all">Tout actualiser</string>
+    <string name="settings_refresh_all_started">Actualisation du compte, des appareils, des chaînes et du contenu en arrière-plan.</string>
+    <string name="channels_check_epg">Vérifier l’EPG</string>
+    <string name="channels_check_epg_checking">Vérification de l’EPG…</string>
+    <string name="calendar_reconnect_trakt">Reconnectez Trakt pour afficher votre calendrier</string>
+    <string name="calendar_reconnect_trakt_desc">Votre session Trakt a expiré ou a été révoquée. Reconnectez Trakt dans les paramètres pour charger les prochains épisodes.</string>
+    <string name="calendar_stale_warning">Le dernier calendrier enregistré est affiché pendant que Trakt est indisponible.</string>
+    <string name="calendar_stale_rate_limited">Le calendrier enregistré est affiché car Trakt limite les requêtes.</string>
+    <string name="calendar_stale_network">Le calendrier enregistré est affiché car Trakt n’a pas pu être contacté.</string>
+    <string name="calendar_stale_server">Le calendrier enregistré est affiché car Trakt est temporairement indisponible.</string>
+    <string name="calendar_stale_unknown">Le calendrier enregistré est affiché car il n’a pas pu être actualisé.</string>
+    <string name="regex_import_json">Importer le JSON</string>
+    <string name="regex_export_json">Exporter le JSON</string>
+    <string name="regex_imported">%1$d motif(s) regex importé(s).</string>
+    <string name="regex_imported_disabled">%1$d motif(s) regex importé(s). %2$d désactivé(s), car l’expression régulière était vide ou non valide.</string>
+    <string name="regex_import_failed">Impossible d’importer le JSON des regex.</string>
+    <string name="regex_export_failed">Impossible d’exporter le JSON des regex.</string>
+    <string name="regex_exported">JSON des regex exporté.</string>
+    <string name="panda_setup_type_title">Choisir le type de configuration</string>
+    <string name="panda_setup_type_desc">Commencez par le streaming cloud via debrid ou passez directement à la configuration Usenet.</string>
+    <string name="panda_setup_type_debrid_title">Debrid</string>
+    <string name="panda_setup_type_debrid_subtitle">Utilisez Real-Debrid, AllDebrid, Premiumize, TorBox ou un autre service debrid pris en charge.</string>
+    <string name="panda_setup_type_usenet_title">Usenet uniquement</string>
+    <string name="panda_setup_type_usenet_subtitle">Ignorez debrid et configurez Usenet, les indexeurs et un client de téléchargement.</string>
+    <string name="panda_setup_auth_choose_title">Connecter un fournisseur debrid</string>
+    <string name="panda_setup_auth_inline_hint">Choisissez un fournisseur, puis connectez-le directement sous la ligne sélectionnée.</string>
+    <string name="stream_groups_import_json">Importer le JSON</string>
+    <string name="stream_groups_export_json">Exporter le JSON</string>
+    <string name="stream_groups_imported">%1$d groupe(s) de streams importé(s).</string>
+    <string name="stream_groups_imported_disabled">%1$d groupe(s) de streams importé(s). %2$d désactivé(s), car l’expression régulière était vide ou non valide.</string>
+    <string name="stream_groups_import_failed">Impossible d’importer le JSON des groupes de streams.</string>
+    <string name="stream_groups_export_failed">Impossible d’exporter le JSON des groupes de streams.</string>
+    <string name="stream_groups_exported">JSON des groupes de streams exporté.</string>
+    <string name="tv_settings_see_all_poster_columns">Affiches par ligne dans Tout afficher</string>
+    <string name="tv_settings_see_all_poster_columns_value">%1$d affiches par ligne</string>
+    <string name="tv_iptv_sign_in_title">Connectez-vous pour restaurer les chaînes</string>
+    <string name="tv_iptv_sign_in_subtitle">Ce téléviseur n’est pas connecté. Connectez-vous pour restaurer en toute sécurité vos sources de chaînes enregistrées.</string>
+    <string name="tv_iptv_sign_in_action">Se connecter</string>
+    <string name="tv_iptv_sync_sources">Synchroniser les sources</string>
+    <string name="tv_iptv_manage_sources">Gérer les sources</string>
+    <string name="manage_devices_limit_loading">Vérification de la limite d’appareils de votre compte…</string>
+    <string name="manage_devices_count_loading">Vérification des appareils actifs…</string>
+    <string name="manage_devices_limit_reached_warning">Vous avez atteint votre limite de %d appareils.</string>
+    <string name="device_limit_message_loading">Vérification des appareils enregistrés sur votre compte. Supprimez un appareil actif pour enregistrer celui-ci.</string>
+    <string name="bug_report_type_crash">Plantage</string>
+    <string name="bug_report_type_lag_freezing">Lenteurs / blocages</string>
+    <string name="bug_report_type_focus_navigation">Focus bloqué / navigation à la télécommande</string>
+    <string name="bug_report_type_playback_problem">Problème de lecture</string>
+    <string name="bug_report_type_broken_link">Lien rompu / échec de la source</string>
+    <string name="bug_report_type_integration_problem">Problème d’intégration</string>
+    <string name="bug_report_type_addon_problem">Problème d’addon</string>
+    <string name="bug_report_type_iptv_problem">Problème IPTV</string>
+    <string name="bug_report_type_account_access">Problème d’accès au compte</string>
+    <string name="bug_report_privacy_note">Les rapports de diagnostic incluent l’état de l’appareil/de l’application et les journaux Torve récents. Les secrets, jetons, mots de passe, URL de streams, données de paiement et identifiants de compte sont masqués.</string>
+    <string name="bug_report_send_support">Envoyer à l’assistance Torve</string>
+    <string name="bug_report_send_support_tv_desc">Envoie le rapport masqué depuis ce téléviseur connecté. Aucune application de messagerie n’est requise.</string>
+    <string name="bug_report_send_full_diagnostics">Envoyer le rapport de diagnostic complet</string>
+    <string name="bug_report_sending">Envoi du rapport…</string>
+    <string name="bug_report_sent">Rapport envoyé. Référence : %1$s</string>
+    <string name="bug_report_saved_for_retry">Un précédent rapport de diagnostic est enregistré localement. Essayez de l’envoyer à nouveau.</string>
+    <string name="bug_report_send_failed">Impossible d’envoyer le rapport pour le moment. Copiez-le et réessayez plus tard.</string>
+    <string name="player_background_playing">Lecture en arrière-plan · Appuyez sur Sélectionner pour revenir</string>
+    <string name="player_background_paused">En pause · Appuyez sur Sélectionner pour revenir</string>
+    <string name="player_background_hold_back_hint">Menu : commandes de lecture · Maintenir Retour : revenir au lecteur</string>
+    <string name="player_background_return">Revenir</string>
+    <string name="player_background_stop">Arrêter</string>
+    <string name="tv_manage_active_count_loading">Vérification des appareils actifs…</string>
+    <string name="tv_manage_limit_reached_warning">Vous avez atteint votre limite de %d appareils.</string>
+    <string name="tv_manage_device_limit_desc_loading">Vérification des appareils enregistrés sur votre compte. Supprimez un appareil actif pour enregistrer celui-ci.</string>
+    <string name="error_stream_reference_unavailable">Cette source n’est plus disponible. Actualisez les sources ou essayez-en une autre.</string>
+    <string name="error_stream_real_debrid_source_blocked">Real-Debrid a bloqué cette source. Essayez une autre source.</string>
+    <string name="transfer_category_arr_stack">Automatisation multimédia</string>
+    <string name="transfer_category_arr_stack_desc">Clés API et URL de serveur Seerr, Sonarr, Radarr, Prowlarr, Bazarr et Tdarr.</string>
+    <string name="integrations_seerr_title">Demandes Seerr</string>
+    <string name="integrations_seerr_desc">Demandez des films et des saisons dans la qualité souhaitée via la configuration Sonarr et Radarr de votre foyer.</string>
+    <string name="integrations_automation_title">Automatisation multimédia (avancée)</string>
+    <string name="integrations_automation_desc">Configurez plusieurs instances Sonarr, Radarr, Prowlarr, Bazarr ou Tdarr.</string>
+    <string name="integrations_automation_admin_warning">Ces clés API peuvent administrer votre pile multimédia. Elles restent chiffrées sur cet appareil, sauf si vous utilisez explicitement le transfert chiffré entre appareils.</string>
+    <string name="integrations_automation_service">Service</string>
+    <string name="integrations_automation_name">Nom de l’instance</string>
+    <string name="integrations_automation_role">Rôle de la bibliothèque</string>
+    <string name="integrations_automation_standard">Bibliothèque standard</string>
+    <string name="integrations_automation_uhd">Bibliothèque 4K / UHD</string>
+    <string name="integrations_automation_default">Utiliser par défaut pour ce service et cette qualité</string>
+    <string name="integrations_tdarr_read_only_probe">Tdarr utilise son point de terminaison documenté et en lecture seule pour l’état du serveur. Aucune clé API n’est requise.</string>
+    <string name="integrations_save_test">Enregistrer et tester</string>
+    <string name="detail_add_to_library">Ajouter à la bibliothèque</string>
+    <string name="detail_add_season_to_library">Ajouter la saison %1$d à la bibliothèque</string>
+    <string name="detail_library_request_pending">En attente d’approbation</string>
+    <string name="detail_library_request_approved">Demande approuvée</string>
+    <string name="detail_library_request_processing">Préparation de la copie dans la bibliothèque</string>
+    <string name="detail_library_request_partial">Partiellement disponible</string>
+    <string name="detail_library_request_available">Disponible dans votre bibliothèque</string>
+    <string name="detail_library_request_retry">Réessayer la demande à la bibliothèque</string>
+    <string name="detail_library_refresh">Actualiser l’état de la bibliothèque</string>
+    <string name="app_update_channel_name">Mises à jour de Torve</string>
+    <string name="app_update_channel_description">Notifications lorsqu’une nouvelle version de Torve est disponible</string>
+    <string name="app_update_notification_title">Torve %1$s est disponible</string>
+    <string name="app_update_notification_body">Une nouvelle mise à jour est prête. Sélectionnez Télécharger et installer pour mettre Torve à jour.</string>
+    <string name="app_update_download_install">Télécharger et installer</string>
+    <string name="app_update_later">Plus tard</string>
+    <string name="app_update_downloading">Téléchargement de la mise à jour signée Torve %1$s…</string>
+    <string name="app_update_verifying">Vérification de la mise à jour téléchargée…</string>
+    <string name="app_update_permission_required">Autorisez Torve à installer cette mise à jour signée, puis revenez pour continuer.</string>
+    <string name="app_update_allow_installation">Autoriser l’installation</string>
+    <string name="app_update_opening_installer">Ouverture du programme d’installation système…</string>
+    <string name="app_update_download_failed">La mise à jour n’a pas pu être téléchargée ou vérifiée. Réessayez.</string>
+    <string name="app_update_retry">Réessayer</string>
+    <string name="app_update_resolving">Préparation de la mise à jour signée Torve %1$s…</string>
+    <string name="app_update_open_installer">Ouvrir le programme d’installation</string>
+    <string name="app_update_network_failed">Le téléchargement de la mise à jour a été interrompu par une erreur réseau. Vérifiez la connexion et réessayez.</string>
+    <string name="app_update_http_failed">Le serveur de mise à jour n’a pas renvoyé l’APK. Réessayez dans quelques instants.</string>
+    <string name="app_update_invalid_asset">Le serveur de versions a renvoyé un fichier de mise à jour non valide. Torve ne l’a pas installé.</string>
+    <string name="app_update_verification_failed">La mise à jour téléchargée n’a pas réussi la vérification de signature ou d’intégrité de Torve et n’a pas été installée.</string>
+    <string name="app_update_permission_failed">Torve n’a pas pu ouvrir l’autorisation d’installation. Activez « Installer des applications inconnues » pour Torve dans les réglages Fire TV, puis réessayez.</string>
+    <string name="app_update_installer_failed">Torve a téléchargé et vérifié la mise à jour, mais n’a pas pu ouvrir le programme d’installation Fire TV. Réessayez.</string>
+    <string name="app_update_back">Retour</string>
+    <string name="app_update_invalid_content">Le serveur de mise à jour n’a pas renvoyé de fichier APK valide. Rien n’a été installé.</string>
+    <string name="app_update_download_incomplete">Torve n’a pas pu télécharger la mise à jour complète. Réessayez.</string>
+    <string name="app_update_invalid_apk">Le fichier téléchargé n’est pas un paquet d’installation Torve valide et a été supprimé.</string>
+    <string name="app_update_hash_mismatch">Torve n’a pas pu vérifier la mise à jour téléchargée. Le fichier non valide a été supprimé.</string>
+    <string name="app_update_signature_mismatch">Cette mise à jour a été signée avec un certificat inattendu et ne peut pas être installée.</string>
+    <string name="app_update_package_mismatch">Le paquet téléchargé n’est pas une mise à jour Torve et a été supprimé.</string>
+    <string name="app_update_version_mismatch">Le paquet téléchargé contient une version Torve incorrecte et a été supprimé.</string>
+    <string name="app_update_file_provider_failed">Torve a vérifié la mise à jour, mais n’a pas pu la transmettre en toute sécurité au programme d’installation système. Réessayez.</string>
+    <string name="app_update_open_downloader">Ouverture de Downloader…</string>
+    <string name="app_update_downloader_not_found">L’application Downloader est nécessaire pour installer les mises à jour. Installez-la depuis l’Amazon Appstore.</string>
+    <string name="tv_settings_check_for_updates">Rechercher des mises à jour</string>
+    <string name="tv_settings_check_for_updates_desc">Vérifier si une nouvelle version de Torve est disponible</string>
+    <string name="tv_settings_check_for_updates_checking">Recherche de mises à jour…</string>
+    <string name="tv_settings_check_for_updates_up_to_date">Torve est à jour</string>
+    <string name="tv_settings_check_for_updates_failed">Impossible de consulter le serveur de versions. Vérifiez le réseau et réessayez.</string>
+    <string name="tv_settings_check_for_updates_available">Torve %1$s est disponible — sélectionnez pour ouvrir Downloader</string>
+    <!-- Playback priority, explicit library actions, and connection repair. -->
+    <string name="product_more">Plus</string>
+    <string name="home_clear_search">Effacer la recherche</string>
+    <string name="detail_watch_now">Regarder</string>
+    <string name="detail_resume_episode">Reprendre · S%1$02dE%2$02d</string>
+    <string name="detail_watch_episode">Regarder · S%1$02dE%2$02d</string>
+    <string name="detail_resume_position">Reprendre à %1$s</string>
+    <string name="detail_mark_show_watched">Marquer la série comme vue</string>
+    <string name="detail_clear_show_history">Effacer l’historique de la série</string>
+    <string name="detail_mark_movie_watched">Marquer le film comme vu</string>
+    <string name="detail_mark_movie_unwatched">Marquer le film comme non vu</string>
+    <string name="detail_confirm_show_watched">Cela modifie l’historique de toute la série. Vous pouvez modifier chaque épisode dans la liste des épisodes.</string>
+    <string name="detail_confirm_clear_history">Cela supprime l’historique de toute la série. Votre liste et vos favoris sont conservés.</string>
+    <string name="detail_confirm_movie_watched">Marquer ce film comme vu ?</string>
+    <string name="detail_confirm_movie_unwatched">Retirer le statut vu de ce film ?</string>
+    <string name="detail_your_rating">Votre note</string>
+    <string name="detail_remove_rating">Supprimer la note</string>
+    <string name="detail_rated_value">Votre note · %1$d/10</string>
+    <string name="repair_title">État et réparation</string>
+    <string name="repair_open_settings">Ouvrir les paramètres</string>
+    <string name="repair_refresh_all">Tout vérifier</string>
+    <string name="repair_no_connections">Connectez les services que vous utilisez. Les services facultatifs peuvent rester déconnectés.</string>
+    <string name="repair_connection_summary">%1$d connectés · %2$d à vérifier</string>
+    <string name="repair_available_connections">Connexions disponibles (%1$d)</string>
+    <string name="repair_check_again">Vérifier à nouveau</string>
+    <string name="repair_connected">Connecté</string>
+    <string name="repair_setup_incomplete">Configuration incomplète</string>
+    <string name="repair_unverified">Pas encore vérifié</string>
+    <string name="repair_not_connected">Non connecté</string>
+    <string name="repair_auth_rejected">Connexion refusée</string>
+    <string name="repair_unreachable">Serveur inaccessible</string>
+    <string name="repair_check_failed">Impossible de vérifier la connexion</string>
+    <string name="repair_checking">Vérification…</string>
+    <string name="repair_update_credentials">Mettre à jour les identifiants</string>
+    <string name="repair_finish_setup">Terminer la configuration</string>
+    <string name="repair_review_connections">Vérifier les connexions</string>
+    <string name="repair_connect">Connecter</string>
+    <string name="repair_try_again">Réessayer</string>
+    <string name="repair_diagnostics">Diagnostic</string>
+    <string name="repair_connection_settings">Paramètres de connexion · %1$s</string>
+
+    <string name="gap_home_returning_title">Commencer par vos séries</string>
+    <string name="gap_home_returning_detail">Afficher les prochains épisodes avant les découvertes. Les rayons masqués le restent.</string>
+    <string name="gap_home_more_shows">Voir les %1$d séries</string>
+    <string name="gap_library_filter">Trier et filtrer</string>
+    <string name="gap_library_filters_active">%1$d filtres actifs</string>
+    <string name="gap_connections_title">Connexions</string>
+    <string name="gap_connections_detail">Vérification, configuration et synchronisation au même endroit.</string>
+    <string name="gap_connections_services">Vos services</string>
+    <string name="gap_connections_sync">Synchronisation du suivi</string>
+    <string name="gap_connections_workflows">Ce que permet votre configuration</string>
+    <string name="gap_check_connections">Vérifier les connexions</string>
+
+    <string name="gap_files_title">Fichiers</string>
+    <string name="gap_files_description">Parcourir et lire vos vidéos NAS ou WebDAV.</string>
+    <string name="gap_files_connection">Connexion</string>
+    <string name="gap_files_connect">Connecter WebDAV</string>
+    <string name="gap_files_restricted">Les fichiers sans classification sont indisponibles dans ce profil limité.</string>
+    <string name="gap_files_auth_error">Le serveur a refusé la connexion. Vérifiez vos identifiants.</string>
+    <string name="gap_files_address_error">Vérifiez l’adresse du dossier WebDAV et la configuration du serveur.</string>
+    <string name="gap_files_network_error">Cette connexion est inaccessible. Réessayez.</string>
+    <string name="gap_files_empty">Aucune vidéo ni sous-dossier ici.</string>
+    <string name="gap_files_not_connected">Connectez un dossier WebDAV pour parcourir vos vidéos.</string>
+    <string name="gap_files_device_scope">Les identifiants restent sur cet appareil pour le profil actif.</string>
+    <string name="gap_files_address">Adresse du dossier</string>
+    <string name="gap_files_username">Identifiant</string>
+    <string name="gap_files_password">Mot de passe</string>
+    <string name="gap_files_disconnect">Déconnecter</string>
+    <string name="gap_files_resume">Reprendre à %1$s</string>
+    <string name="gap_refresh">Actualiser</string>
+
+    <string name="gap_recommendation_options">Options de recommandation</string>
+    <string name="gap_recommendation_hide">Pas intéressé</string>
+    <string name="gap_recommendation_hide_detail">Masquer cette recommandation pour le profil actif.</string>
+    <string name="gap_recommendation_reset">Réinitialiser les recommandations masquées</string>
+    <string name="gap_recommendation_reset_detail">Autoriser les titres précédemment masqués à réapparaître.</string>
+    <string name="gap_recommendation_watched">Parce que vous avez regardé %1$s</string>
+    <string name="gap_recommendation_saved">Parce que vous avez enregistré %1$s</string>
+    <string name="gap_recommendation_like">Parce que vous aimez %1$s</string>
+    <string name="gap_recommendation_genre">Populaire dans %1$s</string>
+    <string name="gap_recommendation_rated">Très bien noté</string>
+    <string name="gap_remote_title">Télécommande</string>
+    <string name="gap_remote_detail">Contrôlez votre TV ou Kodi sur le même réseau Wi-Fi.</string>
+    <string name="gap_remote_choose">Choisir un appareil</string>
+    <string name="gap_remote_sending">Envoi de la demande…</string>
+    <string name="gap_remote_select">Sélectionnez une TV associée ou un appareil Kodi configuré</string>
+    <string name="gap_remote_kodi">Commandes Kodi · même Wi-Fi requis</string>
+    <string name="gap_remote_ready">Connexion sécurisée prête</string>
+    <string name="gap_remote_open">Ouvrez Torve sur la TV, puis connectez-vous</string>
+    <string name="gap_remote_connect">Connecter à la TV</string>
+    <string name="gap_remote_empty">Associer votre première TV</string>
+    <string name="gap_remote_empty_detail">Associez une TV dans Appareils ou ajoutez Kodi dans Connexions.</string>
+    <string name="gap_remote_devices">Ouvrir Appareils</string>
+    <string name="gap_remote_up">Haut</string>
+    <string name="gap_remote_down">Bas</string>
+    <string name="gap_remote_left">Gauche</string>
+    <string name="gap_remote_right">Droite</string>
+    <string name="gap_remote_back">Retour</string>
+    <string name="gap_remote_home">"Home"</string>
+    <string name="gap_remote_menu">Menu</string>
+    <string name="gap_remote_rewind">Reculer</string>
+    <string name="gap_remote_forward">Avancer</string>
+    <string name="gap_remote_play">Lecture / pause</string>
+    <string name="gap_remote_stop">Arrêter la lecture</string>
+    <string name="gap_remote_seek">Pas de recherche : %1$d secondes</string>
+    <string name="gap_remote_manage">Gérer les appareils associés</string>
+    <string name="gap_remote_paired">TV associée</string>
+    <string name="gap_remote_failed">L’appareil ne répond pas. Ouvrez Torve ou Kodi sur le même Wi-Fi et reconnectez-vous.</string>
+    <string name="gap_remote_connect_failed">Connexion impossible. Ouvrez Torve sur la TV et utilisez le même Wi-Fi.</string>
+    <string name="gap_alerts_schedule">Android vérifie périodiquement avec une connexion ; les restrictions de batterie peuvent retarder les alertes.</string>
+    <string name="gap_alerts_check">Vérifier les alertes maintenant</string>
+    <string name="gap_alerts_last">Dernière vérification terminée : %1$s</string>
+    <string name="gap_alerts_never">Aucune vérification en arrière-plan terminée</string>
+    <string name="detail_watch_more_services">%1$s · +%2$d autres</string>
+    <string name="detail_watch_unavailable">Disponibilité indisponible</string>
+    <string name="detail_watch_expanded">Développé</string>
+    <string name="detail_watch_collapsed">Réduit</string>
+    <string name="detail_watch_on_tmdb">Voir les options sur TMDB</string>
+    <string name="detail_watch_attribution">Disponibilité : TMDB / JustWatch</string>
+    <string name="detail_watch_subscription">Abonnement</string>
+    <string name="detail_watch_rent">Location</string>
+    <string name="detail_watch_buy">Achat</string>
+    <string name="detail_watch_free">Gratuit</string>
+    <string name="detail_watch_ads">Avec publicité</string>
+    <string name="detail_library_help">À propos des demandes</string>
+    <string name="detail_library_not_in_library">Absent de la bibliothèque</string>
 </resources>

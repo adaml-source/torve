@@ -22,6 +22,20 @@ class MPVView @JvmOverloads constructor(
     private var pendingBindingToken: Int? = null
     private var pendingBindingReason: String? = null
     private var surfaceAttached = false
+    private val frameRateMatcher = VideoFrameRateMatcher()
+    private var originalSubtitleMargin: Int? = null
+    private var appliedSubtitleMargin: Int? = null
+    fun configurePresentation(matchFrameRate: Boolean, subtitleClearancePx: Int, playing: Boolean) {
+        val fps = runCatching { MPVLib.getPropertyDouble("estimated-vf-fps").toFloat() }.getOrNull()
+        frameRateMatcher.apply(holder.surface, matchFrameRate, fps, playing)
+        if (!MPVLib.isInitialized()) return
+        if (originalSubtitleMargin == null) originalSubtitleMargin = runCatching { MPVLib.getPropertyInt("sub-margin-y") }.getOrDefault(22)
+        val margin = maxOf(originalSubtitleMargin ?: 22, subtitleClearancePx)
+        if (margin != appliedSubtitleMargin) {
+            runCatching { MPVLib.setPropertyInt("sub-margin-y", margin) }
+            appliedSubtitleMargin = margin
+        }
+    }
 
     init {
         holder.addCallback(this)
@@ -54,6 +68,9 @@ class MPVView @JvmOverloads constructor(
     }
 
     fun releaseSurface(reason: String) {
+        frameRateMatcher.clear()
+        originalSubtitleMargin?.let { runCatching { MPVLib.setPropertyInt("sub-margin-y", it) } }
+        originalSubtitleMargin = null; appliedSubtitleMargin = null
         if (surfaceAttached) {
             Log.d(TAG, "Releasing mpv SurfaceView surface reason=$reason bindId=${lastBindingToken ?: -1}")
             runCatching { MPVLib.detachSurface() }

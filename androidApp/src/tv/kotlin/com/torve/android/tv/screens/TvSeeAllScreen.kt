@@ -1,5 +1,12 @@
 package com.torve.android.tv.screens
 
+import com.torve.android.tv.components.tvSettingsLabel as localizedUiText
+
+import com.torve.android.tv.components.tvGlassControl
+import com.torve.data.addon.catalogueShelfId
+import com.torve.data.addon.toMediaItem
+import com.torve.data.auth.withPersonalDataScope
+
 import android.util.Log
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.Crossfade
@@ -7,6 +14,10 @@ import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.input.key.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -75,16 +86,19 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
 import com.torve.android.tv.TV_PAGE_BOTTOM_GUTTER
+import com.torve.android.tv.TV_PAGE_CONTENT_GUTTER
 import com.torve.android.tv.TV_PAGE_END_GUTTER
 import com.torve.android.tv.TV_PAGE_TOP_GUTTER
 import com.torve.android.tv.TvImagePrefetcher
 import com.torve.android.tv.components.TvBrowsePreviewPanel
+import com.torve.android.tv.components.TvClickToEditSearchField
+import com.torve.android.tv.components.TvProviderBrandHeader
 import com.torve.android.tv.components.cacheTvBrowsePreviewEnrichedItem
-import com.torve.android.tv.components.tvExternalCardRatingPrefs
-import com.torve.android.ui.components.PreferredRatingPills
 import com.torve.android.tv.settings.TV_SEE_ALL_POSTER_COLUMN_OPTIONS
 import com.torve.android.tv.settings.rememberTvSeeAllPosterColumnsPreference
 import com.torve.android.tv.settings.setTvSeeAllPosterColumns
+import com.torve.android.ui.home.ALL_STREAMING_SERVICES
+import com.torve.android.ui.home.StreamingService
 import com.torve.data.mdblist.MdbListApi
 import com.torve.data.mdblist.RatingsEnricher
 import com.torve.data.metadata.TmdbMappers
@@ -93,13 +107,17 @@ import com.torve.domain.integrations.IntegrationSecretStore
 import com.torve.domain.model.MediaItem
 import com.torve.domain.model.MediaRatings
 import com.torve.domain.model.PagedResult
+import com.torve.domain.model.StreamingProviderCandidate
+import com.torve.domain.model.resolveStreamingProviderIds
 import com.torve.domain.repository.PreferencesRepository
 import com.torve.presentation.settings.SettingsViewModel
+import com.torve.android.tv.settings.rememberTvPosterRatingsPreference
+import com.torve.android.tv.components.TvPosterRatingPills
 import com.torve.domain.model.RatingDisplayPrefs
 import com.torve.domain.model.hasRichExternalRating
 import com.torve.domain.model.needsExternalRatingEnrichment
-import com.torve.domain.model.withFallbackTmdbScore
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -119,6 +137,8 @@ private const val TV_SEE_ALL_INITIAL_TARGET_COUNT = 100
 private const val TV_SEE_ALL_FILTER_METADATA_LIMIT = 30
 private const val TV_SEE_ALL_FILTER_RESULT_TARGET_COUNT = 60
 private const val TV_SEE_ALL_FILTER_GENRE_LIMIT = 8
+private const val TV_PROVIDER_WORLDWIDE_REGION_BATCH_SIZE = 8
+private const val NETFLIX_TMDB_PROVIDER_ID = 8
 private const val TV_SEE_ALL_FILTER_STUDIO_LIMIT = 5
 private const val TV_SEE_ALL_FILTER_YEAR_LIMIT = 5
 private const val TV_SEE_ALL_LOG_TAG = "TvSeeAll"
@@ -128,6 +148,8 @@ private data class TvSeeAllCacheEntry(
     val currentPage: Int,
     val totalPages: Int,
     val personPanelInfo: TvPersonPanelInfo?,
+    val addonOffset: Int = 0,
+    val addonSeenKeys: Set<String> = emptySet(),
 )
 
 private data class TvSeeAllFilterGroup(
@@ -211,20 +233,75 @@ internal fun TvSeeAllScreen(
     onBack: () -> Unit,
     onFirstContentRequester: (FocusRequester) -> Unit,
     onContentFocused: (FocusRequester) -> Unit,
+    onSeeAll: ((railKey: String, title: String, mediaType: String) -> Unit)? = null,
     registerFocusHandle: ((TvScreenFocusHandle?) -> Unit)? = null,
+    contextMenuActionsForItem: ((MediaItem, Float?) -> List<com.torve.android.tv.components.TvMediaContextMenuAction>)? = null,
+    onContextMenuAction: ((MediaItem, com.torve.android.tv.components.TvMediaContextMenuAction, Float?) -> Unit)? = null,
 ) {
+    var posterMenu by remember { mutableStateOf<com.torve.android.tv.components.TvMediaContextMenuState?>(null) }
+    var posterMenuReturn by remember { mutableStateOf<FocusRequester?>(null) }
+    fun dismissPosterMenu() {
+        posterMenu = null
+        runCatching { posterMenuReturn?.requestFocus() }
+    }
+    posterMenu?.let { menu ->
+        com.torve.android.tv.components.TvMediaContextMenu(menu, ::dismissPosterMenu) { action ->
+            onContextMenuAction?.invoke(menu.item, action, menu.progress)
+            dismissPosterMenu()
+        }
+    }
+    val routeProviderId = remember(railKey) {
+        railKey.takeIf { it.startsWith("provider_") }
+            ?.split("_")
+            ?.getOrNull(2)
+            ?.toIntOrNull()
+    }
     val metadataRepo: MetadataRepository = koinInject()
+    val addonRepository: com.torve.domain.repository.AddonRepository = koinInject()
+    val addonClient: com.torve.data.addon.StremioAddonClient = koinInject()
+    val personalIds: com.torve.data.auth.UserIdProvider = koinInject()
+    val addonContentPolicy: com.torve.data.contentpolicy.ContentPolicyRepository = koinInject()
+    val addonContentFilter: com.torve.presentation.contentpolicy.ContentPolicyFilter = koinInject()
+    var addonOffset by remember(railKey) { mutableIntStateOf(0) }
+    val addonSeenKeys = remember(railKey) { mutableSetOf<String>() }
     val watchProgressRepo: WatchProgressRepository = koinInject()
     val libraryOverlayService: LibraryOverlayService = koinInject()
     val ratingsEnricher: RatingsEnricher = koinInject()
     val prefsRepo: PreferencesRepository = koinInject()
-    val secretStore: IntegrationSecretStore = koinInject()
     val settingsViewModel: SettingsViewModel = koinInject()
     val settingsState by settingsViewModel.state.collectAsState()
-    val tvCardRatingPrefs = remember(settingsState.ratingPrefs) {
-        settingsState.ratingPrefs.tvExternalCardRatingPrefs()
-    }
+    val showPosterRatings = rememberTvPosterRatingsPreference()
+    val secretStore: IntegrationSecretStore = koinInject()
     val isPersonCreditsRail = railKey.startsWith("person_credits_")
+    val focusPreviewPolicy = com.torve.android.tv.settings.rememberTvFocusPreviewPolicy(settingsState.personalDataUserId)
+    val focusPreview = focusPreviewPolicy.hasPreview(if (isPersonCreditsRail) "people" else "seeAll")
+    val isProviderDiscoveryRail = railKey.startsWith("provider_")
+    val isStreamingCatalogRail = railKey.startsWith("streaming_catalog_")
+    val streamingCatalogProviderId = remember(railKey) {
+        railKey.takeIf { it.startsWith("streaming_catalog_") }
+            ?.split("_")
+            ?.getOrNull(2)
+            ?.toIntOrNull()
+    }
+    val configuredProviderId = routeProviderId ?: streamingCatalogProviderId
+    val isProviderSearchRail = isProviderDiscoveryRail || isStreamingCatalogRail
+    val providerDisplayName = remember(configuredProviderId, title) {
+        ALL_STREAMING_SERVICES.firstOrNull { it.tmdbProviderId == configuredProviderId }?.name
+            ?: title.removePrefix("Search & filter ").substringBefore(" · ")
+    }
+    val initialProviderType = remember(railKey) {
+        when {
+            railKey.endsWith("_popular_series") -> "tv"
+            else -> railKey.split("_").getOrNull(1)?.takeIf { it == "movie" || it == "tv" } ?: "movie"
+        }
+    }
+    var providerContentType by rememberSaveable(railKey) { mutableStateOf(initialProviderType) }
+    var providerDefaultRegion by rememberSaveable(railKey) { mutableStateOf<String?>(null) }
+    var selectedProviderRegions by remember(railKey) { mutableStateOf<Set<String>>(emptySet()) }
+    var providerRegionQueries by remember(railKey, providerContentType) {
+        mutableStateOf<Map<String, String>>(emptyMap())
+    }
+    var providerControlsInteracted by remember(railKey) { mutableStateOf(false) }
     val items = remember { mutableStateListOf<MediaItem>() }
     val filterOptionItems = remember(railKey, mediaType) { mutableStateListOf<MediaItem>() }
     var currentPage by remember { mutableIntStateOf(1) }
@@ -235,53 +312,75 @@ internal fun TvSeeAllScreen(
     val gridState = rememberLazyGridState()
     val firstItemFocusRequester = remember { FocusRequester() }
     val previewFocusRequester = remember { FocusRequester() }
+    val sortToggleRequester = remember(railKey, mediaType, "sort_toggle") { FocusRequester() }
+    val catalogSearchRequester = remember(railKey, mediaType, "catalog_search") { FocusRequester() }
+    val filterToggleRequester = remember(railKey, mediaType, "filter_toggle") { FocusRequester() }
     val focusRestoreController = rememberTvModalFocusRestoreController(key = "see_all_${railKey}_$mediaType")
-    val cacheKey = remember(railKey, mediaType) { "$railKey|$mediaType" }
     val sortOptions = remember(railKey) { sortOptionsForRail(railKey) }
     var selectedSortKey by remember(railKey) { mutableStateOf(defaultSortKeyForRail(railKey, sortOptions)) }
     val sortRequesters = remember(sortOptions) { List(sortOptions.size) { FocusRequester() } }
     val selectedSortIndex = sortOptions.indexOfFirst { it.key == selectedSortKey }.coerceAtLeast(0)
     val loadedItems = items.toList()
     var showFilters by rememberSaveable(railKey, mediaType) { mutableStateOf(false) }
+    var showSortOptions by rememberSaveable(railKey, mediaType) { mutableStateOf(false) }
     var selectedGenreIds by remember(railKey, mediaType) { mutableStateOf<Set<Int>>(emptySet()) }
     var selectedStudioIds by remember(railKey, mediaType) { mutableStateOf<Set<Int>>(emptySet()) }
-    var selectedYear by remember(railKey, mediaType) { mutableStateOf<Int?>(null) }
+    var selectedYearRangeIds by remember(railKey, mediaType) { mutableStateOf<Set<Int>>(emptySet()) }
     var selectedMinRating by remember(railKey, mediaType) { mutableStateOf<Double?>(null) }
+    var titleQuery by rememberSaveable(railKey, mediaType) { mutableStateOf("") }
     var restoreFocusAfterClearNonce by remember(railKey, mediaType) { mutableIntStateOf(0) }
+    var restoreSortToggleNonce by remember(railKey, mediaType) { mutableIntStateOf(0) }
     var focusFirstFilterAfterOpen by remember(railKey, mediaType) { mutableStateOf(false) }
     val defaultSortKey = defaultSortKeyForRail(railKey, sortOptions)
+    val supportsGlobalTmdbFilters = remember(railKey) { supportsGlobalTmdbSeeAllQuery(railKey) }
     val hasActiveFilters = selectedGenreIds.isNotEmpty() ||
         selectedStudioIds.isNotEmpty() ||
-        selectedYear != null ||
-        selectedMinRating != null
-    // See All is a scoped expansion of the rail that opened it. Sort/filter
-    // must transform the loaded rail source only; it must not switch to a
-    // broader discovery query to "refill" results.
+        selectedYearRangeIds.isNotEmpty() ||
+        selectedMinRating != null ||
+        titleQuery.isNotBlank()
+    val usesGlobalTmdbQuery = supportsGlobalTmdbFilters &&
+        (hasActiveFilters || selectedSortKey != defaultSortKey)
     val filterSourceItems = filterOptionItems.toList().ifEmpty { loadedItems }
-    val filterMediaType = remember(railKey, mediaType) {
-        mediaType.takeIf { it == "movie" || it == "tv" }
+    val filterMediaType = remember(railKey, mediaType, providerContentType) {
+        if (isProviderSearchRail) providerContentType else mediaType.takeIf { it == "movie" || it == "tv" }
             ?: when {
                 railKey.contains("_tv") || railKey.endsWith("-tv") -> "tv"
                 else -> "movie"
             }
     }
-    val availableGenres = remember(filterSourceItems, filterMediaType) {
-        filterSourceItems.availableSeeAllGenres()
-            .ifEmpty { defaultSeeAllGenres(filterMediaType) }
-            .take(TV_SEE_ALL_FILTER_GENRE_LIMIT)
+    val availableGenres = remember(filterSourceItems, filterMediaType, isProviderSearchRail, supportsGlobalTmdbFilters) {
+        if (isProviderSearchRail || supportsGlobalTmdbFilters) {
+            defaultSeeAllGenres(filterMediaType)
+        } else {
+            filterSourceItems.availableSeeAllGenres()
+                .ifEmpty { defaultSeeAllGenres(filterMediaType) }
+                .take(TV_SEE_ALL_FILTER_GENRE_LIMIT)
+        }
     }
-    val availableStudios = remember(filterSourceItems, filterMediaType) {
-        filterSourceItems.availableSeeAllStudios()
-            .ifEmpty { defaultSeeAllStudios(filterMediaType) }
-            .take(TV_SEE_ALL_FILTER_STUDIO_LIMIT)
+    val availableStudios = remember(filterSourceItems, filterMediaType, supportsGlobalTmdbFilters) {
+        if (supportsGlobalTmdbFilters) {
+            defaultSeeAllStudios(filterMediaType)
+        } else {
+            filterSourceItems.availableSeeAllStudios()
+                .ifEmpty { defaultSeeAllStudios(filterMediaType) }
+                .take(TV_SEE_ALL_FILTER_STUDIO_LIMIT)
+        }
     }
-    val availableYears = remember(filterSourceItems) {
-        filterSourceItems.mapNotNull { it.year }
-            .filter { it in 1900..2100 }
-            .distinct()
-            .sortedDescending()
-            .take(TV_SEE_ALL_FILTER_YEAR_LIMIT)
-            .ifEmpty { defaultSeeAllYears() }
+    val availableYearRanges = remember(filterSourceItems, isProviderSearchRail, supportsGlobalTmdbFilters) {
+        if (isProviderSearchRail || supportsGlobalTmdbFilters) {
+            providerSeeAllYearRanges()
+        } else {
+            filterSourceItems.mapNotNull { it.year }
+                .filter { it in 1900..2100 }
+                .distinct()
+                .sortedDescending()
+                .take(TV_SEE_ALL_FILTER_YEAR_LIMIT)
+                .ifEmpty { defaultSeeAllYears() }
+                .map { year -> TvSeeAllYearRange(year, year, year, year.toString()) }
+        }
+    }
+    val selectedYearRanges = remember(availableYearRanges, selectedYearRangeIds) {
+        availableYearRanges.filter { it.id in selectedYearRangeIds }
     }
     val availableRatingThresholds = listOf(7.0, 8.0, 9.0)
     val displayedItems = remember(
@@ -289,42 +388,79 @@ internal fun TvSeeAllScreen(
         selectedSortKey,
         selectedGenreIds,
         selectedStudioIds,
-        selectedYear,
+        selectedYearRanges,
         selectedMinRating,
+        titleQuery,
+        usesGlobalTmdbQuery,
     ) {
-        sortSeeAllItems(
-            items = loadedItems
-                .filterSeeAllItems(
-                    genreIds = selectedGenreIds,
-                    studioIds = selectedStudioIds,
-                    year = selectedYear,
-                    minRating = selectedMinRating,
-                ),
-            sortKey = selectedSortKey,
-        )
-    }
-    val renderedItems = remember(displayedItems, loadedItems, selectedSortKey, hasActiveFilters) {
-        if (hasActiveFilters && displayedItems.isEmpty() && loadedItems.isNotEmpty() && loading) {
-            sortSeeAllItems(loadedItems, selectedSortKey)
+        if (usesGlobalTmdbQuery) {
+            // Server discovery supplies candidates; IMDb controls the displayed order and threshold.
+            sortSeeAllItems(loadedItems.filter { selectedMinRating == null ||
+                (it.seeAllExternalRating10() ?: -1.0) >= selectedMinRating!! }, selectedSortKey)
         } else {
-            displayedItems
+            val normalizedTitleQuery = titleQuery.trim()
+            sortSeeAllItems(
+                items = loadedItems
+                    .filterSeeAllItems(
+                        genreIds = selectedGenreIds,
+                        studioIds = selectedStudioIds,
+                        yearRanges = selectedYearRanges.map { it.startYear..it.endYear },
+                        minRating = selectedMinRating,
+                    )
+                    .filter { item ->
+                        normalizedTitleQuery.isBlank() ||
+                            item.title.contains(normalizedTitleQuery, ignoreCase = true) ||
+                            item.overview.orEmpty().contains(normalizedTitleQuery, ignoreCase = true)
+                    },
+                sortKey = selectedSortKey,
+            )
         }
     }
+    val renderedItems = displayedItems
     var initialFocusHandled by remember(railKey, mediaType) { mutableStateOf(false) }
     var focusedMediaItem by remember { mutableStateOf<MediaItem?>(null) }
     val enrichedSeeAllItemsByKey = remember(railKey, mediaType) { mutableStateMapOf<String, MediaItem>() }
     var lastFocusedIndex by remember { mutableIntStateOf(-1) }
-    val focusRequesters = remember { mutableMapOf<Int, FocusRequester>() }
+    var posterBackTargetsFilters by remember(railKey, mediaType) { mutableStateOf(false) }
+    var lastFocusedKey by remember { mutableStateOf<String?>(null) }
+    var pendingGridRestoreKey by remember { mutableStateOf<String?>(null) }
+    var pendingGridRestoreNonce by remember { mutableIntStateOf(0) }
+    val focusRequesters = remember { mutableStateMapOf<String, FocusRequester>() }
     var ratingEnrichmentAttemptedKeys by remember(railKey, mediaType) { mutableStateOf<Set<String>>(emptySet()) }
     val screenId = remember(railKey, mediaType) { "see_all:$railKey:$mediaType" }
-    val filterSignature = remember(selectedGenreIds, selectedStudioIds, selectedYear, selectedMinRating, selectedSortKey) {
-        "${selectedGenreIds.sorted()}|${selectedStudioIds.sorted()}|${selectedYear ?: "all"}|${selectedMinRating ?: "all"}|$selectedSortKey"
+    val filterSignature = remember(selectedGenreIds, selectedStudioIds, selectedYearRangeIds, selectedMinRating, selectedSortKey, titleQuery) {
+        "${selectedGenreIds.sorted()}|${selectedStudioIds.sorted()}|${selectedYearRangeIds.sorted()}|${selectedMinRating ?: "all"}|${titleQuery.trim()}|$selectedSortKey"
+    }
+    val providerQuerySignature = remember(
+        providerContentType,
+        selectedProviderRegions,
+        selectedGenreIds,
+        selectedYearRangeIds,
+        selectedMinRating,
+        selectedSortKey,
+        titleQuery,
+        providerRegionQueries,
+    ) {
+        "$providerContentType|${selectedProviderRegions.sorted()}|${selectedGenreIds.sorted()}|" +
+            "${selectedYearRangeIds.sorted()}|${selectedMinRating ?: "all"}|$selectedSortKey|" +
+            "${titleQuery.trim().lowercase()}|${providerRegionQueries.entries.sortedBy { it.key }}"
+    }
+    val catalogQuerySignature = remember(supportsGlobalTmdbFilters, filterSignature) {
+        if (supportsGlobalTmdbFilters) filterSignature else "scoped"
+    }
+    val cacheKey = remember(railKey, mediaType, providerQuerySignature, catalogQuerySignature) {
+        when {
+            isProviderSearchRail -> "$railKey|$providerQuerySignature"
+            supportsGlobalTmdbFilters -> "$railKey|$mediaType|$catalogQuerySignature"
+            else -> "$railKey|$mediaType"
+        }
     }
     var filterBackfillAttempts by remember(filterSignature) { mutableIntStateOf(0) }
     val context = LocalContext.current
     val posterColumns = rememberTvSeeAllPosterColumnsPreference()
 
-    DisposableEffect(registerFocusHandle, focusRestoreController, screenId) {
+    DisposableEffect(registerFocusHandle, focusRestoreController, screenId, focusPreview) {
+        if (focusPreview) return@DisposableEffect onDispose { }
         registerFocusHandle?.invoke(
             TvScreenFocusHandle(
                 captureFocusedOrigin = {
@@ -333,8 +469,11 @@ internal fun TvSeeAllScreen(
                     )
                 },
                 requestRestore = { origin, reason ->
+                    pendingGridRestoreKey = origin.itemKey
+                    pendingGridRestoreNonce += 1
                     focusRestoreController.requestRestore(origin = origin, reason = reason)
                 },
+                isOriginFocused = focusRestoreController::isOriginFocused,
             ),
         )
         onDispose {
@@ -343,15 +482,61 @@ internal fun TvSeeAllScreen(
     }
 
     BackHandler(onBack = {
+        if (showSortOptions) {
+            showSortOptions = false
+            restoreSortToggleNonce++
+            return@BackHandler
+        }
         if (showFilters) {
             showFilters = false
             restoreFocusAfterClearNonce++
             return@BackHandler
         }
+        if (isStreamingCatalogRail && posterBackTargetsFilters) {
+            posterBackTargetsFilters = false
+            runCatching { filterToggleRequester.requestFocus() }
+            onContentFocused(filterToggleRequester)
+            return@BackHandler
+        }
         lastFocusedIndex = -1  // Clear so we don't restore when exiting See All itself
+        lastFocusedKey = null
+        pendingGridRestoreKey = null
         focusedMediaItem = null
         onBack()
     })
+
+    LaunchedEffect(isProviderSearchRail, railKey, providerContentType) {
+        if (!isProviderSearchRail) return@LaunchedEffect
+        val defaultRegion = prefsRepo.getString(SettingsViewModel.KEY_REGION_CODE)
+            ?.trim()
+            ?.uppercase()
+            ?.takeIf { it.length == 2 }
+            ?: "US"
+        providerDefaultRegion = defaultRegion
+        if (isStreamingCatalogRail) {
+            val providerId = configuredProviderId ?: return@LaunchedEffect
+            val candidates = runCatching {
+                metadataRepo.getWatchProviderCandidates(providerContentType)
+            }.getOrDefault(emptyList())
+            val resolvedIds = resolveStreamingProviderIds(
+                requestedName = providerDisplayName,
+                configuredProviderId = providerId,
+                region = defaultRegion,
+                availableProviders = candidates,
+            ).toSet()
+            val queries = buildMap<String, MutableSet<Int>> {
+                candidates.filter { it.id in resolvedIds }.forEach { candidate ->
+                    candidate.regions.forEach { region ->
+                        getOrPut(region) { linkedSetOf() }.add(candidate.id)
+                    }
+                }
+            }.mapValues { (_, ids) -> ids.sorted().joinToString("|") }
+            providerRegionQueries = queries.ifEmpty { mapOf(defaultRegion to providerId.toString()) }
+            selectedProviderRegions = providerRegionQueries.keys
+        } else if (selectedProviderRegions.isEmpty()) {
+            selectedProviderRegions = setOf(defaultRegion)
+        }
+    }
 
     fun rememberBaseFilterOptions() {
         if (!isPersonCreditsRail) {
@@ -369,6 +554,8 @@ internal fun TvSeeAllScreen(
                 currentPage = currentPage,
                 totalPages = totalPages,
                 personPanelInfo = personPanelInfo,
+                addonOffset = addonOffset,
+                addonSeenKeys = addonSeenKeys.toSet(),
             ),
         )
     }
@@ -393,14 +580,14 @@ internal fun TvSeeAllScreen(
         }
     }
 
-    val shouldLoadMore by remember(loading, currentPage, totalPages, displayedItems.size) {
+    val shouldLoadMore by remember(loading, currentPage, totalPages, renderedItems.size) {
         derivedStateOf {
             val layoutInfo = gridState.layoutInfo
-            val lastVisibleIndex = layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
-            val totalItems = layoutInfo.totalItemsCount
+            val lastVisibleIndex = if (focusPreview) lastFocusedIndex + posterColumns else layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
+            val totalItems = renderedItems.size
             !loading &&
                 currentPage < totalPages &&
-                displayedItems.isNotEmpty() &&
+                renderedItems.isNotEmpty() &&
                 lastVisibleIndex >= totalItems - 10
         }
     }
@@ -461,6 +648,40 @@ internal fun TvSeeAllScreen(
         if (loading || page > totalPages) return
         loading = true
         try {
+            if (railKey.startsWith("addon:")) {
+                personalIds.withPersonalDataScope {
+                    val shelfId = railKey.removePrefix("addon:")
+                    val source = addonRepository.getEnabledAddons().firstNotNullOfOrNull { addon ->
+                        addon.manifest.catalogs.firstOrNull { addon.manifest.catalogueShelfId(it) == shelfId }
+                            ?.let { addon to it }
+                    }
+                    if (source == null) {
+                        currentPage = page
+                        totalPages = page
+                    } else {
+                        val (addon, catalogue) = source
+                        val paged = catalogue.extra.any { it.name == "skip" }
+                        if (page == 1) { addonOffset = 0; addonSeenKeys.clear() }
+                        val response = addonClient.fetchCatalog(
+                            addon.manifestUrl.removeSuffix("/manifest.json").trimEnd('/'),
+                            catalogue.type, catalogue.id, skip = addonOffset.takeIf { paged }, failOnError = true,
+                        )
+                        val incoming = response.metas.map { it.copy(type = it.type.ifBlank { catalogue.type }).toMediaItem() }
+                        val unseen = incoming.filter { addonSeenKeys.add(it.seeAllStableKey()) }
+                        val previous = items.mapTo(mutableSetOf()) { it.seeAllStableKey() }
+                        val allowed = addonContentFilter.filterItems(addonContentPolicy.state.value,
+                            com.torve.domain.model.ContentAccessContext.ADDON_SHELF, unseen,
+                            com.torve.domain.model.ContentSourceType.ADDON).items
+                        val added = allowed.filter { previous.add(it.seeAllStableKey()) }
+                        items.addAll(added)
+                        addonOffset += incoming.size
+                        currentPage = page
+                        totalPages = if (paged && unseen.isNotEmpty()) Int.MAX_VALUE else page
+                    }
+                }
+                persistSeeAllCache()
+                return
+            }
             SeeAllViewModel.pendingItems[railKey]
                 ?.takeIf { shouldUsePendingItemsForTvSeeAll(railKey) }
                 ?.let { (_, pendingItems) ->
@@ -504,6 +725,51 @@ internal fun TvSeeAllScreen(
                 currentPage = 1
                 loading = false
                 initialLoad = false
+                persistSeeAllCache()
+                return
+            }
+            if (usesGlobalTmdbQuery) {
+                val queryType = queryMediaType()
+                val categoryGenreId = railKey
+                    .takeIf { it.startsWith("genre_") }
+                    ?.substringAfterLast("_")
+                    ?.toIntOrNull()
+                val genreQuery = buildTmdbGenreQuery(categoryGenreId, selectedGenreIds)
+                val yearPlans: List<TvSeeAllYearRange?> = selectedYearRanges
+                    .takeIf { it.isNotEmpty() }
+                    ?.map { it }
+                    ?: listOf(null)
+                val effectiveMinRating = when {
+                    railKey == "hidden_gems" -> maxOf(7.5, selectedMinRating ?: 7.5)
+                    else -> selectedMinRating
+                }
+                val results = coroutineScope {
+                    yearPlans.map { yearRange ->
+                        async {
+                            metadataRepo.discover(
+                                type = queryType,
+                                page = page,
+                                sortBy = providerDiscoverSortBy(queryType, selectedSortKey),
+                                withGenres = genreQuery,
+                                minRating = null,
+                                year = yearRange?.startYear,
+                                yearTo = yearRange?.endYear,
+                                withCompanies = selectedStudioIds
+                                    .takeIf { it.isNotEmpty() }
+                                    ?.sorted()
+                                    ?.joinToString("|"),
+                            )
+                        }
+                    }.map { it.await() }
+                }
+                if (replace || page == 1) items.clear()
+                val existingKeys = items.mapTo(mutableSetOf()) { it.seeAllStableKey() }
+                val pageItems = results
+                    .flatMap { it.items }
+                    .distinctBy { it.seeAllStableKey() }
+                items.addAll(pageItems.filter { existingKeys.add(it.seeAllStableKey()) })
+                currentPage = page
+                totalPages = results.maxOfOrNull { it.totalPages } ?: page
                 persistSeeAllCache()
                 return
             }
@@ -595,25 +861,141 @@ internal fun TvSeeAllScreen(
                 persistSeeAllCache()
                 return
             }
-            if (railKey.startsWith("provider_")) {
-                val parts = railKey.split("_")
-                val providerType = parts.getOrNull(1)?.takeIf { it == "movie" || it == "tv" } ?: "movie"
-                val providerId = parts.getOrNull(2)
-                if (providerId.isNullOrBlank()) {
+            if (isProviderSearchRail) {
+                val providerId = configuredProviderId
+                if (providerId == null) {
                     loading = false
                     return
                 }
-                val result = metadataRepo.discover(
-                    type = providerType,
-                    page = page,
-                    sortBy = "popularity.desc",
-                    withWatchProviders = providerId,
-                    watchRegion = "US",
+                if (isStreamingCatalogRail && titleQuery.isNotBlank()) {
+                    val searchPage = metadataRepo.searchMultiPaged(
+                        query = titleQuery.trim(),
+                        page = page,
+                        type = providerContentType,
+                    )
+                    val pageItems = coroutineScope {
+                        searchPage.items.map { item ->
+                            async {
+                                val tmdbId = item.tmdbId ?: return@async null
+                                val itemType = if (item.type == MediaType.SERIES) "tv" else "movie"
+                                val titleProviders = runCatching {
+                                    metadataRepo.getTitleWatchProviderCandidates(itemType, tmdbId)
+                                }.getOrDefault(emptyList())
+                                val resolvedIds = resolveStreamingProviderIds(
+                                    requestedName = providerDisplayName,
+                                    configuredProviderId = providerId,
+                                    region = providerDefaultRegion ?: "US",
+                                    availableProviders = titleProviders,
+                                )
+                                val fixedCategoryGenre = railKey.substringAfterLast("_genre_", missingDelimiterValue = "")
+                                    .takeIf { "_genre_" in railKey }
+                                    ?.toIntOrNull()
+                                item.takeIf { candidate ->
+                                    titleProviders.any { it.id in resolvedIds } &&
+                                        listOf(candidate).filterSeeAllItems(
+                                            genreIds = selectedGenreIds + listOfNotNull(fixedCategoryGenre),
+                                            studioIds = selectedStudioIds,
+                                            yearRanges = selectedYearRanges.map { it.startYear..it.endYear },
+                                            minRating = null,
+                                        ).isNotEmpty()
+                                }
+                            }
+                        }.mapNotNull { it.await() }
+                    }
+                    if (replace || page == 1) items.clear()
+                    val existingKeys = items.mapTo(mutableSetOf()) { it.seeAllStableKey() }
+                    items.addAll(pageItems.filter { existingKeys.add(it.seeAllStableKey()) })
+                    currentPage = page
+                    totalPages = searchPage.totalPages
+                    loading = false
+                    initialLoad = false
+                    persistSeeAllCache()
+                    return
+                }
+
+                val allProviderQueries = if (isStreamingCatalogRail) {
+                    providerRegionQueries
+                } else {
+                    val watchRegions = selectedProviderRegions.ifEmpty { setOf(providerDefaultRegion ?: "US") }.sorted()
+                    watchRegions.associateWith { watchRegion ->
+                        val providerNames = runCatching {
+                            metadataRepo.getWatchProviderNames(providerContentType, watchRegion)
+                        }.getOrDefault(emptyMap())
+                        resolveStreamingProviderIds(
+                            requestedName = providerDisplayName,
+                            configuredProviderId = providerId,
+                            region = watchRegion,
+                            availableProviders = providerNames.map { (id, name) ->
+                                StreamingProviderCandidate(id = id, name = name)
+                            },
+                        ).filter { it > 0 }.joinToString("|").ifBlank { providerId.toString() }
+                    }
+                }
+                val orderedQueries = allProviderQueries.entries.sortedWith(
+                    compareBy<Map.Entry<String, String>> { it.key != providerDefaultRegion }.thenBy { it.key },
                 )
+                val queryBatches = orderedQueries.chunked(TV_PROVIDER_WORLDWIDE_REGION_BATCH_SIZE)
+                if (queryBatches.isEmpty()) {
+                    loading = false
+                    return
+                }
+                val batchIndex = if (isStreamingCatalogRail) (page - 1) % queryBatches.size else 0
+                val discoverPage = if (isStreamingCatalogRail) (page - 1) / queryBatches.size + 1 else page
+                val providerQueries = queryBatches[batchIndex].associate { it.key to it.value }
+                val yearPlans: List<TvSeeAllYearRange?> = selectedYearRanges
+                    .takeIf { it.isNotEmpty() }
+                    ?.map { it }
+                    ?: listOf(null)
+                val categoryGenreId = railKey.substringAfterLast("_genre_", missingDelimiterValue = "")
+                    .takeIf { "_genre_" in railKey }
+                    ?.toIntOrNull()
+                val effectiveGenreIds = (selectedGenreIds + listOfNotNull(categoryGenreId)).sorted()
+                val effectiveMinRating = selectedMinRating
+                    ?: 7.0.takeIf { railKey.endsWith("_top_rated") }
+                val effectiveSort = when {
+                    railKey.endsWith("_top_rated") && selectedSortKey == TvSeeAllSortKey.DEFAULT -> "vote_average.desc"
+                    railKey.endsWith("_recent") && selectedSortKey == TvSeeAllSortKey.DEFAULT -> {
+                        if (providerContentType == "tv") "first_air_date.desc" else "primary_release_date.desc"
+                    }
+                    else -> providerDiscoverSortBy(providerContentType, selectedSortKey)
+                }
+                Log.d(
+                    "TvProviderDiscovery",
+                    "provider=$providerDisplayName type=$providerContentType regions=${providerQueries.keys} page=$discoverPage",
+                )
+                val results = coroutineScope {
+                    providerQueries.flatMap { (watchRegion, providerQuery) ->
+                        yearPlans.map { yearRange ->
+                            async {
+                                runCatching {
+                                    metadataRepo.discover(
+                                        type = providerContentType,
+                                        page = discoverPage,
+                                        sortBy = effectiveSort,
+                                        withGenres = effectiveGenreIds.takeIf { it.isNotEmpty() }
+                                            ?.joinToString("|"),
+                                        minRating = null,
+                                        year = yearRange?.startYear,
+                                        yearTo = yearRange?.endYear,
+                                        withWatchProviders = providerQuery,
+                                        watchRegion = watchRegion,
+                                    )
+                                }.getOrElse {
+                                    PagedResult(emptyList(), discoverPage, discoverPage, 0)
+                                }
+                            }
+                        }
+                    }.map { it.await() }
+                }
+                val pageItems = results.flatMap { it.items }.distinctBy { it.seeAllStableKey() }
                 val existingKeys = items.mapTo(mutableSetOf()) { it.seeAllStableKey() }
-                items.addAll(result.items.filter { existingKeys.add(it.seeAllStableKey()) })
+                items.addAll(pageItems.filter { existingKeys.add(it.seeAllStableKey()) })
                 currentPage = page
-                totalPages = result.totalPages
+                totalPages = if (isStreamingCatalogRail) {
+                    (results.maxOfOrNull { it.totalPages } ?: discoverPage) * queryBatches.size
+                } else {
+                    results.maxOfOrNull { it.totalPages } ?: page
+                }
                 loading = false
                 initialLoad = false
                 persistSeeAllCache()
@@ -628,16 +1010,28 @@ internal fun TvSeeAllScreen(
                         loading = false
                         return
                     }
-                    val recommendations = metadataRepo.getRecommendations(relatedType, relatedId, page)
-                    val relatedItems = if (recommendations.isNotEmpty()) {
-                        recommendations
-                    } else {
-                        metadataRepo.getSimilar(relatedType, relatedId, page)
-                    }.filterNot { it.tmdbId == relatedId }
+                    val (recommendations, similar) = coroutineScope {
+                        val recommendationsDeferred = async {
+                            runCatching {
+                                metadataRepo.getRecommendations(relatedType, relatedId, page)
+                            }.getOrDefault(emptyList())
+                        }
+                        val similarDeferred = async {
+                            runCatching {
+                                metadataRepo.getSimilar(relatedType, relatedId, page)
+                            }.getOrDefault(emptyList())
+                        }
+                        recommendationsDeferred.await() to similarDeferred.await()
+                    }
+                    val relatedItems = mergeMoreLikeCandidates(
+                        seedTmdbId = relatedId,
+                        recommendations = recommendations,
+                        similar = similar,
+                    )
                     val existingKeys = items.mapTo(mutableSetOf()) { it.seeAllStableKey() }
                     items.addAll(relatedItems.filter { existingKeys.add(it.seeAllStableKey()) })
                     currentPage = page
-                    totalPages = if (relatedItems.size < 20) page else Int.MAX_VALUE
+                    totalPages = if (recommendations.size < 20 && similar.size < 20) page else Int.MAX_VALUE
                     loading = false
                     initialLoad = false
                     persistSeeAllCache()
@@ -656,6 +1050,7 @@ internal fun TvSeeAllScreen(
             currentPage = page
             persistSeeAllCache()
         } catch (error: Throwable) {
+            if (error is CancellationException) throw error
             Log.w(
                 TV_SEE_ALL_LOG_TAG,
                 "loadPage failed rail=$railKey mediaType=$mediaType page=$page replace=$replace: ${error::class.simpleName}",
@@ -666,19 +1061,25 @@ internal fun TvSeeAllScreen(
         }
     }
 
-    LaunchedEffect(railKey, mediaType) {
+    LaunchedEffect(railKey, mediaType, providerQuerySignature, catalogQuerySignature) {
+        if (isProviderSearchRail && providerDefaultRegion == null) return@LaunchedEffect
+        if (isProviderDiscoveryRail && selectedProviderRegions.isEmpty()) return@LaunchedEffect
+        if (isStreamingCatalogRail && providerRegionQueries.isEmpty()) return@LaunchedEffect
         val cached = TvSeeAllCache.get(cacheKey)
         if (cached != null && shouldRestoreTvSeeAllCache(railKey, cached)) {
             items.clear()
             items.addAll(cached.items)
             filterOptionItems.clear()
             filterOptionItems.addAll(cached.items)
+            addonSeenKeys.clear()
+            addonSeenKeys.addAll(cached.addonSeenKeys)
+            addonOffset = cached.addonOffset
             currentPage = cached.currentPage
             totalPages = cached.totalPages
             loading = false
             initialLoad = false
             personPanelInfo = cached.personPanelInfo
-            initialFocusHandled = false
+            initialFocusHandled = providerControlsInteracted
             return@LaunchedEffect
         }
         items.clear()
@@ -688,18 +1089,13 @@ internal fun TvSeeAllScreen(
         loading = false
         initialLoad = true
         personPanelInfo = null
-        initialFocusHandled = false
-        while (items.size < TV_SEE_ALL_INITIAL_TARGET_COUNT && currentPage < totalPages) {
+        initialFocusHandled = providerControlsInteracted
+        val initialTargetCount = if (isProviderSearchRail) 40 else TV_SEE_ALL_INITIAL_TARGET_COUNT
+        while (items.size < initialTargetCount && currentPage < totalPages) {
+            val beforePage = currentPage
             loadPage(currentPage + 1)
-            if (totalPages == 1) break
+            if (totalPages == 1 || currentPage == beforePage) break
         }
-    }
-
-    LaunchedEffect(filterSignature) {
-        if (initialLoad) return@LaunchedEffect
-        // Keep focus and scroll stable. displayedItems is derived from the
-        // scoped source list, so no reload or global discovery fallback is
-        // needed when sort/filter state changes.
     }
 
     LaunchedEffect(shouldLoadMore) {
@@ -756,11 +1152,12 @@ internal fun TvSeeAllScreen(
     // Background ratings enrichment — populate SQLite cache + update the visible
     // window in place. TMDB fallback is display-only; it does not make a card
     // "enriched enough", so newly paged/visible TMDB-only cards are still queued.
-    LaunchedEffect(renderedItems, gridState.firstVisibleItemIndex, posterColumns) {
+    val ratingWindowStart = if (focusPreview) (lastFocusedIndex.coerceAtLeast(0) / posterColumns) * posterColumns else gridState.firstVisibleItemIndex
+    LaunchedEffect(renderedItems.map { it.seeAllStableKey() }, ratingWindowStart, posterColumns, settingsState.personalDataUserId) {
         if (renderedItems.isEmpty()) return@LaunchedEffect
         val layoutInfo = gridState.layoutInfo
-        val firstVisible = layoutInfo.visibleItemsInfo.minOfOrNull { it.index }
-            ?: gridState.firstVisibleItemIndex
+        val firstVisible = if (focusPreview) ratingWindowStart else layoutInfo.visibleItemsInfo.minOfOrNull { it.index }
+            ?: ratingWindowStart
         val visibleCount = layoutInfo.visibleItemsInfo.size.takeIf { it > 0 }
             ?: (posterColumns * 3)
         val start = firstVisible.coerceIn(0, renderedItems.lastIndex)
@@ -776,13 +1173,11 @@ internal fun TvSeeAllScreen(
         )
 
         val snapshot = renderedItems.subList(start, end)
-            .filter { it.needsExternalRatingEnrichment() }
+            .filter { it.catalogueNotice == null && it.needsExternalRatingEnrichment() }
             .filterNot { it.seeAllStableKey() in ratingEnrichmentAttemptedKeys }
             .take(48)
         if (snapshot.isEmpty()) return@LaunchedEffect
 
-        val originalKeys = snapshot.map { it.seeAllStableKey() }.toSet()
-        ratingEnrichmentAttemptedKeys = ratingEnrichmentAttemptedKeys + originalKeys
         Log.d(TV_SEE_ALL_LOG_TAG, "see_all_visible_enrichment_started items=${snapshot.size}")
 
         launch(Dispatchers.IO) {
@@ -791,13 +1186,15 @@ internal fun TvSeeAllScreen(
                     ?: prefsRepo.getString(SettingsViewModel.KEY_MDBLIST_API_KEY)
                     ?: MdbListApi.DEFAULT_API_KEY
             }.getOrDefault(MdbListApi.DEFAULT_API_KEY)
-            val remainingMs = ratingsEnricher.rateLimitRemainingMs()
-            if (remainingMs > 0L) delay(remainingMs + 2_000L)
-            val enriched = ratingsEnricher.enrichList(snapshot, apiKey)
-            val enrichedByOriginalKey = snapshot.zip(enriched).associate { (before, after) ->
+            // The full chain includes the backend and cache when a direct
+            // provider is cooling down. Publish each visible batch immediately.
+            for (batch in snapshot.chunked(4)) {
+            val enriched = ratingsEnricher.enrichList(batch, apiKey)
+            val enrichedByOriginalKey = batch.zip(enriched).associate { (before, after) ->
                 before.seeAllStableKey() to before.mergeSeeAllEnrichedItem(after)
             }
             withContext(Dispatchers.Main) {
+                ratingEnrichmentAttemptedKeys = ratingEnrichmentAttemptedKeys + batch.map { it.seeAllStableKey() }
                 recordSeeAllEnrichedItems(enrichedByOriginalKey.values)
                 items.replaceSeeAllItemsByKey(enrichedByOriginalKey)
                 updateFocusedItemFromReplacements(enrichedByOriginalKey)
@@ -806,6 +1203,7 @@ internal fun TvSeeAllScreen(
                     TV_SEE_ALL_LOG_TAG,
                     "see_all_visible_enrichment_completed items=${enrichedByOriginalKey.size}",
                 )
+            }
             }
         }
     }
@@ -853,7 +1251,7 @@ internal fun TvSeeAllScreen(
 
     LaunchedEffect(sortOptions, selectedSortIndex) {
         if (sortOptions.isNotEmpty()) {
-            onFirstContentRequester(sortRequesters[selectedSortIndex])
+            onFirstContentRequester(if (isStreamingCatalogRail) catalogSearchRequester else firstItemFocusRequester)
         }
     }
 
@@ -869,6 +1267,29 @@ internal fun TvSeeAllScreen(
         )
     }
 
+    LaunchedEffect(pendingGridRestoreNonce, renderedItems.size, posterColumns) {
+        val restoreKey = pendingGridRestoreKey ?: return@LaunchedEffect
+        if (pendingGridRestoreNonce <= 0) return@LaunchedEffect
+        val targetIndex = renderedItems.indexOfFirst { it.seeAllStableKey() == restoreKey }
+        if (targetIndex < 0) return@LaunchedEffect
+
+        repeat(12) {
+            runCatching { gridState.scrollToItem(targetIndex) }
+            withFrameNanos { }
+            delay(40L)
+
+            val requester = focusRequesters[restoreKey]
+            if (requester != null) {
+                runCatching { requester.requestFocus() }
+                withFrameNanos { }
+                if (lastFocusedKey == restoreKey) {
+                    pendingGridRestoreKey = null
+                    return@LaunchedEffect
+                }
+            }
+        }
+    }
+
     // Restore focus to last focused item when returning from Details sub-route.
     // Uses Lifecycle ON_RESUME to detect when this composable's NavBackStackEntry
     // becomes the active destination again after Details is popped.
@@ -876,7 +1297,8 @@ internal fun TvSeeAllScreen(
     androidx.compose.runtime.DisposableEffect(lifecycleOwner) {
         val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
             if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME && lastFocusedIndex >= 0) {
-                val requester = focusRequesters[lastFocusedIndex]
+                val restoreKey = lastFocusedKey ?: renderedItems.getOrNull(lastFocusedIndex)?.seeAllStableKey()
+                val requester = restoreKey?.let { focusRequesters[it] }
                 if (requester != null) {
                     try { requester.requestFocus() } catch (_: Throwable) { }
                 }
@@ -889,14 +1311,21 @@ internal fun TvSeeAllScreen(
     // Auto-focus once content loads so D-pad works immediately.
     LaunchedEffect(initialLoad, renderedItems.size, sortOptions.size, selectedSortIndex) {
         if (!initialLoad && !initialFocusHandled && (sortOptions.isNotEmpty() || renderedItems.isNotEmpty())) {
-            try {
-                if (sortOptions.isNotEmpty()) {
-                    sortRequesters[selectedSortIndex].requestFocus()
-                } else {
-                    firstItemFocusRequester.requestFocus()
+            val requester = when {
+                isStreamingCatalogRail -> catalogSearchRequester
+                renderedItems.isNotEmpty() -> firstItemFocusRequester
+                else -> sortToggleRequester
+            }
+            // Lazy posters attach after their parent has committed. A failed
+            // request must not mark entry complete and leave focus on the toolbar.
+            repeat(12) {
+                withFrameNanos { }
+                if (initialFocusHandled) return@LaunchedEffect
+                if (runCatching { requester.requestFocus() }.isSuccess) {
+                    initialFocusHandled = true
+                    return@LaunchedEffect
                 }
-                initialFocusHandled = true
-            } catch (_: IllegalStateException) { /* not yet attached */ }
+            }
         }
     }
 
@@ -916,9 +1345,9 @@ internal fun TvSeeAllScreen(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(Obsidian),
+            .background(if (com.torve.android.ui.community.LocalPersonalAppearance.current.active) androidx.compose.ui.graphics.Color.Transparent else Obsidian),
     ) {
-        if (!cinematicBackgroundUrl.isNullOrBlank()) {
+        if (!com.torve.android.ui.community.LocalPersonalAppearance.current.active && !cinematicBackgroundUrl.isNullOrBlank()) {
             Crossfade(
                 targetState = cinematicBackgroundUrl,
                 label = "seeAllCinematicBackground",
@@ -933,6 +1362,7 @@ internal fun TvSeeAllScreen(
                 )
             }
         }
+        if (!com.torve.android.ui.community.LocalPersonalAppearance.current.active) {
         Box(
             modifier = Modifier
                 .fillMaxSize()
@@ -960,13 +1390,65 @@ internal fun TvSeeAllScreen(
                 ),
         )
 
+        }
+
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(start = 14.dp, top = TV_PAGE_TOP_GUTTER, end = TV_PAGE_END_GUTTER, bottom = TV_PAGE_BOTTOM_GUTTER),
+                .padding(start = TV_PAGE_CONTENT_GUTTER, top = TV_PAGE_TOP_GUTTER, end = TV_PAGE_END_GUTTER, bottom = TV_PAGE_BOTTOM_GUTTER),
         ) {
-        // Info panel — left side
-        if (!isPersonCreditsRail) {
+        val firstFilterRequester = remember(screenId, "first_filter") { FocusRequester() }
+        val clearRequester = remember(screenId, "clear_filters") { FocusRequester() }
+        val posterColumnsRequester = remember(screenId, "poster_columns") { FocusRequester() }
+        val providerMovieRequester = remember(screenId, "provider_movie") { FocusRequester() }
+        val providerSeriesRequester = remember(screenId, "provider_series") { FocusRequester() }
+
+        // Provider identity and its deliberately compact search control share one header row.
+        if (isProviderSearchRail) {
+            val providerService = remember(configuredProviderId, title) {
+                ALL_STREAMING_SERVICES.firstOrNull { it.tmdbProviderId == configuredProviderId }
+                    ?: StreamingService(title, Graphite, configuredProviderId ?: 0)
+            }
+            val isNetflix = providerService.tmdbProviderId == NETFLIX_TMDB_PROVIDER_ID
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                TvProviderBrandHeader(
+                    service = providerService,
+                    modifier = Modifier
+                        .width(if (isNetflix) 176.dp else 220.dp)
+                        .height(if (isNetflix) 53.dp else 66.dp),
+                )
+                if (isStreamingCatalogRail) {
+                    TvClickToEditSearchField(
+                        value = titleQuery,
+                        onValueChange = {
+                            providerControlsInteracted = true
+                            titleQuery = it
+                        },
+                        placeholder = "Search movies or series",
+                        onNavigateDown = {
+                            runCatching { providerMovieRequester.requestFocus() }
+                            onContentFocused(providerMovieRequester)
+                        },
+                        modifier = Modifier
+                            .width(340.dp)
+                            .focusRequester(catalogSearchRequester)
+                            .focusProperties {
+                                left = railFocusRequester
+                                down = providerMovieRequester
+                            }
+                            .onFocusChanged {
+                                if (it.isFocused) onContentFocused(catalogSearchRequester)
+                            },
+                    )
+                }
+            }
+        } else if (!isPersonCreditsRail) {
             Text(
                 text = title,
                 style = MaterialTheme.typography.headlineMedium,
@@ -976,18 +1458,25 @@ internal fun TvSeeAllScreen(
             )
         }
 
-        val filterToggleRequester = remember(screenId) { FocusRequester() }
-        val firstFilterRequester = remember(screenId, "first_filter") { FocusRequester() }
-        val clearRequester = remember(screenId, "clear_filters") { FocusRequester() }
-        val posterColumnsRequester = remember(screenId, "poster_columns") { FocusRequester() }
+        val providerRegions = remember(providerDefaultRegion, isStreamingCatalogRail) {
+            if (isStreamingCatalogRail) emptyList() else {
+                listOfNotNull(providerDefaultRegion, "US", "DE", "GB", "CA", "AU", "AT", "CH", "FR")
+                    .distinct()
+            }
+        }
+        val providerRegionRequesters = remember(providerRegions) {
+            List(providerRegions.size) { FocusRequester() }
+        }
+        val rememberedPosterRequester = lastFocusedKey?.let(focusRequesters::get)
         val afterFiltersRequester = when {
-            sortOptions.isNotEmpty() -> sortRequesters[selectedSortIndex]
-            renderedItems.isNotEmpty() -> firstItemFocusRequester
+            rememberedPosterRequester != null -> rememberedPosterRequester
+            renderedItems.isNotEmpty() -> focusRequesters[renderedItems.first().seeAllStableKey()]
+            sortOptions.isNotEmpty() -> sortToggleRequester
             else -> null
         }
         val filterExitRequester = when {
             renderedItems.isNotEmpty() -> firstItemFocusRequester
-            sortOptions.isNotEmpty() -> sortRequesters[selectedSortIndex]
+            sortOptions.isNotEmpty() -> sortToggleRequester
             else -> null
         }
         LaunchedEffect(restoreFocusAfterClearNonce) {
@@ -1003,12 +1492,18 @@ internal fun TvSeeAllScreen(
                 onContentFocused(filterToggleRequester)
             }
         }
+        LaunchedEffect(restoreSortToggleNonce) {
+            if (restoreSortToggleNonce == 0) return@LaunchedEffect
+            withFrameNanos { }
+            runCatching { sortToggleRequester.requestFocus() }
+            onContentFocused(sortToggleRequester)
+        }
         LaunchedEffect(
             showFilters,
             focusFirstFilterAfterOpen,
             availableGenres.size,
             availableStudios.size,
-            availableYears.size,
+            availableYearRanges.size,
             availableRatingThresholds.size,
         ) {
             if (!showFilters || !focusFirstFilterAfterOpen) return@LaunchedEffect
@@ -1024,20 +1519,103 @@ internal fun TvSeeAllScreen(
         }
         Row(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
-            modifier = Modifier.padding(bottom = if (showFilters) 10.dp else 16.dp),
+            modifier = Modifier.padding(bottom = if (showFilters || showSortOptions) 10.dp else 16.dp)
+                .horizontalScroll(rememberScrollState()).testTag("seeall.toolbar"),
         ) {
+            if (isProviderSearchRail) {
+                TvSeeAllFilterChip(
+                    label = localizedUiText("Movies"),
+                    selected = providerContentType == "movie",
+                    modifier = Modifier
+                        .focusRequester(providerMovieRequester)
+                        .focusProperties {
+                            left = railFocusRequester
+                            right = providerSeriesRequester
+                            if (isStreamingCatalogRail) up = catalogSearchRequester
+                            if (showFilters) {
+                                down = firstFilterRequester
+                            } else {
+                                afterFiltersRequester?.let { down = it }
+                            }
+                        },
+                    onFocused = { onContentFocused(providerMovieRequester) },
+                    onClick = {
+                        providerControlsInteracted = true
+                        providerContentType = "movie"
+                    },
+                )
+                TvSeeAllFilterChip(
+                    label = localizedUiText("Series"),
+                    selected = providerContentType == "tv",
+                    modifier = Modifier
+                        .focusRequester(providerSeriesRequester)
+                        .focusProperties {
+                            left = providerMovieRequester
+                            right = providerRegionRequesters.firstOrNull() ?: filterToggleRequester
+                            if (isStreamingCatalogRail) up = catalogSearchRequester
+                            if (showFilters) {
+                                down = firstFilterRequester
+                            } else {
+                                afterFiltersRequester?.let { down = it }
+                            }
+                        },
+                    onFocused = { onContentFocused(providerSeriesRequester) },
+                    onClick = {
+                        providerControlsInteracted = true
+                        providerContentType = "tv"
+                    },
+                )
+                providerRegions.forEachIndexed { index, region ->
+                    val requester = providerRegionRequesters[index]
+                    TvSeeAllFilterChip(
+                        label = region,
+                        selected = region in selectedProviderRegions,
+                        modifier = Modifier
+                            .focusRequester(requester)
+                            .focusProperties {
+                                left = if (index == 0) providerSeriesRequester else providerRegionRequesters[index - 1]
+                                right = providerRegionRequesters.getOrNull(index + 1) ?: filterToggleRequester
+                                if (isStreamingCatalogRail) up = catalogSearchRequester
+                                if (showFilters) {
+                                    down = firstFilterRequester
+                                } else {
+                                    afterFiltersRequester?.let { down = it }
+                                }
+                            },
+                        onFocused = { onContentFocused(requester) },
+                        onClick = {
+                            providerControlsInteracted = true
+                            selectedProviderRegions = if (region in selectedProviderRegions) {
+                                selectedProviderRegions.minus(region).takeIf { it.isNotEmpty() } ?: selectedProviderRegions
+                            } else {
+                                selectedProviderRegions + region
+                            }
+                        },
+                    )
+                }
+            }
             val hasFilterSelections = selectedGenreIds.isNotEmpty() ||
                 selectedStudioIds.isNotEmpty() ||
-                selectedYear != null ||
-                selectedMinRating != null
+                selectedYearRangeIds.isNotEmpty() ||
+                selectedMinRating != null ||
+                titleQuery.isNotBlank()
             TvSeeAllFilterChip(
-                label = "Filters",
+                label = localizedUiText("Filters"),
                 selected = showFilters,
                 modifier = Modifier
                     .focusRequester(filterToggleRequester)
                     .focusProperties {
-                        left = railFocusRequester
-                        right = if (hasFilterSelections) clearRequester else posterColumnsRequester
+                        left = if (isProviderSearchRail) {
+                            providerRegionRequesters.lastOrNull() ?: providerSeriesRequester
+                        } else if (isStreamingCatalogRail) {
+                            catalogSearchRequester
+                        } else {
+                            railFocusRequester
+                        }
+                        if (isStreamingCatalogRail) {
+                            up = catalogSearchRequester
+                        }
+                        right = sortToggleRequester
                         if (showFilters) {
                             down = firstFilterRequester
                         } else {
@@ -1048,20 +1626,45 @@ internal fun TvSeeAllScreen(
                 onClick = {
                     val opening = !showFilters
                     showFilters = opening
+                    if (opening) showSortOptions = false
                     focusFirstFilterAfterOpen = opening
                     if (!opening) {
                         restoreFocusAfterClearNonce++
                     }
                 },
             )
+            TvSeeAllFilterChip(
+                label = localizedUiText("Sort: ${sortOptions.getOrNull(selectedSortIndex)?.label ?: "Default"}"),
+                selected = showSortOptions,
+                modifier = Modifier
+                    .focusRequester(sortToggleRequester)
+                    .focusProperties {
+                        left = filterToggleRequester
+                        right = if (hasFilterSelections) clearRequester else posterColumnsRequester
+                        if (isStreamingCatalogRail) up = catalogSearchRequester
+                        down = if (showSortOptions) {
+                            sortRequesters.firstOrNull() ?: afterFiltersRequester ?: FocusRequester.Default
+                        } else {
+                            afterFiltersRequester ?: FocusRequester.Default
+                        }
+                    },
+                onFocused = { onContentFocused(sortToggleRequester) },
+                onClick = {
+                    val opening = !showSortOptions
+                    showSortOptions = opening
+                    if (opening) showFilters = false
+                    if (!opening) restoreSortToggleNonce++
+                },
+            )
             if (hasFilterSelections) {
                 TvSeeAllFilterChip(
-                    label = "Clear",
+                    label = localizedUiText("Clear"),
                     modifier = Modifier
                         .focusRequester(clearRequester)
                         .focusProperties {
-                            left = filterToggleRequester
+                            left = sortToggleRequester
                             right = posterColumnsRequester
+                            if (isStreamingCatalogRail) up = catalogSearchRequester
                             if (showFilters) {
                                 down = firstFilterRequester
                             } else {
@@ -1074,18 +1677,21 @@ internal fun TvSeeAllScreen(
                         onContentFocused(filterToggleRequester)
                         selectedGenreIds = emptySet()
                         selectedStudioIds = emptySet()
-                        selectedYear = null
+                        selectedYearRangeIds = emptySet()
                         selectedMinRating = null
+                        titleQuery = ""
+                        providerControlsInteracted = true
                         restoreFocusAfterClearNonce++
                     },
                 )
             }
             TvSeeAllFilterChip(
-                label = "Posters: $posterColumns",
+                label = localizedUiText("Posters: $posterColumns"),
                 modifier = Modifier
                     .focusRequester(posterColumnsRequester)
                     .focusProperties {
-                        left = if (hasFilterSelections) clearRequester else filterToggleRequester
+                        left = if (hasFilterSelections) clearRequester else sortToggleRequester
+                        if (isStreamingCatalogRail) up = catalogSearchRequester
                         if (showFilters) {
                             down = firstFilterRequester
                         } else {
@@ -1112,23 +1718,30 @@ internal fun TvSeeAllScreen(
                 onToggleGenre = { id ->
                     val next = if (id in selectedGenreIds) selectedGenreIds - id else selectedGenreIds + id
                     selectedGenreIds = next
+                    providerControlsInteracted = true
                 },
                 studios = availableStudios,
                 selectedStudioIds = selectedStudioIds,
                 onToggleStudio = { id ->
                     val next = if (id in selectedStudioIds) selectedStudioIds - id else selectedStudioIds + id
                     selectedStudioIds = next
+                    providerControlsInteracted = true
                 },
-                years = availableYears,
-                selectedYear = selectedYear,
-                onSelectYear = { year ->
-                    val next = if (selectedYear == year) null else year
-                    selectedYear = next
+                years = availableYearRanges.map { it.id to it.label },
+                selectedYearIds = selectedYearRangeIds,
+                onToggleYear = { yearRangeId ->
+                    selectedYearRangeIds = if (yearRangeId in selectedYearRangeIds) {
+                        selectedYearRangeIds - yearRangeId
+                    } else {
+                        selectedYearRangeIds + yearRangeId
+                    }
+                    providerControlsInteracted = true
                 },
                 selectedMinRating = selectedMinRating,
                 onSelectRating = { rating ->
                     val next = if (selectedMinRating == rating) null else rating
                     selectedMinRating = next
+                    providerControlsInteracted = true
                 },
                 ratingThresholds = availableRatingThresholds,
                 railFocusRequester = railFocusRequester,
@@ -1139,10 +1752,10 @@ internal fun TvSeeAllScreen(
             )
         }
 
-        if (sortOptions.isNotEmpty()) {
+        if (showSortOptions && sortOptions.isNotEmpty()) {
             Row(
-                horizontalArrangement = Arrangement.spacedBy(7.dp),
-                modifier = Modifier.padding(bottom = 16.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                modifier = Modifier.padding(bottom = 10.dp),
             ) {
                 sortOptions.forEachIndexed { index, option ->
                     val sortTarget = remember(screenId, index, option.key) {
@@ -1160,23 +1773,21 @@ internal fun TvSeeAllScreen(
                         target = sortTarget,
                         externalRequester = sortRequesters[index],
                     )
-                    TvSeeAllSortButton(
+                    TvSeeAllFilterChip(
                         label = option.label,
                         selected = option.key == selectedSortKey,
                         modifier = Modifier
                             .focusRequester(sortRequester)
                             .focusProperties {
                                 if (index == 0) {
-                                    left = railFocusRequester
+                                    left = sortToggleRequester
                                 } else {
                                     left = sortRequesters[index - 1]
                                 }
                                 if (index < sortOptions.lastIndex) {
                                     right = sortRequesters[index + 1]
                                 }
-                                if (showFilters) {
-                                    up = firstFilterRequester
-                                }
+                                up = sortToggleRequester
                                 if (renderedItems.isNotEmpty()) {
                                     down = firstItemFocusRequester
                                 }
@@ -1185,7 +1796,12 @@ internal fun TvSeeAllScreen(
                             focusRestoreController.markFocused(sortTarget)
                             onContentFocused(sortRequester)
                         },
-                        onClick = { selectedSortKey = option.key },
+                        onClick = {
+                            selectedSortKey = option.key
+                            providerControlsInteracted = true
+                            showSortOptions = false
+                            restoreSortToggleNonce++
+                        },
                     )
                 }
             }
@@ -1207,7 +1823,11 @@ internal fun TvSeeAllScreen(
                     contentAlignment = Alignment.Center,
                 ) {
                     Text(
-                        text = stringResource(R.string.tv_no_data),
+                        text = localizedUiText(if (isProviderSearchRail) {
+                            "No ${if (providerContentType == "tv") "series" else "movies"} match these filters for $providerDisplayName."
+                        } else {
+                            stringResource(R.string.tv_no_data)
+                        }),
                         style = MaterialTheme.typography.titleLarge,
                         color = Silver,
                     )
@@ -1215,6 +1835,23 @@ internal fun TvSeeAllScreen(
             }
 
             else -> {
+                if (focusPreview) {
+                    com.torve.android.tv.components.TvFocusPreviewGrid(
+                        items = renderedItems, screenId = screenId, columns = posterColumns,
+                        railFocusRequester = railFocusRequester, entryRequester = firstItemFocusRequester,
+                        headerRequester = if (showFilters) firstFilterRequester else sortToggleRequester,
+                        modifier = Modifier.weight(1f).fillMaxWidth(),
+                        onFirstContentRequester = { if (!isStreamingCatalogRail) onFirstContentRequester(it) },
+                        onContentFocused = onContentFocused, registerFocusHandle = registerFocusHandle,
+                        contextActions = contextMenuActionsForItem, onContextAction = onContextMenuAction,
+                        hero = { TvBrowsePreviewPanel(focusedItem = focusedMediaItem ?: renderedItems.firstOrNull(),
+                            modifier = Modifier.fillMaxWidth().height(180.dp)) },
+                        onFocused = { item, index ->
+                            focusedMediaItem = item; lastFocusedIndex = index; lastFocusedKey = item.seeAllStableKey()
+                            posterBackTargetsFilters = isStreamingCatalogRail
+                            if (showFilters) showFilters = false
+                        }, onClick = onMediaClick)
+                } else
                 Row(
                     modifier = Modifier
                         .weight(1f)
@@ -1258,14 +1895,17 @@ internal fun TvSeeAllScreen(
                             renderedItems,
                             key = { _, item -> "sa_${item.seeAllStableKey()}" },
                         ) { index, item ->
-                            val baseRequester = focusRequesters.getOrPut(index) {
-                                if (index == 0) firstItemFocusRequester else FocusRequester()
+                            val itemKey = item.seeAllStableKey()
+                            val baseRequester = if (index == 0) {
+                                firstItemFocusRequester.also { focusRequesters[itemKey] = it }
+                            } else {
+                                focusRequesters.getOrPut(itemKey) { FocusRequester() }
                             }
-                            val target = remember(screenId, index, item.id, item.tmdbId) {
+                            val target = remember(screenId, index, posterColumns, itemKey) {
                                 TvFocusTargetId(
                                     screenId = screenId,
                                     rowKey = "grid",
-                                    itemKey = item.seeAllStableKey(),
+                                    itemKey = itemKey,
                                     rowIndex = index / posterColumns,
                                     itemIndex = index,
                                     targetType = "card",
@@ -1276,13 +1916,15 @@ internal fun TvSeeAllScreen(
                                 target = target,
                                 externalRequester = baseRequester,
                             )
-                            if (index == 0 && sortOptions.isEmpty()) {
-                                onFirstContentRequester(requester)
+                            if (index == 0) {
+                                if (!isStreamingCatalogRail) onFirstContentRequester(requester)
                             }
 
                             SeeAllPosterCard(
                                 item = item,
-                                ratingPrefs = tvCardRatingPrefs,
+                                showRatings = showPosterRatings,
+                                maxPosterRatings = if (posterColumns >= 5) 1 else 2,
+                                ratingPrefs = settingsState.ratingPrefs,
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .aspectRatio(2f / 3f)
@@ -1293,10 +1935,13 @@ internal fun TvSeeAllScreen(
                                         }
                                         if (index < posterColumns) {
                                             up = when {
-                                                sortOptions.isNotEmpty() -> sortRequesters[selectedSortIndex]
+                                                showSortOptions -> sortRequesters[selectedSortIndex]
                                                 showFilters -> firstFilterRequester
-                                                else -> filterToggleRequester
+                                                else -> sortToggleRequester
                                             }
+                                        }
+                                        if (index / posterColumns == renderedItems.lastIndex / posterColumns) {
+                                            down = requester
                                         }
                                     },
                                 onFocused = {
@@ -1306,11 +1951,26 @@ internal fun TvSeeAllScreen(
                                         ?.let { item.mergeSeeAllEnrichedItem(it) }
                                         ?: item
                                     lastFocusedIndex = index
+                                    lastFocusedKey = itemKey
+                                    posterBackTargetsFilters = isStreamingCatalogRail
                                     if (showFilters) {
                                         showFilters = false
                                     }
                                 },
-                                onClick = { onMediaClick(item) },
+                                onContextMenu = {
+                                    val actions = contextMenuActionsForItem?.invoke(item, null).orEmpty()
+                                    if (actions.isNotEmpty()) {
+                                        focusRestoreController.markFocused(target)
+                                        posterMenuReturn = requester
+                                        posterMenu = com.torve.android.tv.components.TvMediaContextMenuState(item, null, null, actions)
+                                    }
+                                },
+                                onClick = {
+                                    focusRestoreController.markFocused(target)
+                                    lastFocusedIndex = index
+                                    lastFocusedKey = itemKey
+                                    onMediaClick(item)
+                                },
                             )
                         }
 
@@ -1494,7 +2154,7 @@ private fun TvPersonInfoPanel(
     }
 }
 
-private enum class TvSeeAllSortKey {
+internal enum class TvSeeAllSortKey {
     DEFAULT,
     RATING_DESC,
     TITLE_ASC,
@@ -1508,11 +2168,76 @@ private data class TvSeeAllSortOption(
     val label: String,
 )
 
+private data class TvSeeAllYearRange(
+    val id: Int,
+    val startYear: Int,
+    val endYear: Int,
+    val label: String,
+)
+
+private fun providerSeeAllYearRanges(): List<TvSeeAllYearRange> {
+    val currentYear = java.time.LocalDate.now().year
+    val individualYears = (currentYear downTo 2020).map { year ->
+        TvSeeAllYearRange(year, year, year, year.toString())
+    }
+    val decades = listOf(2010, 2000, 1990, 1980, 1970, 1960, 1950).map { start ->
+        TvSeeAllYearRange(start, start, start + 9, "${start}s")
+    }
+    return individualYears + decades + TvSeeAllYearRange(1949, 1870, 1949, "Before 1950")
+}
+
+private fun providerDiscoverSortBy(mediaType: String, sortKey: TvSeeAllSortKey): String =
+    when (sortKey) {
+        TvSeeAllSortKey.RATING_DESC -> "vote_average.desc"
+        TvSeeAllSortKey.TITLE_ASC -> if (mediaType == "tv") "original_name.asc" else "original_title.asc"
+        TvSeeAllSortKey.TITLE_DESC -> if (mediaType == "tv") "original_name.desc" else "original_title.desc"
+        TvSeeAllSortKey.NEWEST_RELEASE -> if (mediaType == "tv") "first_air_date.desc" else "primary_release_date.desc"
+        TvSeeAllSortKey.OLDEST_RELEASE -> if (mediaType == "tv") "first_air_date.asc" else "primary_release_date.asc"
+        TvSeeAllSortKey.DEFAULT -> "popularity.desc"
+    }
+
+internal fun supportsGlobalTmdbSeeAllQuery(railKey: String): Boolean = when {
+    railKey.startsWith("trending_") -> true
+    railKey.startsWith("popular_") -> true
+    railKey.startsWith("top_rated_") -> true
+    railKey.startsWith("genre_") -> true
+    railKey in setOf(
+        "trending-movies",
+        "trending-tv",
+        "popular-movies",
+        "popular-tv",
+        "top-rated",
+        "now-playing",
+        "upcoming",
+        "hidden_gems",
+    ) -> true
+    else -> false
+}
+
+internal fun buildTmdbGenreQuery(
+    fixedGenreId: Int?,
+    selectedGenreIds: Set<Int>,
+): String? {
+    val selected = selectedGenreIds
+        .filter { it > 0 && it != fixedGenreId }
+        .sorted()
+    return when {
+        fixedGenreId != null && selected.isNotEmpty() -> "$fixedGenreId,${selected.joinToString("|")}"
+        fixedGenreId != null -> fixedGenreId.toString()
+        selected.isNotEmpty() -> selected.joinToString("|")
+        else -> null
+    }
+}
+
 private fun sortOptionsForRail(railKey: String): List<TvSeeAllSortOption> {
-    val firstLabel = if (railKey.startsWith("continue_watching")) "Recent Viewed" else "Default"
+    val firstLabel = when {
+        railKey.startsWith("continue_watching") -> "Recent Viewed"
+        railKey.startsWith("more_like_") -> "Recommended"
+        else -> "Default"
+    }
     return listOf(
         TvSeeAllSortOption(TvSeeAllSortKey.DEFAULT, firstLabel),
-        TvSeeAllSortOption(TvSeeAllSortKey.RATING_DESC, "IMDb Rating"),
+        TvSeeAllSortOption(TvSeeAllSortKey.RATING_DESC, "Highest IMDb rating"),
         TvSeeAllSortOption(TvSeeAllSortKey.TITLE_ASC, "A-Z"),
         TvSeeAllSortOption(TvSeeAllSortKey.TITLE_DESC, "Z-A"),
         TvSeeAllSortOption(TvSeeAllSortKey.NEWEST_RELEASE, "Newest Release"),
@@ -1520,24 +2245,37 @@ private fun sortOptionsForRail(railKey: String): List<TvSeeAllSortOption> {
     )
 }
 
+internal fun mergeMoreLikeCandidates(
+    seedTmdbId: Int,
+    recommendations: List<MediaItem>,
+    similar: List<MediaItem>,
+): List<MediaItem> {
+    val seen = mutableSetOf<String>()
+    return (recommendations + similar).filter { item ->
+        item.tmdbId != seedTmdbId && seen.add(item.seeAllStableKey())
+    }
+}
+
 private fun defaultSortKeyForRail(
     railKey: String,
     sortOptions: List<TvSeeAllSortOption>,
 ): TvSeeAllSortKey =
-    if (railKey.startsWith("upcoming_schedule")) {
-        TvSeeAllSortKey.OLDEST_RELEASE
-    } else {
-        sortOptions.firstOrNull()?.key ?: TvSeeAllSortKey.DEFAULT
+    when {
+        railKey.startsWith("upcoming_schedule") -> TvSeeAllSortKey.OLDEST_RELEASE
+        railKey == "top-rated" || railKey.startsWith("top_rated_") -> TvSeeAllSortKey.RATING_DESC
+        else -> sortOptions.firstOrNull()?.key ?: TvSeeAllSortKey.DEFAULT
     }
 
 private fun shouldUsePendingItemsForTvSeeAll(railKey: String): Boolean =
     when {
+        railKey.startsWith("addon:") -> false
         railKey.startsWith("trending_") -> false
         railKey.startsWith("popular_") -> false
         railKey.startsWith("top_rated_") -> false
         railKey.startsWith("genre_") -> false
         railKey.startsWith("more_like_") -> false
         railKey.startsWith("provider_") -> false
+        railKey.startsWith("streaming_catalog_") -> false
         railKey in setOf(
             "trending-movies",
             "trending-tv",
@@ -1557,6 +2295,9 @@ private fun shouldRestoreTvSeeAllCache(
 ): Boolean {
     if (entry.items.isEmpty()) return false
     if (shouldUsePendingItemsForTvSeeAll(railKey)) return true
+    if (railKey.startsWith("provider_") || railKey.startsWith("streaming_catalog_")) {
+        return entry.currentPage > 1 || entry.items.size >= 40
+    }
 
     // Discovery/category shelves should behave like catalog pages: enter with a
     // deep first batch, then keep paginating. Older in-memory entries created
@@ -1564,7 +2305,7 @@ private fun shouldRestoreTvSeeAllCache(
     return entry.currentPage > 1 || entry.items.size >= TV_SEE_ALL_INITIAL_TARGET_COUNT
 }
 
-private fun sortSeeAllItems(
+internal fun sortSeeAllItems(
     items: List<MediaItem>,
     sortKey: TvSeeAllSortKey,
 ): List<MediaItem> {
@@ -1580,9 +2321,9 @@ private fun sortSeeAllItems(
         TvSeeAllSortKey.DEFAULT -> items
         TvSeeAllSortKey.RATING_DESC -> items.sortedWith(
             compareByDescending<MediaItem> {
-                it.ratings?.imdbScore != null
+                it.seeAllExternalRating10() != null
             }.thenByDescending {
-                it.ratings?.imdbScore ?: -1f
+                it.seeAllExternalRating10() ?: -1.0
             }.thenBy { it.normalizedTitle() },
         )
         TvSeeAllSortKey.TITLE_ASC -> items.sortedWith(compareBy<MediaItem> { it.normalizedTitle() }.thenBy { it.id })
@@ -1610,9 +2351,9 @@ private fun List<MediaItem>.availableSeeAllGenres(): List<Pair<Int, String>> =
 
 private fun defaultSeeAllGenres(mediaType: String): List<Pair<Int, String>> {
     val ids = if (mediaType == "tv") {
-        listOf(10759, 16, 35, 80, 99, 18, 10751, 9648, 10765, 10768)
+        listOf(10759, 16, 35, 80, 99, 18, 10751, 10762, 9648, 10763, 10764, 10765, 10766, 10767, 10768)
     } else {
-        listOf(28, 12, 16, 35, 80, 99, 18, 14, 27, 9648, 10749, 878, 53)
+        listOf(28, 12, 16, 35, 80, 99, 18, 10751, 14, 36, 27, 10402, 9648, 10749, 878, 10770, 53, 10752, 37)
     }
     return ids.mapNotNull { id -> genreLabelForId(id)?.let { id to it } }
 }
@@ -1653,18 +2394,24 @@ private fun List<MediaItem>.availableSeeAllStudios(): List<Pair<Int, String>> =
         .sortedByDescending { it.value }
         .map { it.key }
 
-private fun List<MediaItem>.filterSeeAllItems(
+internal fun List<MediaItem>.filterSeeAllItems(
     genreIds: Set<Int>,
     studioIds: Set<Int>,
-    year: Int?,
+    yearRanges: List<IntRange>,
     minRating: Double?,
 ): List<MediaItem> =
     filter { item ->
-        (genreIds.isEmpty() || item.genreIds.any { it in genreIds } || item.genres.any { it.id in genreIds }) &&
+            (genreIds.isEmpty() || item.genreIds.any { it in genreIds } || item.genres.any { it.id in genreIds }) &&
             (studioIds.isEmpty() || item.studios.any { it.id in studioIds }) &&
-            (year == null || item.year == year) &&
-            (minRating == null || (item.ratings?.imdbScore?.toDouble() ?: item.rating ?: 0.0) >= minRating)
+            (yearRanges.isEmpty() || item.year?.let { year -> yearRanges.any { year in it } } == true) &&
+            (minRating == null || (item.seeAllExternalRating10() ?: -1.0) >= minRating)
     }
+
+private fun MediaItem.seeAllExternalRating10(): Double? =
+    ratings?.imdbScore
+        ?.takeIf { it > 0f }
+        ?.toDouble()
+
 
 @Composable
 private fun TvSeeAllFilterRows(
@@ -1674,9 +2421,9 @@ private fun TvSeeAllFilterRows(
     studios: List<Pair<Int, String>>,
     selectedStudioIds: Set<Int>,
     onToggleStudio: (Int) -> Unit,
-    years: List<Int>,
-    selectedYear: Int?,
-    onSelectYear: (Int) -> Unit,
+    years: List<Pair<Int, String>>,
+    selectedYearIds: Set<Int>,
+    onToggleYear: (Int) -> Unit,
     selectedMinRating: Double?,
     onSelectRating: (Double) -> Unit,
     ratingThresholds: List<Double>,
@@ -1687,24 +2434,27 @@ private fun TvSeeAllFilterRows(
     onContentFocused: (FocusRequester) -> Unit,
 ) {
     val columns = 5
+    val filterScrollState = rememberScrollState()
     Column(
-        verticalArrangement = Arrangement.spacedBy(7.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
         modifier = Modifier
             .padding(bottom = 10.dp)
+            .heightIn(max = 250.dp)
             .clip(RoundedCornerShape(24.dp))
             .background(Charcoal.copy(alpha = 0.54f))
             .border(1.dp, Snow.copy(alpha = 0.12f), RoundedCornerShape(24.dp))
-            .padding(horizontal = 14.dp, vertical = 12.dp),
+            .verticalScroll(filterScrollState)
+            .padding(horizontal = 12.dp, vertical = 8.dp),
     ) {
         val groups = remember(genres, studios, years, ratingThresholds) {
             buildList {
                 if (genres.isNotEmpty()) add(TvSeeAllFilterGroup("genre", "Genre", genres))
                 if (studios.isNotEmpty()) add(TvSeeAllFilterGroup("studio", "Studio / Network", studios))
-                if (years.isNotEmpty()) add(TvSeeAllFilterGroup("year", "Year", years.map { it to it.toString() }))
+                if (years.isNotEmpty()) add(TvSeeAllFilterGroup("year", "Year / decade", years))
                 add(
                     TvSeeAllFilterGroup(
                         "rating",
-                        "Rating",
+                        "Minimum IMDb rating",
                         ratingThresholds.map { it.toInt() to "${it.toInt()}+" },
                     ),
                 )
@@ -1737,11 +2487,11 @@ private fun TvSeeAllFilterRows(
         visualRows.forEachIndexed { rowIndex, row ->
             row.groupLabel?.let { label ->
                 Text(
-                    text = label,
+                    text = localizedUiText(label),
                     style = MaterialTheme.typography.labelMedium,
                     color = Silver,
                     fontWeight = FontWeight.Medium,
-                    modifier = Modifier.padding(top = if (rowIndex == 0) 0.dp else 4.dp),
+                    modifier = Modifier.padding(top = if (rowIndex == 0) 0.dp else 2.dp),
                 )
             }
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -1761,7 +2511,7 @@ private fun TvSeeAllFilterRows(
                     val selected = when (chip.groupKey) {
                         "genre" -> chip.id in selectedGenreIds
                         "studio" -> chip.id in selectedStudioIds
-                        "year" -> selectedYear == chip.id
+                        "year" -> chip.id in selectedYearIds
                         "rating" -> selectedMinRating?.toInt() == chip.id
                         else -> false
                     }
@@ -1781,7 +2531,7 @@ private fun TvSeeAllFilterRows(
                         when (chip.groupKey) {
                             "genre" -> onToggleGenre(chip.id)
                             "studio" -> onToggleStudio(chip.id)
-                            "year" -> onSelectYear(chip.id)
+                            "year" -> onToggleYear(chip.id)
                             "rating" -> onSelectRating(chip.id.toDouble())
                         }
                     },
@@ -1792,7 +2542,8 @@ private fun TvSeeAllFilterRows(
     }
 }
 
-private fun MediaItem.seeAllStableKey(): String = "${type.name}:${tmdbId ?: id}"
+private fun MediaItem.seeAllStableKey(): String =
+    "${type.name}:${if (id.startsWith("trakt-calendar:")) id else tmdbId ?: id}"
 
 private fun genreLabelForId(id: Int): String? = when (id) {
     28 -> "Action"
@@ -1848,24 +2599,6 @@ private fun TvSeeAllFilterChip(
     onClick: () -> Unit,
 ) {
     var focused by remember { mutableStateOf(false) }
-    val backgroundColor by animateColorAsState(
-        targetValue = when {
-            focused && selected -> Amber.copy(alpha = 0.30f)
-            selected -> Amber.copy(alpha = 0.22f)
-            focused -> Graphite.copy(alpha = 0.95f)
-            else -> Charcoal.copy(alpha = 0.64f)
-        },
-        label = "tvSeeAllFilterBackground",
-    )
-    val borderColor by animateColorAsState(
-        targetValue = when {
-            focused && selected -> Snow
-            selected -> Amber
-            focused -> AmberLight
-            else -> Snow.copy(alpha = 0.10f)
-        },
-        label = "tvSeeAllFilterBorder",
-    )
     Box(
         modifier = modifier
             .height(30.dp)
@@ -1874,9 +2607,7 @@ private fun TvSeeAllFilterChip(
                 focused = it.isFocused
                 if (it.isFocused) onFocused()
             }
-            .clip(RoundedCornerShape(999.dp))
-            .background(backgroundColor)
-            .border(if (focused) 2.dp else 1.dp, borderColor, RoundedCornerShape(999.dp))
+            .tvGlassControl(focused, selected, cornerRadius = 999.dp)
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null,
@@ -1886,7 +2617,7 @@ private fun TvSeeAllFilterChip(
         contentAlignment = Alignment.Center,
     ) {
         Text(
-            text = label,
+            text = localizedUiText(label),
             style = MaterialTheme.typography.labelMedium,
             color = if (focused && selected) Snow else if (selected) AmberLight else Snow,
             fontWeight = FontWeight.Medium,
@@ -1906,27 +2637,6 @@ private fun TvSeeAllSortButton(
     onClick: () -> Unit,
 ) {
     var focused by remember { mutableStateOf(false) }
-    val backgroundColor by animateColorAsState(
-        targetValue = when {
-            selected -> Amber
-            focused -> Graphite.copy(alpha = 0.95f)
-            else -> Charcoal.copy(alpha = 0.75f)
-        },
-        label = "tvSeeAllSortBackground",
-    )
-    val contentColor by animateColorAsState(
-        targetValue = if (selected) Obsidian else Snow,
-        label = "tvSeeAllSortText",
-    )
-    val borderColor by animateColorAsState(
-        targetValue = when {
-            focused && selected -> Snow
-            focused -> AmberLight
-            selected -> Amber.copy(alpha = 0.72f)
-            else -> Snow.copy(alpha = 0.10f)
-        },
-        label = "tvSeeAllSortBorder",
-    )
 
     Box(
         modifier = modifier
@@ -1936,9 +2646,7 @@ private fun TvSeeAllSortButton(
                 focused = it.isFocused
                 if (it.isFocused) onFocused()
             }
-            .clip(RoundedCornerShape(999.dp))
-            .background(backgroundColor)
-            .border(if (focused) 3.dp else 1.dp, borderColor, RoundedCornerShape(999.dp))
+            .tvGlassControl(focused, selected, cornerRadius = 999.dp, focusBorderWidth = 3.dp)
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null,
@@ -1948,9 +2656,9 @@ private fun TvSeeAllSortButton(
         contentAlignment = Alignment.Center,
     ) {
         Text(
-            text = label,
+            text = localizedUiText(label),
             style = MaterialTheme.typography.labelMedium,
-            color = contentColor,
+            color = Snow,
             fontWeight = FontWeight.Medium,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
@@ -1959,14 +2667,22 @@ private fun TvSeeAllSortButton(
     }
 }
 
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
-private fun SeeAllPosterCard(
+internal fun SeeAllPosterCard(
     item: MediaItem,
+    showRatings: Boolean,
+    maxPosterRatings: Int,
     ratingPrefs: RatingDisplayPrefs,
     modifier: Modifier,
     onFocused: () -> Unit,
     onClick: () -> Unit,
+    onContextMenu: (() -> Unit)? = null,
 ) {
+    if (item.catalogueNotice != null) {
+        com.torve.android.ui.community.CatalogueNoticeCard(item, modifier, onFocused)
+        return
+    }
     var focused by remember { mutableStateOf(false) }
     val scale by animateFloatAsState(targetValue = if (focused) 1.035f else 1f, label = "seeAllCardScale")
     val borderColor by animateColorAsState(
@@ -1984,7 +2700,14 @@ private fun SeeAllPosterCard(
                 focused = it.isFocused
                 if (it.isFocused) onFocused()
             }
-            .clickable(
+            .onPreviewKeyEvent { event ->
+                if (event.key == Key.Menu && onContextMenu != null) {
+                    if (event.type == KeyEventType.KeyDown && event.nativeKeyEvent.repeatCount == 0) onContextMenu()
+                    true
+                } else false
+            }
+            .combinedClickable(
+                onLongClick = onContextMenu,
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null,
                 onClick = onClick,
@@ -1995,7 +2718,7 @@ private fun SeeAllPosterCard(
             .background(baseColor)
             .border(if (focused) 3.dp else 1.dp, borderColor, RoundedCornerShape(16.dp)),
     ) {
-        val imageUrl = item.posterUrl ?: item.backdropUrl
+        val (imageUrl, artworkFailed) = com.torve.android.ui.community.stableArtwork(item, false)
         if (imageUrl.isNullOrBlank()) {
             Box(
                 modifier = Modifier
@@ -2017,20 +2740,14 @@ private fun SeeAllPosterCard(
         } else {
             AsyncImage(
                 model = imageUrl,
+                onError = { artworkFailed() },
                 contentDescription = item.title,
                 contentScale = ContentScale.Crop,
                 modifier = Modifier.fillMaxSize(),
             )
         }
-
-        item.ratings.withFallbackTmdbScore(item.rating)?.let { ratings ->
-            PreferredRatingPills(
-                ratings = ratings,
-                prefs = ratingPrefs,
-                modifier = Modifier
-                    .align(Alignment.BottomEnd)
-                    .padding(8.dp),
-            )
+        if (showRatings) {
+            TvPosterRatingPills(item, ratingPrefs, Modifier.align(Alignment.BottomStart).padding(start = 4.dp, bottom = 8.dp), maxRatings = maxPosterRatings)
         }
     }
 }

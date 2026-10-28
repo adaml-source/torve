@@ -30,16 +30,16 @@ class PandaUsenetProviderHealthChecker(
         if (!state.isEditMode) {
             return base(ProviderHealthCategory.USENET_INDEXER, "Usenet indexer").copy(
                 status = ProviderHealthStatus.UNCONFIGURED,
-                message = "Panda not set up yet.",
-                nextAction = "Run Panda setup",
+                message = "No direct NZB indexer connection. External extensions manage their own indexers.",
+                nextAction = null,
             )
         }
         val configured = state.nzbIndexers.filter { it.type != "none" }
         if (configured.isEmpty()) {
             return base(ProviderHealthCategory.USENET_INDEXER, "Usenet indexer").copy(
                 status = ProviderHealthStatus.UNCONFIGURED,
-                message = "No NZB indexer configured in Panda.",
-                nextAction = "Add an indexer",
+                message = "No direct NZB indexer configured. External extensions manage their own indexers.",
+                nextAction = null,
             )
         }
         val withKey = configured.filter { it.apiKey.isNotBlank() && !isRedacted(it.apiKey) }
@@ -95,17 +95,17 @@ class PandaUsenetProviderProviderHealthChecker(
 
     override suspend fun check(): ProviderHealthEntry {
         val state = stateSource()
-        if (!state.isEditMode || !state.enableUsenet || state.usenetProvider == "none") {
-            return base(ProviderHealthCategory.USENET_PROVIDER, "Usenet provider").copy(
-                status = ProviderHealthStatus.UNCONFIGURED,
-                message = "Usenet provider not selected.",
-                nextAction = "Pick a usenet provider",
-            )
-        }
         if (debridNzbClientCoversIt(state)) {
             return base(ProviderHealthCategory.USENET_PROVIDER, "Usenet provider").copy(
                 status = ProviderHealthStatus.GREEN,
                 message = "Not required — ${state.downloadClient.replaceFirstChar { it.uppercase() }} resolves NZBs server-side.",
+                nextAction = null,
+            )
+        }
+        if (!state.isEditMode || !state.enableUsenet || state.usenetProvider == "none") {
+            return base(ProviderHealthCategory.USENET_PROVIDER, "Usenet provider").copy(
+                status = ProviderHealthStatus.UNCONFIGURED,
+                message = "No direct NNTP connection. Cloud services and external extensions can manage Usenet separately.",
                 nextAction = null,
             )
         }

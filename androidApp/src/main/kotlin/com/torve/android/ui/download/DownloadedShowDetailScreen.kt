@@ -1,5 +1,7 @@
 package com.torve.android.ui.download
 
+import com.torve.android.ui.community.parityLabel as localizedUiText
+
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -83,7 +85,7 @@ fun DownloadedShowDetailScreen(
 
     if (group == null) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            Text(stringResource(R.string.download_show_not_found), color = Silver)
+            Text(stringResource(R.string.download_show_not_found), color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         return
     }
@@ -117,14 +119,9 @@ fun DownloadedShowDetailScreen(
                         ),
                     ),
             )
-            IconButton(
-                onClick = onBack,
-                modifier = Modifier
+            com.torve.android.ui.components.BackButton(onClick = onBack, modifier = Modifier
                     .statusBarsPadding()
-                    .padding(8.dp),
-            ) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, stringResource(R.string.common_back), tint = Snow)
-            }
+                    .padding(8.dp))
         }
 
         // Title + info
@@ -133,16 +130,16 @@ fun DownloadedShowDetailScreen(
                 group.title,
                 style = MaterialTheme.typography.headlineSmall,
                 fontWeight = FontWeight.Bold,
-                color = Snow,
+                color = MaterialTheme.colorScheme.onSurface,
             )
             Spacer(Modifier.height(4.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                group.year?.let { Text("$it", color = Silver, fontSize = 13.sp) }
-                Text(stringResource(R.string.download_episodes_count, group.itemCount), color = Silver, fontSize = 13.sp)
+                group.year?.let { Text("$it", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp) }
+                Text(stringResource(R.string.download_episodes_count, group.itemCount), color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp)
                 Text(formatFileSize(group.totalSizeBytes), color = Amber, fontSize = 13.sp)
                 Text(
                     stringResource(R.string.download_watched_count, group.watchedCount, group.totalCount),
-                    color = Silver,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                     fontSize = 13.sp,
                 )
             }
@@ -189,11 +186,11 @@ fun DownloadedShowDetailScreen(
                         Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
                     ) {
-                        Text(stringResource(R.string.download_episodes_count, season.episodes.size), color = Silver, fontSize = 12.sp)
-                        Text(formatFileSize(season.totalSizeBytes), color = Silver, fontSize = 12.sp)
+                        Text(stringResource(R.string.download_episodes_count, season.episodes.size), color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
+                        Text(formatFileSize(season.totalSizeBytes), color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
                         Text(
                             stringResource(R.string.download_watched_count, season.watchedCount, season.episodes.size),
-                            color = Silver,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                             fontSize = 12.sp,
                         )
                     }
@@ -259,7 +256,7 @@ private fun EpisodeRow(
                 } else {
                     Text(
                         "${episode.episodeNumber ?: "?"}",
-                        color = Snow,
+                        color = MaterialTheme.colorScheme.onSurface,
                         fontWeight = FontWeight.Bold,
                         fontSize = 14.sp,
                     )
@@ -271,18 +268,18 @@ private fun EpisodeRow(
             // Episode info
             Column(Modifier.weight(1f)) {
                 Text(
-                    episode.episodeTitle ?: "Episode ${episode.episodeNumber}",
-                    color = Snow,
+                    localizedUiText(episode.episodeTitle ?: "Episode ${episode.episodeNumber}"),
+                    color = MaterialTheme.colorScheme.onSurface,
                     fontWeight = FontWeight.SemiBold,
                     fontSize = 14.sp,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text(formatFileSize(episode.fileSizeBytes), color = Silver, fontSize = 11.sp)
-                    episode.resolution?.let { Text(it, color = Silver, fontSize = 11.sp) }
-                    episode.audioCodec?.let { Text(it, color = Silver, fontSize = 11.sp) }
-                    episode.runtime?.let { Text("${it}m", color = Silver, fontSize = 11.sp) }
+                    Text(formatFileSize(episode.fileSizeBytes), color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp)
+                    episode.resolution?.let { Text(it, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp) }
+                    episode.audioCodec?.let { Text(it, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp) }
+                    episode.runtime?.let { Text("${it}m", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp) }
                 }
                 // Progress bar
                 if (episode.watchProgress > 0f && !episode.isWatched) {

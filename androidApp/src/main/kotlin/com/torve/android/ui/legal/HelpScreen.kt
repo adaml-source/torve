@@ -43,9 +43,7 @@ fun HelpScreen(onBack: () -> Unit) {
         TopAppBar(
             title = { Text(stringResource(R.string.settings_help)) },
             navigationIcon = {
-                IconButton(onClick = onBack) {
-                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.common_back_cd))
-                }
+                com.torve.android.ui.components.BackButton(onClick = onBack)
             },
             colors = TopAppBarDefaults.topAppBarColors(
                 containerColor = MaterialTheme.colorScheme.surface,

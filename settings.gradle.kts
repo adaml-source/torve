@@ -21,7 +21,7 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "Torve"
+rootProject.name = "StreamVault"
 include(":shared")
 include(":androidApp")
 include(":desktopApp")

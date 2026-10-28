@@ -88,6 +88,11 @@ class MediaFavoritesRepositoryImpl(
         }
     }
 
+    override suspend fun refreshAndAwait() {
+        val userId = currentUserIdOrNull() ?: return
+        refreshInternal(userId)
+    }
+
     override fun toggleFavorite(item: MediaItem) {
         val existingKeys = _state.value.items
             .filter { it.matchesMediaItemFavorite(item) }

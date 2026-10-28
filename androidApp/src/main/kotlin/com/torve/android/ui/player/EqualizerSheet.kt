@@ -1,5 +1,7 @@
 package com.torve.android.ui.player
 
+import com.torve.android.ui.community.parityLabel as localizedUiText
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -249,7 +251,7 @@ private fun PresetSelector(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
-                text = selected?.label ?: stringResource(R.string.eq_custom),
+                text = selected?.label?.let { localizedUiText(it) } ?: stringResource(R.string.eq_custom),
                 color = Snow,
                 style = MaterialTheme.typography.bodyMedium,
             )
@@ -265,7 +267,7 @@ private fun PresetSelector(
                 DropdownMenuItem(
                     text = {
                         Text(
-                            preset.label,
+                            localizedUiText(preset.label),
                             color = if (preset == selected) Amber else Color.Unspecified,
                         )
                     },
@@ -297,7 +299,7 @@ private fun HorizontalBandSlider(
     ) {
         // Frequency label
         Text(
-            text = label,
+            text = localizedUiText(label),
             color = Silver,
             style = MaterialTheme.typography.labelSmall,
             fontSize = 10.sp,

@@ -30,99 +30,19 @@ class BetaProgramViewModel(
     val state: StateFlow<BetaProgramUiState> = _state.asStateFlow()
 
     fun onOpenBetaProgram() {
-        load(initial = true)
+        _state.update { it.copy(isLoading = false, isRefreshing = false, errorMessage = null) }
     }
 
     fun onRetry() {
-        load(initial = true)
+        onOpenBetaProgram()
     }
 
     fun onRefreshStatus() {
-        scope.launch {
-            _state.update { it.copy(isRefreshing = true, errorMessage = null) }
-            runCatching { repository.refreshBetaStatus() }
-                .onSuccess {
-                    val status = repository.getBetaStatus()
-                    _state.value = status.toUiState(
-                        current = _state.value,
-                        isLoading = false,
-                        isRefreshing = false,
-                    )
-                }
-                .onFailure { error ->
-                    _state.update {
-                        it.copy(
-                            isRefreshing = false,
-                            errorMessage = mapError(error),
-                        )
-                    }
-                }
-        }
+        onOpenBetaProgram()
     }
 
     fun onGenerateCode() {
-        val current = _state.value
-        if (!current.isSignedIn) {
-            _state.update { it.copy(errorMessage = mapBetaError(BetaProgramError.AuthRequired)) }
-            return
-        }
-        if (!current.isEmailVerified || current.isEmailVerificationRequired) {
-            _state.update {
-                it.copy(
-                    showGenerateCode = false,
-                    errorMessage = mapBetaError(BetaProgramError.EmailNotVerified),
-                )
-            }
-            return
-        }
-        if (!current.canApply) {
-            _state.update {
-                it.copy(
-                    showGenerateCode = false,
-                    errorMessage = mapBlockedReason(current.blockedReason),
-                )
-            }
-            return
-        }
-        scope.launch {
-            _state.update {
-                it.copy(
-                    isGeneratingCode = true,
-                    errorMessage = null,
-                    copySuccess = false,
-                )
-            }
-            runCatching { repository.generateDiscordBetaLinkCode() }
-                .onSuccess { code ->
-                    runCatching { repository.refreshAccessStateAfterBetaChange() }
-                    val status = runCatching { repository.getBetaStatus() }.getOrNull()
-                    _state.value = (status?.toUiState(_state.value) ?: _state.value).copy(
-                        isGeneratingCode = false,
-                        generatedCode = code.code,
-                        generatedCodeExpiresAt = code.expiresAt,
-                        discordInviteUrl = code.discordInviteUrl ?: status?.discordInviteUrl ?: _state.value.discordInviteUrl,
-                        openDiscordAvailable = !(code.discordInviteUrl ?: status?.discordInviteUrl ?: _state.value.discordInviteUrl).isNullOrBlank(),
-                        showCopyCode = code.code.isNotBlank(),
-                        showOpenDiscord = !(code.discordInviteUrl ?: status?.discordInviteUrl ?: _state.value.discordInviteUrl).isNullOrBlank(),
-                        primaryBadge = "Code Generated",
-                        primaryActionLabel = "Copy Code",
-                        secondaryActionLabel = if (!(code.discordInviteUrl ?: status?.discordInviteUrl ?: _state.value.discordInviteUrl).isNullOrBlank()) {
-                            "Open Discord"
-                        } else {
-                            null
-                        },
-                        body = BetaProgramCopy.DISCORD_INSTRUCTION,
-                    )
-                }
-                .onFailure { error ->
-                    _state.update {
-                        it.copy(
-                            isGeneratingCode = false,
-                            errorMessage = mapError(error),
-                        )
-                    }
-                }
-        }
+        onOpenBetaProgram()
     }
 
     fun onCopyCode() {
@@ -213,7 +133,7 @@ fun BetaProgramStatus.toSettingsCardState(): BetaProgramSettingsCardState {
             badge = "Verify email",
         )
         betaAccessActive -> BetaProgramSettingsCardState(
-            subtitle = safeExpiry?.let { "Free beta access active until ${it.formatBetaDate()}." } ?: "Beta access is active.",
+            subtitle = safeExpiry?.let { "Beta tester access active until ${it.formatBetaDate()}." } ?: "Beta tester access is active.",
             badge = "Beta active",
         )
         applicationStatus == BetaApplicationStatus.SUBMITTED -> BetaProgramSettingsCardState(
@@ -225,7 +145,7 @@ fun BetaProgramStatus.toSettingsCardState(): BetaProgramSettingsCardState {
             badge = "Closed",
         )
         blockedReason == BetaBlockedReason.BETA_ACCESS_ENDED -> BetaProgramSettingsCardState(
-            subtitle = "Free beta access ended. Beta tester access may still be available.",
+            subtitle = "This beta testing round has ended.",
             badge = "Beta ended",
         )
         else -> BetaProgramSettingsCardState()
@@ -268,7 +188,9 @@ fun BetaProgramStatus.toUiState(
         }
         betaAccessActive -> {
             badge = "Beta Active"
-            body = "Free beta access is active until ${safeExpiry?.formatBetaDate() ?: "July 31, 2026"}. Beta builds may be unstable."
+            body = safeExpiry?.let {
+                "Beta tester access is active until ${it.formatBetaDate()}. Beta builds may be unstable."
+            } ?: "Beta tester access is active. Beta builds may be unstable."
             primary = "View Status"
             secondary = if (!discordInviteUrl.isNullOrBlank()) "Open Discord" else null
             showGenerate = false
@@ -295,7 +217,7 @@ fun BetaProgramStatus.toUiState(
         }
         applicationStatus == BetaApplicationStatus.EXPIRED -> {
             badge = "Expired"
-            body = "Your free beta access has expired."
+            body = "Your beta invitation has expired."
             primary = if (canApply) "Apply Again" else "Refresh Status"
             secondary = null
             showGenerate = canApply
@@ -304,7 +226,7 @@ fun BetaProgramStatus.toUiState(
         }
         blockedReason == BetaBlockedReason.BETA_ACCESS_ENDED && !canApply -> {
             badge = "Beta Access Ended"
-            body = "The beta access period has ended. Discord beta tester access may still be available when applications are open."
+            body = "This beta testing round has ended. New tester applications may open in a future round."
             primary = "Refresh Status"
             secondary = null
             showGenerate = false
@@ -322,7 +244,7 @@ fun BetaProgramStatus.toUiState(
         }
         else -> {
             badge = "Beta applications open"
-            body = "Apply for Discord beta tester access. Free beta access only runs until July 31, 2026."
+            body = "Apply to test upcoming builds through the Torve Discord. Beta participation never changes access to Torve features."
             primary = "Generate Discord Link Code"
             secondary = "Learn More"
             showGenerate = canApply
@@ -378,7 +300,7 @@ private fun BetaProgramStatus.safeBetaAccessExpiry(): String? {
 fun mapBetaError(error: BetaProgramError): String = when (error) {
     BetaProgramError.EmailNotVerified -> "Verify your email address before applying for beta access."
     BetaProgramError.SignupClosed -> "Beta applications are currently closed."
-    BetaProgramError.AccessEnded -> "The beta access period has ended. Discord beta tester access can still be available when applications are open."
+    BetaProgramError.AccessEnded -> "This beta testing round has ended. New applications may open in a future round."
     BetaProgramError.RateLimited -> "Please wait before requesting another code."
     BetaProgramError.AuthRequired -> "Please sign in again."
     BetaProgramError.BetaUnavailable -> "Beta applications are currently closed."
@@ -411,7 +333,7 @@ fun shouldShowBetaProgramSettingsEntry(
     hasPremiumAccess: Boolean,
     nowEpochMs: Long = Clock.System.now().toEpochMilliseconds(),
 ): Boolean {
-    return true
+    return false
 }
 
 fun String.formatBetaDate(): String {

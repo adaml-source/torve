@@ -23,12 +23,13 @@ class DownloadViewModel(
     private val contentPolicyFilter: ContentPolicyFilter = ContentPolicyFilter(),
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
-    private val _state = MutableStateFlow(DownloadUiState())
+    private val _state = contentPolicyFilter.profileState(DownloadUiState())
     val state: StateFlow<DownloadUiState> = _state.asStateFlow()
 
     // Platform callbacks — set from Android composable code to trigger WorkManager
     var onDownloadEnqueued: ((downloadId: String) -> Unit)? = null
     var onDownloadCancelled: ((downloadId: String) -> Unit)? = null
+    var onDownloadDeleted: ((downloadId: String) -> Unit)? = null
     var onFileDelete: ((filePath: String) -> Unit)? = null
 
     init {
@@ -120,6 +121,7 @@ class DownloadViewModel(
                 val download = downloadRepo.getDownload(id)
                 onDownloadCancelled?.invoke(id)
                 downloadRepo.deleteDownload(id)
+                onDownloadDeleted?.invoke(id)
                 download?.filePath?.let { onFileDelete?.invoke(it) }
                 loadDownloads()
             } catch (e: Exception) {

@@ -26,6 +26,15 @@ import kotlin.test.assertTrue
  *      state" bug the store was introduced to fix.
  */
 class PandaConfigStateStoreTest {
+    @Test
+    fun torBoxDoesNotRequireDirectNntpSelection() = runTest {
+        val state = PandaSetupUiState(isEditMode = true, enableUsenet = false, usenetProvider = "none",
+            downloadClient = "torbox", downloadClientApiKey = "fixture-key",
+            nzbIndexers = listOf(NzbIndexerRow("newznab", "https://example.test", "fixture-indexer-key")))
+        val result = PandaUsenetProviderProviderHealthChecker { state }.check()
+        assertEquals(ProviderHealthStatus.GREEN, result.status)
+        assertTrue(result.message.orEmpty().contains("Not required"))
+    }
 
     @Test
     fun defaultSnapshotIsUnconfiguredFlavoredAndCheckersReportUnconfigured() = runTest {

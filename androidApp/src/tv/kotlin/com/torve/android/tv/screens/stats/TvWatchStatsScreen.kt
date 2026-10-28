@@ -1,5 +1,7 @@
 package com.torve.android.tv.screens.stats
 
+import com.torve.android.tv.components.tvSettingsLabel as localizedUiText
+
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -43,6 +45,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
@@ -334,7 +338,7 @@ private fun TvWatchStatsDashboard(
                     modifier = Modifier.height(360.dp).fillMaxWidth(),
                 )
                 metadataUnavailable -> TvWatchStatsModeUnavailableCard(
-                    title = dashboardModel.unavailableTitle ?: "Metadata unavailable",
+                    title = com.torve.android.tv.components.tvSettingsLabel(dashboardModel.unavailableTitle ?: "Metadata unavailable"),
                     body = dashboardModel.unavailableBody ?: "No local metadata is available for this selection yet.",
                     locked = false,
                     requester = firstMetricRequester,
@@ -513,25 +517,18 @@ private fun TvWatchStatsDashboardHeader(
         horizontalArrangement = Arrangement.spacedBy(16.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        TvStatsPill(
-            label = "Back",
-            selected = false,
-            focusRequester = entryFocusRequester,
-            left = railFocusRequester,
-            down = down,
-            onFocused = onFocused,
-            onClick = onBack,
-            modifier = Modifier.width(72.dp),
-        )
+        com.torve.android.ui.components.BackButton(onClick = onBack,
+            modifier = Modifier.focusRequester(entryFocusRequester).focusProperties { left = railFocusRequester; this.down = down },
+            onFocused = onFocused)
         Column(modifier = Modifier.weight(1f)) {
             Text(
-                text = "Watch Stats",
+                text = com.torve.android.tv.components.tvSettingsLabel("Watch Stats"),
                 style = MaterialTheme.typography.headlineMedium,
                 color = Snow,
                 fontWeight = FontWeight.Bold,
             )
             Text(
-                text = "Playback, imports, and manual watches. Sources are labeled.",
+                text = com.torve.android.tv.components.tvSettingsLabel("Playback, imports, and manual watches. Sources are labeled."),
                 style = MaterialTheme.typography.bodyMedium,
                 color = Silver,
                 maxLines = 2,
@@ -546,7 +543,7 @@ private fun TvWatchStatsDashboardHeader(
             onClick = onTimeRangeClick,
             modifier = Modifier.width(112.dp),
         )
-        TvStatsSourceChip(if (isPremium) "Premium" else "Basic")
+        TvStatsSourceChip(localizedUiText(if (isPremium) "Premium" else "Basic"))
     }
 }
 
@@ -593,7 +590,7 @@ private fun TvWatchStatsDashboardFilters(
         filters.forEachIndexed { index, filter ->
             if (filter == WatchStatsTvFilter.OVERVIEW) {
                 Text(
-                    text = "View",
+                    text = com.torve.android.tv.components.tvSettingsLabel("View"),
                     style = MaterialTheme.typography.labelSmall,
                     color = Ash,
                     modifier = Modifier.padding(start = 10.dp, end = 2.dp),
@@ -601,7 +598,7 @@ private fun TvWatchStatsDashboardFilters(
                 )
             } else if (filter == WatchStatsTvFilter.ALL) {
                 Text(
-                    text = "Content",
+                    text = com.torve.android.tv.components.tvSettingsLabel("Content"),
                     style = MaterialTheme.typography.labelSmall,
                     color = Ash,
                     modifier = Modifier.padding(end = 2.dp),
@@ -1099,8 +1096,8 @@ private fun TvWatchStatsOverviewModulesRow(
         horizontalArrangement = Arrangement.spacedBy(14.dp),
     ) {
         TvWatchStatsDonutCard(
-            title = "Source split",
-            subtitle = "Only real recorded sources",
+            title = com.torve.android.tv.components.tvSettingsLabel("Source split"),
+            subtitle = com.torve.android.tv.components.tvSettingsLabel("Only real recorded sources"),
             rows = sourceBreakdownRows(summary),
             unavailableCopy = "Source stats appear after Torve records playback, imports, or manual watches.",
             requester = chartSourceRequester,
@@ -1112,7 +1109,7 @@ private fun TvWatchStatsOverviewModulesRow(
             modifier = Modifier.weight(1f).height(228.dp),
         )
         TvWatchStatsTopTitlesCard(
-            title = "Recent activity preview",
+            title = com.torve.android.tv.components.tvSettingsLabel("Recent activity preview"),
             rows = dashboardRecentTitleRows(sessions),
             emptyCopy = "Recent rows appear as you watch or import history.",
             requester = recentPreviewRequester,
@@ -1199,7 +1196,7 @@ private fun TvWatchStatsModeListsRow(
             WatchStatsInsightMode.OVERVIEW -> when (model.contentScope) {
                 WatchStatsContentScope.MOVIES -> {
                     TvWatchStatsTopTitlesCard(
-                        title = "Top movies",
+                        title = com.torve.android.tv.components.tvSettingsLabel("Top movies"),
                         rows = dashboardTopMovieRows(sessions),
                         emptyCopy = "Not enough watched movies yet",
                         requester = topMoviesRequester,
@@ -1212,7 +1209,7 @@ private fun TvWatchStatsModeListsRow(
                         modifier = Modifier.weight(1f).height(248.dp),
                     )
                     TvWatchStatsTopTitlesCard(
-                        title = "Recently watched movies",
+                        title = com.torve.android.tv.components.tvSettingsLabel("Recently watched movies"),
                         rows = dashboardRecentTitleRows(sessions),
                         emptyCopy = "No recent movie activity in this view",
                         requester = topShowsRequester,
@@ -1226,7 +1223,7 @@ private fun TvWatchStatsModeListsRow(
                 }
                 WatchStatsContentScope.SHOWS -> {
                     TvWatchStatsTopTitlesCard(
-                        title = "Top shows",
+                        title = com.torve.android.tv.components.tvSettingsLabel("Top shows"),
                         rows = dashboardTopShowRows(sessions),
                         emptyCopy = "Not enough watched episodes yet",
                         requester = topMoviesRequester,
@@ -1239,7 +1236,7 @@ private fun TvWatchStatsModeListsRow(
                         modifier = Modifier.weight(1f).height(248.dp),
                     )
                     TvWatchStatsTopTitlesCard(
-                        title = "Recently watched episodes",
+                        title = com.torve.android.tv.components.tvSettingsLabel("Recently watched episodes"),
                         rows = dashboardRecentTitleRows(sessions),
                         emptyCopy = "No recent episode activity in this view",
                         requester = topShowsRequester,
@@ -1253,7 +1250,7 @@ private fun TvWatchStatsModeListsRow(
                 }
                 WatchStatsContentScope.ALL -> {
                     TvWatchStatsTopTitlesCard(
-                        title = "Top movies",
+                        title = com.torve.android.tv.components.tvSettingsLabel("Top movies"),
                         rows = dashboardTopMovieRows(sessions),
                         emptyCopy = "Not enough watched movies yet",
                         requester = topMoviesRequester,
@@ -1266,7 +1263,7 @@ private fun TvWatchStatsModeListsRow(
                         modifier = Modifier.weight(1f).height(248.dp),
                     )
                     TvWatchStatsTopTitlesCard(
-                        title = "Top shows",
+                        title = com.torve.android.tv.components.tvSettingsLabel("Top shows"),
                         rows = dashboardTopShowRows(sessions),
                         emptyCopy = "Not enough watched episodes yet",
                         requester = topShowsRequester,
@@ -1281,7 +1278,7 @@ private fun TvWatchStatsModeListsRow(
             }
             WatchStatsInsightMode.ACTIVITY -> {
                 TvWatchStatsTopTitlesCard(
-                    title = "Recent activity preview",
+                    title = com.torve.android.tv.components.tvSettingsLabel("Recent activity preview"),
                     rows = dashboardRecentTitleRows(sessions),
                     emptyCopy = "No recent activity in this view",
                     requester = topMoviesRequester,
@@ -1294,7 +1291,7 @@ private fun TvWatchStatsModeListsRow(
                     modifier = Modifier.weight(1f).height(248.dp),
                 )
                 TvWatchStatsTopTitlesCard(
-                    title = "Latest counted rows",
+                    title = com.torve.android.tv.components.tvSettingsLabel("Latest counted rows"),
                     rows = dashboardRecentTitleRows(sessions),
                     emptyCopy = "No counted rows in this view",
                     requester = topShowsRequester,
@@ -1350,7 +1347,7 @@ private fun TvWatchStatsModeListsRow(
                 TvWatchStatsAdvancedModeCard(
                     model = model,
                     rows = summary.advanced.decadeGroups,
-                    title = "Decades",
+                    title = com.torve.android.tv.components.tvSettingsLabel("Decades"),
                     requester = topShowsRequester,
                     left = topMoviesRequester,
                     up = upRight,
@@ -1374,7 +1371,7 @@ private fun TvWatchStatsModeListsRow(
                     modifier = Modifier.weight(1f).height(248.dp),
                 )
                 TvWatchStatsTopTitlesCard(
-                    title = "Rated watched titles",
+                    title = com.torve.android.tv.components.tvSettingsLabel("Rated watched titles"),
                     rows = dashboardRowsFromRatingGroups(summary.advanced.ratingDistribution),
                     emptyCopy = model.unavailableBody ?: "No watched titles have local ratings yet.",
                     requester = topShowsRequester,
@@ -1388,8 +1385,8 @@ private fun TvWatchStatsModeListsRow(
             }
             WatchStatsInsightMode.SOURCE -> {
                 TvWatchStatsBreakdownCard(
-                    title = "Source detail",
-                    subtitle = "Watch time and sessions by source",
+                    title = com.torve.android.tv.components.tvSettingsLabel("Source detail"),
+                    subtitle = com.torve.android.tv.components.tvSettingsLabel("Watch time and sessions by source"),
                     rows = sourceBreakdownRows(summary),
                     emptyTitle = "No source sessions yet",
                     requester = topMoviesRequester,
@@ -1401,7 +1398,7 @@ private fun TvWatchStatsModeListsRow(
                     modifier = Modifier.weight(1f).height(248.dp),
                 )
                 TvWatchStatsTopTitlesCard(
-                    title = "Recent source rows",
+                    title = com.torve.android.tv.components.tvSettingsLabel("Recent source rows"),
                     rows = dashboardRecentTitleRows(sessions),
                     emptyCopy = "Recent rows appear as source-labeled activity is recorded.",
                     requester = topShowsRequester,
@@ -1434,7 +1431,7 @@ private fun TvWatchStatsPrimaryModeCard(
 ) {
     when (model.insightMode) {
         WatchStatsInsightMode.SOURCE -> TvWatchStatsDonutCard(
-            title = "Source split",
+            title = com.torve.android.tv.components.tvSettingsLabel("Source split"),
             subtitle = sourceModeSubtitle(summary),
             rows = sourceBreakdownRows(summary),
             unavailableCopy = "No source sessions yet",
@@ -1463,7 +1460,7 @@ private fun TvWatchStatsPrimaryModeCard(
         WatchStatsInsightMode.YEARS -> TvWatchStatsAdvancedModeCard(
             model = model,
             rows = summary.advanced.yearGroups,
-            title = "Release year distribution",
+            title = com.torve.android.tv.components.tvSettingsLabel("Release year distribution"),
             requester = requester,
             left = left,
             right = right,
@@ -1515,8 +1512,8 @@ private fun TvWatchStatsSecondaryModeCard(
 ) {
     when (model.insightMode) {
         WatchStatsInsightMode.SOURCE -> TvWatchStatsDonutCard(
-            title = "Runtime confidence",
-            subtitle = "Measured, estimated, unknown",
+            title = com.torve.android.tv.components.tvSettingsLabel("Runtime confidence"),
+            subtitle = com.torve.android.tv.components.tvSettingsLabel("Measured, estimated, unknown"),
             rows = confidenceBreakdownRows(summary),
             unavailableCopy = "No runtime confidence yet",
             requester = requester,
@@ -1529,7 +1526,7 @@ private fun TvWatchStatsSecondaryModeCard(
         WatchStatsInsightMode.GENRES -> TvWatchStatsAdvancedModeCard(
             model = model,
             rows = summary.advanced.genreGroups,
-            title = "Top genres",
+            title = com.torve.android.tv.components.tvSettingsLabel("Top genres"),
             requester = requester,
             left = left,
             up = up,
@@ -1541,7 +1538,7 @@ private fun TvWatchStatsSecondaryModeCard(
         WatchStatsInsightMode.YEARS -> TvWatchStatsAdvancedModeCard(
             model = model,
             rows = summary.advanced.decadeGroups,
-            title = "Decade distribution",
+            title = com.torve.android.tv.components.tvSettingsLabel("Decade distribution"),
             requester = requester,
             left = left,
             up = up,
@@ -1553,7 +1550,7 @@ private fun TvWatchStatsSecondaryModeCard(
         WatchStatsInsightMode.RATINGS -> {
             if (model.isLocked || model.isUnavailable) {
                 TvWatchStatsModeUnavailableCard(
-                    title = model.lockedTitle ?: model.unavailableTitle ?: "Ratings unavailable",
+                    title = com.torve.android.tv.components.tvSettingsLabel(model.lockedTitle ?: model.unavailableTitle ?: "Ratings unavailable"),
                     body = model.lockedBody ?: model.unavailableBody ?: "No local rating metadata is available.",
                     locked = model.isLocked,
                     requester = requester,
@@ -1566,8 +1563,8 @@ private fun TvWatchStatsSecondaryModeCard(
                 )
             } else {
                 TvWatchStatsBreakdownCard(
-                    title = "Rating bands",
-                    subtitle = "Missing ratings are ignored",
+                    title = com.torve.android.tv.components.tvSettingsLabel("Rating bands"),
+                    subtitle = com.torve.android.tv.components.tvSettingsLabel("Missing ratings are ignored"),
                     rows = ratingBreakdownRows(summary),
                     emptyTitle = model.unavailableBody ?: "No local ratings yet",
                     requester = requester,
@@ -1580,8 +1577,8 @@ private fun TvWatchStatsSecondaryModeCard(
             }
         }
         WatchStatsInsightMode.ACTIVITY -> TvWatchStatsDonutCard(
-            title = "Runtime confidence",
-            subtitle = "Activity runtime labels",
+            title = com.torve.android.tv.components.tvSettingsLabel("Runtime confidence"),
+            subtitle = com.torve.android.tv.components.tvSettingsLabel("Activity runtime labels"),
             rows = confidenceBreakdownRows(summary),
             unavailableCopy = "No runtime confidence yet",
             requester = requester,
@@ -1592,8 +1589,8 @@ private fun TvWatchStatsSecondaryModeCard(
             modifier = modifier,
         )
         WatchStatsInsightMode.OVERVIEW -> TvWatchStatsBreakdownCard(
-            title = "Source breakdown",
-            subtitle = "Only real recorded sources",
+            title = com.torve.android.tv.components.tvSettingsLabel("Source breakdown"),
+            subtitle = com.torve.android.tv.components.tvSettingsLabel("Only real recorded sources"),
             rows = sourceBreakdownRows(summary),
             emptyTitle = "No source sessions yet",
             insight = if (summary.sourceBreakdown.count { it.sessionCount > 0 } <= 2) {
@@ -1635,7 +1632,7 @@ private fun TvWatchStatsTimelineCard(
     }
     TvStatsFocusCard(
         title = title,
-        subtitle = "Recent counted sessions",
+        subtitle = com.torve.android.tv.components.tvSettingsLabel("Recent counted sessions"),
         focusRequester = requester,
         left = left,
         right = right,
@@ -1646,7 +1643,7 @@ private fun TvWatchStatsTimelineCard(
         modifier = modifier,
     ) {
         if (rows.isEmpty()) {
-            TvWatchStatsUnavailableText("Timeline appears after sessions have counted runtime.")
+            TvWatchStatsUnavailableText(com.torve.android.tv.components.tvSettingsLabel("Timeline appears after sessions have counted runtime."))
         } else {
             TvWatchStatsBarRows(rows)
         }
@@ -1714,7 +1711,7 @@ private fun TvWatchStatsAdvancedBreakdownCard(
 ) {
     TvStatsFocusCard(
         title = title,
-        subtitle = if (locked) "Unlock deeper watch insights" else "Local metadata only",
+        subtitle = com.torve.android.tv.components.tvSettingsLabel(if (locked) "Unlock deeper watch insights" else "Local metadata only"),
         locked = locked,
         focusRequester = requester,
         left = left,
@@ -1726,7 +1723,7 @@ private fun TvWatchStatsAdvancedBreakdownCard(
         modifier = modifier,
     ) {
         when {
-            locked -> TvWatchStatsUnavailableText("Advanced metadata breakdowns are available when enough watch data exists. No sample data is shown.")
+            locked -> TvWatchStatsUnavailableText(com.torve.android.tv.components.tvSettingsLabel("Advanced metadata breakdowns are available when enough watch data exists. No sample data is shown."))
             rows.isEmpty() -> TvWatchStatsUnavailableText(unavailableCopy)
             else -> TvWatchStatsBarRows(rows)
         }
@@ -1757,7 +1754,7 @@ private fun TvWatchStatsAdvancedModeCard(
     }
     when {
         model.isLocked -> TvWatchStatsModeUnavailableCard(
-            title = model.lockedTitle ?: "Unlock deeper watch insights",
+            title = com.torve.android.tv.components.tvSettingsLabel(model.lockedTitle ?: "Unlock deeper watch insights"),
             body = model.lockedBody ?: "Advanced metadata insights require Premium.",
             locked = true,
             requester = requester,
@@ -1770,7 +1767,7 @@ private fun TvWatchStatsAdvancedModeCard(
             modifier = modifier,
         )
         model.isUnavailable || breakdownRows.isEmpty() -> TvWatchStatsModeUnavailableCard(
-            title = model.unavailableTitle ?: "$title unavailable",
+            title = com.torve.android.tv.components.tvSettingsLabel(model.unavailableTitle ?: "$title unavailable"),
             body = model.unavailableBody ?: "No local metadata is available for this watch history yet.",
             locked = false,
             requester = requester,
@@ -1784,7 +1781,7 @@ private fun TvWatchStatsAdvancedModeCard(
         )
         useDonut -> TvWatchStatsDonutCard(
             title = title,
-            subtitle = "Attributed watch time",
+            subtitle = com.torve.android.tv.components.tvSettingsLabel("Attributed watch time"),
             rows = breakdownRows,
             unavailableCopy = model.unavailableBody ?: "No local metadata available.",
             requester = requester,
@@ -1797,7 +1794,7 @@ private fun TvWatchStatsAdvancedModeCard(
         )
         else -> TvWatchStatsBreakdownCard(
             title = title,
-            subtitle = "Attributed watch time",
+            subtitle = com.torve.android.tv.components.tvSettingsLabel("Attributed watch time"),
             rows = breakdownRows,
             emptyTitle = model.unavailableBody ?: "No local metadata available.",
             requester = requester,
@@ -1826,7 +1823,7 @@ private fun TvWatchStatsRatingDistributionCard(
 ) {
     when {
         model.isLocked -> TvWatchStatsModeUnavailableCard(
-            title = model.lockedTitle ?: "Unlock deeper watch insights",
+            title = com.torve.android.tv.components.tvSettingsLabel(model.lockedTitle ?: "Unlock deeper watch insights"),
             body = model.lockedBody ?: "Rating distribution is available to everyone.",
             locked = true,
             requester = requester,
@@ -1839,7 +1836,7 @@ private fun TvWatchStatsRatingDistributionCard(
             modifier = modifier,
         )
         model.isUnavailable -> TvWatchStatsModeUnavailableCard(
-            title = model.unavailableTitle ?: "Ratings unavailable",
+            title = com.torve.android.tv.components.tvSettingsLabel(model.unavailableTitle ?: "Ratings unavailable"),
             body = model.unavailableBody ?: "No local rating metadata is available for this watch history yet.",
             locked = false,
             requester = requester,
@@ -1852,8 +1849,8 @@ private fun TvWatchStatsRatingDistributionCard(
             modifier = modifier,
         )
         else -> TvWatchStatsBreakdownCard(
-            title = "Rating distribution",
-            subtitle = "Missing ratings are ignored",
+            title = com.torve.android.tv.components.tvSettingsLabel("Rating distribution"),
+            subtitle = com.torve.android.tv.components.tvSettingsLabel("Missing ratings are ignored"),
             rows = ratingBreakdownRows(summary),
             emptyTitle = model.unavailableBody ?: "No local ratings yet",
             requester = requester,
@@ -1883,7 +1880,7 @@ private fun TvWatchStatsModeUnavailableCard(
 ) {
     TvStatsFocusCard(
         title = title,
-        subtitle = if (locked) "More watch data needed" else "Local metadata only",
+        subtitle = com.torve.android.tv.components.tvSettingsLabel(if (locked) "More watch data needed" else "Local metadata only"),
         locked = locked,
         focusRequester = requester,
         left = left,
@@ -1897,7 +1894,7 @@ private fun TvWatchStatsModeUnavailableCard(
         TvWatchStatsUnavailableText(body)
         if (!locked) {
             Text(
-                text = "No network lookup is triggered on page open.",
+                text = com.torve.android.tv.components.tvSettingsLabel("No network lookup is triggered on page open."),
                 style = MaterialTheme.typography.labelSmall,
                 color = Ash,
                 maxLines = 1,
@@ -1951,7 +1948,7 @@ private fun TvWatchStatsDonutCard(
             }
             if (rows.size == 1) {
                 Text(
-                    text = "All counted activity currently comes from ${rows.first().label}.",
+                    text = com.torve.android.tv.components.tvSettingsLabel("All counted activity currently comes from ${rows.first().label}."),
                     style = MaterialTheme.typography.labelSmall,
                     color = Ash,
                     maxLines = 1,
@@ -2094,7 +2091,7 @@ private fun TvWatchStatsTopTitlesCard(
 
     TvStatsFocusCard(
         title = title,
-        subtitle = if (visibleRows.isEmpty()) "Based on local watch sessions" else "Press OK to browse rows",
+        subtitle = com.torve.android.tv.components.tvSettingsLabel(if (visibleRows.isEmpty()) "Based on local watch sessions" else "Press OK to browse rows"),
         meta = if (visibleRows.isEmpty()) null else "${visibleRows.size} rows",
         focusRequester = requester,
         left = left,
@@ -2139,7 +2136,7 @@ private fun TvWatchStatsTopTitlesCard(
             }
             if (rows.size < 5 && !listActive) {
                 Text(
-                    text = "More titles appear as you watch",
+                    text = com.torve.android.tv.components.tvSettingsLabel("More titles appear as you watch"),
                     style = MaterialTheme.typography.labelSmall,
                     color = Ash,
                     maxLines = 1,
@@ -2332,27 +2329,27 @@ private fun TvWatchStatsRecentActivityTable(
             horizontalArrangement = Arrangement.spacedBy(12.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            TvStatsSectionLabel("Recent activity")
+            TvStatsSectionLabel(localizedUiText("Recent activity"))
             Text(
-                text = "Title",
+                text = com.torve.android.tv.components.tvSettingsLabel("Title"),
                 style = MaterialTheme.typography.labelMedium,
                 color = Ash,
                 modifier = Modifier.weight(1f),
             )
             Text(
-                text = "Date",
+                text = com.torve.android.tv.components.tvSettingsLabel("Date"),
                 style = MaterialTheme.typography.labelMedium,
                 color = Ash,
                 modifier = Modifier.width(58.dp),
             )
             Text(
-                text = "Runtime",
+                text = com.torve.android.tv.components.tvSettingsLabel("Runtime"),
                 style = MaterialTheme.typography.labelMedium,
                 color = Ash,
                 modifier = Modifier.width(66.dp),
             )
             Text(
-                text = "Source / status",
+                text = com.torve.android.tv.components.tvSettingsLabel("Source / status"),
                 style = MaterialTheme.typography.labelMedium,
                 color = Ash,
                 modifier = Modifier.width(300.dp),
@@ -2360,8 +2357,8 @@ private fun TvWatchStatsRecentActivityTable(
         }
         if (visibleSessions.isEmpty()) {
             TvStatsFocusCard(
-                title = "No recent activity in this view",
-                subtitle = "Try a different time range or start watching to build your stats.",
+                title = com.torve.android.tv.components.tvSettingsLabel("No recent activity in this view"),
+                subtitle = com.torve.android.tv.components.tvSettingsLabel("Try a different time range or start watching to build your stats."),
                 focusRequester = firstRequester,
                 left = left,
                 up = up,
@@ -2481,7 +2478,7 @@ private fun TvWatchStatsBottomInsightStrip(
         ),
     )
     TvStatsFocusCard(
-        title = "Stats summary",
+        title = com.torve.android.tv.components.tvSettingsLabel("Stats summary"),
         showHeader = false,
         compact = true,
         focusRequester = requester,
@@ -2548,32 +2545,25 @@ private fun TvWatchStatsHeader(
         horizontalArrangement = Arrangement.spacedBy(14.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        TvStatsPill(
-            label = "Back",
-            selected = false,
-            focusRequester = entryFocusRequester,
-            left = railFocusRequester,
-            down = sectionEntryRequester,
-            onFocused = onFocused,
-            onClick = onBack,
-            modifier = Modifier.width(88.dp),
-        )
+        com.torve.android.ui.components.BackButton(onClick = onBack,
+            modifier = Modifier.focusRequester(entryFocusRequester).focusProperties { left = railFocusRequester; down = sectionEntryRequester },
+            onFocused = onFocused)
         Column(modifier = Modifier.weight(1f)) {
             Text(
-                text = "Watch Stats",
+                text = com.torve.android.tv.components.tvSettingsLabel("Watch Stats"),
                 style = MaterialTheme.typography.headlineMedium,
                 color = Snow,
                 fontWeight = FontWeight.Bold,
             )
             Text(
-                text = "Playback, imports, and manual watches. Sources are labeled.",
+                text = com.torve.android.tv.components.tvSettingsLabel("Playback, imports, and manual watches. Sources are labeled."),
                 style = MaterialTheme.typography.bodyMedium,
                 color = Silver,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
             )
         }
-        TvStatsSourceChip(if (isPremium) "Premium" else "Basic")
+        TvStatsSourceChip(localizedUiText(if (isPremium) "Premium" else "Basic"))
     }
 }
 
@@ -2692,7 +2682,7 @@ private fun TvWatchStatsContextFilters(
                 if (!isPremium) {
                     val requester = remember("advanced_locked_filter") { FocusRequester() }
                     TvStatsPill(
-                        label = "Unlock advanced",
+                        label = com.torve.android.tv.components.tvSettingsLabel("Unlock advanced"),
                         selected = false,
                         focusRequester = requester,
                         left = sectionEntryRequester,
@@ -2704,7 +2694,7 @@ private fun TvWatchStatsContextFilters(
                 } else if (!summary.advanced.availability.hasAnyMetadata) {
                     val requester = remember("advanced_unavailable_filter") { FocusRequester() }
                     TvStatsPill(
-                        label = "Metadata unavailable",
+                        label = com.torve.android.tv.components.tvSettingsLabel("Metadata unavailable"),
                         selected = false,
                         focusRequester = requester,
                         left = sectionEntryRequester,
@@ -2717,7 +2707,7 @@ private fun TvWatchStatsContextFilters(
                     if (selection.hasAdvancedSelection()) {
                         val requester = remember("advanced_clear_filter") { FocusRequester() }
                         TvStatsPill(
-                            label = "Clear",
+                            label = com.torve.android.tv.components.tvSettingsLabel("Clear"),
                             selected = false,
                             focusRequester = requester,
                             left = sectionEntryRequester,
@@ -2862,13 +2852,13 @@ private fun TvWatchStatsMainStage(
                     }
                     WatchStatsTvSection.ACTIVITY -> {
                         item(key = "activity_header") {
-                            TvStatsSectionLabel("Recent activity")
+                            TvStatsSectionLabel(localizedUiText("Recent activity"))
                         }
                         if (state.recentActivity.isEmpty()) {
                             item(key = "activity_empty") {
                                 TvStatsFocusCard(
-                                    title = "No activity in this view",
-                                    subtitle = "Try another time range, source, or status filter.",
+                                    title = com.torve.android.tv.components.tvSettingsLabel("No activity in this view"),
+                                    subtitle = com.torve.android.tv.components.tvSettingsLabel("Try another time range, source, or status filter."),
                                     focusRequester = mainStageRequester,
                                     left = sectionEntryRequester,
                                     onFocused = { onFocused(mainStageRequester) },
@@ -3011,17 +3001,17 @@ private fun TvWatchStatsOverviewSection(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            TvStatsSectionLabel("Recent activity")
+            TvStatsSectionLabel(localizedUiText("Recent activity"))
             Text(
-                text = "Latest watched items",
+                text = com.torve.android.tv.components.tvSettingsLabel("Latest watched items"),
                 style = MaterialTheme.typography.labelMedium,
                 color = Ash,
             )
         }
         if (state.recentActivity.isEmpty()) {
             TvWatchStatsCompactActivityRow(
-                title = "No recent activity in this view",
-                subtitle = "Try another time range, source, or status filter.",
+                title = com.torve.android.tv.components.tvSettingsLabel("No recent activity in this view"),
+                subtitle = com.torve.android.tv.components.tvSettingsLabel("Try another time range, source, or status filter."),
                 requester = activityRequester,
                 left = sectionEntryRequester,
                 right = panelRequester,
@@ -3095,10 +3085,10 @@ private fun TvWatchStatsHeroInsightCard(
             horizontalArrangement = Arrangement.spacedBy(10.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            TvStatsSourceChip("Measured ${WatchStatsUiText.formatDuration(summary.measuredWatchMs)}")
-            TvStatsSourceChip("Estimated ${WatchStatsUiText.formatDuration(summary.estimatedWatchMs)}")
+            TvStatsSourceChip(localizedUiText("Measured ${WatchStatsUiText.formatDuration(summary.measuredWatchMs)}"))
+            TvStatsSourceChip(localizedUiText("Estimated ${WatchStatsUiText.formatDuration(summary.estimatedWatchMs)}"))
             if (unknownRuntimeSessionCount(summary) > 0 || summary.hasLegacyUnknownRuntime) {
-                TvStatsSourceChip("Unknown runtimes excluded")
+                TvStatsSourceChip(localizedUiText("Unknown runtimes excluded"))
             }
         }
     }
@@ -3135,8 +3125,8 @@ private fun TvWatchStatsTimeSection(
             modifier = Modifier.fillMaxWidth(),
         )
         TvStatsFocusCard(
-            title = "Runtime confidence",
-            subtitle = "Measured, estimated, and unknown are kept separate.",
+            title = com.torve.android.tv.components.tvSettingsLabel("Runtime confidence"),
+            subtitle = com.torve.android.tv.components.tvSettingsLabel("Measured, estimated, and unknown are kept separate."),
             focusRequester = confidenceRequester,
             selected = selectedInsightKey == "confidence",
             left = sectionEntryRequester,
@@ -3171,8 +3161,8 @@ private fun TvWatchStatsOverviewInsightPanel(
 ) {
     TvStatsFocusCard(
         title = overviewInsightTitle(selectedKey),
-        subtitle = selectedKey?.let(::drilldownTitle)
-            ?: "Source, status, and runtime confidence stay visible.",
+        subtitle = com.torve.android.tv.components.tvSettingsLabel(selectedKey?.let(::drilldownTitle)
+            ?: "Source, status, and runtime confidence stay visible."),
         focusRequester = requester,
         left = left,
         down = down,
@@ -3190,10 +3180,10 @@ private fun TvWatchStatsOverviewInsightPanel(
         Spacer(Modifier.height(2.dp))
         when (selectedKey) {
             "completed" -> {
-                TvStatsMetricLine("Movies", summary.completedMovies.toString())
-                TvStatsMetricLine("Episodes", summary.completedEpisodes.toString())
-                TvStatsMetricLine("Partial", summary.partialCount.toString())
-                TvStatsMetricLine("Abandoned", summary.abandonedCount.toString())
+                TvStatsMetricLine(localizedUiText("Movies"), summary.completedMovies.toString())
+                TvStatsMetricLine(localizedUiText("Episodes"), summary.completedEpisodes.toString())
+                TvStatsMetricLine(localizedUiText("Partial"), summary.partialCount.toString())
+                TvStatsMetricLine(localizedUiText("Abandoned"), summary.abandonedCount.toString())
             }
             "sources" -> {
                 summary.sourceBreakdown
@@ -3207,12 +3197,12 @@ private fun TvWatchStatsOverviewInsightPanel(
                     }
             }
             else -> {
-                TvStatsMetricLine("Total", WatchStatsUiText.formatDuration(summary.totalWatchMs))
-                TvStatsMetricLine("Measured", WatchStatsUiText.formatDuration(summary.measuredWatchMs))
-                TvStatsMetricLine("Estimated", WatchStatsUiText.formatDuration(summary.estimatedWatchMs))
+                TvStatsMetricLine(localizedUiText("Total"), WatchStatsUiText.formatDuration(summary.totalWatchMs))
+                TvStatsMetricLine(localizedUiText("Measured"), WatchStatsUiText.formatDuration(summary.measuredWatchMs))
+                TvStatsMetricLine(localizedUiText("Estimated"), WatchStatsUiText.formatDuration(summary.estimatedWatchMs))
                 val unknownCount = unknownRuntimeSessionCount(summary)
                 if (unknownCount > 0) {
-                    TvStatsMetricLine("Unknown", "$unknownCount sessions")
+                    TvStatsMetricLine(localizedUiText("Unknown"), "$unknownCount sessions")
                 }
             }
         }
@@ -3306,8 +3296,8 @@ private fun TvWatchStatsSourcesSection(
         val rows = summary.sourceBreakdown.filter { it.sessionCount > 0 }
         if (rows.isEmpty()) {
             TvStatsFocusCard(
-                title = "No sources yet",
-                subtitle = "Torve, Trakt, Manual, SIMKL, and migrated rows appear only when real sessions exist.",
+                title = com.torve.android.tv.components.tvSettingsLabel("No sources yet"),
+                subtitle = com.torve.android.tv.components.tvSettingsLabel("Torve, Trakt, Manual, SIMKL, and migrated rows appear only when real sessions exist."),
                 focusRequester = mainStageRequester,
                 left = sectionEntryRequester,
                 onFocused = { onFocused(mainStageRequester) },
@@ -3348,8 +3338,8 @@ private fun TvWatchStatsAdvancedSection(
         when {
             !isPremium -> {
                 TvStatsFocusCard(
-                    title = "Unlock deeper watch insights",
-                    subtitle = "See advanced trends by genre, rating, year, studio, and source.",
+                    title = com.torve.android.tv.components.tvSettingsLabel("Unlock deeper watch insights"),
+                    subtitle = com.torve.android.tv.components.tvSettingsLabel("See advanced trends by genre, rating, year, studio, and source."),
                     meta = "Go Premium",
                     locked = true,
                     focusRequester = mainStageRequester,
@@ -3361,8 +3351,8 @@ private fun TvWatchStatsAdvancedSection(
             }
             !summary.advanced.availability.hasAnyMetadata -> {
                 TvStatsFocusCard(
-                    title = "Metadata unavailable",
-                    subtitle = "Advanced cards appear after Torve has local genre, year, or rating metadata.",
+                    title = com.torve.android.tv.components.tvSettingsLabel("Metadata unavailable"),
+                    subtitle = com.torve.android.tv.components.tvSettingsLabel("Advanced cards appear after Torve has local genre, year, or rating metadata."),
                     meta = "No fake preview data",
                     focusRequester = mainStageRequester,
                     left = sectionEntryRequester,
@@ -3373,8 +3363,8 @@ private fun TvWatchStatsAdvancedSection(
             }
             else -> {
                 TvStatsFocusCard(
-                    title = "Genre and year",
-                    subtitle = "Attributed watch time does not change headline totals.",
+                    title = com.torve.android.tv.components.tvSettingsLabel("Genre and year"),
+                    subtitle = com.torve.android.tv.components.tvSettingsLabel("Attributed watch time does not change headline totals."),
                     focusRequester = mainStageRequester,
                     selected = selectedInsightKey == "advanced_genres",
                     left = sectionEntryRequester,
@@ -3389,8 +3379,8 @@ private fun TvWatchStatsAdvancedSection(
                     }
                 }
                 TvStatsFocusCard(
-                    title = "Rating distribution",
-                    subtitle = "Missing ratings are hidden instead of treated as zero.",
+                    title = com.torve.android.tv.components.tvSettingsLabel("Rating distribution"),
+                    subtitle = com.torve.android.tv.components.tvSettingsLabel("Missing ratings are hidden instead of treated as zero."),
                     focusRequester = ratingsRequester,
                     selected = selectedInsightKey == "advanced_ratings",
                     left = sectionEntryRequester,
@@ -3475,7 +3465,7 @@ private fun TvWatchStatsSourceCard(
         modifier = Modifier.fillMaxWidth(),
     ) {
         Text(
-            text = "${source.sessionCount} sessions",
+            text = com.torve.android.tv.components.tvSettingsLabel("${source.sessionCount} sessions"),
             style = MaterialTheme.typography.headlineMedium,
             color = Snow,
             fontWeight = FontWeight.Bold,
@@ -3555,8 +3545,8 @@ private fun TvWatchStatsInlineDrilldown(
     ) {
         item(key = "drilldown_header") {
             TvStatsFocusCard(
-                title = selectedKey?.let(::drilldownTitle) ?: "Details",
-                subtitle = "Selected insight details",
+                title = com.torve.android.tv.components.tvSettingsLabel(selectedKey?.let(::drilldownTitle) ?: "Details"),
+                subtitle = com.torve.android.tv.components.tvSettingsLabel("Selected insight details"),
                 focusRequester = drilldownRequester,
                 left = mainStageRequester,
                 onFocused = onFocused,
@@ -3568,8 +3558,8 @@ private fun TvWatchStatsInlineDrilldown(
         if (selectedKey?.startsWith("advanced") == true && !isPremium) {
             item(key = "drilldown_locked") {
                 TvStatsFocusCard(
-                    title = "Unlock deeper watch insights",
-                    subtitle = "See advanced trends by genre, rating, year, studio, and source.",
+                    title = com.torve.android.tv.components.tvSettingsLabel("Unlock deeper watch insights"),
+                    subtitle = com.torve.android.tv.components.tvSettingsLabel("See advanced trends by genre, rating, year, studio, and source."),
                     meta = "Go Premium",
                     locked = true,
                     left = mainStageRequester,
@@ -3580,21 +3570,21 @@ private fun TvWatchStatsInlineDrilldown(
         } else {
             item(key = "drilldown_totals") {
                 TvStatsFocusCard(
-                    title = "Totals",
+                    title = com.torve.android.tv.components.tvSettingsLabel("Totals"),
                     subtitle = WatchStatsUiText.formatDuration(summary.totalWatchMs),
                     left = mainStageRequester,
                     modifier = Modifier.fillMaxWidth(),
                 ) {
-                    TvStatsMetricLine("Movies", summary.completedMovies.toString())
-                    TvStatsMetricLine("Episodes", summary.completedEpisodes.toString())
-                    TvStatsMetricLine("Partial", summary.partialCount.toString())
-                    TvStatsMetricLine("Measured", WatchStatsUiText.formatDuration(summary.measuredWatchMs))
-                    TvStatsMetricLine("Estimated", WatchStatsUiText.formatDuration(summary.estimatedWatchMs))
+                    TvStatsMetricLine(localizedUiText("Movies"), summary.completedMovies.toString())
+                    TvStatsMetricLine(localizedUiText("Episodes"), summary.completedEpisodes.toString())
+                    TvStatsMetricLine(localizedUiText("Partial"), summary.partialCount.toString())
+                    TvStatsMetricLine(localizedUiText("Measured"), WatchStatsUiText.formatDuration(summary.measuredWatchMs))
+                    TvStatsMetricLine(localizedUiText("Estimated"), WatchStatsUiText.formatDuration(summary.estimatedWatchMs))
                 }
             }
             item(key = "drilldown_sources") {
                 TvStatsFocusCard(
-                    title = "Sources",
+                    title = com.torve.android.tv.components.tvSettingsLabel("Sources"),
                     left = mainStageRequester,
                     modifier = Modifier.fillMaxWidth(),
                 ) {
@@ -3610,7 +3600,7 @@ private fun TvWatchStatsInlineDrilldown(
             }
             item(key = "drilldown_confidence") {
                 TvStatsFocusCard(
-                    title = "Runtime",
+                    title = com.torve.android.tv.components.tvSettingsLabel("Runtime"),
                     left = mainStageRequester,
                     modifier = Modifier.fillMaxWidth(),
                 ) {
@@ -3627,7 +3617,7 @@ private fun TvWatchStatsInlineDrilldown(
         }
 
         item(key = "drilldown_recent_label") {
-            TvStatsSectionLabel("Recent")
+            TvStatsSectionLabel(localizedUiText("Recent"))
         }
         items(
             items = recentActivity.take(4),
@@ -3783,7 +3773,7 @@ private fun TvStatsLoadingState(modifier: Modifier) {
             )
             Spacer(Modifier.height(16.dp))
             Text(
-                text = "Loading watch stats",
+                text = com.torve.android.tv.components.tvSettingsLabel("Loading watch stats"),
                 color = Snow,
                 style = MaterialTheme.typography.titleMedium,
             )
@@ -3801,8 +3791,8 @@ private fun TvStatsEmptyState(
 ) {
     Box(modifier = modifier.fillMaxHeight(), contentAlignment = Alignment.Center) {
         TvStatsFocusCard(
-            title = "Your watch stats will appear here",
-            subtitle = "Start watching movies and shows, or connect Trakt/SIMKL, to build your timeline.",
+            title = com.torve.android.tv.components.tvSettingsLabel("Your watch stats will appear here"),
+            subtitle = com.torve.android.tv.components.tvSettingsLabel("Start watching movies and shows, or connect Trakt/SIMKL, to build your timeline."),
             meta = "Back to browsing",
             focusRequester = mainStageRequester,
             left = sectionEntryRequester,
@@ -3825,8 +3815,8 @@ private fun TvStatsErrorState(
 ) {
     Box(modifier = modifier.fillMaxHeight(), contentAlignment = Alignment.Center) {
         TvStatsFocusCard(
-            title = "Could not load watch stats",
-            subtitle = "Torve could not read your local watch activity right now.",
+            title = com.torve.android.tv.components.tvSettingsLabel("Could not load watch stats"),
+            subtitle = com.torve.android.tv.components.tvSettingsLabel("Torve could not read your local watch activity right now."),
             meta = "Try again",
             focusRequester = mainStageRequester,
             left = sectionEntryRequester,

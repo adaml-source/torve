@@ -1,5 +1,8 @@
 package com.torve.android.ui.detail
 
+import com.torve.android.ui.community.parityLabel as localizedUiText
+
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -20,34 +23,40 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import com.torve.presentation.detail.primaryPlaybackTarget
+import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.rounded.Movie
 import androidx.compose.material.icons.rounded.Bookmark
 import androidx.compose.material.icons.rounded.BookmarkBorder
+import androidx.compose.material.icons.rounded.CollectionsBookmark
 import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.FavoriteBorder
 import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.Star
 import androidx.compose.material.icons.rounded.Visibility
 import androidx.compose.material.icons.rounded.VisibilityOff
-import androidx.compose.material3.Button
+import com.torve.android.ui.components.MobileGlassButton as Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
+import com.torve.android.ui.components.MobileGlassIconButton as IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
+import com.torve.android.ui.components.MobileGlassOutlinedButton as OutlinedButton
 import androidx.compose.material3.Snackbar
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -67,6 +76,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.stringResource
@@ -79,6 +89,9 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.zIndex
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -94,17 +107,21 @@ import com.torve.android.ui.components.MultiRatingPills
 import com.torve.android.ui.components.PosterCard
 import com.torve.android.ui.components.SectionHeader
 import com.torve.android.ui.components.mediaItemLazyKey
+import com.torve.android.ui.image.MobileImagePrefetcher
 import com.torve.android.ui.theme.Amber
 import com.torve.android.ui.theme.Silver
 import com.torve.android.ui.theme.Graphite
+import com.torve.android.ui.theme.Gunmetal
 import com.torve.android.ui.theme.HeroGradient
 import com.torve.android.ui.theme.Obsidian
+import com.torve.android.ui.theme.Ruby
 import com.torve.android.ui.theme.Snow
 import com.torve.android.ui.theme.Torve
 import com.torve.domain.model.CandidateProvenanceKind
 import org.koin.compose.koinInject
 import com.torve.android.download.DownloadWorker
 import com.torve.data.download.BulkDownloadManager
+import com.torve.data.integrations.JellyfinLibraryOverlayService
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import android.content.Intent
@@ -114,9 +131,9 @@ import com.torve.domain.model.DownloadStatus
 import com.torve.domain.model.MediaItem
 import com.torve.domain.model.MediaRatings
 import com.torve.domain.model.MediaType
+import com.torve.domain.model.canResolveStreams
 import com.torve.domain.model.favoriteMediaKey
 import com.torve.domain.model.AvailabilityOffer
-import com.torve.domain.model.AvailabilityOfferType
 import com.torve.domain.model.hasAnyEnabledDisplayValue
 import com.torve.domain.model.resolveCardStyle
 import com.torve.domain.model.calculateTorveScore
@@ -141,6 +158,8 @@ import com.torve.presentation.tvhome.TvSourcePickerState
 import com.torve.presentation.watchlist.containsMedia
 import com.torve.presentation.watchlist.isMutatingMedia
 import com.torve.presentation.watchlist.WatchlistViewModel
+import com.torve.domain.repository.MetadataRepository
+import androidx.compose.material.icons.rounded.PlaylistAdd
 import com.torve.util.FormatUtil
 import org.koin.compose.koinInject
 
@@ -149,6 +168,7 @@ import org.koin.compose.koinInject
 fun DetailScreen(
     type: String,
     id: Int,
+    extensionSeedJson: String? = null,
     accessTier: AccessTier = AccessTier.FREE,
     onLockedFeatureClick: (PremiumFeature) -> Unit = {},
     onPlayClick: (url: String, fallbackUrl: String, season: Int?, episode: Int?, imdbId: String?, autoSourceSelection: Boolean) -> Unit,
@@ -156,7 +176,12 @@ fun DetailScreen(
     onMediaClick: (MediaItem) -> Unit,
     onPersonClick: ((Int) -> Unit)? = null,
     onSettingsClick: (() -> Unit)? = null,
+    onDevicesClick: (() -> Unit)? = null,
+    onCollectionsClick: ((MediaItem) -> Unit)? = null,
     onOpenAddonCatalog: (() -> Unit)? = null,
+    onOpenTraktLists: (() -> Unit)? = null,
+    initialSeason: Int? = null,
+    initialEpisode: Int? = null,
     viewModel: DetailViewModel = koinInject(),
     settingsViewModel: SettingsViewModel = koinInject(),
     downloadViewModel: DownloadViewModel = koinInject(),
@@ -165,9 +190,11 @@ fun DetailScreen(
     addonViewModel: com.torve.presentation.addon.AddonViewModel = koinInject(),
     downloadRepository: DownloadRepository = koinInject(),
     lanLibraryConsumer: LanLibraryConsumer = koinInject(),
+    jellyfinLibrary: JellyfinLibraryOverlayService = koinInject(),
     networkMonitor: NetworkMonitor = koinInject(),
 ) {
     val bulkDownloadManager: BulkDownloadManager = koinInject()
+    val metadataRepository: MetadataRepository = koinInject()
     val bulkProgress by bulkDownloadManager.progress.collectAsState()
     // Kick the LAN-library consumer once so the "Available on desktop"
     // pill resolves on first paint (instead of waiting for the next
@@ -175,12 +202,26 @@ fun DetailScreen(
     com.torve.android.ui.components.LanAvailabilityBootstrap()
     val coroutineScope = rememberCoroutineScope()
     val state by viewModel.state.collectAsState()
+    var cinematicLogoUrl by remember(type, id) { mutableStateOf<String?>(null) }
+    LaunchedEffect(state.mediaItem?.id, state.mediaItem?.logoUrl) {
+        val item = state.mediaItem ?: return@LaunchedEffect
+        val logo = item.logoUrl ?: item.tmdbId?.let { tmdbId ->
+            runCatching { metadataRepository.getLogoUrl(type, tmdbId) }.getOrNull()
+        }
+        cinematicLogoUrl = logo
+        com.torve.android.ui.components.ContentLaunchArtworkStore.clear()
+    }
     val settingsState by settingsViewModel.state.collectAsState()
     val runtimeFilterFeedbackEnabled = true
     val watchlistState by watchlistViewModel.state.collectAsState()
     val favoritesState by mediaFavoritesRepository.state.collectAsState()
     val addonState by addonViewModel.state.collectAsState()
-    val hasAnyAddon = addonState.addons.isNotEmpty()
+    val hasEnabledStreamAddon = remember(addonState.addons) {
+        addonState.addons.any { addon -> addon.canResolveStreams() }
+    }
+    // Settings also includes standalone saved Usenet connections. Keep the
+    // fresh addon state while startup account sync is still completing.
+    val canPlayStreams = settingsState.canPlayStreams || hasEnabledStreamAddon
     val isLocked: (PremiumFeature) -> Boolean = remember(accessTier) {
         { feature -> PremiumAccess.isPremiumLocked(feature, accessTier) }
     }
@@ -191,34 +232,102 @@ fun DetailScreen(
     val traktListLocked = isLocked(PremiumFeature.TRAKT_LIST_MANAGER)
     val chooseSourceLocked = isLocked(PremiumFeature.CHOOSE_SOURCE_PREMIUM)
     var showActionSheet by remember { mutableStateOf(false) }
+    var requestPlaybackOptions by remember(type, id) { mutableStateOf(false) }
     var resolvedUrl by remember { mutableStateOf("") }
     var resolvedUrlIsTemporary by remember { mutableStateOf(false) }
     var showTrailer by remember { mutableStateOf(false) }
+    var pendingWatchedChange by remember(type, id) { mutableStateOf<Boolean?>(null) }
+    var showRatingDialog by remember(type, id) { mutableStateOf(false) }
     var sourcePickerState by remember { mutableStateOf<TvSourcePickerState?>(null) }
     var sourcePickerSeason by remember { mutableStateOf<Int?>(null) }
     var sourcePickerEpisode by remember { mutableStateOf<Int?>(null) }
+    var jellyfinAvailableEpisodes by remember(type, id) {
+        mutableStateOf<Set<Pair<Int, Int>>>(emptySet())
+    }
     // Tracks whether the current stream resolution is for download (not playback)
     var pendingEpisodeDownload by remember { mutableStateOf<Pair<Int, Int>?>(null) }
     val context = LocalContext.current
     val isTvDevice = remember(context) { DeviceFormFactor.isTv(context) }
+    val syncCoordinator: com.torve.android.sync.SyncCoordinator = koinInject()
+    val syncState by syncCoordinator.state.collectAsState()
+    var showTvPicker by remember(type, id) { mutableStateOf(false) }
+    var tvHandoffBusy by remember(type, id) { mutableStateOf(false) }
+    val tvTargets = remember(syncState.devices, syncState.deviceId) {
+        syncCoordinator.targetDevices().filter { it.deviceType.contains("tv", ignoreCase = true) }
+    }
+    if (showTvPicker) com.torve.android.ui.sync.SyncDevicePickerDialog(
+        title = stringResource(R.string.detail_play_on_tv),
+        devices = tvTargets,
+        onSelectDevice = { device ->
+            val item = state.mediaItem
+            val tmdbId = item?.tmdbId?.takeIf { it > 0 } ?: id.takeIf { it > 0 }
+            showTvPicker = false
+            if (item != null && tmdbId != null && !tvHandoffBusy) coroutineScope.launch {
+                tvHandoffBusy = true
+                try {
+                    val result = syncCoordinator.sendPlaybackIntent(
+                        targetDeviceId = device.id, contentId = tmdbId.toString(), providerTarget = "torve",
+                        // The paired TV selects its own next episode. Do not apply a
+                        // phone episode's resume offset to a different TV episode.
+                        positionMs = if (item.type == MediaType.MOVIE) state.primaryPlaybackTarget.positionMs ?: 0L else 0L,
+                        mediaType = if (item.type == MediaType.SERIES) "tv" else "movie",
+                    )
+                    android.widget.Toast.makeText(context,
+                        if (result.isSuccess) context.getString(R.string.player_sent_to, device.deviceName)
+                        else result.exceptionOrNull()?.message ?: context.getString(R.string.player_cannot_handoff),
+                        android.widget.Toast.LENGTH_LONG).show()
+                } finally { tvHandoffBusy = false }
+            }
+        },
+        onDismiss = { showTvPicker = false },
+        onManageDevices = onDevicesClick ?: onSettingsClick,
+    )
+
+    fun launchPlayback(url: String, fallback: String, season: Int?, episode: Int?, imdbId: String?, autoSource: Boolean) {
+        com.torve.android.ui.player.PlaybackMetadataStore.stage(org.koin.java.KoinJavaComponent.getKoin().get<com.torve.data.auth.UserIdProvider>().currentDataUserId(), viewModel.state.value)
+        viewModel.onPlaybackLaunched(season, episode)
+        showActionSheet = false
+        resolvedUrl = ""
+        onPlayClick(url, fallback, season, episode, imdbId, autoSource)
+    }
+
+    LaunchedEffect(state.mediaItem, state.similar) {
+        state.mediaItem?.let { item ->
+            MobileImagePrefetcher.prefetchDetail(
+                context = context,
+                item = item,
+                similar = state.similar,
+            )
+        }
+    }
 
     fun openSourcePickerOrProvider(season: Int? = null, episode: Int? = null) {
         val item = state.mediaItem ?: return
+        if (season != null && episode != null) {
+            viewModel.selectEpisodeForPlayback(season, episode)
+        }
         coroutineScope.launch {
             val picker = buildMobileDetailPickerState(
                 item = item,
                 seasonNumber = season,
                 episodeNumber = episode,
                 downloadRepository = downloadRepository,
+                jellyfinLibrary = jellyfinLibrary,
                 lanLibraryConsumer = lanLibraryConsumer,
                 networkMonitor = networkMonitor,
                 wifiOnlyForLan = settingsState.lanPlaybackWifiOnly,
             )
             val hasDirectSource = picker.options.any { opt ->
-                opt.route is PlaybackRoute.LocalFile || opt.route is PlaybackRoute.LanDesktopStream
+                opt.route is PlaybackRoute.LocalFile ||
+                    opt.route is PlaybackRoute.JellyfinStream ||
+                    opt.route is PlaybackRoute.LanDesktopStream
             }
             if (!hasDirectSource) {
-                viewModel.fetchStreams(season = season, episode = episode)
+                if (canPlayStreams) {
+                    viewModel.fetchStreams(season = season, episode = episode)
+                } else {
+                    onOpenAddonCatalog?.invoke()
+                }
             } else {
                 sourcePickerSeason = season
                 sourcePickerEpisode = episode
@@ -239,12 +348,34 @@ fun DetailScreen(
         viewModel.setSettingsProvider { settingsViewModel }
         viewModel.setDeviceCodecCaps(DeviceCodecProbe.probe())
     }
-    LaunchedEffect(type, id) {
-        if (id <= 0) {
-            onBack()
-            return@LaunchedEffect
+    LaunchedEffect(type, id, extensionSeedJson) {
+        if (extensionSeedJson != null) {
+            val seed = com.torve.presentation.apple.AppleCatalogueDetail.decode(extensionSeedJson)
+            if (viewModel.state.value.mediaItem?.id != seed.id) {
+                val features = com.torve.presentation.apple.AppleNativeFeatures(org.koin.mp.KoinPlatform.getKoin())
+                val full = features.catalogueDetail(extensionSeedJson, settingsState.appLanguage.code)
+                viewModel.loadExtensionDetail(full)
+            }
+        } else {
+            viewModel.ensureDetailLoaded(type, id)
         }
-        viewModel.loadDetail(type, id)
+    }
+    var episodeEntryApplied by androidx.compose.runtime.saveable.rememberSaveable(type, id, initialSeason, initialEpisode) { mutableStateOf(false) }
+    LaunchedEffect(state.mediaItem?.tmdbId, state.isLoading, initialSeason, initialEpisode) {
+        if (!episodeEntryApplied && !state.isLoading && state.mediaItem?.tmdbId == id && initialSeason != null && initialEpisode != null) {
+            episodeEntryApplied = true
+            viewModel.selectEpisodeForPlayback(initialSeason, initialEpisode, pinPlaybackTarget = true)
+            viewModel.loadSeasonDetail(id, initialSeason)
+        }
+    }
+
+    LaunchedEffect(state.mediaItem?.tmdbId, state.mediaLifecycleStatus?.state) {
+        val media = state.mediaItem
+        jellyfinAvailableEpisodes = if (media?.type == MediaType.SERIES && media.tmdbId != null) {
+            runCatching { jellyfinLibrary.findAvailableEpisodes(media.tmdbId!!) }.getOrDefault(emptySet())
+        } else {
+            emptySet()
+        }
     }
 
     // Refresh watch state when returning from the player (lifecycle ON_RESUME).
@@ -253,9 +384,11 @@ fun DetailScreen(
         var resumeCount = 0
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
+                viewModel.restoreSourcesAfterPlayback()
                 // Skip the initial resume — loadDetail already handles it.
                 if (resumeCount++ > 0) {
-                    viewModel.refreshWatchState()
+                    viewModel.resumeDetail()
+                    viewModel.refreshMediaLifecycleStatus()
                 }
             }
         }
@@ -282,7 +415,7 @@ fun DetailScreen(
     LaunchedEffect(state.usenetPlaybackIntent) {
         val intent = state.usenetPlaybackIntent ?: return@LaunchedEffect
         val item = state.mediaItem
-        onPlayClick(
+        launchPlayback(
             /* url = */ intent.url,
             /* fallbackUrl = */ "",
             /* season = */ state.streamContextSeason,
@@ -334,8 +467,8 @@ fun DetailScreen(
                     android.util.Log.w("DetailScreen", "Calling downloadViewModel.enqueueDownload for $dlTitle")
                     downloadViewModel.enqueueDownload(
                         com.torve.domain.model.Download(
-                            id = "${item.tmdbId}_${s}_${e}_${System.currentTimeMillis()}",
-                            mediaId = item.tmdbId.toString(),
+                            id = "${item.id}_${s}_${e}_${System.currentTimeMillis()}",
+                            mediaId = item.id,
                             mediaType = item.type,
                             title = dlTitle,
                             posterUrl = item.posterUrl,
@@ -352,8 +485,12 @@ fun DetailScreen(
                     ).show()
                 }
                 pendingEpisodeDownload = null
-            } else {
+            } else if (requestPlaybackOptions) {
+                requestPlaybackOptions = false
                 showActionSheet = true
+            } else {
+                launchPlayback(url, fallback, state.streamContextSeason, state.streamContextEpisode,
+                    state.mediaItem?.imdbId, resolved.isTemporary)
             }
         }
     }
@@ -364,8 +501,10 @@ fun DetailScreen(
         globalDefaultPresetId = settingsState.globalDefaultPresetId,
     )
     val detailScrollState = rememberScrollState()
-    val compactBackThresholdPx = with(LocalDensity.current) { 80.dp.toPx() }
-    val useCompactBackButton = detailScrollState.value >= compactBackThresholdPx
+    val heroHeight = (LocalConfiguration.current.screenHeightDp.dp * 0.24f).coerceIn(160.dp, 240.dp)
+    var primaryActionAboveViewport by remember(type, id) { mutableStateOf(false) }
+    LaunchedEffect(state.returnToPrimaryRequestId) { if (state.returnToPrimaryRequestId > 0) detailScrollState.scrollTo(0) }
+
 
     CompositionLocalProvider(
         LocalCardStyle provides defaultCardStyle,
@@ -374,18 +513,35 @@ fun DetailScreen(
         Box(modifier = Modifier.fillMaxSize()) {
         when {
             state.isLoading -> {
-                CircularProgressIndicator(
-                    modifier = Modifier.align(Alignment.Center).size(48.dp),
-                    color = Amber,
+                val launchArtwork = com.torve.android.ui.components.ContentLaunchArtworkStore.current
+                com.torve.android.ui.components.CinematicContentLoading(
+                    title = launchArtwork?.title.orEmpty(),
+                    backdropUrl = launchArtwork?.backdropUrl,
+                    posterUrl = launchArtwork?.posterUrl,
+                    logoUrl = launchArtwork?.logoUrl,
+                    tmdbId = launchArtwork?.tmdbId,
+                    mediaType = launchArtwork?.type,
+                    modifier = Modifier.fillMaxSize(),
                 )
             }
 
             state.error != null -> {
-                Text(
-                    text = com.torve.android.error.resolveErrorKey(androidx.compose.ui.platform.LocalContext.current, state.error) ?: stringResource(R.string.error_unknown),
-                    modifier = Modifier.align(Alignment.Center),
-                    color = MaterialTheme.colorScheme.error,
-                )
+                Column(
+                    modifier = Modifier.align(Alignment.Center).padding(24.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    Text(
+                        text = com.torve.android.error.resolveErrorKey(context, state.error) ?: stringResource(R.string.error_unknown),
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                    Button(onClick = { viewModel.loadDetail(type, id) }) {
+                        Text(stringResource(R.string.common_retry))
+                    }
+                    onSettingsClick?.let { openSettings ->
+                        TextButton(onClick = openSettings) { Text(stringResource(R.string.nav_settings)) }
+                    }
+                }
             }
 
             state.mediaItem != null -> {
@@ -401,25 +557,18 @@ fun DetailScreen(
                 val detailRatings = remember(item.ratings, item.rating) {
                     item.ratings.withFallbackTmdbScore(item.rating)
                 }
-                val hasRenderableDetailProviders = remember(detailRatings, settingsState.ratingPrefs) {
-                    detailRatings?.hasAnyEnabledDisplayValue(settingsState.ratingPrefs) == true
-                }
-                val torveDetailScore = remember(detailRatings, settingsState.ratingPrefs) {
-                    detailRatings?.takeIf { settingsState.ratingPrefs.showTorveScoreOnDetailPage }
-                        ?.let { calculateTorveScore(it, settingsState.ratingPrefs.torveWeights) }
-                }
 
                 Column(
                     modifier = Modifier
                         .fillMaxSize()
-                        .verticalScroll(detailScrollState),
+                        .verticalScroll(detailScrollState)
+                        .navigationBarsPadding(),
                 ) {
                     // ── Immersive Backdrop ──
-                    // Taller than before, deeper gradient, content overlaid
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(360.dp),
+                            .height(heroHeight),
                     ) {
                         // Content-policy hardening: never request real artwork for locked items
                         val detailImageModel = if (item.isContentPlaceholder || item.isStubDetail) null
@@ -436,17 +585,17 @@ fun DetailScreen(
                                 .background(Brush.verticalGradient(HeroGradient)),
                         )
 
+                        Box(Modifier.align(Alignment.BottomStart).padding(20.dp)) {
+                            com.torve.android.ui.product.ArtworkTitle(item, logoUrl = cinematicLogoUrl, onDarkArtwork = true)
+                        }
                         // Back button removed — floating version below
                     }
 
                     // ── Content Section ──
-                    Column(modifier = Modifier.padding(horizontal = 20.dp)) {
+                    Column(modifier = Modifier.align(Alignment.CenterHorizontally)
+                        .widthIn(max = 960.dp).fillMaxWidth().padding(horizontal = 20.dp)) {
                         // Title
-                        Text(
-                            text = item.title,
-                            style = MaterialTheme.typography.displaySmall,
-                            color = Snow,
-                        )
+
 
                         // LAN-library presence pill (Prompt 9C). Hidden
                         // when no desktop hub on the same account is
@@ -457,104 +606,48 @@ fun DetailScreen(
                             modifier = Modifier.padding(top = 6.dp),
                         )
 
-                        if (state.isInLibrary) {
-                            Spacer(Modifier.height(6.dp))
-                            Row(
-                                modifier = Modifier
-                                    .background(Graphite, RoundedCornerShape(12.dp))
-                                    .padding(horizontal = 8.dp, vertical = 4.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
+                        Spacer(Modifier.height(8.dp))
+
+                        // Tagline
+                        item.tagline?.let { tagline ->
+                            if (tagline.isNotBlank()) {
+                                Spacer(Modifier.height(20.dp))
                                 Text(
-                                    text = stringResource(R.string.detail_in_library),
-                                    color = Amber,
-                                    style = MaterialTheme.typography.labelMedium,
-                                    fontWeight = FontWeight.SemiBold,
+                                    text = tagline,
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    fontStyle = FontStyle.Italic,
                                 )
                             }
                         }
+
+
+
+                        MobileDetailMetadata(item, detailRatings, settingsState.ratingPrefs)
 
                         Spacer(Modifier.height(8.dp))
 
-                        // Metadata row — year • runtime • rating
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(4.dp),
-                        ) {
-                            item.year?.let {
-                                MetadataText(it.toString())
-                            }
-                            item.runtime?.let { runtime ->
-                                if (runtime > 0) {
-                                    MetadataText("•")
-                                    MetadataText(FormatUtil.formatRuntime(runtime))
-                                }
-                            }
-                            torveDetailScore?.let {
-                                MetadataText("•")
-                                Text(
-                                    text = "Torve ${"%.0f".format(it)}",
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = Amber,
-                                    fontWeight = FontWeight.SemiBold,
-                                )
-                            }
-                        }
-
-                        // Genre pills
                         if (item.genres.isNotEmpty()) {
-                            Spacer(Modifier.height(12.dp))
-                            FlowRow(
-                                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                                verticalArrangement = Arrangement.spacedBy(6.dp),
-                            ) {
-                                item.genres.forEach { genre ->
-                                    GenrePill(genre.name)
-                                }
+                            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                item.genres.forEach { genre -> GenrePill(genre.name) }
                             }
                         }
-
-                        // Multi-source rating pills
-                        if (settingsState.ratingPrefs.showRatingsOnDetailPage && detailRatings != null) {
-                            if (hasRenderableDetailProviders) {
-                                Spacer(Modifier.height(12.dp))
-                                MultiRatingPills(
-                                    ratings = detailRatings,
-                                    prefs = settingsState.ratingPrefs.copy(
-                                        maxRatingsOnCard = settingsState.ratingPrefs.enabledProviders.size.coerceAtLeast(1),
-                                    ),
-                                )
-                                Spacer(Modifier.height(10.dp))
-                            }
-                            if (hasRenderableDetailProviders || torveDetailScore != null) {
-                                DetailRatingsAttribution(
-                                    ratings = detailRatings,
-                                    prefs = settingsState.ratingPrefs,
-                                )
-                            }
-                        }
-
-                        Spacer(Modifier.height(20.dp))
-
                         // ── Action Buttons ──
-                        if (item.imdbId != null) {
-                            // Play button — full width, amber, prominent
+                        Spacer(Modifier.height(12.dp))
+                        if (item.id.isNotBlank()) {
+                            val primaryPlayback: @Composable RowScope.() -> Unit = {
                             Button(
+                                accented = true,
                                 onClick = {
                                     if (streamPlaybackLocked) {
                                         onLockedFeatureClick(PremiumFeature.STREAM_PLAYBACK)
-                                    } else if (!settingsState.canPlayStreams) {
-                                        // No stream source (debrid or stream-providing addon) available.
-                                        // Metadata-only addons like Cinemeta don't qualify. Send the user
-                                        // to the addon catalog to install one (e.g. Panda). Predicate
-                                        // matches TvDetailsScreen for phone/TV consistency.
-                                        onOpenAddonCatalog?.invoke()
                                     } else {
-                                        // Let the addon layer decide between debrid/Usenet/etc. Panda
-                                        // handles its own routing based on its saved config.
+                                        // Always probe local download, Jellyfin, and LAN before
+                                        // falling back to an online stream provider.
                                         if (item.type == MediaType.SERIES) {
-                                            val ctxS = state.streamContextSeason
-                                            val ctxE = state.streamContextEpisode
+                                            val ctxS = state.streamContextSeason ?: state.nextEpisode?.season
+                                            val ctxE = state.streamContextEpisode ?: state.nextEpisode?.episode
                                             if (ctxS != null && ctxE != null) {
                                                 openSourcePickerOrProvider(ctxS, ctxE)
                                             } else {
@@ -566,21 +659,23 @@ fun DetailScreen(
                                     }
                                 },
                                 modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(52.dp),
+                                    .weight(1f)
+                                    .height(48.dp).testTag("detail_primary_play")
+                                    .onGloballyPositioned { primaryActionAboveViewport = it.boundsInRoot().bottom <= 0f },
                                 enabled = !state.isLoadingStreams && !state.isResolving,
                                 colors = ButtonDefaults.buttonColors(
-                                    containerColor = Amber,
-                                    contentColor = Obsidian,
+                                    containerColor = MaterialTheme.colorScheme.primary.copy(alpha = .18f),
+                                    contentColor = MaterialTheme.colorScheme.onSurface,
                                     disabledContainerColor = Amber.copy(alpha = 0.4f),
                                 ),
-                                shape = RoundedCornerShape(10.dp),
+                                shape = RoundedCornerShape(24.dp),
+                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
                             ) {
                                 if (state.isLoadingStreams || state.isResolving) {
                                     CircularProgressIndicator(
                                         modifier = Modifier.size(20.dp),
                                         strokeWidth = 2.dp,
-                                        color = Obsidian,
+                                        color = MaterialTheme.colorScheme.onSurface,
                                     )
                                     Spacer(Modifier.width(8.dp))
                                     Text(
@@ -595,42 +690,14 @@ fun DetailScreen(
                                         modifier = Modifier.size(22.dp),
                                     )
                                     Spacer(Modifier.width(8.dp))
-                                    val playLabel = when {
-                                        streamPlaybackLocked -> stringResource(R.string.premium_unlock_with_lifetime)
-                                        !settingsState.canPlayStreams -> stringResource(R.string.detail_install_addon)
-                                        item.type == MediaType.SERIES && state.streamContextSeason != null && state.streamContextEpisode != null ->
-                                            "S${state.streamContextSeason.toString().padStart(2, '0')}E${state.streamContextEpisode.toString().padStart(2, '0')}"
-                                        else -> state.primaryPlayLabel
-                                    }
-                                    Text(
-                                        playLabel,
-                                        style = MaterialTheme.typography.labelLarge,
-                                        fontWeight = FontWeight.Bold,
-                                    )
+                                    val playLabel = if (streamPlaybackLocked) {
+                                        stringResource(R.string.premium_unlock_with_lifetime)
+                                    } else detailPlaybackLabel(state)
+                                    DetailPlaybackButtonLabel(playLabel)
                                 }
                             }
 
-                            // Watch Trailer button
-                            state.mediaItem?.trailerKey?.let {
-                                Spacer(Modifier.height(10.dp))
-                                OutlinedButton(
-                                    onClick = { showTrailer = true },
-                                    modifier = Modifier.fillMaxWidth().height(44.dp),
-                                    shape = RoundedCornerShape(10.dp),
-                                ) {
-                                    Icon(
-                                        Icons.Rounded.Movie,
-                                        contentDescription = null,
-                                        modifier = Modifier.size(18.dp),
-                                    )
-                                    Spacer(Modifier.width(6.dp))
-                                    Text(
-                                        stringResource(R.string.detail_watch_trailer),
-                                        style = MaterialTheme.typography.labelLarge,
-                                    )
-                                }
                             }
-
                             if (state.isLoadingStreams || state.isResolving || state.streams.isNotEmpty()) {
                                 Spacer(Modifier.height(10.dp))
                                 DetailPlaybackReadinessCard(
@@ -720,17 +787,34 @@ fun DetailScreen(
                                     ),
                                 )
 
+                                if (item.type == MediaType.MOVIE) onCollectionsClick?.let { open ->
+                                    add(DetailSecondaryActionSpec(
+                                        label = stringResource(R.string.detail_explore_collections),
+                                        icon = Icons.Rounded.CollectionsBookmark,
+                                        containerColor = Graphite,
+                                        contentColor = Snow,
+                                        testTag = "detail_collections",
+                                        onClick = { open(item) },
+                                    ))
+                                }
+
                                 if (settingsState.traktConnected) {
+                                    if (onOpenTraktLists != null) add(DetailSecondaryActionSpec(
+                                        label = "Trakt lists", icon = Icons.Rounded.PlaylistAdd,
+                                        containerColor = Graphite, contentColor = Snow,
+                                        onClick = { if (traktListLocked) onLockedFeatureClick(PremiumFeature.TRAKT_LIST_MANAGER) else onOpenTraktLists() },
+                                    ))
                                     add(
                                         DetailSecondaryActionSpec(
                                             label = when {
                                                 watchedStatusLocked -> stringResource(R.string.premium_unlock_with_lifetime)
-                                                state.isMarkedWatched -> stringResource(R.string.detail_unwatched)
-                                                else -> stringResource(R.string.detail_watched)
+                                                item.type == MediaType.SERIES -> stringResource(R.string.detail_mark_show_watched)
+                                                state.isMarkedWatched -> stringResource(R.string.detail_mark_movie_unwatched)
+                                                else -> stringResource(R.string.detail_mark_movie_watched)
                                             },
                                             icon = when {
                                                 watchedStatusLocked -> Icons.Rounded.Lock
-                                                state.isMarkedWatched -> Icons.Rounded.VisibilityOff
+                                                state.isMarkedWatched && item.type != MediaType.SERIES -> Icons.Rounded.VisibilityOff
                                                 else -> Icons.Rounded.Visibility
                                             },
                                             containerColor = if (watchedStatusLocked) Amber.copy(alpha = 0.2f) else Graphite,
@@ -739,18 +823,28 @@ fun DetailScreen(
                                                 if (watchedStatusLocked) {
                                                     onLockedFeatureClick(PremiumFeature.WATCHED_STATUS_EDIT)
                                                 } else {
-                                                    if (state.isMarkedWatched) viewModel.markUnwatched()
-                                                    else viewModel.markWatched()
+                                                    pendingWatchedChange = item.type == MediaType.SERIES || !state.isMarkedWatched
                                                 }
                                             },
                                         ),
                                     )
+                                    if (item.type == MediaType.SERIES && (state.isMarkedWatched || state.watchedEpisodes.isNotEmpty())) {
+                                        add(DetailSecondaryActionSpec(
+                                            label = stringResource(R.string.detail_clear_show_history),
+                                            icon = if (watchedStatusLocked) Icons.Rounded.Lock else Icons.Rounded.VisibilityOff,
+                                            containerColor = Graphite, contentColor = Snow,
+                                            onClick = {
+                                                if (watchedStatusLocked) onLockedFeatureClick(PremiumFeature.WATCHED_STATUS_EDIT)
+                                                else pendingWatchedChange = false
+                                            },
+                                        ))
+                                    }
                                     add(
                                         DetailSecondaryActionSpec(
                                             label = if (traktListLocked) {
                                                 stringResource(R.string.premium_unlock_with_lifetime)
                                             } else {
-                                                state.userRating?.let { "Rated $it/10" } ?: "Rate"
+                                                state.userRating?.let { stringResource(R.string.detail_rated_value, it) } ?: stringResource(R.string.detail_your_rating)
                                             },
                                             icon = if (traktListLocked) Icons.Rounded.Lock else Icons.Rounded.Star,
                                             containerColor = when {
@@ -767,32 +861,55 @@ fun DetailScreen(
                                                 if (traktListLocked) {
                                                     onLockedFeatureClick(PremiumFeature.TRAKT_LIST_MANAGER)
                                                 } else {
-                                                    val next = when (val current = state.userRating) {
-                                                        null -> 7
-                                                        10 -> null
-                                                        else -> current + 1
-                                                    }
-                                                    viewModel.setUserRating(next)
+                                                    showRatingDialog = true
                                                 }
                                             },
                                         ),
                                     )
                                 }
                             }
-                            DetailSecondaryActionsGrid(
-                                actions = secondaryActions,
-                                modifier = Modifier.fillMaxWidth(),
-                            )
+                            val playbackOptions = DetailSecondaryActionSpec(
+                                label = "Playback options", icon = Icons.Rounded.PlayArrow,
+                                containerColor = Graphite, contentColor = Snow,
+                                onClick = { requestPlaybackOptions = true; openSourcePickerOrProvider(state.primaryPlaybackTarget.season, state.primaryPlaybackTarget.episode) })
+                            val renderSecondaryActions: @Composable (List<DetailSecondaryActionSpec>) -> Unit = { libraryActions ->
+                                DetailSecondaryActions(
+                                    title = item.title,
+                                    primaryContent = primaryPlayback,
+                                    watchlistAction = secondaryActions.firstOrNull(),
+                                    onPlayOnTv = if (!isTvDevice && (item.tmdbId ?: id) > 0 && !tvHandoffBusy) ({
+                                        syncCoordinator.refreshDevices()
+                                        showTvPicker = true
+                                    }) else null,
+                                    actions = libraryActions + secondaryActions + playbackOptions,
+                                    onTrailer = if (item.trailerKey != null) ({ showTrailer = true }) else null,
+                                    modifier = Modifier.fillMaxWidth(),
+                                    libraryStatus = state,
+                                )
+                            }
+                            if (settingsState.optionalAppFeaturesLoaded && settingsState.optionalAppFeatures.arrStack) {
+                                DetailLibraryActions(
+                                    state = state,
+                                    isSeries = item.type == MediaType.SERIES,
+                                    onRequest = { season -> viewModel.requestPermanentCopy(seasons = season?.let(::listOf)) },
+                                    onRetry = viewModel::retryMediaLifecycleRequest,
+                                    onDeleteRequest = viewModel::deleteMediaLifecycleRequest,
+                                    onRefresh = { viewModel.refreshMediaLifecycleStatus(force = true) },
+                                    content = renderSecondaryActions,
+                                )
+                            } else {
+                                renderSecondaryActions(emptyList())
+                            }
 
                             // Errors
                             StreamFilterUiText.visibleErrorMessage(
-                                error = state.streamsError,
+                                error = if (state.streams.isEmpty()) state.streamsError else null,
                                 premiumFeedbackEnabled = runtimeFilterFeedbackEnabled,
                             )?.let { visibleError ->
                                 ErrorMessage(visibleError, Modifier.padding(top = 8.dp))
                             }
                             StreamFilterUiText.visibleHint(
-                                hint = state.streamsErrorHint,
+                                hint = if (state.streams.isEmpty()) state.streamsErrorHint else null,
                                 premiumFeedbackEnabled = runtimeFilterFeedbackEnabled,
                             )?.let { hint ->
                                 val visibleHint = if (
@@ -817,13 +934,41 @@ fun DetailScreen(
                             state.resolveError?.let { error ->
                                 ErrorMessage(error, Modifier.padding(top = 8.dp))
                             }
+                            if (((state.streamsError != null).and(state.streams.isEmpty())).or(state.resolveError != null)) {
+                                Row(
+                                    modifier = Modifier.padding(top = 4.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                ) {
+                                    TextButton(
+                                        onClick = {
+                                            viewModel.fetchStreams(
+                                                season = state.streamContextSeason,
+                                                episode = state.streamContextEpisode,
+                                                forceManualPick = true,
+                                            )
+                                        },
+                                    ) {
+                                        Text(stringResource(R.string.common_retry), color = Amber)
+                                    }
+                                    onSettingsClick?.let { openSettings ->
+                                        TextButton(onClick = openSettings) {
+                                            Text(stringResource(R.string.nav_settings), color = Amber)
+                                        }
+                                    }
+                                }
+                            }
                         }
+
+                        Spacer(Modifier.height(16.dp))
+                        com.torve.android.ui.community.FullSynopsis(item)
 
                         Spacer(Modifier.height(20.dp))
                         WhereToWatchSection(
+                            contentKey = "$type:$id",
                             offers = state.availability?.offers.orEmpty(),
                             isLoading = state.isLoadingAvailability,
-                            error = state.availabilityError,
+                            error = com.torve.android.error.resolveErrorKey(context, state.availabilityError)
+                                ?: state.availabilityError,
                             onOpenOffer = { offer ->
                                 val targetUrl = offer.deeplinkUrl ?: offer.webUrl
                                 if (!targetUrl.isNullOrBlank()) {
@@ -835,32 +980,6 @@ fun DetailScreen(
                             },
                         )
 
-                        // Tagline
-                        item.tagline?.let { tagline ->
-                            if (tagline.isNotBlank()) {
-                                Spacer(Modifier.height(20.dp))
-                                Text(
-                                    text = "\"$tagline\"",
-                                    style = MaterialTheme.typography.bodyLarge,
-                                    color = Amber.copy(alpha = 0.8f),
-                                    fontStyle = FontStyle.Italic,
-                                )
-                            }
-                        }
-
-                        // Overview
-                        item.overview?.let { overview ->
-                            if (overview.isNotBlank()) {
-                                Spacer(Modifier.height(16.dp))
-                                Text(
-                                    text = overview,
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = Torve.colors.textSecondary,
-                                    lineHeight = MaterialTheme.typography.bodyMedium.lineHeight,
-                                )
-                            }
-                        }
-
                         // ── Director ──
                         item.director?.let { director ->
                             Spacer(Modifier.height(16.dp))
@@ -871,13 +990,14 @@ fun DetailScreen(
                                     color = Torve.colors.textTertiary,
                                     fontWeight = FontWeight.Medium,
                                 )
+                                Spacer(Modifier.width(8.dp))
                                 Text(
                                     text = director,
                                     style = MaterialTheme.typography.bodyMedium,
                                     color = Amber,
                                     fontWeight = FontWeight.SemiBold,
                                     modifier = if (item.directorId != null && onPersonClick != null) {
-                                        Modifier.clickable { onPersonClick(item.directorId!!) }
+                                        Modifier.clickable { viewModel.leaveDetail(); onPersonClick(item.directorId!!) }
                                     } else {
                                         Modifier
                                     },
@@ -890,7 +1010,7 @@ fun DetailScreen(
                             Spacer(Modifier.height(12.dp))
                             Column {
                                 Text(
-                                    text = "Downloading ${bulkProgress.currentEpisodeLabel} (${bulkProgress.completedEpisodes}/${bulkProgress.totalEpisodes})",
+                                    text = localizedUiText("Downloading ${bulkProgress.currentEpisodeLabel} (${bulkProgress.completedEpisodes}/${bulkProgress.totalEpisodes})"),
                                     style = MaterialTheme.typography.bodySmall,
                                     color = Amber,
                                 )
@@ -908,32 +1028,29 @@ fun DetailScreen(
                         if (item.type == MediaType.SERIES && item.seasons.isNotEmpty()) {
                             Spacer(Modifier.height(24.dp))
                             EpisodeSelector(
+                                hideUnwatchedSpoilers = state.hideUnwatchedSpoilers,
                                 seasons = item.seasons,
                                 selectedSeason = state.selectedSeason,
                                 seasonDetail = state.seasonDetail,
                                 isLoadingSeasonDetail = state.isLoadingSeasonDetail,
                                 watchedEpisodes = state.watchedEpisodes,
+                                availableInJellyfinEpisodes = jellyfinAvailableEpisodes,
                                 seriesRatings = item.ratings.withFallbackTmdbScore(item.rating),
                                 onSeasonSelected = { seasonNum ->
-                                    item.tmdbId?.let { tvId ->
-                                        viewModel.loadSeasonDetail(tvId, seasonNum)
-                                    }
+                                    if (extensionSeedJson != null) viewModel.selectExtensionSeason(seasonNum)
+                                    else item.tmdbId?.let { viewModel.loadSeasonDetail(it, seasonNum) }
                                 },
                                 onEpisodePlay = { season, episode ->
-                                    if (!hasAnyAddon) {
-                                        onOpenAddonCatalog?.invoke()
-                                    } else {
-                                        openSourcePickerOrProvider(season, episode)
-                                    }
+                                    openSourcePickerOrProvider(season, episode)
                                 },
                                 onEpisodeDownload = { season, episode ->
-                                    if (settingsState.debridConnected) {
+                                    if (settingsState.connectedDebridProviders.isNotEmpty()) {
                                         pendingEpisodeDownload = season to episode
                                         viewModel.fetchStreams(season = season, episode = episode)
                                     }
                                 },
                                 onDownloadSeason = { season ->
-                                    if (settingsState.debridConnected) {
+                                    if (settingsState.connectedDebridProviders.isNotEmpty()) {
                                         val media = state.mediaItem ?: return@EpisodeSelector
                                         val seasonObj = media.seasons.find { it.seasonNumber == season }
                                         val epCount = seasonObj?.episodeCount ?: return@EpisodeSelector
@@ -954,7 +1071,7 @@ fun DetailScreen(
                                     }
                                 },
                                 onDownloadAll = {
-                                    if (settingsState.debridConnected) {
+                                    if (settingsState.connectedDebridProviders.isNotEmpty()) {
                                         val media = state.mediaItem ?: return@EpisodeSelector
                                         coroutineScope.launch {
                                             val episodes = bulkDownloadManager.buildAllSeasonsTargets(media)
@@ -989,12 +1106,15 @@ fun DetailScreen(
                             )
                         }
 
+                        if (state.sourceStatistics.isNotEmpty() || state.isLoadingStreams) {
+                            com.torve.android.ui.community.SourceStatisticsButton(state.sourceStatistics, state.isLoadingStreams || state.isLoadingMoreSources)
+                        }
                         // ── Cast ──
                         if (item.cast.isNotEmpty()) {
                             Spacer(Modifier.height(24.dp))
                             SectionHeader(
                                 title = stringResource(R.string.detail_cast),
-                                modifier = Modifier.padding(horizontal = 0.dp),
+                                contentPadding = PaddingValues(vertical = 8.dp),
                             )
                             LazyRow(
                                 horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -1006,19 +1126,22 @@ fun DetailScreen(
                                         character = castMember.character,
                                         profileUrl = castMember.profileUrl,
                                         onClick = {
-                                            onPersonClick?.invoke(castMember.id)
+                                            if (castMember.id > 0) { viewModel.leaveDetail(); onPersonClick?.invoke(castMember.id) }
                                         },
                                     )
                                 }
                             }
                         }
 
+                        Spacer(Modifier.height(24.dp))
+                        com.torve.android.ui.community.ContentCommunityPanel(item)
+
                         // ── Similar ──
                         if (state.similar.isNotEmpty()) {
                             Spacer(Modifier.height(24.dp))
                             SectionHeader(
                                 title = stringResource(R.string.detail_more_like_this),
-                                modifier = Modifier.padding(horizontal = 0.dp),
+                                contentPadding = PaddingValues(vertical = 8.dp),
                             )
                             LazyRow(
                                 horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -1034,7 +1157,7 @@ fun DetailScreen(
                             }
                         }
 
-                        Spacer(Modifier.height(32.dp))
+                        Spacer(Modifier.height(88.dp))
                     }
                 }
 
@@ -1065,7 +1188,7 @@ fun DetailScreen(
                                 }
                             } else null,
                         ) {
-                            Text(text = message, style = MaterialTheme.typography.bodySmall)
+                            Text(text = localizedUiText(message), style = MaterialTheme.typography.bodySmall)
                         }
                     }
                 }
@@ -1082,7 +1205,7 @@ fun DetailScreen(
                             containerColor = Graphite,
                             contentColor = Snow,
                         ) {
-                            Text(text = message, style = MaterialTheme.typography.bodySmall)
+                            Text(text = localizedUiText(message), style = MaterialTheme.typography.bodySmall)
                         }
                     }
                     LaunchedEffect(message) {
@@ -1094,6 +1217,10 @@ fun DetailScreen(
                 // Stream picker
                 if (state.showStreamPicker && state.streams.isNotEmpty()) {
                     StreamPickerSheet(
+                        onRefresh = { viewModel.refreshStreams(state.streamContextSeason, state.streamContextEpisode) },
+                        isInspectingSourceLanguages = state.isInspectingSourceLanguages,
+                        sourceSessionKey = "${state.mediaItem?.id}:${state.streamContextSeason}:${state.streamContextEpisode}",
+                        sourceStatistics = state.sourceStatistics,
                         streams = state.streams,
                         startupCandidates = state.startupCandidates,
                         isResolving = state.isResolving,
@@ -1115,7 +1242,7 @@ fun DetailScreen(
                             }
                         },
                         usenetCandidates = state.usenetCandidates,
-                        onDismiss = { viewModel.dismissStreamPicker() },
+                        onDismiss = { requestPlaybackOptions = false; viewModel.cancelSourceLookup(); viewModel.dismissStreamPicker() },
                     )
                 }
 
@@ -1132,8 +1259,19 @@ fun DetailScreen(
                             }
                             when (val route = option.route) {
                                 is PlaybackRoute.LocalFile -> {
-                                    onPlayClick(
+                                    launchPlayback(
                                         "file://${route.absolutePath}",
+                                        "",
+                                        sourcePickerSeason,
+                                        sourcePickerEpisode,
+                                        item.imdbId,
+                                        true,
+                                    )
+                                }
+                                is PlaybackRoute.JellyfinStream -> {
+                                    PendingLanPlaybackHandoff.stage(route)
+                                    launchPlayback(
+                                        route.url,
                                         "",
                                         sourcePickerSeason,
                                         sourcePickerEpisode,
@@ -1143,7 +1281,7 @@ fun DetailScreen(
                                 }
                                 is PlaybackRoute.LanDesktopStream -> {
                                     PendingLanPlaybackHandoff.stage(route)
-                                    onPlayClick(
+                                    launchPlayback(
                                         route.url,
                                         "",
                                         sourcePickerSeason,
@@ -1177,16 +1315,17 @@ fun DetailScreen(
                         item?.title ?: ""
                     }
                     StreamActionSheet(
+                        onExternalPlaybackStarted = { viewModel.onPlaybackLaunched(ctxSeason, ctxEpisode) },
                         url = resolvedUrl,
                         title = dlTitle,
                         posterUrl = item?.posterUrl ?: "",
-                        onPlayInApp = { onPlayClick(resolvedUrl, resolvedFallbackUrl, ctxSeason, ctxEpisode, item?.imdbId, resolvedUrlIsTemporary) },
+                        onPlayInApp = { launchPlayback(resolvedUrl, resolvedFallbackUrl, ctxSeason, ctxEpisode, item?.imdbId, resolvedUrlIsTemporary) },
                         onDownload = {
                             if (item != null) {
                                 downloadViewModel.enqueueDownload(
                                     Download(
-                                        id = "${item.tmdbId}_${ctxSeason ?: 0}_${ctxEpisode ?: 0}_${System.currentTimeMillis()}",
-                                        mediaId = item.tmdbId.toString(),
+                                        id = "${item.id}_${ctxSeason ?: 0}_${ctxEpisode ?: 0}_${System.currentTimeMillis()}",
+                                        mediaId = item.id,
                                         mediaType = item.type,
                                         title = dlTitle,
                                         posterUrl = item.posterUrl,
@@ -1223,17 +1362,104 @@ fun DetailScreen(
             }
         }
 
+            pendingWatchedChange?.let { mark ->
+                DetailWatchedConfirmation(
+                    isSeries = state.mediaItem?.type == MediaType.SERIES,
+                    markWatched = mark,
+                    onConfirm = {
+                        pendingWatchedChange = null
+                        if (mark) viewModel.markWatched() else viewModel.markUnwatched()
+                    },
+                    onDismiss = { pendingWatchedChange = null },
+                )
+            }
+            if (showRatingDialog) {
+                DetailRatingDialog(
+                    currentRating = state.userRating,
+                    onSave = { rating -> showRatingDialog = false; viewModel.setUserRating(rating) },
+                    onDismiss = { showRatingDialog = false },
+                )
+            }
+
             // Floating back button — always visible regardless of scroll position
             FloatingBackButton(
                 onBack = onBack,
                 label = stringResource(R.string.common_back_cd),
-                compact = useCompactBackButton,
+                compact = true,
                 modifier = Modifier
                     .zIndex(20f)
                     .align(Alignment.TopStart)
                     .statusBarsPadding()
                     .padding(start = 12.dp, top = 10.dp),
             )
+
+            // Keep the primary action reachable on long mobile detail pages.
+            // The in-content button remains the explanatory first action; this
+            // compact duplicate only appears once that area has scrolled away.
+            val stickyPlayItem = state.mediaItem
+            if (
+                !isTvDevice &&
+                primaryActionAboveViewport &&
+                stickyPlayItem != null && (stickyPlayItem.imdbId != null || stickyPlayItem.tmdbId != null) &&
+                !state.showStreamPicker &&
+                sourcePickerState == null &&
+                !showActionSheet
+            ) {
+                Button(
+                    onClick = {
+                        if (streamPlaybackLocked) {
+                            onLockedFeatureClick(PremiumFeature.STREAM_PLAYBACK)
+                        } else if (stickyPlayItem.type == MediaType.SERIES) {
+                            val season = state.streamContextSeason ?: state.nextEpisode?.season
+                            val episode = state.streamContextEpisode ?: state.nextEpisode?.episode
+                            if (season != null && episode != null) {
+                                openSourcePickerOrProvider(season, episode)
+                            } else {
+                                viewModel.playNextEpisode()
+                            }
+                        } else {
+                            openSourcePickerOrProvider()
+                        }
+                    },
+                    modifier = Modifier
+                        .zIndex(24f)
+                        .align(Alignment.BottomCenter)
+                        .navigationBarsPadding()
+                        .padding(horizontal = 16.dp, vertical = 12.dp)
+                        .widthIn(max = 960.dp)
+                        .fillMaxWidth()
+                        .height(52.dp),
+                    enabled = !state.isLoadingStreams && !state.isResolving,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Amber,
+                        contentColor = Obsidian,
+                        disabledContainerColor = Amber.copy(alpha = 0.45f),
+                    ),
+                    shape = RoundedCornerShape(12.dp),
+                ) {
+                    if (state.isLoadingStreams || state.isResolving) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(20.dp),
+                            strokeWidth = 2.dp,
+                            color = Obsidian,
+                        )
+                        Spacer(Modifier.width(8.dp))
+                    } else {
+                        Icon(Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(22.dp))
+                        Spacer(Modifier.width(8.dp))
+                    }
+                    val stickyLabel = when {
+                        state.isResolving -> stringResource(R.string.detail_resolving)
+                        state.isLoadingStreams -> stringResource(R.string.detail_finding_streams)
+                        streamPlaybackLocked -> stringResource(R.string.premium_unlock_with_lifetime)
+                        else -> detailPlaybackLabel(state)
+                    }
+                    Text(
+                        stickyLabel,
+                        fontWeight = FontWeight.Bold,
+                    )
+                }
+            }
 
             // Preparing-stream overlay: blocks the detail surface while a
             // Panda cloud-client stream is still warming up. Never open the
@@ -1242,169 +1468,24 @@ fun DetailScreen(
             state.preparing?.let { preparing ->
                 StreamPreparingOverlay(
                     state = preparing,
+                    mediaItem = state.mediaItem?.copy(logoUrl = cinematicLogoUrl ?: state.mediaItem?.logoUrl),
                     onCancel = { viewModel.cancelPreparing() },
                     modifier = Modifier.zIndex(80f),
                 )
             }
-        }
-    }
-}
-
-@OptIn(ExperimentalLayoutApi::class)
-@Composable
-private fun WhereToWatchSection(
-    offers: List<AvailabilityOffer>,
-    isLoading: Boolean,
-    error: String?,
-    onOpenOffer: (AvailabilityOffer) -> Unit,
-) {
-    SectionHeader(title = stringResource(R.string.detail_where_to_watch))
-    Spacer(Modifier.height(8.dp))
-    when {
-        isLoading -> {
-            CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp, color = Amber)
-        }
-        error != null -> {
-            Text(error, color = Torve.colors.textTertiary, style = MaterialTheme.typography.bodySmall)
-        }
-        offers.isEmpty() -> {
-            Text(stringResource(R.string.detail_no_offers), color = Torve.colors.textTertiary, style = MaterialTheme.typography.bodySmall)
-        }
-        else -> {
-            val grouped = offers.groupBy { it.offerType }
-            val order = listOf(
-                AvailabilityOfferType.SUBSCRIPTION,
-                AvailabilityOfferType.FREE,
-                AvailabilityOfferType.ADS,
-                AvailabilityOfferType.RENT,
-                AvailabilityOfferType.BUY,
-            )
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                order.forEach { type ->
-                    val rows = grouped[type].orEmpty()
-                    if (rows.isNotEmpty()) {
-                        Text(
-                            text = when (type) {
-                                AvailabilityOfferType.SUBSCRIPTION -> "Subscription"
-                                AvailabilityOfferType.RENT -> "Rent"
-                                AvailabilityOfferType.BUY -> "Buy"
-                                AvailabilityOfferType.FREE -> "Free"
-                                AvailabilityOfferType.ADS -> "With Ads"
-                            },
-                            style = MaterialTheme.typography.bodySmall,
-                            color = Torve.colors.textSecondary,
-                            fontWeight = FontWeight.SemiBold,
-                        )
-                        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            rows.forEach { offer ->
-                                Row(
-                                    modifier = Modifier
-                                        .background(Graphite, RoundedCornerShape(16.dp))
-                                        .clickable { onOpenOffer(offer) }
-                                        .padding(horizontal = 10.dp, vertical = 6.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                ) {
-                                    Text(
-                                        offer.providerName,
-                                        color = Snow,
-                                        style = MaterialTheme.typography.bodySmall,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
+            if ((state.isLoadingStreams || state.isResolving) && state.preparing == null && sourcePickerState == null) {
+                val resolvingItem = state.mediaItem
+                com.torve.android.ui.components.CinematicContentLoading(
+                    title = resolvingItem?.title.orEmpty(),
+                    backdropUrl = resolvingItem?.backdropUrl,
+                    posterUrl = resolvingItem?.posterUrl,
+                    logoUrl = cinematicLogoUrl ?: resolvingItem?.logoUrl,
+                    tmdbId = resolvingItem?.tmdbId,
+                    mediaType = resolvingItem?.type,
+                    modifier = Modifier.fillMaxSize().zIndex(70f),
+                )
             }
         }
-    }
-}
-
-private data class DetailSecondaryActionSpec(
-    val label: String,
-    val icon: ImageVector,
-    val containerColor: Color,
-    val contentColor: Color,
-    val enabled: Boolean = true,
-    val onClick: () -> Unit,
-)
-
-@Composable
-private fun DetailSecondaryActionsGrid(
-    actions: List<DetailSecondaryActionSpec>,
-    modifier: Modifier = Modifier,
-) {
-    if (actions.isEmpty()) return
-    val spacing = 10.dp
-    BoxWithConstraints(modifier = modifier) {
-        val columns = when {
-            actions.size <= 1 -> 1
-            maxWidth < 400.dp -> 2
-            else -> minOf(3, actions.size)
-        }
-        val actionRows = actions.chunked(columns)
-        Column(
-            modifier = Modifier.fillMaxWidth(),
-            verticalArrangement = Arrangement.spacedBy(spacing),
-        ) {
-            actionRows.forEach { rowActions ->
-                val singleWideRow = rowActions.size == 1 && columns > 1
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(spacing),
-                ) {
-                    rowActions.forEach { action ->
-                        DetailSecondaryActionButton(
-                            action = action,
-                            modifier = if (singleWideRow) {
-                                Modifier.fillMaxWidth()
-                            } else {
-                                Modifier.weight(1f)
-                            },
-                        )
-                    }
-                    if (!singleWideRow && rowActions.size < columns) {
-                        repeat(columns - rowActions.size) {
-                            Spacer(Modifier.weight(1f))
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun DetailSecondaryActionButton(
-    action: DetailSecondaryActionSpec,
-    modifier: Modifier = Modifier,
-) {
-    FilledTonalButton(
-        onClick = action.onClick,
-        modifier = modifier.heightIn(min = 46.dp),
-        enabled = action.enabled,
-        shape = RoundedCornerShape(10.dp),
-        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp),
-        colors = ButtonDefaults.filledTonalButtonColors(
-            containerColor = action.containerColor,
-            contentColor = action.contentColor,
-        ),
-    ) {
-        Icon(
-            imageVector = action.icon,
-            contentDescription = null,
-            modifier = Modifier.size(18.dp),
-        )
-        Spacer(Modifier.width(8.dp))
-        Text(
-            text = action.label,
-            style = MaterialTheme.typography.labelMedium,
-            modifier = Modifier.weight(1f),
-            maxLines = 1,
-            softWrap = false,
-            overflow = TextOverflow.Ellipsis,
-        )
     }
 }
 
@@ -1428,6 +1509,7 @@ private suspend fun buildMobileDetailPickerState(
     seasonNumber: Int?,
     episodeNumber: Int?,
     downloadRepository: DownloadRepository,
+    jellyfinLibrary: JellyfinLibraryOverlayService,
     lanLibraryConsumer: LanLibraryConsumer,
     networkMonitor: NetworkMonitor,
     wifiOnlyForLan: Boolean,
@@ -1443,6 +1525,17 @@ private suspend fun buildMobileDetailPickerState(
         seasonNumber = seasonNumber,
         episodeNumber = episodeNumber,
     )
+    val jellyfinRoute = item.tmdbId?.let { tmdbId ->
+        runCatching {
+            jellyfinLibrary.findPlaybackRoute(
+                tmdbId = tmdbId,
+                mediaType = item.type,
+                seasonNumber = seasonNumber,
+                episodeNumber = episodeNumber,
+                imdbId = item.imdbId,
+            )
+        }.getOrNull()
+    }
     val lanRoute = runCatching {
         lanLibraryConsumer.findLanRoute(
             title = item.title,
@@ -1458,6 +1551,7 @@ private suspend fun buildMobileDetailPickerState(
     }
     return TvDetailsSourcePickerStateBuilder.build(
         localFilePath = localFilePath,
+        jellyfinRoute = jellyfinRoute,
         lanRoute = lanRoute,
         providerAvailable = true,
         networkMode = networkMode,

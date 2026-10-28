@@ -31,7 +31,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -65,6 +64,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.torve.android.R
 import com.torve.android.session.PostSignInRefresh
+import com.torve.android.ui.components.TvBrowseOutlinedTextField
 import com.torve.domain.transfer.SecretCategory
 import com.torve.domain.transfer.TransferApplyResult
 import com.torve.domain.transfer.TransferDecryptResult
@@ -145,9 +145,7 @@ fun SecretsTransferReceiveScreen(
             TopAppBar(
                 title = { Text(stringResource(R.string.transfer_receive_title)) },
                 navigationIcon = {
-                    IconButton(onClick = ::closeReceiveScreen) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.common_back))
-                    }
+                    com.torve.android.ui.components.BackButton(onClick = ::closeReceiveScreen)
                 },
             )
         },
@@ -284,6 +282,7 @@ private fun ActiveBlock(
         importing = state.importing,
         importResult = state.importResult,
         relayStatus = state.relayStatus,
+        tvEnabled = largeQr,
         onChange = onEnvelopeChanged,
         onImport = onImport,
     )
@@ -410,6 +409,7 @@ private fun AdvancedPasteSection(
     importing: Boolean,
     importResult: TransferImportResult?,
     relayStatus: RelayStatus,
+    tvEnabled: Boolean,
     onChange: (String) -> Unit,
     onImport: () -> Unit,
 ) {
@@ -429,9 +429,10 @@ private fun AdvancedPasteSection(
             }
         }
         if (advancedOpen) {
-            OutlinedTextField(
+            TvBrowseOutlinedTextField(
                 value = envelopeText,
                 onValueChange = onChange,
+                tvEnabled = tvEnabled,
                 label = { Text(stringResource(R.string.transfer_sealed_code_from_sender)) },
                 placeholder = { Text(stringResource(R.string.transfer_sealed_code_placeholder)) },
                 singleLine = false,
@@ -621,6 +622,7 @@ private fun transferCategoryTitle(category: SecretCategory): String = when (cate
     SecretCategory.TRAKT_SIMKL -> stringResource(R.string.transfer_category_trakt_simkl)
     SecretCategory.AI_KEYS -> stringResource(R.string.transfer_category_ai_keys)
     SecretCategory.PANDA -> stringResource(R.string.transfer_category_panda)
+    SecretCategory.ARR_STACK -> stringResource(R.string.transfer_category_arr_stack)
 }
 
 @Composable
@@ -631,6 +633,7 @@ private fun transferCategoryTitles(): Map<SecretCategory, String> = mapOf(
     SecretCategory.TRAKT_SIMKL to stringResource(R.string.transfer_category_trakt_simkl),
     SecretCategory.AI_KEYS to stringResource(R.string.transfer_category_ai_keys),
     SecretCategory.PANDA to stringResource(R.string.transfer_category_panda),
+    SecretCategory.ARR_STACK to stringResource(R.string.transfer_category_arr_stack),
 )
 
 @Composable

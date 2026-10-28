@@ -29,6 +29,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -58,11 +59,12 @@ fun PandaSetupScreen(
     viewModel: PandaSetupViewModel = koinInject(),
 ) {
     val state by viewModel.state.collectAsState()
+    LaunchedEffect(viewModel) { viewModel.openSetup() }
     val context = LocalContext.current
     val pandaConfigUrl = remember { "${BuildConfig.PANDA_BASE_URL.trimEnd('/')}/configure" }
 
     // Intercept system back: go one step back within the wizard, or exit on first step
-    BackHandler(enabled = state.currentStep != PandaSetupStep.SETUP_TYPE) {
+    BackHandler(enabled = state.currentStep != PandaSetupStep.AUTH) {
         viewModel.previousStep()
     }
 
@@ -84,7 +86,7 @@ fun PandaSetupScreen(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             BackButton(onClick = {
-                if (state.currentStep == PandaSetupStep.SETUP_TYPE) onBack() else viewModel.previousStep()
+                if (state.currentStep == PandaSetupStep.AUTH) onBack() else viewModel.previousStep()
             })
             Spacer(Modifier.width(12.dp))
             Text(
@@ -123,8 +125,8 @@ fun PandaSetupScreen(
             label = "panda_step",
         ) { step ->
             when (step) {
-                PandaSetupStep.SETUP_TYPE -> PandaSetupTypeStep(state, viewModel)
-                PandaSetupStep.PROVIDER -> PandaProviderStep(state, viewModel)
+                PandaSetupStep.SETUP_TYPE -> PandaAuthStep(state, viewModel)
+                PandaSetupStep.PROVIDER -> PandaAuthStep(state, viewModel)
                 PandaSetupStep.AUTH -> PandaAuthStep(state, viewModel)
                 PandaSetupStep.SOURCES -> PandaSourcesStep(state, viewModel)
                 PandaSetupStep.USENET -> PandaUsenetStep(state, viewModel)
@@ -140,12 +142,8 @@ fun PandaSetupScreen(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                if (state.currentStep != PandaSetupStep.SETUP_TYPE) {
-                    OutlinedButton(onClick = { viewModel.previousStep() }) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, null, Modifier.size(18.dp))
-                        Spacer(Modifier.width(4.dp))
-                        Text(stringResource(R.string.common_back))
-                    }
+                if (state.currentStep != PandaSetupStep.AUTH) {
+                    com.torve.android.ui.components.BackButton(onClick = { viewModel.previousStep() })
                 } else {
                     Spacer(Modifier.width(1.dp))
                 }
@@ -153,7 +151,7 @@ fun PandaSetupScreen(
                 if (state.currentStep in listOf(PandaSetupStep.SOURCES, PandaSetupStep.USENET, PandaSetupStep.QUALITY) ||
                     (state.currentStep == PandaSetupStep.AUTH && state.authConnected)
                 ) {
-                    Button(onClick = { viewModel.nextStep() }) {
+                    PandaButton(onClick = { viewModel.nextStep() }) {
                         Text(stringResource(R.string.panda_setup_next))
                         Spacer(Modifier.width(4.dp))
                         Icon(Icons.AutoMirrored.Filled.ArrowForward, null, Modifier.size(18.dp))
@@ -164,7 +162,7 @@ fun PandaSetupScreen(
             }
 
             // Web fallback
-            TextButton(
+            PandaButton(
                 onClick = {
                     val intent = Intent(Intent.ACTION_VIEW, Uri.parse(pandaConfigUrl))
                     intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
@@ -174,7 +172,6 @@ fun PandaSetupScreen(
             ) {
                 Text(
                     stringResource(R.string.panda_setup_web_fallback),
-                    color = Silver,
                     style = MaterialTheme.typography.bodySmall,
                 )
             }

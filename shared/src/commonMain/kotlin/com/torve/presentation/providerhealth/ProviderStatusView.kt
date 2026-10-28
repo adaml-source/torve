@@ -1,6 +1,7 @@
 package com.torve.presentation.providerhealth
 
 import com.torve.domain.providerhealth.ProviderHealthEntry
+import com.torve.domain.providerhealth.ProviderHealthFailure
 import com.torve.domain.providerhealth.ProviderHealthStatus
 
 /**
@@ -87,7 +88,7 @@ object ProviderStatusMapper {
     fun map(entry: ProviderHealthEntry): ProviderStatusView {
         val kind = classify(entry)
         val (label, detail) = headlineAndDetail(entry, kind)
-        val (actionLabel, actionKind) = primaryAction(kind)
+        val (actionLabel, actionKind) = primaryAction(kind, entry.failure)
         return ProviderStatusView(
             entry = entry,
             kind = kind,
@@ -142,11 +143,25 @@ object ProviderStatusMapper {
         return headline to detail
     }
 
-    private fun primaryAction(kind: ProviderStatusKind): Pair<String?, ProviderActionKind> = when (kind) {
+    private fun primaryAction(
+        kind: ProviderStatusKind,
+        failure: ProviderHealthFailure?,
+    ): Pair<String?, ProviderActionKind> = when (kind) {
         ProviderStatusKind.CONNECTED -> "Check again" to ProviderActionKind.REFRESH
-        ProviderStatusKind.CONFIGURED_NOT_VERIFIED -> "Check again" to ProviderActionKind.REFRESH
+        ProviderStatusKind.CONFIGURED_NOT_VERIFIED -> failureAction(failure, "Check again")
         ProviderStatusKind.NEEDS_CREDENTIALS -> "Configure" to ProviderActionKind.CONFIGURE
-        ProviderStatusKind.LAST_CHECK_FAILED -> "Re-enter credentials" to ProviderActionKind.REENTER
+        ProviderStatusKind.LAST_CHECK_FAILED -> failureAction(failure, "Try again")
         ProviderStatusKind.CHECKING -> null to ProviderActionKind.NONE
+    }
+
+    private fun failureAction(
+        failure: ProviderHealthFailure?,
+        fallback: String,
+    ): Pair<String, ProviderActionKind> = when (failure) {
+        ProviderHealthFailure.AUTH_REJECTED -> "Update credentials" to ProviderActionKind.REENTER
+        ProviderHealthFailure.UNREACHABLE -> "Try again" to ProviderActionKind.REFRESH
+        ProviderHealthFailure.SETUP_INCOMPLETE -> "Finish setup" to ProviderActionKind.CONFIGURE
+        ProviderHealthFailure.MIXED -> "Review connections" to ProviderActionKind.CONFIGURE
+        null -> fallback to ProviderActionKind.REFRESH
     }
 }

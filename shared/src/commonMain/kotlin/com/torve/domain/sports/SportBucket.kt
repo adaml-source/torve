@@ -1,5 +1,7 @@
 package com.torve.domain.sports
 
+import com.torve.util.DisplayTextDecoder
+
 /**
  * Buckets a release-name string into a coarse sport category. Used by
  * the Sports page filter pills so users can narrow Newznab category
@@ -67,7 +69,7 @@ enum class SportBucket(
         keywords = listOf(
             "nba", "ncaa.basketball", "ncaa basketball", "ncaab",
             "wnba", "euroleague", "march.madness", "final.four",
-            "basketball",
+            "basketball", "euro.league", "eurocup", "fiba", "acb",
         ),
     ),
     BASEBALL(
@@ -128,13 +130,50 @@ enum class SportBucket(
     OTHER(label = "Other", keywords = emptyList());
 
     companion object {
-        fun classify(title: String): SportBucket {
-            val lower = title.lowercase()
-            for (bucket in entries) {
-                if (bucket == OTHER) continue
-                if (bucket.keywords.any { it in lower }) return bucket
+        private val separators = Regex("[^a-z0-9]+")
+        private val episodePattern = Regex("(?i)(?:^|[^a-z0-9])(?:S\\d{1,3}[ ._-]*E\\d{1,3}|\\d{1,2}x\\d{2})(?:$|[^a-z0-9])")
+        private fun words(value: String) = value.lowercase().replace(separators, " ").trim()
+        private val keywordPatterns by lazy {
+            entries.filter { it != OTHER }.associateWith { bucket ->
+                bucket.keywords.map { keyword -> Regex("\\b${Regex.escape(words(keyword))}(?:\\d+)?\\b") }
             }
-            return OTHER
+        }
+
+        fun classify(title: String): SportBucket {
+            val decodedTitle = DisplayTextDecoder.decodeReleaseTitle(title)
+            // League names in a reality show's episode title are not events.
+            val eventName = episodePattern.find(decodedTitle)?.let { decodedTitle.take(it.range.first) } ?: decodedTitle
+            val normalized = words(eventName)
+            // EuroLeague Monaco vs Barcelona is basketball, even though Monaco
+            // is also a Formula 1 venue. Prefer the earliest sport signal.
+            return keywordPatterns.mapNotNull { (bucket, patterns) ->
+                patterns.mapNotNull { it.find(normalized)?.range?.first }.minOrNull()
+                    ?.let { position -> bucket to position }
+            }.minByOrNull { it.second }?.first ?: OTHER
+        }
+
+        private val gamePlatform = Regex("\\b(?:ps[1-5]|playstation|xbox|nintendo|switch|steam|gog|elamigos|fitgirl|skidrow|codex|dlc|nsp|xci|pkg|iso)\\b")
+        private val gameTitle = Regex("\\b(?:(?:nba|wwe|pga(?: tour)?) ?2k ?\\d+|madden(?: nfl)? ?\\d+|fifa ?\\d+|ea sports (?:fc|ufc) ?\\d+|(?:nhl|f1) \\d{2})\\b")
+        private val nonEvent = Regex("\\b(?:documentary|documentaries|docuseries|doku|dokumentation|biography|biopic|movie|film|featurette|trailer|interview|podcast|talk ?show|preview|countdown|embedded|magazine|news|sports ?cent(?:er|re)|sportschau|inside the nba|nba today|nfl total access|first take|pardon the interruption|drive to survive|all or nothing|hard knocks|the ultimate fighter|total divas|total bellas|30 for 30|untold)\\b")
+        private val otherSports = Regex("\\b(?:darts|snooker|cycling|motogp|moto[23]|superbike|indycar|nascar|dtm|wec|wrc|rally|tour de france|vuelta|giro|olympics?|olympic|swimming|athletics|biathlon|skiing|ski jumping|volleyball|handball|badminton|table tennis|sailing|triathlon|marathon|surfing|gymnastics|water polo|fencing|weightlifting|judo|taekwondo)\\b")
+        private val eventWords = Regex("\\b(?:vs?|versus|at|race|qualifying|practice|sprint|grand prix|main card|prelims?|preliminary|fight night|round|stage|finals?|quarterfinals?|semifinals?|playoffs?|championship|tournament|match|game|week|day|session|royal rumble|wrestlemania)(?:\\d+)?\\b")
+        private val numberedEvent = Regex("\\b(?:ufc|bellator|pfl|rizin) ?\\d{2,3}\\b")
+        private val wrestlingBroadcast = Regex("^(?:wwe (?:raw|smackdown|nxt|main event)|aew (?:dynamite|collision|rampage))\\b")
+
+        /** A league keyword alone also describes games, films and studio programmes. Require event evidence. */
+        fun isSportsRelease(title: String, categoryId: String? = null): Boolean {
+            val categories = categoryId.orEmpty().split(',', ' ').mapNotNull { it.toIntOrNull() }
+            // Explicit console, PC, movie, music, book, anime or documentary categories cannot be sports events.
+            if (categories.any { it in 1000..4999 || it in 6000..8999 || it in setOf(5070, 5080, 5170, 5180, 5270, 5280, 5370, 5380) }) return false
+            val decoded = DisplayTextDecoder.decodeReleaseTitle(title)
+            val normalized = words(decoded)
+            if (gamePlatform.containsMatchIn(normalized) || gameTitle.containsMatchIn(normalized) || nonEvent.containsMatchIn(normalized)) return false
+            val wrestling = wrestlingBroadcast.containsMatchIn(normalized)
+            // Weekly wrestling broadcasts are actual events; league-themed drama/reality episodes are not.
+            if (episodePattern.containsMatchIn(decoded)) return wrestling
+            if (classify(decoded) == OTHER && !otherSports.containsMatchIn(normalized)) return false
+            return wrestling || SportsReleaseDateParser.eventDate(decoded) != null ||
+                eventWords.containsMatchIn(normalized) || numberedEvent.containsMatchIn(normalized) || '@' in decoded
         }
     }
 }

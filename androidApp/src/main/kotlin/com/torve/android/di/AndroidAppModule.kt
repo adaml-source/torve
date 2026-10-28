@@ -22,10 +22,19 @@ import org.koin.android.ext.koin.androidContext
 import org.koin.dsl.module
 
 val androidAppModule = module {
+    single { ActiveProfileIdCache.observing(get()) }
+    single {
+        com.torve.data.auth.UserIdProvider(
+            activeProfileIdProvider = { accountId -> get<ActiveProfileIdCache>().current(accountId) },
+            authClientProvider = { get() },
+        )
+    }
+    single { com.torve.android.player.AndroidSourceTrackInspector(androidContext(), get()) }
+    single<com.torve.data.addon.SourceTrackInspector> { get<com.torve.android.player.AndroidSourceTrackInspector>() }
     single { DatabaseDriverFactory(androidContext()) }
     single { NetworkMonitor(androidContext()) }
     single { AndroidKeystoreSecretStore(androidContext()) }
-    single<IntegrationSecretStore> { get<AndroidKeystoreSecretStore>() }
+    single<IntegrationSecretStore> { com.torve.domain.integrations.ProfileScopedSecretStore(get<AndroidKeystoreSecretStore>(), get<com.torve.data.auth.UserIdProvider>()) }
     single<SecureStorage> { get<AndroidKeystoreSecretStore>() }
     single<SyncPayloadEncryptor> { AndroidSyncPayloadEncryptor(get()) }
     single<DeviceIdProvider> { AndroidDeviceIdProvider(androidContext()) }
@@ -59,12 +68,19 @@ val androidAppModule = module {
             traktTokenStore = get(),
             prefs = get(),
             libraryService = get(),
+            mediaLifecycleService = get(),
+            automationRepository = get(),
+            automationAdminClient = get(),
             addonRepository = get(),
             stremioAddonClient = get(),
-            channelsViewModel = get(),
+            channelsHealth = com.torve.android.providerhealth.AndroidIptvHealthSource(get(),
+                savedPlaylists = { get<com.torve.domain.repository.ChannelRepository>().getPlaylists() }),
             pandaConfigStateStore = get(),
             refreshOnSettings = get(),
             context = androidContext(),
+            traktClient = get(),
+            traktAuthorizedApi = get(),
+            simklClient = get(),
         )
     }
 }

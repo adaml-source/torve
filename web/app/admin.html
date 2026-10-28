@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Admin - Torve</title>
+  <link rel="icon" type="image/png" href="/assets/favicon.png" />
+  <link rel="stylesheet" href="/assets/site-base.css?v=20260701-storecopy" />
+  <style>
+    body { margin: 0; background: var(--t-bg); color: var(--t-text); font-family: Inter, system-ui, sans-serif; }
+    .wrap { max-width: 1040px; margin: 0 auto; padding: 32px 20px 64px; }
+    .head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 28px; }
+    h1 { color: #fff; font-size: 22px; margin: 0; }
+    a { color: var(--t-accent); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    .auth { max-width: 400px; margin: 80px auto; text-align: center; }
+    .auth h2 { color: #fff; font-size: 18px; margin: 0 0 10px; }
+    .auth p { color: #888; font-size: 13px; margin: 0 0 18px; }
+    input { width: 100%; box-sizing: border-box; padding: 10px 12px; border-radius: 8px; border: 1px solid rgba(255,255,255,.12); background: rgba(255,255,255,.04); color: #fff; }
+    button, .btn { display: inline-flex; align-items: center; justify-content: center; min-height: 36px; padding: 8px 14px; border-radius: 8px; border: 1px solid rgba(255,255,255,.1); background: rgba(255,255,255,.06); color: #ddd; cursor: pointer; font-size: 13px; font-weight: 700; text-decoration: none; }
+    .primary { background: linear-gradient(135deg, var(--t-accent), #dbb95c); color: #08080e; border: 0; }
+    .tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 14px; }
+    .tile { display: block; padding: 18px; border-radius: 8px; border: 1px solid rgba(255,255,255,.08); background: rgba(255,255,255,.035); color: #fff; text-decoration: none; }
+    .tile:hover { border-color: rgba(245,179,1,.65); background: rgba(255,255,255,.055); text-decoration: none; }
+    .tile strong { display: block; font-size: 15px; margin-bottom: 6px; }
+    .tile span { display: block; color: #999; font-size: 12px; line-height: 1.45; }
+    .msg { margin-top: 10px; color: #f87171; font-size: 12px; }
+    .signout { margin-top: 28px; text-align: right; }
+  </style>
+  <link rel="stylesheet" href="/assets/modern-site.css?v=20261012-7" />
+  <meta name="robots" content="noindex, nofollow" />
+</head>
+<body class="modern-page admin-page">
+<header class="site-header" data-site-header>
+    <div class="site-header-inner">
+      <a class="site-brand" href="/" aria-label="Torve home"><img src="/assets/torve-logo-transparent.png" alt="Torve" class="site-header-logo" /></a>
+      <nav id="site-navigation" class="site-header-nav" aria-label="Main navigation"><a href="/#explore">Explore</a><a href="/download.html">Downloads</a><a href="/app/help.html">Guide</a><a href="/support.html">Support</a></nav>
+      <div class="site-header-actions"><a class="site-account-link t-btn t-btn-secondary" href="/signin.html">Sign in</a><a class="t-btn t-btn-primary" href="/download.html"><span class="install-label-full">Install Torve</span><span class="install-label-short">Install</span><svg class="button-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M12 3v12m-4-4 4 4 4-4M5 16v4h14v-4"/></svg></a></div>
+      <button class="site-menu-toggle" type="button" aria-label="Open menu" aria-controls="site-navigation" aria-expanded="false"><span></span><span></span></button>
+    </div>
+  </header>
+  <main class="wrap">
+    <div class="head">
+      <h1>Torve Admin</h1>
+      <a href="/">Back to site</a>
+    </div>
+
+    <section id="authGate" class="auth">
+      <h2>Admin Access</h2>
+      <p>Enter the admin secret for this browser session.</p>
+      <input type="password" id="secretInput" placeholder="Admin secret" autocomplete="off" />
+      <div style="margin-top:12px"><button class="primary" id="authBtn">Sign in</button></div>
+      <div id="authMsg" class="msg"></div>
+    </section>
+
+    <section id="adminPanel" style="display:none">
+      <div class="tiles">
+        <a class="tile" href="/app/admin-accounts.html">
+          <strong>Accounts</strong>
+          <span>Search users, inspect devices and entitlements, manage account state, beta access, and device caps.</span>
+        </a>
+        <a class="tile" href="/app/admin-rebate.html">
+          <strong>Rebate Codes</strong>
+          <span>Create and manage rebate codes for account access grants.</span>
+        </a>
+        <a class="tile" href="/app/admin-streams.html">
+          <strong>Stream Protection</strong>
+          <span>Monitor protected handoff adoption, legacy fallback usage, and memory-id coverage.</span>
+        </a>
+        <a class="tile" href="/app/admin-discord.html">
+          <strong>Discord Pages</strong>
+          <span>Edit official server pages, preview embed cards, and publish updates.</span>
+        </a>
+        <a class="tile" href="/app/admin-downloads.html">
+          <strong>Release Files</strong>
+          <span>Upload public MSI and APK files, promote current downloads, and remove old artifacts.</span>
+        </a>
+      </div>
+      <div class="signout">
+        <button id="signoutBtn">Sign out</button>
+      </div>
+    </section>
+  </main>
+  <script src="/assets/app/page-admin.js?v=20260706-downloads"></script>
+  <script src="/assets/modern-site.js?v=20261012-7" defer></script>
+</body>
+</html>

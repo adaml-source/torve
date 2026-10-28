@@ -42,7 +42,7 @@ class WatchlistRepositoryImpl(
 ) : WatchlistRepository {
 
     private val syncScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
-    private fun signedInUserIdOrNull(): String? = userIdProvider.currentUserIdOrNull()
+    private fun signedInUserIdOrNull(): String? = userIdProvider.currentDataUserIdOrNull()
 
     override suspend fun getAll(): List<WatchlistItem> {
         val userId = signedInUserIdOrNull() ?: return emptyList()
@@ -355,7 +355,7 @@ class WatchlistRepositoryImpl(
             message?.contains("Reconnect Trakt", ignoreCase = true) == true
 
     private fun syncTraktAdd(item: WatchlistItem) {
-        syncScope.launch {
+        syncScope.launch(com.torve.data.auth.PersonalDataScope(userIdProvider.currentUserId(), userIdProvider.currentProfileId())) {
             try {
                 val ids = TraktIds(tmdb = item.tmdbId, imdb = item.imdbId)
                 val body = if (item.mediaType == MediaType.MOVIE) {
@@ -375,7 +375,7 @@ class WatchlistRepositoryImpl(
     }
 
     private fun syncTraktRemove(tmdbId: Int, imdbId: String?, isMovie: Boolean) {
-        syncScope.launch {
+        syncScope.launch(com.torve.data.auth.PersonalDataScope(userIdProvider.currentUserId(), userIdProvider.currentProfileId())) {
             try {
                 val ids = TraktIds(tmdb = tmdbId, imdb = imdbId)
                 val body = if (isMovie) {
@@ -395,7 +395,7 @@ class WatchlistRepositoryImpl(
     }
 
     private fun syncSimklAdd(item: WatchlistItem) {
-        syncScope.launch {
+        syncScope.launch(com.torve.data.auth.PersonalDataScope(userIdProvider.currentUserId(), userIdProvider.currentProfileId())) {
             try {
                 val token = integrationSecretStore.get(IntegrationSecretKey.SIMKL_ACCESS_TOKEN)
                     ?: prefsRepo.getString("simkl_access_token")
@@ -415,7 +415,7 @@ class WatchlistRepositoryImpl(
     }
 
     private fun syncSimklRemove(tmdbId: Int, imdbId: String?, isMovie: Boolean) {
-        syncScope.launch {
+        syncScope.launch(com.torve.data.auth.PersonalDataScope(userIdProvider.currentUserId(), userIdProvider.currentProfileId())) {
             try {
                 val token = integrationSecretStore.get(IntegrationSecretKey.SIMKL_ACCESS_TOKEN)
                     ?: prefsRepo.getString("simkl_access_token")

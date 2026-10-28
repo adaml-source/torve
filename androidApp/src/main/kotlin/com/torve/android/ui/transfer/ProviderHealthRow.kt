@@ -1,5 +1,7 @@
 package com.torve.android.ui.transfer
 
+import com.torve.android.ui.community.parityLabel as localizedUiText
+
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -86,19 +88,19 @@ fun ProviderHealthRow(
                         when (action) {
                             ProviderRepairAction.TransferFromAnotherDevice ->
                                 OutlinedButton(onClick = onTransferReceive) {
-                                    Text("Transfer from another device")
+                                    Text(localizedUiText("Transfer from another device"))
                                 }
                             ProviderRepairAction.ReenterCredentials ->
                                 TextButton(onClick = { onOpenSettings(entry) }) {
-                                    Text("Re-enter")
+                                    Text(localizedUiText("Re-enter"))
                                 }
                             ProviderRepairAction.OpenDiagnostics ->
                                 TextButton(onClick = onOpenDiagnostics) {
-                                    Text("Diagnostics")
+                                    Text(localizedUiText("Diagnostics"))
                                 }
                             ProviderRepairAction.OpenProviderSettings ->
                                 TextButton(onClick = { onOpenSettings(entry) }) {
-                                    Text("Open settings")
+                                    Text(localizedUiText("Open settings"))
                                 }
                         }
                     }
@@ -123,7 +125,7 @@ private fun StatusPill(status: ProviderHealthStatus) {
     else MaterialTheme.colorScheme.onErrorContainer
     Surface(color = container, shape = RoundedCornerShape(999.dp)) {
         Text(
-            label,
+            localizedUiText(label),
             color = onContainer,
             style = MaterialTheme.typography.labelSmall,
             fontWeight = FontWeight.SemiBold,
@@ -138,15 +140,26 @@ private fun StatusPill(status: ProviderHealthStatus) {
  * mobile and TV surfaces (with their respective NavController-vs-TV-nav
  * adaptation done at the call site).
  */
+fun providerSettingsRouteFor(entry: ProviderHealthEntry): String? = when {
+    entry.providerKey == "automation:admin" -> "integrations?service=automation"
+    entry.category == ProviderHealthCategory.REQUEST_MANAGER -> "integrations?service=seerr"
+    entry.category == ProviderHealthCategory.TRAKT -> "integrations?service=trakt"
+    entry.category == ProviderHealthCategory.SIMKL -> "integrations?service=simkl"
+    entry.category == ProviderHealthCategory.PLEX_JELLYFIN && entry.providerKey == "jellyfin" -> "integrations?service=jellyfin"
+    entry.category == ProviderHealthCategory.PLEX_JELLYFIN && entry.providerKey == "plex" -> "integrations?service=plex"
+    else -> providerSettingsRouteFor(entry.category)
+}
+
 fun providerSettingsRouteFor(category: ProviderHealthCategory): String? = when (category) {
-    ProviderHealthCategory.DEBRID -> "panda_setup"
+    ProviderHealthCategory.DEBRID -> "integrations?service=debrid"
     ProviderHealthCategory.PLEX_JELLYFIN -> "integrations"
     ProviderHealthCategory.TRAKT, ProviderHealthCategory.SIMKL -> "integrations"
     ProviderHealthCategory.USENET_INDEXER,
     ProviderHealthCategory.USENET_PROVIDER,
-    ProviderHealthCategory.DOWNLOAD_CLIENT -> "manage_panda"
+    ProviderHealthCategory.DOWNLOAD_CLIENT -> "usenet_setup"
     ProviderHealthCategory.IPTV -> "settings"
     ProviderHealthCategory.ADDON -> "addon_catalog"
     ProviderHealthCategory.EPG -> "settings"
+    ProviderHealthCategory.REQUEST_MANAGER -> "integrations"
     ProviderHealthCategory.PLAYBACK -> null
 }

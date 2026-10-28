@@ -159,8 +159,6 @@ fun AccountScreen(
         }
 
         Spacer(modifier = Modifier.height(8.dp))
-        OutlinedButton(onClick = onBack) {
-            Text(stringResource(R.string.common_back))
-        }
+        com.torve.android.ui.components.BackButton(onClick = onBack)
     }
 }

@@ -11,10 +11,10 @@ enum class RatingSource(
     val defaultOrder: Int,
 ) {
     TORVE("Torve Score", "T+", false, 0),
-    IMDB("IMDb", "I", true, 1),
+    IMDB("IMDb", "I", true, 0),
     ROTTEN_TOMATOES("Rotten Tomatoes", "R", true, 2),
     RT_AUDIENCE("RT Audience", "A", false, 3),
-    TMDB("TMDB", "T", true, 0),
+    TMDB("TMDB", "T", true, 1),
     METACRITIC("Metacritic", "M", false, 4),
     LETTERBOXD("Letterboxd", "L", false, 5),
     TRAKT("Trakt", "K", false, 6),
@@ -168,9 +168,10 @@ private fun mergeRatingsPreservingExisting(
     )
 }
 
+private val ratingLookupPunctuation = Regex("[^a-z0-9]+")
 private fun String.normalizedRatingLookupTitle(): String =
     lowercase()
-        .replace(Regex("[^a-z0-9]+"), "")
+        .replace(ratingLookupPunctuation, "")
         .trim()
 
 @Serializable
@@ -231,6 +232,17 @@ fun RatingPillPosition.isOutside(): Boolean = this == RatingPillPosition.OUTSIDE
 fun RatingDisplayPrefs.allowsTmdbRatingProvider(): Boolean =
     enabledProviders.isEmpty() || RatingSource.TMDB in enabledProviders
 
+/** Card ranking uses available external scores first, with TMDB only as a real fallback. */
+fun RatingDisplayPrefs.forAvailableCardRatings(ratings: MediaRatings): RatingDisplayPrefs {
+    val enabled = if (enabledProviders.isEmpty()) listOf(RatingSource.TMDB) else enabledProviders
+    val available = (providerOrder + RatingSource.entries).distinct().filter { it in enabled && ratings.hasValueFor(it) }
+    val external = available.any { it != RatingSource.TMDB && it != RatingSource.TORVE }
+    val ordered = available.filter { !external || it != RatingSource.TMDB }.sortedBy {
+        when (it) { RatingSource.IMDB -> 0; RatingSource.ROTTEN_TOMATOES -> 1; else -> 2 }
+    }
+    return copy(enabledProviders = ordered, providerOrder = ordered, maxRatingsOnCard = maxRatingsOnCard.coerceAtMost(ordered.size))
+}
+
 fun defaultTorveWeights(): Map<RatingSource, Int> = mapOf(
     RatingSource.IMDB to 35,
     RatingSource.TMDB to 25,
@@ -240,15 +252,15 @@ fun defaultTorveWeights(): Map<RatingSource, Int> = mapOf(
 
 fun MediaRatings.hasValueFor(source: RatingSource): Boolean = when (source) {
     RatingSource.TORVE -> false
-    RatingSource.IMDB -> imdbScore != null
-    RatingSource.ROTTEN_TOMATOES -> rottenTomatoesScore != null
-    RatingSource.RT_AUDIENCE -> rtAudienceScore != null
-    RatingSource.TMDB -> tmdbScore != null
-    RatingSource.METACRITIC -> metacriticScore != null
-    RatingSource.LETTERBOXD -> letterboxdScore != null
-    RatingSource.TRAKT -> traktScore != null
-    RatingSource.MDBLIST -> mdblistScore != null
-    RatingSource.MAL -> malScore != null
+    RatingSource.IMDB -> imdbScore?.let { it > 0f && it <= 10f } == true
+    RatingSource.ROTTEN_TOMATOES -> rottenTomatoesScore in 1..100
+    RatingSource.RT_AUDIENCE -> rtAudienceScore in 1..100
+    RatingSource.TMDB -> tmdbScore?.let { it > 0f && it <= 10f } == true
+    RatingSource.METACRITIC -> metacriticScore in 1..100
+    RatingSource.LETTERBOXD -> letterboxdScore?.let { it > 0f && it <= 5f } == true
+    RatingSource.TRAKT -> traktScore?.let { it > 0f && it <= 100f } == true
+    RatingSource.MDBLIST -> mdblistScore?.let { it > 0f && it <= 100f } == true
+    RatingSource.MAL -> malScore?.let { it > 0f && it <= 10f } == true
 }
 
 fun MediaRatings.hasAnyEnabledDisplayValue(

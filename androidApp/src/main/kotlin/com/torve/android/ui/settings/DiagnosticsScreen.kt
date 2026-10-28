@@ -1,5 +1,7 @@
 package com.torve.android.ui.settings
 
+import com.torve.android.ui.community.parityLabel as localizedUiText
+
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
@@ -65,24 +67,24 @@ fun DiagnosticsScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(Obsidian)
+            .background(MaterialTheme.colorScheme.background)
             .statusBarsPadding()
             .padding(16.dp)
             .verticalScroll(rememberScrollState()),
     ) {
         BackButton(onClick = onBack)
         Spacer(Modifier.height(8.dp))
-        Text(stringResource(R.string.diagnostics_title), style = MaterialTheme.typography.titleLarge, color = Snow, fontWeight = FontWeight.Bold)
+        Text(stringResource(R.string.diagnostics_title), style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.Bold)
         Spacer(Modifier.height(12.dp))
 
         // Device & App info
         Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = Charcoal)) {
             Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text("App: $appVersion", color = Snow, style = MaterialTheme.typography.bodyMedium)
-                Text("Build: release", color = Silver, style = MaterialTheme.typography.bodySmall)
-                Text("Device: ${Build.MANUFACTURER} ${Build.MODEL}", color = Silver, style = MaterialTheme.typography.bodySmall)
-                Text("Android: ${Build.VERSION.RELEASE} (SDK ${Build.VERSION.SDK_INT})", color = Silver, style = MaterialTheme.typography.bodySmall)
-                Text("Region: ${state.regionCode}", color = Silver, style = MaterialTheme.typography.bodySmall)
+                Text(localizedUiText("App: $appVersion"), color = MaterialTheme.colorScheme.onSurface, style = MaterialTheme.typography.bodyMedium)
+                Text(localizedUiText("Build: release"), color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+                Text(localizedUiText("Device: ${Build.MANUFACTURER} ${Build.MODEL}"), color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+                Text(localizedUiText("Android: ${Build.VERSION.RELEASE} (SDK ${Build.VERSION.SDK_INT})"), color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+                Text(localizedUiText("Region: ${state.regionCode}"), color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
             }
         }
         Spacer(Modifier.height(12.dp))
@@ -90,14 +92,14 @@ fun DiagnosticsScreen(
         // Service Health
         Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = Charcoal)) {
             Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text(stringResource(R.string.diagnostics_service_health), color = Snow, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.bodyMedium)
-                StatusRow("Cloud", state.debridConnected)
-                StatusRow("Trakt", state.traktConnected)
-                StatusRow("SIMKL", state.simklConnected)
-                StatusRow("Jellyfin", state.jellyfinApiKey.isNotBlank())
-                StatusRow("Plex", state.plexConnected)
-                StatusRow("AI (${state.aiProvider.name})", state.activeAiApiKey.isNotBlank())
-                StatusRow("MDBList", state.mdblistApiKey.isNotBlank())
+                Text(stringResource(R.string.diagnostics_service_health), color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.bodyMedium)
+                StatusRow(localizedUiText("Cloud"), state.debridConnected)
+                StatusRow(localizedUiText("Trakt"), state.traktConnected)
+                StatusRow(localizedUiText("SIMKL"), state.simklConnected)
+                StatusRow(localizedUiText("Jellyfin"), state.jellyfinApiKey.isNotBlank())
+                StatusRow(localizedUiText("Plex"), state.plexConnected)
+                StatusRow(localizedUiText("AI (${state.aiProvider.name})"), state.activeAiApiKey.isNotBlank())
+                StatusRow(localizedUiText("MDBList"), state.mdblistApiKey.isNotBlank())
             }
         }
         Spacer(Modifier.height(12.dp))
@@ -105,10 +107,10 @@ fun DiagnosticsScreen(
         // Sync timestamps
         Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = Charcoal)) {
             Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text(stringResource(R.string.diagnostics_sync_status), color = Snow, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.bodyMedium)
-                Text("Trakt last sync: ${formatTimestamp(state.traktLastSyncTime)}", color = Silver, style = MaterialTheme.typography.bodySmall)
-                Text("Availability last sync: ${formatTimestamp(state.availabilityLastSyncTime)}", color = Silver, style = MaterialTheme.typography.bodySmall)
-                Text("Library overlay last sync: ${formatTimestamp(state.libraryOverlayLastSyncTime)}", color = Silver, style = MaterialTheme.typography.bodySmall)
+                Text(stringResource(R.string.diagnostics_sync_status), color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.bodyMedium)
+                Text(localizedUiText("Trakt last sync: ${formatTimestamp(state.traktLastSyncTime)}"), color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+                Text(localizedUiText("Availability last sync: ${formatTimestamp(state.availabilityLastSyncTime)}"), color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+                Text(localizedUiText("Library overlay last sync: ${formatTimestamp(state.libraryOverlayLastSyncTime)}"), color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
             }
         }
         Spacer(Modifier.height(12.dp))
@@ -116,16 +118,16 @@ fun DiagnosticsScreen(
         // Content & Configuration
         Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = Charcoal)) {
             Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text(stringResource(R.string.diagnostics_content_config), color = Snow, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.bodyMedium)
-                DiagRow("Card style presets", "${state.cardStylePresets.size}")
-                DiagRow("Global default preset", state.globalDefaultPresetId ?: "default")
-                DiagRow("Regex patterns", "${state.regexPatterns.size} active")
-                DiagRow("Stream groups", "${state.streamGroups.size}")
-                DiagRow("Kodi devices", "${state.kodiHosts.size}")
-                DiagRow("AI provider", state.aiProvider.name)
-                DiagRow("AI key configured", if (state.activeAiApiKey.isNotBlank()) "Yes" else "No")
-                DiagRow("Cloud provider", state.debridProvider.name)
-                DiagRow("Connected cloud services", "${state.connectedDebridProviders.size}")
+                Text(stringResource(R.string.diagnostics_content_config), color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.bodyMedium)
+                DiagRow(localizedUiText("Card style presets"), "${state.cardStylePresets.size}")
+                DiagRow(localizedUiText("Global default preset"), state.globalDefaultPresetId ?: "default")
+                DiagRow(localizedUiText("Regex patterns"), "${state.regexPatterns.size} active")
+                DiagRow(localizedUiText("Stream groups"), "${state.streamGroups.size}")
+                DiagRow(localizedUiText("Kodi devices"), "${state.kodiHosts.size}")
+                DiagRow(localizedUiText("AI provider"), state.aiProvider.name)
+                DiagRow(localizedUiText("AI key configured"), if (state.activeAiApiKey.isNotBlank()) "Yes" else "No")
+                DiagRow(localizedUiText("Cloud provider"), state.debridProvider.name)
+                DiagRow(localizedUiText("Connected cloud services"), "${state.connectedDebridProviders.size}")
             }
         }
         Spacer(Modifier.height(12.dp))
@@ -133,14 +135,14 @@ fun DiagnosticsScreen(
         // Stream Preferences
         Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = Charcoal)) {
             Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text(stringResource(R.string.diagnostics_stream_prefs), color = Snow, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.bodyMedium)
-                DiagRow("Max quality", state.maxQuality.name)
-                DiagRow("Min quality", state.minQuality.name)
-                DiagRow("Max file size", state.maxFileSizeMb?.let { "${it} MB" } ?: "No limit")
-                DiagRow("Cached only", state.cachedOnly.toString())
-                DiagRow("Codec preference", state.codecPreference.name)
-                DiagRow("HDR mode", state.hdrMode.name)
-                DiagRow("Dedupe results", state.dedupeResults.toString())
+                Text(stringResource(R.string.diagnostics_stream_prefs), color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.bodyMedium)
+                DiagRow(localizedUiText("Max quality"), state.maxQuality.name)
+                DiagRow(localizedUiText("Min quality"), state.minQuality.name)
+                DiagRow(localizedUiText("Max file size"), state.maxFileSizeMb?.let { "${it} MB" } ?: "No limit")
+                DiagRow(localizedUiText("Cached only"), state.cachedOnly.toString())
+                DiagRow(localizedUiText("Codec preference"), state.codecPreference.name)
+                DiagRow(localizedUiText("HDR mode"), state.hdrMode.name)
+                DiagRow(localizedUiText("Dedupe results"), state.dedupeResults.toString())
             }
         }
         Spacer(Modifier.height(12.dp))
@@ -148,14 +150,14 @@ fun DiagnosticsScreen(
         // Ratings
         Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = Charcoal)) {
             Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text(stringResource(R.string.diagnostics_rating_config), color = Snow, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.bodyMedium)
-                DiagRow("Enabled providers", state.ratingPrefs.enabledProviders.joinToString(", ") { it.name })
-                DiagRow("Pill style", state.ratingPrefs.pillStyle.name)
-                DiagRow("Pill position", state.ratingPrefs.pillPosition.displayName)
-                DiagRow("Max ratings on card", "${state.ratingPrefs.maxRatingsOnCard}")
-                DiagRow("Show on detail page", state.ratingPrefs.showRatingsOnDetailPage.toString())
-                DiagRow("Torve on cards", state.ratingPrefs.showTorveScoreOnCards.toString())
-                DiagRow("Landscape ratings", state.ratingPrefs.allowRatingsOnLandscapeCards.toString())
+                Text(stringResource(R.string.diagnostics_rating_config), color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.bodyMedium)
+                DiagRow(localizedUiText("Enabled providers"), state.ratingPrefs.enabledProviders.joinToString(", ") { it.name })
+                DiagRow(localizedUiText("Pill style"), state.ratingPrefs.pillStyle.name)
+                DiagRow(localizedUiText("Pill position"), state.ratingPrefs.pillPosition.displayName)
+                DiagRow(localizedUiText("Max ratings on card"), "${state.ratingPrefs.maxRatingsOnCard}")
+                DiagRow(localizedUiText("Show on detail page"), state.ratingPrefs.showRatingsOnDetailPage.toString())
+                DiagRow(localizedUiText("Torve on cards"), state.ratingPrefs.showTorveScoreOnCards.toString())
+                DiagRow(localizedUiText("Landscape ratings"), state.ratingPrefs.allowRatingsOnLandscapeCards.toString())
             }
         }
         Spacer(Modifier.height(12.dp))
@@ -163,14 +165,14 @@ fun DiagnosticsScreen(
         // Integrations detail
         Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = Charcoal)) {
             Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text(stringResource(R.string.diagnostics_integrations_detail), color = Snow, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.bodyMedium)
-                DiagRow("Jellyfin URL", if (state.jellyfinServerUrl.isNotBlank()) state.jellyfinServerUrl else "Not configured")
-                DiagRow("Jellyfin profiles", "${state.jellyfinProfiles.size}")
-                DiagRow("Plex URL", if (state.plexServerUrl.isNotBlank()) state.plexServerUrl else "Not configured")
-                DiagRow("Plex connected", state.plexConnected.toString())
-                DiagRow("Trakt scrobble", state.traktScrobbleEnabled.toString())
-                DiagRow("Theme", state.themeMode.name)
-                DiagRow("Language", state.appLanguage.displayName)
+                Text(stringResource(R.string.diagnostics_integrations_detail), color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.bodyMedium)
+                DiagRow(localizedUiText("Jellyfin URL"), if (state.jellyfinServerUrl.isNotBlank()) state.jellyfinServerUrl else "Not configured")
+                DiagRow(localizedUiText("Jellyfin profiles"), "${state.jellyfinProfiles.size}")
+                DiagRow(localizedUiText("Plex URL"), if (state.plexServerUrl.isNotBlank()) state.plexServerUrl else "Not configured")
+                DiagRow(localizedUiText("Plex connected"), state.plexConnected.toString())
+                DiagRow(localizedUiText("Trakt scrobble"), state.traktScrobbleEnabled.toString())
+                DiagRow(localizedUiText("Theme"), state.themeMode.name)
+                DiagRow(localizedUiText("Language"), state.appLanguage.displayName)
             }
         }
         Spacer(Modifier.height(12.dp))
@@ -180,7 +182,7 @@ fun DiagnosticsScreen(
             Text(
                 diagnostics,
                 modifier = Modifier.padding(12.dp),
-                color = Silver,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
                 style = MaterialTheme.typography.bodySmall,
             )
         }
@@ -222,7 +224,7 @@ fun DiagnosticsScreen(
 @Composable
 private fun StatusRow(label: String, connected: Boolean) {
     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-        Text(label, color = Silver, style = MaterialTheme.typography.bodySmall)
+        Text(localizedUiText(label), color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
         Text(
             if (connected) stringResource(R.string.diagnostics_connected) else stringResource(R.string.diagnostics_not_configured),
             color = if (connected) Snow else Silver,
@@ -235,8 +237,8 @@ private fun StatusRow(label: String, connected: Boolean) {
 @Composable
 private fun DiagRow(label: String, value: String) {
     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-        Text(label, color = Silver, style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
-        Text(value, color = Snow, style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Medium)
+        Text(localizedUiText(label), color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
+        Text(value, color = MaterialTheme.colorScheme.onSurface, style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Medium)
     }
 }
 

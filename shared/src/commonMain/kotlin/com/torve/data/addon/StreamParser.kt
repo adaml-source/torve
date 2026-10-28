@@ -1,5 +1,7 @@
 package com.torve.data.addon
 
+import com.torve.util.DisplayTextDecoder
+
 /**
  * Parses raw Stremio stream objects into our app's ParsedStream format.
  * Ported from stremio.ts parseStream / extractQuality / extractCodec.
@@ -11,36 +13,42 @@ object StreamParser {
         fallbackAddonName: String = "Unknown",
         addonBaseUrl: String? = null,
     ): ParsedStream {
-        val nameParts = (stream.name ?: "").split("\n")
+        val nameParts = DisplayTextDecoder.decode(stream.name ?: "").split("\n")
         val rawAddonName = nameParts.firstOrNull()?.trim()?.takeIf { it.isNotBlank() }
         val isPandaOrigin = isPandaAddon(fallbackAddonName, addonBaseUrl)
         val addonName = if (isPandaOrigin) {
             "Panda"
         } else {
-            rawAddonName ?: fallbackAddonName
+            rawAddonName ?: DisplayTextDecoder.decode(fallbackAddonName)
         }
-        val qualityFromName = nameParts.getOrNull(1) ?: ""
+        val qualityFromName = nameParts.drop(1).joinToString(" ").ifBlank { nameParts.firstOrNull().orEmpty() }
 
-        val title = stream.title ?: stream.behaviorHints?.filename ?: "Unknown"
+        val title = DisplayTextDecoder.decodeReleaseTitle(stream.title?.takeIf(String::isNotBlank)
+            ?: stream.behaviorHints?.filename?.takeIf(String::isNotBlank)
+            ?: stream.description?.takeIf(String::isNotBlank) ?: "Unknown")
         val lines = title.split("\n")
         val mainTitle = lines.firstOrNull() ?: title
+        val fullText = listOfNotNull(title, stream.description?.let(DisplayTextDecoder::decodeReleaseTitle)).joinToString("\n")
 
-        val quality = extractQuality(qualityFromName.ifBlank { mainTitle })
+        val quality = extractQuality("$qualityFromName $mainTitle")
 
         // Extract size (💾 XX.X GB pattern or just numbers)
         val sizeRegex1 = Regex("💾\\s*([\\d.]+\\s*[GMKT]B)", RegexOption.IGNORE_CASE)
         val sizeRegex2 = Regex("([\\d.]+)\\s*(GB|MB)", RegexOption.IGNORE_CASE)
-        val sizeMatch = sizeRegex1.find(title) ?: sizeRegex2.find(title)
+        val sizeMatch = sizeRegex1.find(fullText) ?: sizeRegex2.find(fullText)
         val size = sizeMatch?.value?.replace("💾", "")?.trim()
+            ?: stream.behaviorHints?.videoSize?.takeIf { it > 0 }?.let { bytes -> "${bytes / 1_000_000} MB" }
 
         // Extract seeds (👤 pattern)
-        val seedsMatch = Regex("👤\\s*(\\d+)").find(title)
-        val seeds = seedsMatch?.groupValues?.get(1)?.toIntOrNull()
+        val seedsMatch = Regex("👤\\s*(\\d+)").find(fullText)
+        val seeds = stream.behaviorHints?.seeders ?: seedsMatch?.groupValues?.get(1)?.toIntOrNull()
 
-        val codec = extractCodec(mainTitle)
+        val codec = extractCodec(fullText)
 
         // Extract source (last line often has the indexer)
-        val source = if (lines.size > 1) {
+        val source = stream.behaviorHints?.indexer?.takeIf(String::isNotBlank)
+            ?: Regex("🔍\\s*([^\\n]+)").find(fullText)?.groupValues?.get(1)?.trim()
+            ?: if (lines.size > 1) {
             lines.last().replace(Regex("[⚙️]"), "").trim().takeIf { it.isNotBlank() }
         } else null
         val displaySource = if (isPandaOrigin) {
@@ -52,13 +60,14 @@ object StreamParser {
             source
         }
 
-        val fullText = title
         val hdr = extractHdr(fullText)
         val audioCodec = extractAudioCodec(fullText)
-        val languages = extractLanguages(fullText)
-        val cachedByAddon = hasDebridCachedMarker(
-            text = listOfNotNull(stream.name, stream.title, stream.behaviorHints?.filename).joinToString("\n"),
-        )
+        val languageText = listOfNotNull(fullText,
+            stream.behaviorHints?.filename?.let(DisplayTextDecoder::decodeReleaseTitle)).joinToString("\n")
+        val languages = extractLanguages(languageText)
+        // An explicit service-scoped false must override any decorative cached badge.
+        val cachedByAddon = stream.behaviorHints?.let { hints -> hints.cached?.takeIf { !hints.service.isNullOrBlank() } }
+            ?: hasDebridCachedMarker(listOfNotNull(stream.name, stream.title, stream.description).joinToString("\n"))
 
         val primaryUrl = stream.url?.trim()?.takeIf { it.isNotBlank() }
         val externalUrl = stream.externalUrl?.trim()?.takeIf { it.isNotBlank() }
@@ -79,6 +88,7 @@ object StreamParser {
             addonName = addonName,
             quality = quality,
             title = mainTitle,
+            fileName = stream.behaviorHints?.filename?.let(DisplayTextDecoder::decodeReleaseTitle),
             infoHash = resolvedInfoHash,
             fileIdx = stream.fileIdx,
             magnetUrl = magnetUrl,
@@ -91,7 +101,10 @@ object StreamParser {
             hdr = hdr,
             audioCodec = audioCodec,
             languages = languages,
+            subtitleLanguages = SourceLanguages.extractSubtitles(languageText),
             addonBaseUrl = addonBaseUrl,
+            bingeGroup = stream.behaviorHints?.bingeGroup?.trim()?.takeIf { it.isNotEmpty() },
+            downloadService = stream.behaviorHints?.service?.trim()?.lowercase()?.takeIf { it.isNotEmpty() },
         )
     }
 
@@ -109,21 +122,10 @@ object StreamParser {
     }
 
     /**
-     * Extract audio-language codes from Panda's `🗣️ DE, EN` badge (or unicode
-     * variant `🗣  DE, EN`). Returns upper-cased, trimmed codes in the order
-     * they appear. Anything that isn't a 2–3 letter code is rejected so
-     * multi-line text or stray punctuation doesn't leak in.
+     * Prefer explicit audio badges, otherwise infer conservative release-file
+     * tags. Subtitle-only tags and an unspecified MULTI never establish audio.
      */
-    fun extractLanguages(text: String): List<String> {
-        // Match the 🗣 emoji (with or without variation selector) followed by a
-        // run of letters/commas/spaces up to the next non-language character.
-        val badgeRegex = Regex("\uD83D\uDDE3\uFE0F?\\s*([A-Za-z,\\s]+)")
-        val match = badgeRegex.find(text) ?: return emptyList()
-        return match.groupValues[1]
-            .split(',')
-            .map { it.trim().uppercase() }
-            .filter { it.matches(Regex("^[A-Z]{2,3}$")) }
-    }
+    fun extractLanguages(text: String): List<String> = SourceLanguages.extract(text)
 
     fun extractQuality(text: String): String {
         val t = text.uppercase()
@@ -176,7 +178,7 @@ object StreamParser {
 
     private fun hasDebridCachedMarker(text: String): Boolean {
         val t = text.uppercase()
-        return listOf(
+        return Regex("\\[(?:RD|AD|PM|TB|DL|ED|OC|PP|TORBOX)\\s*⚡\\uFE0F?]", RegexOption.IGNORE_CASE).containsMatchIn(text) || listOf(
             "RD+",
             "AD+",
             "PM+",

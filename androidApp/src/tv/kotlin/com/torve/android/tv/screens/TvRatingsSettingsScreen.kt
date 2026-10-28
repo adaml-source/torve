@@ -19,6 +19,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -28,6 +29,8 @@ import com.torve.domain.model.RatingDisplayPrefs
 import com.torve.domain.model.RatingSource
 import com.torve.presentation.settings.SettingsViewModel
 import org.koin.compose.koinInject
+import com.torve.android.tv.settings.rememberTvPosterRatingsPreference
+import com.torve.android.tv.settings.setTvPosterRatingsEnabled
 
 @Composable
 fun TvRatingsSettingsScreen(
@@ -42,6 +45,8 @@ fun TvRatingsSettingsScreen(
 ) {
     val settingsState by settingsViewModel.state.collectAsState()
     val prefs = settingsState.ratingPrefs
+    val context = LocalContext.current
+    val showPosterRatings = rememberTvPosterRatingsPreference()
 
     BackHandler(onBack = onBack)
 
@@ -91,6 +96,20 @@ fun TvRatingsSettingsScreen(
                         prefs.copy(showRatingsOnDetailPage = !prefs.showRatingsOnDetailPage),
                     )
                 },
+            )
+        }
+
+        item(key = "show_on_posters") {
+            val requester = remember("rt_posters") { FocusRequester() }
+            TvSettingCard(
+                title = stringResource(R.string.tv_ratings_show_on_posters),
+                subtitle = if (showPosterRatings) stringResource(R.string.tv_home_layout_enabled)
+                           else stringResource(R.string.tv_home_layout_disabled),
+                modifier = Modifier.fillMaxWidth().focusProperties { left = railFocusRequester },
+                focusRequester = requester,
+                onFocused = { onContentFocused(requester) },
+                onClick = { setTvPosterRatingsEnabled(context, !showPosterRatings) },
+                rowType = TvSettingRowType.TOGGLE,
             )
         }
 
@@ -172,6 +191,7 @@ fun TvRatingsSettingsScreen(
                 onFocused = { onContentFocused(requester) },
                 onClick = {
                     settingsViewModel.updateRatingPrefs(RatingDisplayPrefs())
+                    setTvPosterRatingsEnabled(context, true)
                 },
             )
         }

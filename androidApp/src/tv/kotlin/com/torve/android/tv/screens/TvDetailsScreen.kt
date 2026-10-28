@@ -1,8 +1,8 @@
-﻿package com.torve.android.tv.screens
+package com.torve.android.tv.screens
+
+import com.torve.android.tv.components.tvSettingsLabel as localizedUiText
 
 import android.content.Context
-import android.content.Intent
-import android.net.Uri
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
@@ -11,11 +11,12 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusGroup
-import androidx.compose.foundation.focusable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -45,14 +46,17 @@ import androidx.compose.runtime.derivedStateOf
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.compose.currentStateAsState
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -77,21 +81,25 @@ import com.torve.android.R
 import com.torve.android.premium.rememberEffectivePremiumAccessTier
 import com.torve.android.ui.detail.DetailPlaybackReadinessCard
 import com.torve.android.ui.detail.DetailRatingsAttribution
-import com.torve.android.ui.detail.StreamExperienceBadges
-import com.torve.android.ui.detail.StreamReadinessLabel
 import com.torve.android.ui.detail.groupPlaybackOptionStreams
 import com.torve.android.ui.detail.streamUiKey
-import com.torve.android.ui.components.getRatingValue
 import com.torve.android.ui.components.mediaItemLazyKey
-import com.torve.android.ui.components.ratingSourceIconRes
 import com.torve.android.ui.theme.*
 import com.torve.android.player.DeviceCodecProbe
 import com.torve.android.tv.NotificationType
 import com.torve.android.tv.TvNotificationQueue
+import com.torve.android.tv.launchTvTrailer
+import com.torve.android.tv.components.tvGlassControl
 import com.torve.android.tv.components.TvEpisodePicker
+import com.torve.android.tv.components.TvStreamResultRow
+import com.torve.android.tv.components.readTvStreamSortMode
+import com.torve.android.tv.components.tvStreamPresentation
+import com.torve.android.tv.components.writeTvStreamSortMode
 import com.torve.android.tv.focus.TvFocusTargetId
 import com.torve.android.tv.focus.rememberRegisteredTvFocusRequester
 import com.torve.android.tv.focus.rememberTvModalFocusRestoreController
+import com.torve.android.tv.focus.TvDetailsPlaybackReturnTarget
+import com.torve.android.tv.focus.resolveTvDetailsPlaybackReturnTarget
 import com.torve.android.tv.premium.TvEntitledFeature
 import com.torve.android.tv.premium.TvPremiumAccess
 import androidx.compose.material.icons.Icons
@@ -99,18 +107,14 @@ import androidx.compose.material.icons.rounded.CloudDone
 import androidx.compose.material3.Icon
 import com.torve.android.download.DownloadWorker
 import com.torve.data.download.BulkDownloadManager
+import com.torve.data.integrations.JellyfinLibraryOverlayService
 import com.torve.domain.model.CandidateProvenanceKind
 import com.torve.domain.model.ContentWarmupTrigger
 import com.torve.domain.model.Download
 import com.torve.domain.model.DownloadStatus
 import com.torve.domain.model.MediaItem
 import com.torve.domain.model.MediaType
-import com.torve.domain.model.RatingSource
-import com.torve.domain.model.allowsTmdbRatingProvider
-import com.torve.domain.model.deriveProvidersToRender
 import com.torve.domain.model.favoriteMediaKey
-import com.torve.domain.model.hasAnyEnabledDisplayValue
-import com.torve.domain.model.withFallbackTmdbScore
 import com.torve.android.tv.components.TvSourcePickerSheet
 import com.torve.data.addon.isTorrentOrDebridStream
 import com.torve.data.addon.isUsenetStream
@@ -118,6 +122,8 @@ import com.torve.domain.lanlibrary.NetworkMode
 import com.torve.domain.lanlibrary.PlaybackRoute
 import com.torve.domain.repository.DownloadRepository
 import com.torve.domain.repository.MediaFavoritesRepository
+import com.torve.domain.repository.MetadataRepository
+import com.torve.domain.streams.usenetCandidateIdOrNull
 import com.torve.platform.NetworkMonitor
 import com.torve.platform.NetworkType
 import com.torve.presentation.detail.DetailViewModel
@@ -138,12 +144,12 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import org.koin.compose.koinInject
 
-private enum class TvStreamSourceFilter(val label: String) {
-    ALL("All"), TORRENT("Torrent/RD"), USENET("Usenet")
-}
+
 
 private const val TV_USENET_PREPARING_NOTIFICATION_TAG = "tv_usenet_preparing"
 private const val TV_STREAM_RESOLVING_NOTIFICATION_TAG = "tv_stream_resolving"
+private const val TV_SOURCE_ERROR_NOTIFICATION_TAG = "tv_source_error"
+private const val TV_SOURCE_ERROR_NOTIFICATION_DURATION_MS = 5_000L
 
 private sealed class DownloadAction {
     data object None : DownloadAction()
@@ -151,13 +157,16 @@ private sealed class DownloadAction {
     data class Episode(val s: Int, val e: Int) : DownloadAction()
 }
 
-@OptIn(ExperimentalFoundationApi::class)
+@OptIn(ExperimentalFoundationApi::class, ExperimentalLayoutApi::class)
 @Composable
 fun TvDetailsScreen(
     type: String,
     id: Int,
+    extensionSeedJson: String? = null,
     autoPlay: Boolean,
     focusEpisodes: Boolean = false,
+    onTraktListsClick: ((MediaItem) -> Unit)? = null,
+    onCollectionsClick: ((MediaItem) -> Unit)? = null,
     railFocusRequester: FocusRequester,
     onBack: () -> Unit,
     onPlayResolved: (
@@ -171,13 +180,20 @@ fun TvDetailsScreen(
     ) -> Unit,
     onFirstContentRequester: (FocusRequester) -> Unit,
     onContentFocused: (FocusRequester) -> Unit,
+    onContentFocusStateChanged: (Boolean) -> Unit = {},
+    playbackFocusRestoreRequestId: Long = 0L,
+    playbackFocusRestoreSeason: Int? = null,
+    playbackFocusRestoreEpisode: Int? = null,
+    preserveEntryPlaybackTarget: Boolean = false,
     onMediaClick: (MediaItem) -> Unit = {},
     onCastClick: (castId: Int, castName: String) -> Unit = { _, _ -> },
     onSettingsClick: () -> Unit = {},
+    onLibraryAutomationClick: () -> Unit = {},
     onRequestLifetimeUnlock: (TvEntitledFeature) -> Unit = {},
     onWatchedStatusChanged: (MediaItem, Boolean) -> Unit = { _, _ -> },
+    detailViewModel: DetailViewModel = koinInject(),
 ) {
-    val detailViewModel: DetailViewModel = koinInject()
+    val metadataRepository: MetadataRepository = koinInject()
     val settingsViewModel: SettingsViewModel = koinInject()
     val watchlistViewModel: WatchlistViewModel = koinInject()
     val downloadViewModel: DownloadViewModel = koinInject()
@@ -186,6 +202,7 @@ fun TvDetailsScreen(
     val downloadRepository: DownloadRepository = koinInject()
     val mediaFavoritesRepository: MediaFavoritesRepository = koinInject()
     val lanLibraryConsumer: LanLibraryConsumer = koinInject()
+    val jellyfinLibrary: JellyfinLibraryOverlayService = koinInject()
     val networkMonitor: NetworkMonitor = koinInject()
     // Kick the LAN-library consumer once so the badge resolves on
     // first paint of the TV detail screen.
@@ -193,9 +210,27 @@ fun TvDetailsScreen(
     val coroutineScope = rememberCoroutineScope()
     val watchlistState by watchlistViewModel.state.collectAsState()
     val settingsState by settingsViewModel.state.collectAsState()
+    val relatedPreview = com.torve.android.tv.settings.rememberTvFocusPreviewPolicy(settingsState.personalDataUserId).hasPreview("related")
     val subscriptionState by subscriptionViewModel.state.collectAsState()
     val mediaFavoritesState by mediaFavoritesRepository.state.collectAsState()
     val state by detailViewModel.state.collectAsState()
+    val contentRowKeys = tvDetailsContentRowKeys(
+        isSeries = state.mediaItem?.type == MediaType.SERIES,
+        hasTagline = !state.mediaItem?.tagline.isNullOrBlank(),
+        hasGenres = !state.mediaItem?.genres.isNullOrEmpty(),
+        hasOverview = !state.mediaItem?.overview.isNullOrBlank(),
+        hasDirector = !state.mediaItem?.director.isNullOrBlank(),
+        hasCast = !state.mediaItem?.cast.isNullOrEmpty(),
+    )
+    var cinematicLogoUrl by remember(type, id) { mutableStateOf<String?>(null) }
+    LaunchedEffect(state.mediaItem?.id, state.mediaItem?.logoUrl) {
+        val item = state.mediaItem ?: return@LaunchedEffect
+        val logo = item.logoUrl ?: item.tmdbId?.let { tmdbId ->
+            runCatching { metadataRepository.getLogoUrl(type, tmdbId) }.getOrNull()
+        }
+        cinematicLogoUrl = logo
+        com.torve.android.ui.components.ContentLaunchArtworkStore.clear()
+    }
     val accessTier = rememberEffectivePremiumAccessTier(
         subscriptionTier = subscriptionState.subscription?.tier,
         subscriptionIsPro = subscriptionState.isPro,
@@ -215,34 +250,92 @@ fun TvDetailsScreen(
 
     val playFocusRequester = remember { FocusRequester() }
     val watchlistFocusRequester = remember { FocusRequester() }
-    val favoritesFocusRequester = remember { FocusRequester() }
-    val markWatchedFocusRequester = remember { FocusRequester() }
-    val rateFocusRequester = remember { FocusRequester() }
     val trailerFocusRequester = remember { FocusRequester() }
     val downloadMovieFocusRequester = remember { FocusRequester() }
     val downloadAllFocusRequester = remember { FocusRequester() }
-    val firstStreamFocusRequester = remember { FocusRequester() }
     var restoreFocusAfterPreparingCancel by remember { mutableStateOf(false) }
     val listState = rememberLazyListState()
+    val castListState = rememberLazyListState()
+    val castEntryRequester = remember(type, id) { FocusRequester() }
+    val directorRequester = remember(type, id) { FocusRequester() }
     var episodesFocusHandled by rememberSaveable(type, id, focusEpisodes) { mutableStateOf(false) }
-    var tvStreamFilter by remember { mutableStateOf(TvStreamSourceFilter.ALL) }
-    val filteredStreams = remember(state.streams, tvStreamFilter) {
-        when (tvStreamFilter) {
-            TvStreamSourceFilter.ALL -> state.streams
-            TvStreamSourceFilter.TORRENT -> state.streams.filter { it.isTorrentOrDebridStream() }
-            TvStreamSourceFilter.USENET -> state.streams.filter { it.isUsenetStream() }
-        }
+    val streamSortPreferences = remember(context) { context.getSharedPreferences("tv_prefs", Context.MODE_PRIVATE) }
+    var tvStreamSortMode by rememberSaveable { mutableStateOf(streamSortPreferences.readTvStreamSortMode()) }
+    var presetOverride by remember { mutableStateOf<Triple<String, FocusRequester, () -> Unit>?>(null) }
+    var presetFocusReturn by remember { mutableStateOf<FocusRequester?>(null) }
+    LaunchedEffect(presetFocusReturn) {
+        presetFocusReturn?.let { withFrameNanos { }; runCatching { it.requestFocus() } }
+        presetFocusReturn = null
     }
+    val languagePicker = com.torve.android.ui.detail.rememberSourceLanguagePicker(state.streams,
+        enabled = state.showStreamPicker && !state.isResolving && state.preparing == null,
+        sessionKey = "$type:$id:${state.streamContextSeason}:${state.streamContextEpisode}",
+        externalChecking = state.isInspectingSourceLanguages)
     var didAutoPlay by rememberSaveable(type, id) { mutableStateOf(false) }
     var pendingDownloadAction by remember { mutableStateOf<DownloadAction>(DownloadAction.None) }
     var resolvingEpisodeTarget by remember(type, id) { mutableStateOf<Pair<Int, Int>?>(null) }
+    var jellyfinAvailableEpisodes by remember(type, id) {
+        mutableStateOf<Set<Pair<Int, Int>>>(emptySet())
+    }
     var showWatchlistPicker by remember { mutableStateOf(false) }
     // Source picker (Prompt 11C). Non-null while the sheet is open;
     // selection routes either directly to the player (LocalFile/LAN)
     // or falls back to fetchStreams() (Provider). Cleared on dismiss.
     var sourcePickerState by remember { mutableStateOf<TvSourcePickerState?>(null) }
+    // Keep the title that produced the picker. Detail metadata can refresh while
+    // the modal is open; source selection must not depend on transient UI state.
+    var sourcePickerMediaItem by remember(type, id) { mutableStateOf<MediaItem?>(null) }
     var sourcePickerSeason by remember { mutableStateOf<Int?>(null) }
     var sourcePickerEpisode by remember { mutableStateOf<Int?>(null) }
+    var sourcePickerOriginEpisode by remember(type, id) { mutableStateOf<Pair<Int, Int>?>(null) }
+    var pendingEpisodeFocusRestore by remember(type, id) { mutableStateOf<Pair<Int, Int>?>(null) }
+    var playbackOriginSeason by rememberSaveable(type, id) { mutableIntStateOf(-1) }
+    var playbackOriginEpisode by rememberSaveable(type, id) { mutableIntStateOf(-1) }
+    var lastHandledPlaybackFocusRestoreRequestId by rememberSaveable(type, id) {
+        mutableLongStateOf(0L)
+    }
+    var playActionHasFocus by remember(type, id) { mutableStateOf(false) }
+    var restorePlayFocusAfterSourceDismiss by remember { mutableStateOf(false) }
+    val showCinematicSourceLoading = state.shouldShowCinematicSourceLoading(
+        sourcePickerVisible = sourcePickerState != null,
+    )
+    val sourceOperationBlocksDetail = state.preparing != null || showCinematicSourceLoading
+
+    fun queueSourceOriginFocusRestore(
+        episodeTarget: Pair<Int, Int>? = sourcePickerOriginEpisode ?: resolvingEpisodeTarget,
+    ) {
+        if (episodeTarget != null) {
+            pendingEpisodeFocusRestore = episodeTarget
+            restorePlayFocusAfterSourceDismiss = false
+        } else {
+            restorePlayFocusAfterSourceDismiss = true
+        }
+        sourcePickerOriginEpisode = null
+        resolvingEpisodeTarget = null
+    }
+
+    fun launchResolvedPlayback(
+        url: String,
+        fallbackUrl: String,
+        mediaItem: MediaItem,
+        season: Int?,
+        episode: Int?,
+        autoSourceSelection: Boolean,
+        episodeName: String,
+    ) {
+        playbackOriginSeason = season ?: -1
+        playbackOriginEpisode = episode ?: -1
+        detailViewModel.onPlaybackLaunched(season, episode)
+        onPlayResolved(
+            url,
+            fallbackUrl,
+            mediaItem,
+            season,
+            episode,
+            autoSourceSelection,
+            episodeName,
+        )
+    }
     val watchlistModalRestoreController = rememberTvModalFocusRestoreController(
         key = "details_watchlist_${type}_$id",
     )
@@ -263,17 +356,25 @@ fun TvDetailsScreen(
     )
     // downloadToastMessage replaced by TvNotificationQueue
 
-    BackHandler(onBack = onBack)
+    BackHandler(
+        enabled = sourcePickerState == null && !showWatchlistPicker && !sourceOperationBlocksDetail,
+        onBack = onBack,
+    )
+    BackHandler(enabled = sourceOperationBlocksDetail && !showWatchlistPicker) {
+        queueSourceOriginFocusRestore()
+        detailViewModel.cancelSourceLookup()
+    }
     DisposableEffect(Unit) {
         onDispose {
             TvNotificationQueue.clear(TV_USENET_PREPARING_NOTIFICATION_TAG)
+            TvNotificationQueue.clear(TV_STREAM_RESOLVING_NOTIFICATION_TAG)
+            TvNotificationQueue.clear(TV_SOURCE_ERROR_NOTIFICATION_TAG)
         }
     }
     BackHandler(enabled = showWatchlistPicker) {
         showWatchlistPicker = false
         watchlistModalRestoreController.requestRestore()
     }
-
     // Wire download callbacks to trigger WorkManager
     LaunchedEffect(downloadViewModel) {
         downloadViewModel.onDownloadEnqueued = { downloadId ->
@@ -287,59 +388,212 @@ fun TvDetailsScreen(
         onFirstContentRequester(playFocusRequester)
     }
 
-    LaunchedEffect(type, id) {
-        detailViewModel.loadDetail(type, id)
-        mediaFavoritesRepository.refresh(force = true)
+    LaunchedEffect(type, id, extensionSeedJson) {
+        if (extensionSeedJson != null) {
+            val seed = com.torve.presentation.apple.AppleCatalogueDetail.decode(extensionSeedJson)
+            if (detailViewModel.state.value.mediaItem?.id != seed.id) {
+                val features = com.torve.presentation.apple.AppleNativeFeatures(org.koin.mp.KoinPlatform.getKoin())
+                val full = features.catalogueDetail(extensionSeedJson, settingsState.appLanguage.code)
+                detailViewModel.loadExtensionDetail(full)
+            }
+        } else {
+            detailViewModel.ensureDetailLoaded(type, id)
+        }
     }
+    LaunchedEffect(type, id) { mediaFavoritesRepository.refresh(force = true) }
 
-    // Refresh watch state and restore focus when returning from player (lifecycle ON_RESUME).
+    // Refresh data on resume, but never move focus here. ON_RESUME also fires
+    // when the detail route is first shown; delayed focus requests from this
+    // observer used to race a quickly-opened source modal and steal its focus.
     val lifecycleOwner = LocalLifecycleOwner.current
+    val lifecycleState by lifecycleOwner.lifecycle.currentStateAsState()
+    val detailIsResumed = lifecycleState.isAtLeast(Lifecycle.State.RESUMED)
+    LaunchedEffect(detailIsResumed, detailViewModel) {
+        if (detailIsResumed) detailViewModel.restoreSourcesAfterPlayback()
+    }
+    LaunchedEffect(detailIsResumed, state.mediaItem?.id, state.mediaLifecycleStatus?.isInProgress) {
+        if (!detailIsResumed || state.mediaLifecycleStatus?.isInProgress != true) return@LaunchedEffect
+        while (true) {
+            delay(30_000L)
+            detailViewModel.refreshMediaLifecycleStatus(force = true)
+        }
+    }
+    // Only the visible series is refreshed. This also catches changes made on
+    // another TV while this episode list stays open, without a full-account sync.
+    LaunchedEffect(state.mediaItem?.id, detailIsResumed) {
+        if (!detailIsResumed || state.mediaItem?.type != MediaType.SERIES) return@LaunchedEffect
+        while (true) {
+            detailViewModel.refreshSeriesWatchState()
+            delay(60_000L)
+        }
+    }
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
-                detailViewModel.refreshWatchState()
-                // Scroll list to top so the Play button is in the viewport, then focus it.
-                // The button label changes (Play → Resume) after refreshWatchState; without
-                // scrolling, the button is off-screen in LazyColumn and requestFocus fails silently.
-                coroutineScope.launch {
-                    listState.scrollToItem(0)
-                    delay(300)
-                    runCatching { playFocusRequester.requestFocus() }
-                    delay(400)
-                    runCatching { playFocusRequester.requestFocus() }
-                }
+                // A background watch refresh may advance Watch now, but must
+                // not replace the season row currently owning remote focus.
+                detailViewModel.refreshWatchState(preserveSelectedSeason = true)
+                detailViewModel.refreshMediaLifecycleStatus()
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
-    LaunchedEffect(state.mediaItem?.id) {
-        if (state.mediaItem != null) {
+    // Assign entry focus once per title. Background metadata, progress,
+    // library-status, and rating updates must never re-focus Watch now.
+    // Including modal visibility in the key cancels this one-shot request if
+    // the user opens the source chooser in the same frame.
+    TvDetailsPrimaryEntryFocus(
+        contentId = state.mediaItem?.id,
+        episodeEntry = focusEpisodes || playbackFocusRestoreRequestId > 0L,
+        sourcePickerVisible = sourcePickerState != null || state.showStreamPicker,
+        playRequester = playFocusRequester,
+    )
+
+    // Player return is a destination-owned, single-shot restoration. The
+    // episode identity survives requester recreation; movies return to the
+    // primary Play action. Scrolling makes the target compose before focus is
+    // requested, without lifecycle timing delays.
+    LaunchedEffect(playbackFocusRestoreRequestId, state.mediaItem?.id, detailIsResumed,
+        state.selectedSeason, contentRowKeys, state.showStreamPicker) {
+        if (
+            !detailIsResumed ||
+            playbackFocusRestoreRequestId <= 0L ||
+            playbackFocusRestoreRequestId == lastHandledPlaybackFocusRestoreRequestId
+        ) {
+            return@LaunchedEffect
+        }
+        val item = state.mediaItem ?: return@LaunchedEffect
+        if (state.showStreamPicker) {
+            if (!preserveEntryPlaybackTarget) detailViewModel.resumeDetail()
+            return@LaunchedEffect
+        }
+        if (preserveEntryPlaybackTarget && playbackFocusRestoreSeason != null && playbackFocusRestoreEpisode != null && item.type == MediaType.SERIES) {
+            detailViewModel.selectEpisodeForPlayback(playbackFocusRestoreSeason, playbackFocusRestoreEpisode,
+                pinPlaybackTarget = preserveEntryPlaybackTarget)
+        }
+        val restoreTarget = if (!preserveEntryPlaybackTarget) TvDetailsPlaybackReturnTarget.PrimaryAction else resolveTvDetailsPlaybackReturnTarget(
+            isSeries = item.type == MediaType.SERIES && item.seasons.isNotEmpty(),
+            originSeason = playbackFocusRestoreSeason ?: playbackOriginSeason,
+            originEpisode = playbackFocusRestoreEpisode ?: playbackOriginEpisode,
+        )
+        if (restoreTarget is TvDetailsPlaybackReturnTarget.PrimaryAction) {
+            listState.scrollToItem(0)
+            repeat(24) {
+                withFrameNanos { }
+                runCatching { playFocusRequester.requestFocus() }
+                kotlinx.coroutines.delay(32)
+                if (playActionHasFocus) {
+                    lastHandledPlaybackFocusRestoreRequestId = playbackFocusRestoreRequestId
+                    return@LaunchedEffect
+                }
+            }
+            return@LaunchedEffect
+        }
+
+        val episodeTarget = restoreTarget as TvDetailsPlaybackReturnTarget.Episode
+        val episodeIdentity = episodeTarget.season to episodeTarget.episode
+        pendingEpisodeFocusRestore = episodeIdentity
+        if (state.selectedSeason != episodeTarget.season) {
+            item.tmdbId?.let { detailViewModel.loadSeasonDetail(it, episodeTarget.season) }
+        }
+        listState.scrollToComposedTvDetailsRow(contentRowKeys.indexOf("episodes").coerceAtLeast(1))
+    }
+
+    LaunchedEffect(
+        playbackFocusRestoreRequestId,
+        pendingEpisodeFocusRestore,
+        state.selectedSeason,
+        state.seasonDetail?.seasonNumber,
+        state.seasonDetail?.episodes?.size,
+        state.isLoadingSeasonDetail,
+        detailIsResumed,
+    ) {
+        if (!detailIsResumed) return@LaunchedEffect
+        val target = pendingEpisodeFocusRestore ?: return@LaunchedEffect
+        val loadedSeason = state.seasonDetail?.takeIf { it.seasonNumber == target.first }
+            ?: return@LaunchedEffect
+        if (state.isLoadingSeasonDetail || loadedSeason.episodes.isNotEmpty()) return@LaunchedEffect
+        pendingEpisodeFocusRestore = null
+        listState.scrollToItem(0)
+        withFrameNanos { }
+        runCatching { playFocusRequester.requestFocus() }
+    }
+
+    // Dismissing the modal is the only post-entry path that deliberately
+    // restores Watch now. This is explicit rather than being coupled to any
+    // asynchronous detail-state update.
+    LaunchedEffect(sourcePickerState, restorePlayFocusAfterSourceDismiss) {
+        if (sourcePickerState == null && restorePlayFocusAfterSourceDismiss) {
+            restorePlayFocusAfterSourceDismiss = false
+            kotlinx.coroutines.yield()
             runCatching { playFocusRequester.requestFocus() }
         }
     }
 
     // Surface stream errors as visible notifications
-    LaunchedEffect(state.streamsError) {
-        state.streamsError?.let { error ->
-            TvNotificationQueue.clear(TV_USENET_PREPARING_NOTIFICATION_TAG)
-            TvNotificationQueue.clear(TV_STREAM_RESOLVING_NOTIFICATION_TAG)
-            TvNotificationQueue.post(resolveTvDetailMessage(context, error), NotificationType.ERROR)
+    LaunchedEffect(state.streamsError, state.resolvedStream, state.isLoadingStreams, state.isResolving) {
+        val error = state.streamsError ?: return@LaunchedEffect
+        if (state.streams.isNotEmpty()) return@LaunchedEffect
+        if (state.resolvedStream != null || state.isLoadingStreams || state.isResolving) {
+            return@LaunchedEffect
         }
+        TvNotificationQueue.clear(TV_USENET_PREPARING_NOTIFICATION_TAG)
+        TvNotificationQueue.clear(TV_STREAM_RESOLVING_NOTIFICATION_TAG)
+        queueSourceOriginFocusRestore(
+            terminalEpisodeFocusTarget(state, sourcePickerOriginEpisode, resolvingEpisodeTarget),
+        )
+        TvNotificationQueue.post(
+            message = resolveTvDetailMessage(context, error),
+            type = NotificationType.ERROR,
+            tag = TV_SOURCE_ERROR_NOTIFICATION_TAG,
+            durationMs = TV_SOURCE_ERROR_NOTIFICATION_DURATION_MS,
+        )
     }
 
-    LaunchedEffect(state.resolveError) {
-        state.resolveError?.let { error ->
-            TvNotificationQueue.clear(TV_USENET_PREPARING_NOTIFICATION_TAG)
-            TvNotificationQueue.clear(TV_STREAM_RESOLVING_NOTIFICATION_TAG)
+    LaunchedEffect(state.resolveError, state.resolvedStream, state.isResolving) {
+        val error = state.resolveError ?: return@LaunchedEffect
+        if (state.resolvedStream != null || state.isResolving) {
+            return@LaunchedEffect
+        }
+        TvNotificationQueue.clear(TV_USENET_PREPARING_NOTIFICATION_TAG)
+        TvNotificationQueue.clear(TV_STREAM_RESOLVING_NOTIFICATION_TAG)
+        if (state.hasTerminalSourceFailure()) {
+            queueSourceOriginFocusRestore(
+                terminalEpisodeFocusTarget(state, sourcePickerOriginEpisode, resolvingEpisodeTarget),
+            )
+        } else {
             resolvingEpisodeTarget = null
-            TvNotificationQueue.post(resolveTvDetailMessage(context, error), NotificationType.ERROR)
+        }
+        TvNotificationQueue.post(
+            message = resolveTvDetailMessage(context, error),
+            type = NotificationType.ERROR,
+            tag = TV_SOURCE_ERROR_NOTIFICATION_TAG,
+            durationMs = TV_SOURCE_ERROR_NOTIFICATION_DURATION_MS,
+        )
+    }
+
+    LaunchedEffect(
+        state.isLoadingStreams,
+        state.isResolving,
+        state.preparing,
+        state.resolvedStream,
+        state.streams.size,
+    ) {
+        if (
+            state.isLoadingStreams ||
+            state.isResolving ||
+            state.preparing != null ||
+            state.resolvedStream != null ||
+            state.streams.isNotEmpty()
+        ) {
+            TvNotificationQueue.clear(TV_SOURCE_ERROR_NOTIFICATION_TAG)
         }
     }
 
-    LaunchedEffect(state.isLoadingStreams, state.isResolving, state.showStreamPicker, state.resolvedStream) {
-        if (!state.isLoadingStreams && !state.isResolving || state.showStreamPicker || state.resolvedStream != null) {
+    LaunchedEffect(state.showStreamPicker, state.resolvedStream) {
+        if (state.showStreamPicker || state.resolvedStream != null) {
             resolvingEpisodeTarget = null
         }
     }
@@ -368,18 +622,6 @@ fun TvDetailsScreen(
         }
     }
 
-    // Auto-load first season detail for series
-    LaunchedEffect(state.mediaItem?.id, state.mediaItem?.seasons) {
-        val media = state.mediaItem ?: return@LaunchedEffect
-        if (media.type == MediaType.SERIES && media.seasons.isNotEmpty()) {
-            val firstSeason = media.seasons.filter { it.seasonNumber > 0 }.minByOrNull { it.seasonNumber }
-            if (firstSeason != null && state.seasonDetail == null) {
-                val tvId = media.tmdbId ?: return@LaunchedEffect
-                detailViewModel.loadSeasonDetail(tvId, firstSeason.seasonNumber)
-            }
-        }
-    }
-
     LaunchedEffect(state.mediaItem?.id, autoPlay) {
         val media = state.mediaItem ?: return@LaunchedEffect
         if (autoPlay && !didAutoPlay) {
@@ -392,41 +634,38 @@ fun TvDetailsScreen(
         }
     }
 
-    // Scroll to stream picker and focus the first stream when picker appears
-    LaunchedEffect(state.showStreamPicker, state.streams.size) {
-        if (state.showStreamPicker && state.streams.isNotEmpty()) {
-            kotlinx.coroutines.delay(100)
-            val pickerIndex = listState.layoutInfo.totalItemsCount - state.streams.size - 1
-            if (pickerIndex >= 0) {
-                listState.animateScrollToItem(pickerIndex.coerceAtLeast(0))
-            }
-            kotlinx.coroutines.delay(50)
-            runCatching { firstStreamFocusRequester.requestFocus() }
+    LaunchedEffect(state.mediaItem?.tmdbId, state.mediaLifecycleStatus?.state) {
+        val media = state.mediaItem
+        jellyfinAvailableEpisodes = if (media?.type == MediaType.SERIES && media.tmdbId != null) {
+            runCatching { jellyfinLibrary.findAvailableEpisodes(media.tmdbId!!) }.getOrDefault(emptySet())
+        } else {
+            emptySet()
         }
     }
 
     LaunchedEffect(
         focusEpisodes,
+        playbackFocusRestoreRequestId,
         state.mediaItem?.id,
         state.mediaItem?.seasons?.size,
+        state.selectedSeason,
         state.seasonDetail?.episodes?.size,
+        state.isLoadingSeasonDetail,
+        contentRowKeys,
     ) {
         val item = state.mediaItem ?: return@LaunchedEffect
-        if (!focusEpisodes || episodesFocusHandled || item.type != MediaType.SERIES || item.seasons.isEmpty()) {
+        if (!focusEpisodes || playbackFocusRestoreRequestId > 0L || episodesFocusHandled ||
+            item.type != MediaType.SERIES || item.seasons.isEmpty()) {
             return@LaunchedEffect
         }
-        kotlinx.coroutines.delay(220)
-        val episodesIndex = 1 +
-            (if (!item.tagline.isNullOrBlank()) 1 else 0) +
-            (if (item.genres.isNotEmpty()) 1 else 0) +
-            (if (
-                item.ratings.withFallbackTmdbScore(item.rating) != null &&
-                settingsState.ratingPrefs.showRatingsOnDetailPage
-            ) 2 else 0) +
-            (if (!item.overview.isNullOrBlank()) 1 else 0) +
-            (if (!item.director.isNullOrBlank()) 1 else 0) +
-            (if (item.cast.isNotEmpty()) 1 else 0)
-        runCatching { listState.animateScrollToItem(episodesIndex.coerceAtLeast(0)) }
+        val season = state.seasonDetail?.takeIf { it.seasonNumber == state.selectedSeason }
+            ?: return@LaunchedEffect
+        if (state.isLoadingSeasonDetail || season.episodes.isEmpty()) return@LaunchedEffect
+        pendingEpisodeFocusRestore = state.selectedSeason to
+            (state.nextEpisode?.takeIf { it.season == state.selectedSeason }?.episode
+                ?: season.episodes.first().episodeNumber)
+        detailViewModel.selectEpisodeForPlayback(pendingEpisodeFocusRestore!!.first, pendingEpisodeFocusRestore!!.second)
+        listState.scrollToComposedTvDetailsRow(contentRowKeys.indexOf("episodes").coerceAtLeast(1))
         episodesFocusHandled = true
     }
 
@@ -435,19 +674,10 @@ fun TvDetailsScreen(
         state.preparing,
         state.showStreamPicker,
         state.streams.size,
+        sourcePickerState != null,
     ) {
-        if (restoreFocusAfterPreparingCancel && state.preparing == null) {
-            kotlinx.coroutines.delay(120)
-            if (state.showStreamPicker && state.streams.isNotEmpty()) {
-                val pickerIndex = listState.layoutInfo.totalItemsCount - state.streams.size - 1
-                if (pickerIndex >= 0) {
-                    listState.animateScrollToItem(pickerIndex.coerceAtLeast(0))
-                }
-                kotlinx.coroutines.delay(50)
-                runCatching { firstStreamFocusRequester.requestFocus() }
-            } else {
-                runCatching { playFocusRequester.requestFocus() }
-            }
+        if (restoreFocusAfterPreparingCancel && state.preparing == null && sourcePickerState == null) {
+            if (!state.showStreamPicker || state.streams.isEmpty()) queueSourceOriginFocusRestore()
             restoreFocusAfterPreparingCancel = false
         }
     }
@@ -470,10 +700,13 @@ fun TvDetailsScreen(
     LaunchedEffect(state.usenetPlaybackIntent) {
         val intent = state.usenetPlaybackIntent ?: return@LaunchedEffect
         val media = state.mediaItem ?: return@LaunchedEffect
+        sourcePickerOriginEpisode = null
+        pendingEpisodeFocusRestore = null
+        resolvingEpisodeTarget = null
         TvNotificationQueue.clear(TV_USENET_PREPARING_NOTIFICATION_TAG)
         val epName = state.seasonDetail?.episodes
             ?.find { it.episodeNumber == state.streamContextEpisode }?.name.orEmpty()
-        onPlayResolved(
+        launchResolvedPlayback(
             intent.url,
             "",
             media,
@@ -501,6 +734,10 @@ fun TvDetailsScreen(
         // Don't navigate to player if this resolve was for a download action
         if (pendingDownloadAction !is DownloadAction.None) return@LaunchedEffect
 
+        sourcePickerOriginEpisode = null
+        pendingEpisodeFocusRestore = null
+        resolvingEpisodeTarget = null
+
         val urlCandidates = if (resolved.service != null) {
             listOf(resolved.url, resolved.transcodeUrls?.hls, resolved.transcodeUrls?.mp4)
         } else {
@@ -511,7 +748,7 @@ fun TvDetailsScreen(
 
         val epName = state.seasonDetail?.episodes
             ?.find { it.episodeNumber == state.streamContextEpisode }?.name.orEmpty()
-        onPlayResolved(
+        launchResolvedPlayback(
             playbackUrl,
             fallbackUrl,
             media,
@@ -568,16 +805,23 @@ fun TvDetailsScreen(
     val isBusy = state.isLoadingStreams || state.isResolving
 
     if (state.isLoading && mediaItem == null) {
-        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            CircularProgressIndicator(color = Amber)
-        }
+        val launchArtwork = com.torve.android.ui.components.ContentLaunchArtworkStore.current
+        com.torve.android.ui.components.CinematicContentLoading(
+            title = launchArtwork?.title.orEmpty(),
+            backdropUrl = launchArtwork?.backdropUrl,
+            posterUrl = launchArtwork?.posterUrl,
+            logoUrl = launchArtwork?.logoUrl,
+            tmdbId = launchArtwork?.tmdbId,
+            mediaType = launchArtwork?.type,
+        )
         return
     }
 
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(Obsidian)
+            .background(if (com.torve.android.ui.community.LocalPersonalAppearance.current.active) androidx.compose.ui.graphics.Color.Transparent else Obsidian)
+            .onFocusChanged { onContentFocusStateChanged(it.hasFocus) }
             .focusGroup(),
     ) {
     TvDetailsCinematicBackground(mediaItem)
@@ -590,12 +834,9 @@ fun TvDetailsScreen(
             val item = mediaItem
             // â"€â"€ Hero backdrop + title + buttons â"€â"€
             item(key = "hero") {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(330.dp)
-                        .clip(RoundedCornerShape(20.dp)),
-                ) {
+                TvDetailsHeroLayout(
+                    isSeries = item.type == MediaType.SERIES,
+                    background = {
                     AsyncImage(
                         model = item.backdropUrl ?: item.posterUrl,
                         contentDescription = item.title,
@@ -617,70 +858,47 @@ fun TvDetailsScreen(
                             ),
                     )
 
-                    Column(
-                        modifier = Modifier
-                            .align(Alignment.BottomStart)
-                            .padding(horizontal = 24.dp, vertical = 20.dp),
-                        verticalArrangement = Arrangement.spacedBy(10.dp),
-                    ) {
+                    },
+                    foreground = {
                         DetailLogoTitle(item = item)
-                        // LAN-library presence pill (Prompt 9C). The
-                        // shared `LanAvailabilityBadge` is in the main
-                        // source set; TV reuses it.
-                        com.torve.android.ui.components.LanAvailabilityBadge(
-                            title = item.title,
-                        )
-                        val metadata = buildString {
-                            item.year?.let { append(it) }
-                            if (item.rating != null && settingsState.ratingPrefs.allowsTmdbRatingProvider()) {
-                                if (isNotBlank()) append("  ")
-                                append(String.format("%.1f", item.rating))
+                        TvDetailsMetadataRow(item, settingsState.ratingPrefs)
+
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                            com.torve.android.ui.components.LanAvailabilityBadge(title = item.title)
+                            if (item.type == MediaType.SERIES) {
+                                tvSeriesWatchedSummary(state.watchedEpisodes)?.let { label ->
+                                    TvWatchedStatusPill(label)
+                                }
+                            } else if (state.isMarkedWatched) {
+                                TvWatchedStatusPill()
                             }
-                            item.runtime?.let {
-                                if (isNotBlank()) append("  ")
-                                append("${it}m")
-                            }
-                        }
-                        if (metadata.isNotBlank()) {
-                            Text(
-                                text = metadata,
-                                style = MaterialTheme.typography.titleMedium,
-                                color = Silver,
-                            )
+
                         }
 
-                        if (state.isMarkedWatched) {
-                            TvWatchedStatusPill()
-                        }
-
-                        // â"€â"€ Library status indicator â"€â"€
-                        if (state.isInLibrary) {
-                            Text(
-                                text = stringResource(R.string.tv_detail_in_library),
-                                style = MaterialTheme.typography.labelMedium,
-                                color = Amber,
-                                fontWeight = FontWeight.SemiBold,
-                                modifier = Modifier
-                                    .background(Amber.copy(alpha = 0.15f), RoundedCornerShape(6.dp))
-                                    .padding(horizontal = 10.dp, vertical = 4.dp),
-                            )
-                        }
-
-                        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        FlowRow(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                             // â"€â"€ Play button with debrid check + loading phases â"€â"€
                             val streamLocked = isLockedFeature(TvEntitledFeature.STREAM_PLAYBACK)
                             val playText = when {
                                 streamLocked -> TvPremiumAccess.UNLOCK_WITH_LIFETIME_LABEL
                                 state.isLoadingStreams -> stringResource(R.string.tv_detail_finding_streams)
                                 state.isResolving -> stringResource(R.string.tv_detail_resolving)
-                                !settingsState.canPlayStreams -> stringResource(R.string.tv_detail_connect_cloud)
-                                else -> state.primaryPlayLabel
+                                item.type == MediaType.SERIES -> tvSeriesPlayActionLabel(
+                                    state.nextEpisode,
+                                    state.streamContextSeason,
+                                    state.streamContextEpisode,
+                                )
+                                else -> if (state.primaryPlayLabel.equals("Play", ignoreCase = true)) {
+                                    "Watch now"
+                                } else {
+                                    "Watch now · ${state.primaryPlayLabel}"
+                                }
                             }
                             TvActionButton(
                                 text = playText,
                                 isPrimary = true,
                                 modifier = Modifier
                                     .focusRequester(playFocusRequester)
+                                    .onFocusChanged { playActionHasFocus = it.isFocused }
                                     .focusProperties { left = railFocusRequester },
                                 enabled = !isBusy,
                                 onFocused = {
@@ -690,17 +908,6 @@ fun TvDetailsScreen(
                                     )
                                 },
                                 onClick = {
-                                    if (!settingsState.canPlayStreams) {
-                                        runPremiumAction(TvEntitledFeature.CLOUD_PROVIDER_SETUP) {
-                                            context.getSharedPreferences("tv_prefs", Context.MODE_PRIVATE)
-                                                .edit()
-                                                .putBoolean("tv_settings_open_connections_once", true)
-                                                .apply()
-                                            onSettingsClick()
-                                        }
-                                        return@TvActionButton
-                                    }
-
                                     runPremiumAction(TvEntitledFeature.STREAM_PLAYBACK) {
                                         // Movies: surface the source picker if there's
                                         // a non-Provider option (LocalFile or LAN). For
@@ -710,8 +917,8 @@ fun TvDetailsScreen(
                                         // context map. Series picker integration is a
                                         // follow-up.
                                         if (item.type == MediaType.SERIES) {
-                                            val ctxS = state.streamContextSeason
-                                            val ctxE = state.streamContextEpisode
+                                            val ctxS = state.streamContextSeason ?: state.nextEpisode?.season
+                                            val ctxE = state.streamContextEpisode ?: state.nextEpisode?.episode
                                             if (ctxS == null || ctxE == null) {
                                                 detailViewModel.playNextEpisode()
                                                 return@runPremiumAction
@@ -722,19 +929,31 @@ fun TvDetailsScreen(
                                                     seasonNumber = ctxS,
                                                     episodeNumber = ctxE,
                                                     downloadRepository = downloadRepository,
+                                                    jellyfinLibrary = jellyfinLibrary,
                                                     lanLibraryConsumer = lanLibraryConsumer,
                                                     networkMonitor = networkMonitor,
                                                     wifiOnlyForLan = settingsState.lanPlaybackWifiOnly,
                                                 )
                                                 val hasNonProvider = picker.options.any { opt ->
                                                     opt.route is PlaybackRoute.LocalFile ||
+                                                        opt.route is PlaybackRoute.JellyfinStream ||
                                                         opt.route is PlaybackRoute.LanDesktopStream
                                                 }
                                                 if (!hasNonProvider) {
-                                                    detailViewModel.fetchStreams(season = ctxS, episode = ctxE)
+                                                    if (settingsState.canPlayStreams) {
+                                                        detailViewModel.fetchStreams(season = ctxS, episode = ctxE)
+                                                    } else {
+                                                        context.getSharedPreferences("tv_prefs", Context.MODE_PRIVATE)
+                                                            .edit()
+                                                            .putBoolean("tv_settings_open_connections_once", true)
+                                                            .apply()
+                                                        onSettingsClick()
+                                                    }
                                                 } else {
+                                                    sourcePickerOriginEpisode = null
                                                     sourcePickerSeason = ctxS
                                                     sourcePickerEpisode = ctxE
+                                                    sourcePickerMediaItem = item
                                                     sourcePickerState = picker
                                                 }
                                             }
@@ -746,6 +965,7 @@ fun TvDetailsScreen(
                                                 seasonNumber = null,
                                                 episodeNumber = null,
                                                 downloadRepository = downloadRepository,
+                                                jellyfinLibrary = jellyfinLibrary,
                                                 lanLibraryConsumer = lanLibraryConsumer,
                                                 networkMonitor = networkMonitor,
                                                 wifiOnlyForLan = settingsState.lanPlaybackWifiOnly,
@@ -755,13 +975,24 @@ fun TvDetailsScreen(
                                             // existing behavior.
                                             val hasNonProvider = picker.options.any { opt ->
                                                 opt.route is PlaybackRoute.LocalFile ||
+                                                    opt.route is PlaybackRoute.JellyfinStream ||
                                                     opt.route is PlaybackRoute.LanDesktopStream
                                             }
                                             if (!hasNonProvider) {
-                                                detailViewModel.fetchStreams()
+                                                if (settingsState.canPlayStreams) {
+                                                    detailViewModel.fetchStreams()
+                                                } else {
+                                                    context.getSharedPreferences("tv_prefs", Context.MODE_PRIVATE)
+                                                        .edit()
+                                                        .putBoolean("tv_settings_open_connections_once", true)
+                                                        .apply()
+                                                    onSettingsClick()
+                                                }
                                             } else {
+                                                sourcePickerOriginEpisode = null
                                                 sourcePickerSeason = null
                                                 sourcePickerEpisode = null
+                                                sourcePickerMediaItem = item
                                                 sourcePickerState = picker
                                             }
                                         }
@@ -775,18 +1006,19 @@ fun TvDetailsScreen(
                                     modifier = Modifier.focusRequester(trailerFocusRequester),
                                     onFocused = { onContentFocused(trailerFocusRequester) },
                                     onClick = {
-                                        val intent = Intent(
-                                            Intent.ACTION_VIEW,
-                                            Uri.parse("https://www.youtube.com/watch?v=${item.trailerKey}"),
-                                        )
-                                        runCatching { context.startActivity(intent) }
+                                        if (!launchTvTrailer(context, item.trailerKey.orEmpty())) {
+                                            TvNotificationQueue.post(
+                                                context.getString(R.string.tv_notification_trailer_unavailable),
+                                                NotificationType.ERROR,
+                                            )
+                                        }
                                     },
                                 )
                             }
 
                             val watchlistLocked = isLockedFeature(TvEntitledFeature.WATCHLIST_EDIT)
                             TvActionButton(
-                                text = if (isWatchlistUpdating) {
+                                text = localizedUiText(if (isWatchlistUpdating) {
                                     stringResource(R.string.common_loading)
                                 } else if (isInWatchlist) {
                                     if (watchlistLocked) {
@@ -800,7 +1032,7 @@ fun TvDetailsScreen(
                                     } else {
                                         stringResource(R.string.tv_action_add_watchlist)
                                     }
-                                },
+                                }),
                                 modifier = Modifier.focusRequester(registeredWatchlistFocusRequester),
                                 enabled = !isWatchlistUpdating,
                                 onFocused = {
@@ -813,25 +1045,40 @@ fun TvDetailsScreen(
                                     }
                                 },
                             )
-
                             val favoritesLocked = isLockedFeature(TvEntitledFeature.FAVORITES_EDIT)
-                            TvActionButton(
-                                text = if (isFavorite) {
-                                    if (favoritesLocked) {
-                                        "${stringResource(R.string.tv_action_remove_favorites)} (Locked)"
-                                    } else {
-                                        stringResource(R.string.tv_action_remove_favorites)
-                                    }
-                                } else {
-                                    if (favoritesLocked) {
-                                        "${stringResource(R.string.tv_action_add_favorites)} (Locked)"
-                                    } else {
-                                        stringResource(R.string.tv_action_add_favorites)
-                                    }
-                                },
-                                modifier = Modifier.focusRequester(favoritesFocusRequester),
-                                onFocused = { onContentFocused(favoritesFocusRequester) },
-                                onClick = {
+                            val favoritesLabel = if (isFavorite) {
+                                stringResource(R.string.tv_action_remove_favorites)
+                            } else {
+                                stringResource(R.string.tv_action_add_favorites)
+                            } + if (favoritesLocked) " (Locked)" else ""
+                            val watchedLabel = if (item.type == MediaType.SERIES) {
+                                if (state.isMarkedWatched) "Unmark series" else "Mark series watched"
+                            } else if (state.isMarkedWatched) {
+                                stringResource(R.string.tv_detail_unwatched)
+                            } else {
+                                stringResource(R.string.tv_detail_watched)
+                            }
+                            val rateLabel = state.userRating?.let { context.getString(R.string.tv_detail_rated, it) }
+                                ?: stringResource(R.string.tv_detail_rate)
+                            val libraryMenu = if (settingsState.optionalAppFeatures.arrStack) tvDetailsLibraryMenu(
+                                status = state.mediaLifecycleStatus,
+                                isLoading = state.isLoadingMediaLifecycle,
+                                operation = state.mediaLifecycleOperation,
+                                error = state.mediaLifecycleError,
+                                isSeries = item.type == MediaType.SERIES,
+                                selectedSeason = state.selectedSeason ?: 1,
+                                onSetup = onLibraryAutomationClick,
+                                onRequest = { season -> detailViewModel.requestPermanentCopy(seasons = season?.let(::listOf)) },
+                                isInLibrary = state.isInLibrary,
+                                contentKey = "$type:$id",
+                                onRetry = { detailViewModel.retryMediaLifecycleRequest() },
+                                onDelete = { detailViewModel.deleteMediaLifecycleRequest() },
+                                onRefresh = { detailViewModel.refreshMediaLifecycleStatus(force = true) },
+                            ) else null
+                            val moreActions = buildList {
+                                if (item.type == MediaType.MOVIE) onCollectionsClick?.let { open -> add(TvDetailsMenuAction("collections", "Choose a collection") { open(item) }) }
+                                onTraktListsClick?.let { open -> add(TvDetailsMenuAction("trakt_lists", "Trakt lists") { open(item) }) }
+                                add(TvDetailsMenuAction("favorites", favoritesLabel) {
                                     runPremiumAction(TvEntitledFeature.FAVORITES_EDIT) {
                                         val shouldFavorite = !isFavorite
                                         mediaFavoritesRepository.toggleFavorite(item)
@@ -844,20 +1091,9 @@ fun TvDetailsScreen(
                                             NotificationType.SUCCESS,
                                         )
                                     }
-                                },
-                            )
-
-                            // â"€â"€ Mark Watched + Rate (Trakt only) â"€â"€
-                            if (settingsState.traktConnected) {
-                                TvActionButton(
-                                    text = if (state.isMarkedWatched) {
-                                        stringResource(R.string.tv_detail_unwatched)
-                                    } else {
-                                        stringResource(R.string.tv_detail_watched)
-                                    },
-                                    modifier = Modifier.focusRequester(markWatchedFocusRequester),
-                                    onFocused = { onContentFocused(markWatchedFocusRequester) },
-                                    onClick = {
+                                })
+                                if (settingsState.traktConnected) {
+                                    add(TvDetailsMenuAction("watched", watchedLabel) {
                                         runPremiumAction(TvEntitledFeature.WATCHED_STATUS_EDIT) {
                                             if (state.isMarkedWatched) {
                                                 detailViewModel.markUnwatched()
@@ -867,17 +1103,8 @@ fun TvDetailsScreen(
                                                 onWatchedStatusChanged(item, true)
                                             }
                                         }
-                                    },
-                                )
-
-                                val rateText = state.userRating?.let { rating ->
-                                    stringResource(R.string.tv_detail_rated, rating)
-                                } ?: stringResource(R.string.tv_detail_rate)
-                                TvActionButton(
-                                    text = rateText,
-                                    modifier = Modifier.focusRequester(rateFocusRequester),
-                                    onFocused = { onContentFocused(rateFocusRequester) },
-                                    onClick = {
+                                    })
+                                    add(TvDetailsMenuAction("rating", rateLabel) {
                                         runPremiumAction(TvEntitledFeature.TRAKT_CONNECT) {
                                             val next = when (state.userRating) {
                                                 null -> 7
@@ -888,173 +1115,33 @@ fun TvDetailsScreen(
                                             }
                                             detailViewModel.setUserRating(next)
                                         }
-                                    },
-                                )
+                                    })
+                                }
+                                addAll(libraryMenu?.actions.orEmpty())
                             }
+                            TvDetailsMoreActions(
+                                screenId = "details:$type:$id",
+                                title = item.title,
+                                actions = moreActions,
+                                listState = listState,
+                                onContentFocused = onContentFocused,
+                                libraryState = state.takeIf { settingsState.optionalAppFeatures.arrStack || state.isInLibrary },
+                                libraryStatusText = libraryMenu?.statusText,
+                                librarySupportingText = libraryMenu?.supportingText,
+                            )
 
                             // Download buttons removed â€" TV is stream-only
                         }
-                    }
-                }
+
+                    },
+                )
             }
 
-            // â"€â"€ Tagline â"€â"€
-            if (!item.tagline.isNullOrBlank()) {
-                item(key = "tagline") {
-                    Text(
-                        text = "\"${item.tagline}\"",
-                        style = MaterialTheme.typography.bodyLarge,
-                        color = Amber.copy(alpha = 0.8f),
-                        fontWeight = FontWeight.Medium,
-                        modifier = Modifier.padding(top = 20.dp, bottom = 10.dp),
-                    )
-                }
-            }
-
-            // â"€â"€ Genre pills â"€â"€
-            if (item.genres.isNotEmpty()) {
-                item(key = "genres") {
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        modifier = Modifier.padding(top = if (item.tagline.isNullOrBlank()) 20.dp else 0.dp, bottom = 12.dp),
-                    ) {
-                        item.genres.take(5).forEach { genre ->
-                            Text(
-                                text = genre.name,
-                                style = MaterialTheme.typography.labelMedium,
-                                color = Snow,
-                                modifier = Modifier
-                                    .background(Gunmetal, RoundedCornerShape(6.dp))
-                                    .padding(horizontal = 10.dp, vertical = 4.dp),
-                            )
-                        }
-                    }
-                }
-            }
-
-            // â"€â"€ Multi-source ratings â"€â"€
-            val ratingPrefs = settingsState.ratingPrefs
-            val detailRatings = item.ratings.withFallbackTmdbScore(item.rating)
-            if (detailRatings != null &&
-                ratingPrefs.showRatingsOnDetailPage &&
-                detailRatings.hasAnyEnabledDisplayValue(ratingPrefs)
-            ) {
-                item(key = "ratings") {
-                    val selectedProviders = ratingPrefs.enabledProviders.filterNot { it == RatingSource.TORVE }
-                    val providers = deriveProvidersToRender(
-                        enabledProviders = selectedProviders,
-                        providerOrder = ratingPrefs.providerOrder,
-                        maxRatingsOnCard = selectedProviders.size.coerceAtLeast(1),
-                        fallbackToTmdbWhenNoneSelected = ratingPrefs.enabledProviders.isEmpty(),
-                    )
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(10.dp),
-                        modifier = Modifier.padding(bottom = 14.dp),
-                    ) {
-                        for (source in providers) {
-                            val value = getRatingValue(source, detailRatings, ratingPrefs) ?: continue
-                            TvRatingChip(
-                                label = source.displayName,
-                                value = value,
-                                iconRes = ratingSourceIconRes(source, detailRatings),
-                            )
-                        }
-                    }
-                }
-            }
-
-            // â"€â"€ Overview â"€â"€
-            if (!item.overview.isNullOrBlank()) {
-                item(key = "overview") {
-                    Text(
-                        text = item.overview.orEmpty(),
-                        style = MaterialTheme.typography.bodyLarge,
-                        color = Silver,
-                        maxLines = 8,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.padding(bottom = 16.dp),
-                    )
-                }
-            }
-
-            // â"€â"€ Director â"€â"€
-            if (!item.director.isNullOrBlank()) {
-                item(key = "director") {
-                    val directorId = item.directorId
-                    val directorReq = remember { FocusRequester() }
-                    var directorFocused by remember { mutableStateOf(false) }
-                    val directorBorderColor by animateColorAsState(
-                        targetValue = if (directorFocused) Amber else Color.Transparent,
-                        label = "directorBorder",
-                    )
-                    val directorModifier = if (directorId != null) {
-                        Modifier
-                            .padding(bottom = 10.dp)
-                            .border(2.dp, directorBorderColor, RoundedCornerShape(10.dp))
-                            .clip(RoundedCornerShape(10.dp))
-                            .background(if (directorFocused) Amber.copy(alpha = 0.16f) else Color.Transparent)
-                            .focusRequester(directorReq)
-                            .onFocusChanged {
-                                directorFocused = it.isFocused
-                                if (it.isFocused) onContentFocused(directorReq)
-                            }
-                            .clickable(
-                                interactionSource = remember { MutableInteractionSource() },
-                                indication = null,
-                            ) {
-                                onCastClick(directorId, item.director.orEmpty())
-                            }
-                            .padding(horizontal = 10.dp, vertical = 8.dp)
-                    } else {
-                        Modifier.padding(bottom = 10.dp)
-                    }
-                    Row(modifier = directorModifier) {
-                        Text(
-                            text = stringResource(R.string.tv_detail_director) + "  ",
-                            style = MaterialTheme.typography.labelLarge,
-                            color = Ash,
-                        )
-                        Text(
-                            text = item.director.orEmpty(),
-                            style = MaterialTheme.typography.bodyLarge,
-                            color = Snow,
-                            fontWeight = FontWeight.Medium,
-                        )
-                    }
-                }
-            }
-
-            // â"€â"€ Cast â"€â"€
-            if (item.cast.isNotEmpty() && item.type != MediaType.SERIES) {
-                item(key = "cast") {
-                    Text(
-                        text = stringResource(R.string.tv_detail_cast),
-                        style = MaterialTheme.typography.labelLarge,
-                        color = Ash,
-                        modifier = Modifier.padding(bottom = 8.dp),
-                    )
-                    LazyRow(
-                        horizontalArrangement = Arrangement.spacedBy(14.dp),
-                        contentPadding = PaddingValues(start = 8.dp, end = 16.dp),
-                        modifier = Modifier.padding(bottom = 16.dp),
-                    ) {
-                        items(item.cast.take(12), key = { it.id }) { member ->
-                            TvCastCard(
-                                name = member.name,
-                                character = member.character,
-                                profileUrl = member.profileUrl,
-                                onClick = { onCastClick(member.id, member.name) },
-                            )
-                        }
-                    }
-                }
-            }
-
-            // â"€â"€ Episode picker for series â"€â"€
             if (item.type == MediaType.SERIES && item.seasons.isNotEmpty()) {
                 item(key = "episodes") {
                     Spacer(modifier = Modifier.height(4.dp))
                     TvEpisodePicker(
+                        hideUnwatchedSpoilers = state.hideUnwatchedSpoilers,
                         seasons = item.seasons,
                         selectedSeason = state.selectedSeason,
                         seasonDetail = state.seasonDetail,
@@ -1062,15 +1149,18 @@ fun TvDetailsScreen(
                         seasonDetailError = state.seasonDetailError,
                         watchedEpisodes = state.watchedEpisodes,
                         watchProgress = state.watchProgress,
+                        availableInJellyfinEpisodes = jellyfinAvailableEpisodes,
                         ratingPrefs = settingsState.ratingPrefs,
                         seriesBackdropUrl = item.backdropUrl,
                         seriesPosterUrl = item.posterUrl,
                         railFocusRequester = railFocusRequester,
                         onSeasonSelected = { seasonNumber ->
-                            val tvId = item.tmdbId ?: return@TvEpisodePicker
-                            detailViewModel.loadSeasonDetail(tvId, seasonNumber)
+                            if (extensionSeedJson != null) detailViewModel.selectExtensionSeason(seasonNumber)
+                            else item.tmdbId?.let { detailViewModel.loadSeasonDetail(it, seasonNumber) }
                         },
                         onEpisodeSelected = { season, episode ->
+                            sourcePickerOriginEpisode = season to episode
+                            detailViewModel.selectEpisodeForPlayback(season, episode)
                             resolvingEpisodeTarget = season to episode
                             coroutineScope.launch {
                                 val picker = buildDetailPickerState(
@@ -1078,23 +1168,42 @@ fun TvDetailsScreen(
                                     seasonNumber = season,
                                     episodeNumber = episode,
                                     downloadRepository = downloadRepository,
+                                    jellyfinLibrary = jellyfinLibrary,
                                     lanLibraryConsumer = lanLibraryConsumer,
                                     networkMonitor = networkMonitor,
                                     wifiOnlyForLan = settingsState.lanPlaybackWifiOnly,
                                 )
                                 val hasNonProvider = picker.options.any { opt ->
                                     opt.route is PlaybackRoute.LocalFile ||
+                                        opt.route is PlaybackRoute.JellyfinStream ||
                                         opt.route is PlaybackRoute.LanDesktopStream
                                 }
                                 if (!hasNonProvider) {
-                                    detailViewModel.fetchStreams(season = season, episode = episode)
+                                    if (settingsState.canPlayStreams) {
+                                        detailViewModel.fetchStreams(season = season, episode = episode)
+                                    } else {
+                                        sourcePickerOriginEpisode = null
+                                        resolvingEpisodeTarget = null
+                                        context.getSharedPreferences("tv_prefs", Context.MODE_PRIVATE)
+                                            .edit()
+                                            .putBoolean("tv_settings_open_connections_once", true)
+                                            .apply()
+                                        onSettingsClick()
+                                    }
                                 } else {
                                     resolvingEpisodeTarget = null
                                     sourcePickerSeason = season
                                     sourcePickerEpisode = episode
+                                    sourcePickerMediaItem = item
                                     sourcePickerState = picker
                                 }
                             }
+                        },
+                        restoreFocusEpisode = pendingEpisodeFocusRestore,
+                        isActive = detailIsResumed,
+                        onEpisodeFocusRestored = {
+                            lastHandledPlaybackFocusRestoreRequestId = playbackFocusRestoreRequestId
+                            pendingEpisodeFocusRestore = null
                         },
                         onRetrySeason = {
                             val tvId = item.tmdbId ?: return@TvEpisodePicker
@@ -1122,29 +1231,153 @@ fun TvDetailsScreen(
                             } else {
                                 null
                             },
+                        preferredEpisode = state.nextEpisode?.let { next ->
+                            next.season to next.episode
+                        },
+                        heroFocusRequester = playFocusRequester,
                     )
                 }
             }
 
-            if (item.type == MediaType.SERIES && item.cast.isNotEmpty()) {
+            // â"€â"€ Tagline â"€â"€
+            if ("tagline" in contentRowKeys) {
+                item(key = "tagline") {
+                    Text(
+                        text = "\"${item.tagline}\"",
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = Amber.copy(alpha = 0.8f),
+                        fontWeight = FontWeight.Medium,
+                        modifier = Modifier.padding(top = 20.dp, bottom = 10.dp),
+                    )
+                }
+            }
+
+            // â"€â"€ Genre pills â"€â"€
+            if ("genres" in contentRowKeys) {
+                item(key = "genres") {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier.padding(top = if (item.tagline.isNullOrBlank()) 20.dp else 0.dp, bottom = 12.dp),
+                    ) {
+                        item.genres.take(5).forEach { genre ->
+                            Text(
+                                text = genre.name,
+                                style = MaterialTheme.typography.labelMedium,
+                                color = Snow,
+                                modifier = Modifier
+                                    .background(Gunmetal, RoundedCornerShape(6.dp))
+                                    .padding(horizontal = 10.dp, vertical = 4.dp),
+                            )
+                        }
+                    }
+                }
+            }
+
+            // â"€â"€ Multi-source ratings â"€â"€
+            // â"€â"€ Overview â"€â"€
+            if ("overview" in contentRowKeys) {
+                item(key = "overview") {
+                    com.torve.android.ui.community.FullSynopsis(item)
+                }
+            }
+
+            // â"€â"€ Director â"€â"€
+            if ("director" in contentRowKeys) {
+                item(key = "director") {
+                    val directorId = item.directorId
+                    val directorReq = directorRequester
+                    var directorFocused by remember { mutableStateOf(false) }
+                    val directorBorderColor by animateColorAsState(
+                        targetValue = if (directorFocused) Amber else Color.Transparent,
+                        label = "directorBorder",
+                    )
+                    val directorModifier = if (directorId != null) {
+                        Modifier
+                            .padding(bottom = 10.dp)
+                            .border(2.dp, directorBorderColor, RoundedCornerShape(10.dp))
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(if (directorFocused) Amber.copy(alpha = 0.16f) else Color.Transparent)
+                            .focusRequester(directorReq)
+                            .onFocusChanged {
+                                directorFocused = it.isFocused
+                                if (it.isFocused) onContentFocused(directorReq)
+                            }
+                            .clickable(
+                                interactionSource = remember { MutableInteractionSource() },
+                                indication = null,
+                            ) {
+                                detailViewModel.leaveDetail(); onCastClick(directorId, item.director.orEmpty())
+                            }
+                            .padding(horizontal = 10.dp, vertical = 8.dp)
+                    } else {
+                        Modifier.padding(bottom = 10.dp)
+                    }
+                    Row(modifier = directorModifier) {
+                        Text(
+                            text = stringResource(R.string.tv_detail_director) + "  ",
+                            style = MaterialTheme.typography.labelLarge,
+                            color = Silver,
+                        )
+                        Text(
+                            text = item.director.orEmpty(),
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = Snow,
+                            fontWeight = FontWeight.Medium,
+                        )
+                    }
+                }
+            }
+
+            // â"€â"€ Cast â"€â"€
+            if ("cast" in contentRowKeys) {
+                item(key = "cast") {
+                    Text(
+                        text = stringResource(R.string.tv_detail_cast),
+                        style = MaterialTheme.typography.labelLarge,
+                        color = Silver,
+                        modifier = Modifier.padding(bottom = 8.dp),
+                    )
+                    LazyRow(
+                        state = castListState,
+                        horizontalArrangement = Arrangement.spacedBy(14.dp),
+                        contentPadding = PaddingValues(start = 8.dp, end = 16.dp),
+                        modifier = Modifier.padding(bottom = 16.dp),
+                    ) {
+                        items(item.cast.take(12), key = { it.id }) { member ->
+                            TvCastCard(
+                                modifier = if (member.id == item.cast.first().id) Modifier.focusRequester(castEntryRequester) else Modifier,
+                                name = member.name,
+                                character = member.character,
+                                profileUrl = member.profileUrl,
+                                onClick = { if (member.id > 0) { detailViewModel.leaveDetail(); onCastClick(member.id, member.name) } },
+                            )
+                        }
+                    }
+                }
+            }
+
+            // â"€â"€ Episode picker for series â"€â"€
+            if ("cast_secondary" in contentRowKeys) {
                 item(key = "cast_secondary") {
                     Text(
                         text = stringResource(R.string.tv_detail_cast),
                         style = MaterialTheme.typography.labelLarge,
-                        color = Ash,
+                        color = Silver,
                         modifier = Modifier.padding(top = 16.dp, bottom = 8.dp),
                     )
                     LazyRow(
+                        state = castListState,
                         horizontalArrangement = Arrangement.spacedBy(12.dp),
                         contentPadding = PaddingValues(start = 8.dp, end = 16.dp),
                         modifier = Modifier.padding(bottom = 16.dp),
                     ) {
                         items(item.cast.take(10), key = { it.id }) { member ->
                             TvCastCard(
+                                modifier = if (member.id == item.cast.first().id) Modifier.focusRequester(castEntryRequester) else Modifier,
                                 name = member.name,
                                 character = member.character,
                                 profileUrl = member.profileUrl,
-                                onClick = { onCastClick(member.id, member.name) },
+                                onClick = { if (member.id > 0) { detailViewModel.leaveDetail(); onCastClick(member.id, member.name) } },
                             )
                         }
                     }
@@ -1163,10 +1396,36 @@ fun TvDetailsScreen(
                     Text(
                         text = stringResource(R.string.tv_detail_more_like_this),
                         style = MaterialTheme.typography.labelLarge,
-                        color = Ash,
+                        color = Silver,
                         modifier = Modifier.padding(top = 20.dp, bottom = 8.dp),
                     )
-                    LazyRow(
+                    if (relatedPreview) com.torve.android.tv.components.TvFocusPreviewGrid(
+                        items = similarItems, screenId = "details:$type:$id", columns = 6,
+                        railFocusRequester = railFocusRequester, entryRequester = remember { FocusRequester() },
+                        modifier = Modifier.fillMaxWidth().height(430.dp), onContentFocused = onContentFocused,
+                        onExitUp = {
+                            coroutineScope.launch {
+                                val rowKey = tvDetailsRelatedReturnRow(
+                                    isSeries = item.type == MediaType.SERIES,
+                                    hasCast = item.cast.isNotEmpty(),
+                                    hasDirectorLink = item.directorId != null && !item.director.isNullOrBlank(),
+                                )
+                                listState.scrollToComposedTvDetailsRow(contentRowKeys.indexOf(rowKey).coerceAtLeast(0))
+                                val requester = when (rowKey) {
+                                    "cast", "cast_secondary" -> {
+                                        castListState.scrollToItem(0)
+                                        castEntryRequester
+                                    }
+                                    "director" -> directorRequester
+                                    else -> playFocusRequester
+                                }
+                                withFrameNanos { }
+                                requester.requestFocus()
+                                onContentFocused(requester)
+                            }
+                        },
+                        onClick = onMediaClick)
+                    else LazyRow(
                         horizontalArrangement = Arrangement.spacedBy(12.dp),
                         contentPadding = PaddingValues(start = 8.dp, end = 16.dp),
                         modifier = Modifier.padding(bottom = 16.dp),
@@ -1184,12 +1443,12 @@ fun TvDetailsScreen(
                         Text(
                             text = stringResource(R.string.tv_detail_more_like_this),
                             style = MaterialTheme.typography.labelLarge,
-                            color = Ash,
+                            color = Silver,
                             modifier = Modifier.padding(bottom = 8.dp),
                         )
                         TvDetailsCompactInlineState(
-                            title = "Loading similar shows...",
-                            subtitle = "Looking for related series from the catalog.",
+                            title = localizedUiText("Loading similar shows..."),
+                            subtitle = localizedUiText("Looking for related series from the catalog."),
                         )
                     }
                 }
@@ -1198,12 +1457,12 @@ fun TvDetailsScreen(
                         Text(
                             text = stringResource(R.string.tv_detail_more_like_this),
                             style = MaterialTheme.typography.labelLarge,
-                            color = Ash,
+                            color = Silver,
                             modifier = Modifier.padding(bottom = 8.dp),
                         )
                         TvDetailsCompactInlineState(
-                            title = "Couldn't load similar shows.",
-                            subtitle = "Check the catalog source or try again.",
+                            title = localizedUiText("Couldn't load similar shows."),
+                            subtitle = localizedUiText("Check the catalog source or try again."),
                             actionLabel = "Retry",
                             onAction = { detailViewModel.loadDetail(type, id) },
                         )
@@ -1214,12 +1473,12 @@ fun TvDetailsScreen(
                         Text(
                             text = stringResource(R.string.tv_detail_more_like_this),
                             style = MaterialTheme.typography.labelLarge,
-                            color = Ash,
+                            color = Silver,
                             modifier = Modifier.padding(bottom = 8.dp),
                         )
                         TvDetailsCompactInlineState(
-                            title = "No similar shows found.",
-                            subtitle = "The catalog did not return related series for this title.",
+                            title = localizedUiText("No similar shows found."),
+                            subtitle = localizedUiText("The catalog did not return related series for this title."),
                         )
                     }
                 }
@@ -1286,7 +1545,7 @@ fun TvDetailsScreen(
                                 }
                                 .padding(horizontal = 16.dp, vertical = 12.dp),
                         ) {
-                            Text("Trakt", color = Snow, style = MaterialTheme.typography.bodyLarge)
+                            Text(localizedUiText("Trakt"), color = Snow, style = MaterialTheme.typography.bodyLarge)
                         }
                     }
                 }
@@ -1314,7 +1573,7 @@ fun TvDetailsScreen(
                                 }
                                 .padding(horizontal = 16.dp, vertical = 12.dp),
                         ) {
-                            Text("Simkl", color = Snow, style = MaterialTheme.typography.bodyLarge)
+                            Text(localizedUiText("Simkl"), color = Snow, style = MaterialTheme.typography.bodyLarge)
                         }
                     }
                 }
@@ -1342,7 +1601,7 @@ fun TvDetailsScreen(
                                 }
                                 .padding(horizontal = 16.dp, vertical = 12.dp),
                         ) {
-                            Text("Trakt + Simkl", color = Snow, style = MaterialTheme.typography.bodyLarge)
+                            Text(localizedUiText("Trakt + Simkl"), color = Snow, style = MaterialTheme.typography.bodyLarge)
                         }
                     }
                 }
@@ -1353,7 +1612,7 @@ fun TvDetailsScreen(
                 item(key = "autoplay_status") {
                     Column(modifier = Modifier.padding(top = 14.dp)) {
                         Text(
-                            text = state.autoPlayMessage.orEmpty(),
+                            text = localizedUiText(state.autoPlayMessage.orEmpty()),
                             style = MaterialTheme.typography.bodyMedium,
                             color = Amber,
                         )
@@ -1372,7 +1631,7 @@ fun TvDetailsScreen(
             }
 
             // â"€â"€ Resolve error â"€â"€
-            if (state.isLoadingStreams || state.isResolving || state.streams.isNotEmpty()) {
+            if (!state.showStreamPicker && (state.isLoadingStreams || state.isResolving || state.streams.isNotEmpty())) {
                 item(key = "playback_readiness") {
                     DetailPlaybackReadinessCard(
                         streams = state.streams,
@@ -1393,267 +1652,75 @@ fun TvDetailsScreen(
                     Text(
                         text = resolveTvDetailMessage(context, state.resolveError),
                         style = MaterialTheme.typography.bodyMedium,
-                        color = Ruby.copy(alpha = 0.7f),
+                        color = Ruby,
                         modifier = Modifier.padding(top = 14.dp),
                     )
                 }
             }
 
             // â"€â"€ Stream Picker (when auto-play is off or auto-play failed) â"€â"€
-            if (state.showStreamPicker && state.streams.isNotEmpty()) {
-                val groups = groupPlaybackOptionStreams(filteredStreams, state.startupCandidates)
-                val startupCandidateMap = state.startupCandidates.associateBy { it.streamKey }
-                val firstStreamKey = groups.firstOrNull()?.items?.firstOrNull()?.streamUiKey()
-                item(key = "picker_header") {
-                    Text(
-                        text = stringResource(R.string.tv_streams_pick),
-                        style = MaterialTheme.typography.titleMedium,
-                        color = Snow,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier.padding(top = 18.dp, bottom = 8.dp),
-                    )
-                }
-                item(key = "picker_filter_pills") {
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        modifier = Modifier.padding(bottom = 10.dp),
-                    ) {
-                        TvStreamSourceFilter.entries.forEach { filter ->
-                            val isActive = tvStreamFilter == filter
-                            var pillFocused by remember { mutableStateOf(false) }
-                            val pillBg = when {
-                                isActive -> Amber
-                                pillFocused -> Amber.copy(alpha = 0.3f)
-                                else -> Gunmetal
-                            }
-                            val pillTextColor = if (isActive) Obsidian else Snow
-                            Box(
-                                modifier = Modifier
-                                    .background(pillBg, RoundedCornerShape(20.dp))
-                                    .border(1.dp, if (pillFocused || isActive) Amber else Steel.copy(alpha = 0.4f), RoundedCornerShape(20.dp))
-                                    .onFocusChanged { pillFocused = it.isFocused }
-                                    .focusable()
-                                    .clickable { tvStreamFilter = filter }
-                                    .padding(horizontal = 14.dp, vertical = 6.dp),
-                                contentAlignment = Alignment.Center,
-                            ) {
-                                Text(
-                                    text = filter.label,
-                                    style = MaterialTheme.typography.labelMedium,
-                                    fontWeight = if (isActive) FontWeight.Bold else FontWeight.Normal,
-                                    color = pillTextColor,
-                                )
-                            }
-                        }
-                    }
-                }
-                groups.forEach { group ->
-                    item(key = "picker_group_${group.titleRes}") {
-                        Column(modifier = Modifier.padding(bottom = 6.dp)) {
-                            Text(
-                                text = stringResource(group.titleRes),
-                                style = MaterialTheme.typography.labelLarge,
-                                color = Amber,
-                                fontWeight = FontWeight.SemiBold,
-                            )
-                            group.subtitleRes?.let {
-                                Text(
-                                    text = stringResource(it),
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = Silver,
-                                )
-                            }
-                        }
-                    }
-                    itemsIndexed(
-                        group.items,
-                        key = { index, stream -> "stream_${group.titleRes}_${index}_${stream.streamUiKey()}" },
-                    ) { _, stream ->
-                    val startupCandidate = startupCandidateMap[stream.streamUiKey()]
-                    val req = if (stream.streamUiKey() == firstStreamKey) {
-                        firstStreamFocusRequester
-                    } else {
-                        remember { FocusRequester() }
-                    }
-                    var focused by remember { mutableStateOf(false) }
-                    val bg = if (focused) Amber.copy(alpha = 0.2f) else Graphite
-                    val streamBorderColor by animateColorAsState(
-                        targetValue = if (focused) Amber else Steel.copy(alpha = 0.3f),
-                        label = "streamBorder",
-                    )
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 3.dp)
-                            .border(2.dp, streamBorderColor, RoundedCornerShape(10.dp))
-                            .clip(RoundedCornerShape(10.dp))
-                            .background(bg)
-                            .focusRequester(req)
-                            .onFocusChanged {
-                                focused = it.isFocused
-                                if (it.isFocused) onContentFocused(req)
-                            }
-                            .clickable(
-                                interactionSource = remember { MutableInteractionSource() },
-                                indication = null,
-                            ) {
-                                if (stream.isUsenetStream()) {
-                                    TvNotificationQueue.post(
-                                        message = context.getString(R.string.stream_preparing_title),
-                                        type = NotificationType.INFO,
-                                        tag = TV_USENET_PREPARING_NOTIFICATION_TAG,
-                                        durationMs = null,
-                                    )
-                                } else {
-                                    TvNotificationQueue.post(
-                                        context.getString(R.string.stream_resolving),
-                                        NotificationType.INFO,
-                                        tag = TV_STREAM_RESOLVING_NOTIFICATION_TAG,
-                                        durationMs = null,
-                                    )
-                                }
-                                // USENET_NZBDAV rows go through the shared
-                                // NzbDAV resolver; everything else stays on
-                                // the existing debrid/addon resolve path.
-                                if (stream.accelerationProvenanceKind == CandidateProvenanceKind.USENET_NZBDAV) {
-                                    detailViewModel.selectUsenetSource(stream)
-                                } else {
-                                    detailViewModel.resolveStream(
-                                        stream = stream,
-                                        provider = settingsViewModel.getDebridProvider(),
-                                        apiKey = settingsViewModel.getDebridApiKey(),
-                                    )
-                                }
-                            }
-                            .padding(horizontal = 16.dp, vertical = 10.dp),
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(12.dp),
-                        ) {
-                            // Score circle
-                            val score = stream.score
-                            val scoreColor = when {
-                                score >= 80 -> Emerald
-                                score >= 60 -> Amber
-                                else -> Gunmetal
-                            }
-                            Box(
-                                modifier = Modifier
-                                    .size(32.dp)
-                                    .background(scoreColor, CircleShape),
-                                contentAlignment = Alignment.Center,
-                            ) {
-                                Text(
-                                    text = "$score",
-                                    fontSize = 11.sp,
-                                    color = if (score >= 60) Obsidian else Snow,
-                                    fontWeight = FontWeight.Bold,
-                                )
-                            }
-
-                            // Center column: quality details
-                            Column(modifier = Modifier.weight(1f)) {
-                                StreamReadinessLabel(
-                                    stream = stream,
-                                    startupCandidate = startupCandidate,
-                                    modifier = Modifier.padding(bottom = 2.dp),
-                                )
-                                Text(
-                                    text = buildString {
-                                        append(stream.quality)
-                                        stream.codec?.let { append(" · $it") }
-                                        stream.hdr?.let { append(" · $it") }
-                                        stream.size?.let { append(" · $it") }
-                                        if (stream.languages.isNotEmpty()) {
-                                            append(" · \uD83D\uDDE3 ")
-                                            append(stream.languages.joinToString(", "))
-                                        }
-                                    },
-                                    style = MaterialTheme.typography.bodyLarge,
-                                    color = Snow,
-                                    fontWeight = FontWeight.Medium,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                )
-                                if (stream.title.isNotBlank()) {
-                                    val titleLines = stream.title.split('\n')
-                                    Text(
-                                        text = titleLines.first(),
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = Silver,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
-                                    )
-                                    if (titleLines.size > 1) {
-                                        Text(
-                                            text = titleLines.drop(1).joinToString(" "),
-                                            style = MaterialTheme.typography.labelSmall,
-                                            color = Silver.copy(alpha = 0.75f),
-                                            maxLines = 2,
-                                            overflow = TextOverflow.Ellipsis,
-                                        )
-                                    }
-                                }
-                                Text(
-                                    text = buildString {
-                                        append(stream.addonName)
-                                        stream.source?.let { append(" · $it") }
-                                        stream.seeds?.let { if (it > 0) append(" · $it seeds") }
-                                    },
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = Amber,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                )
-                                Spacer(Modifier.height(6.dp))
-                                StreamExperienceBadges(
-                                    stream = stream,
-                                    startupCandidate = startupCandidate,
-                                )
-                            }
-
-                            // Cached indicator
-                            if (stream.isCached) {
-                                Icon(
-                                    imageVector = Icons.Rounded.CloudDone,
-                                    contentDescription = "Cached",
-                                    tint = Emerald,
-                                    modifier = Modifier.size(18.dp),
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-
             // â"€â"€ Error â"€â"€
-            if (state.streamsError != null) {
+            if ((state.streamsError != null).and(state.streams.isEmpty())) {
                 item(key = "error") {
                     Text(
                         text = resolveTvDetailMessage(context, state.streamsError),
                         style = MaterialTheme.typography.bodyMedium,
-                        color = Ruby.copy(alpha = 0.7f),
+                        color = Ruby,
                         modifier = Modifier.padding(top = 14.dp),
                     )
                 }
             }
-        } else {
+        } else if (mediaItem == null) {
             item(key = "empty") {
                 TvDetailsInlineState(
-                    title = "Couldn't load this title.",
-                    subtitle = com.torve.android.error.resolveErrorKey(
+                    title = localizedUiText("Couldn't load this title."),
+                    subtitle = localizedUiText(com.torve.android.error.resolveErrorKey(
                         androidx.compose.ui.platform.LocalContext.current,
                         state.error,
-                    ) ?: "Check the catalog source or try again.",
+                    ) ?: "Check the catalog source or try again."),
                 )
             }
         }
-    }
-
     // Download toast now rendered by TvNotificationQueue in TvRoot
 
     } // end LazyColumn
+
+    if (state.showStreamPicker && state.streams.isNotEmpty() && state.preparing == null &&
+        !state.isResolving && !showCinematicSourceLoading && presetOverride == null) {
+        val preferences = settingsViewModel.buildStreamPreferences()
+        com.torve.android.tv.components.TvStreamBrowser(
+            title = listOfNotNull(mediaItem?.title, state.streamContextSeason?.let { season ->
+                state.streamContextEpisode?.let { episode -> "S%02dE%02d".format(season, episode) }
+            }).joinToString(" · "),
+            picker = languagePicker, sort = tvStreamSortMode,
+            onSort = { tvStreamSortMode = it; streamSortPreferences.writeTvStreamSortMode(it) },
+            loading = state.isLoadingStreams || state.isLoadingMoreSources,
+            errorMessage = state.resolveError?.let { resolveTvDetailMessage(context, it) },
+            presentation = { stream -> tvStreamPresentation(stream,
+                state.startupCandidates.firstOrNull { it.streamKey == stream.streamUiKey() },
+                stream.usenetCandidateIdOrNull()?.let { state.usenetCandidates[it] }) },
+            onRefresh = { detailViewModel.refreshStreams(season = state.streamContextSeason, episode = state.streamContextEpisode) },
+            onDismiss = { detailViewModel.dismissStreamPicker(); queueSourceOriginFocusRestore() },
+            onSelect = { stream, requester ->
+                val policy = com.torve.data.addon.StreamAutoSelectionPolicy.evaluate(stream, preferences,
+                    com.torve.data.addon.StreamSelectionContext(durationMs = (state.seasonDetail?.episodes?.firstOrNull {
+                        it.episodeNumber == state.streamContextEpisode }?.runtime ?: state.mediaItem?.runtime)?.times(60_000L)))
+                val startPlayback: () -> Unit = {
+                    languagePicker.select(stream) {}
+                    TvNotificationQueue.post(
+                        message = context.getString(if (stream.isUsenetStream()) R.string.stream_preparing_title else R.string.stream_resolving),
+                        type = NotificationType.INFO,
+                        tag = if (stream.isUsenetStream()) TV_USENET_PREPARING_NOTIFICATION_TAG else TV_STREAM_RESOLVING_NOTIFICATION_TAG,
+                        durationMs = null)
+                    if (stream.accelerationProvenanceKind == CandidateProvenanceKind.USENET_NZBDAV) detailViewModel.selectUsenetSource(stream)
+                    else detailViewModel.resolveStream(stream, provider = settingsViewModel.getDebridProvider(), apiKey = settingsViewModel.getDebridApiKey())
+                }
+                if (!policy.eligible && preferences.sourceFallbackPolicy == com.torve.domain.model.SourceFallbackPolicy.ASK)
+                    presetOverride = Triple(policy.explanation ?: context.getString(R.string.tv_source_override), requester, startPlayback)
+                else startPlayback()
+            },
+        )
+    }
 
     // Preparing overlay â€" rendered inside the Box but outside the
     // LazyColumn so it always layers above the detail surface, blocking
@@ -1664,12 +1731,36 @@ fun TvDetailsScreen(
     if (preparing != null) {
         TvStreamPreparingOverlay(
             state = preparing,
+            mediaItem = mediaItem?.copy(logoUrl = cinematicLogoUrl ?: mediaItem.logoUrl),
             onCancel = {
                 restoreFocusAfterPreparingCancel = true
                 detailViewModel.cancelPreparing()
             },
             modifier = Modifier.zIndex(80f),
         )
+    }
+    if (showCinematicSourceLoading) {
+        com.torve.android.ui.components.CinematicContentLoading(
+            title = mediaItem?.title.orEmpty(),
+            backdropUrl = mediaItem?.backdropUrl,
+            posterUrl = mediaItem?.posterUrl,
+            logoUrl = cinematicLogoUrl ?: mediaItem?.logoUrl,
+            tmdbId = mediaItem?.tmdbId,
+            mediaType = mediaItem?.type,
+            modifier = Modifier.fillMaxSize().zIndex(70f),
+        )
+    }
+
+    presetOverride?.let { choice ->
+        com.torve.android.tv.components.TvWorkflowDialog(localizedUiText("Use this source once?"), {
+            presetOverride = null; presetFocusReturn = choice.second
+        }, null) {
+            Text(choice.first, color = Silver, style = MaterialTheme.typography.titleMedium)
+            Text(localizedUiText("Your saved preset stays the same. You can try this source or return to the source list."), color = Silver)
+            com.torve.android.tv.components.TvWorkflowAction(localizedUiText("Play this source"), {
+                presetOverride = null; choice.third()
+            })
+        }
     }
 
     // â"€â"€ Source picker (Prompt 11C) â"€â"€
@@ -1679,27 +1770,53 @@ fun TvDetailsScreen(
     // flow (Provider). Route failures are handled by PlayerScreen's
     // auto-source fallback path when launched with autoSourceSelection.
     sourcePickerState?.let { picker ->
-        val mediaItem = state.mediaItem
+        val mediaItem = sourcePickerMediaItem ?: state.mediaItem
         TvSourcePickerSheet(
             state = picker,
             modifier = Modifier.zIndex(90f),
             onSelect = { option ->
+                // Capture the launch context before removing the modal. This is
+                // atomic with DPAD_CENTER even if detail metadata refreshes now.
+                val selectedMediaItem = mediaItem ?: return@TvSourcePickerSheet
+                val selectedSeason = sourcePickerSeason
+                val selectedEpisode = sourcePickerEpisode
+                val selectedOriginEpisode = sourcePickerOriginEpisode
+                restorePlayFocusAfterSourceDismiss = false
+                pendingEpisodeFocusRestore = null
                 sourcePickerState = null
-                if (mediaItem == null) return@TvSourcePickerSheet
+                sourcePickerMediaItem = null
+                sourcePickerSeason = null
+                sourcePickerEpisode = null
                 if (TvDetailsSourcePickerStateBuilder.isProviderFetchSentinel(option)) {
-                    detailViewModel.fetchStreams(season = sourcePickerSeason, episode = sourcePickerEpisode)
+                    sourcePickerOriginEpisode = selectedOriginEpisode
+                    resolvingEpisodeTarget = selectedOriginEpisode
+                    detailViewModel.fetchStreams(season = selectedSeason, episode = selectedEpisode)
                     return@TvSourcePickerSheet
                 }
+                sourcePickerOriginEpisode = null
+                resolvingEpisodeTarget = null
                 val pickerEpName = state.seasonDetail?.episodes
-                    ?.find { it.episodeNumber == sourcePickerEpisode }?.name.orEmpty()
+                    ?.find { it.episodeNumber == selectedEpisode }?.name.orEmpty()
                 when (val route = option.route) {
                     is PlaybackRoute.LocalFile -> {
-                        onPlayResolved(
+                        launchResolvedPlayback(
                             "file://${route.absolutePath}",
                             "",
-                            mediaItem,
-                            sourcePickerSeason,
-                            sourcePickerEpisode,
+                            selectedMediaItem,
+                            selectedSeason,
+                            selectedEpisode,
+                            true,
+                            pickerEpName,
+                        )
+                    }
+                    is PlaybackRoute.JellyfinStream -> {
+                        PendingLanPlaybackHandoff.stage(route)
+                        launchResolvedPlayback(
+                            route.url,
+                            "",
+                            selectedMediaItem,
+                            selectedSeason,
+                            selectedEpisode,
                             true,
                             pickerEpName,
                         )
@@ -1708,12 +1825,12 @@ fun TvDetailsScreen(
                         // Stage headers BEFORE navigating — PlayerScreen
                         // attaches X-Torve-Lan-Auth before play().
                         PendingLanPlaybackHandoff.stage(route)
-                        onPlayResolved(
+                        launchResolvedPlayback(
                             route.url,
                             "",
-                            mediaItem,
-                            sourcePickerSeason,
-                            sourcePickerEpisode,
+                            selectedMediaItem,
+                            selectedSeason,
+                            selectedEpisode,
                             true,
                             pickerEpName,
                         )
@@ -1723,7 +1840,9 @@ fun TvDetailsScreen(
                         // A real ProviderStream URL here would be
                         // unusual â€" fall back to fetchStreams to keep
                         // the source disambiguation flow.
-                        detailViewModel.fetchStreams(season = sourcePickerSeason, episode = sourcePickerEpisode)
+                        sourcePickerOriginEpisode = selectedOriginEpisode
+                        resolvingEpisodeTarget = selectedOriginEpisode
+                        detailViewModel.fetchStreams(season = selectedSeason, episode = selectedEpisode)
                     }
                     PlaybackRoute.ReDownload -> {
                         // No-op â€" the picker only emits ReDownload when
@@ -1733,7 +1852,12 @@ fun TvDetailsScreen(
                 }
             },
             onDismiss = {
+                val episodeOrigin = sourcePickerOriginEpisode
+                pendingEpisodeFocusRestore = episodeOrigin
+                restorePlayFocusAfterSourceDismiss = episodeOrigin == null
+                sourcePickerOriginEpisode = null
                 sourcePickerState = null
+                sourcePickerMediaItem = null
                 sourcePickerSeason = null
                 sourcePickerEpisode = null
             },
@@ -1754,6 +1878,7 @@ private suspend fun buildDetailPickerState(
     seasonNumber: Int?,
     episodeNumber: Int?,
     downloadRepository: DownloadRepository,
+    jellyfinLibrary: JellyfinLibraryOverlayService,
     lanLibraryConsumer: LanLibraryConsumer,
     networkMonitor: NetworkMonitor,
     wifiOnlyForLan: Boolean,
@@ -1769,6 +1894,17 @@ private suspend fun buildDetailPickerState(
         seasonNumber = seasonNumber,
         episodeNumber = episodeNumber,
     )
+    val jellyfinRoute = item.tmdbId?.let { tmdbId ->
+        runCatching {
+            jellyfinLibrary.findPlaybackRoute(
+                tmdbId = tmdbId,
+                mediaType = item.type,
+                seasonNumber = seasonNumber,
+                episodeNumber = episodeNumber,
+                imdbId = item.imdbId,
+            )
+        }.getOrNull()
+    }
     val lanRoute = runCatching {
         lanLibraryConsumer.findLanRoute(
             title = item.title,
@@ -1784,6 +1920,7 @@ private suspend fun buildDetailPickerState(
     }
     return TvDetailsSourcePickerStateBuilder.build(
         localFilePath = localFilePath,
+        jellyfinRoute = jellyfinRoute,
         lanRoute = lanRoute,
         // The detail screen always assumes provider streams might
         // resolve â€" the existing fetchStreams() will tell the user if
@@ -1870,6 +2007,7 @@ private fun TvSimilarCard(
 
 @Composable
 private fun TvDetailsCinematicBackground(item: MediaItem?) {
+    if (com.torve.android.ui.community.LocalPersonalAppearance.current.active) return
     Box(modifier = Modifier.fillMaxSize()) {
         val backdrop = item?.backdropUrl ?: item?.posterUrl
         if (!backdrop.isNullOrBlank()) {
@@ -1990,15 +2128,7 @@ private fun TvSeriesCompactHeader(
                         overflow = TextOverflow.Ellipsis,
                     )
                 }
-                item.overview?.takeIf { it.isNotBlank() }?.let { overview ->
-                    Text(
-                        text = overview,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = Snow.copy(alpha = 0.86f),
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
+
             }
             if (!selectedEpisodeLabel.isNullOrBlank()) {
                 Box(
@@ -2101,7 +2231,6 @@ private fun TvDetailsInlineState(
                     .background(if (focused) Amber.copy(alpha = 0.18f) else Gunmetal.copy(alpha = 0.74f))
                     .border(2.dp, borderColor, RoundedCornerShape(999.dp))
                     .onFocusChanged { focused = it.isFocused }
-                    .focusable()
                     .clickable(
                         interactionSource = remember { MutableInteractionSource() },
                         indication = null,
@@ -2151,7 +2280,7 @@ private fun TvDetailsCompactInlineState(
                 Text(
                     text = subtitle,
                     style = MaterialTheme.typography.labelMedium,
-                    color = Silver.copy(alpha = 0.78f),
+                color = Silver,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
@@ -2169,7 +2298,6 @@ private fun TvDetailsCompactInlineState(
                     .background(if (focused) Amber.copy(alpha = 0.18f) else Gunmetal.copy(alpha = 0.70f))
                     .border(2.dp, borderColor, RoundedCornerShape(999.dp))
                     .onFocusChanged { focused = it.isFocused }
-                    .focusable()
                     .clickable(
                         interactionSource = remember { MutableInteractionSource() },
                         indication = null,
@@ -2206,7 +2334,7 @@ private fun DetailLogoTitle(item: MediaItem) {
             },
             modifier = Modifier
                 .fillMaxWidth(0.55f)
-                .heightIn(min = 62.dp, max = 104.dp),
+                .heightIn(min = if (item.type == MediaType.SERIES) 44.dp else 62.dp, max = if (item.type == MediaType.SERIES) 70.dp else 104.dp),
         )
         return
     }
@@ -2243,7 +2371,7 @@ private fun resolveTvDetailMessage(context: android.content.Context, message: St
 }
 
 @Composable
-private fun TvActionButton(
+internal fun TvActionButton(
     text: String,
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
@@ -2253,23 +2381,14 @@ private fun TvActionButton(
 ) {
     var focused by remember { mutableStateOf(false) }
     val scale by animateFloatAsState(targetValue = if (focused) 1.05f else 1f, label = "actionScale")
-    val borderColor by animateColorAsState(targetValue = if (focused) Amber else Color.Transparent, label = "actionBorder")
 
     Box(
         modifier = modifier
+            .heightIn(min = 44.dp)
             .zIndex(if (focused) 1f else 0f)
             .scale(scale)
-            .border(2.dp, borderColor, RoundedCornerShape(10.dp))
-            .clip(RoundedCornerShape(10.dp))
-            .background(
-                when {
-                    !enabled && isPrimary -> Amber.copy(alpha = 0.5f)
-                    isPrimary && focused -> AmberDark
-                    isPrimary -> Amber
-                    focused -> Graphite
-                    else -> Gunmetal.copy(alpha = 0.5f)
-                },
-            )
+            .tvGlassControl(focused = focused, selected = isPrimary, enabled = enabled,
+                focusBorderWidth = if (isPrimary) 3.dp else 2.dp)
             .onFocusChanged {
                 focused = it.isFocused
                 if (it.isFocused) onFocused()
@@ -2285,12 +2404,7 @@ private fun TvActionButton(
         Text(
             text = text,
             style = MaterialTheme.typography.titleMedium,
-            color = when {
-                isPrimary && !enabled -> Obsidian.copy(alpha = 0.5f)
-                isPrimary -> Obsidian
-                !enabled -> Snow.copy(alpha = 0.5f)
-                else -> Snow
-            },
+            color = if (enabled) Snow else Silver,
             fontWeight = if (isPrimary) FontWeight.Bold else FontWeight.Normal,
         )
     }
@@ -2298,6 +2412,7 @@ private fun TvActionButton(
 
 @Composable
 private fun TvCastCard(
+    modifier: Modifier = Modifier,
     name: String,
     character: String?,
     profileUrl: String?,
@@ -2309,7 +2424,7 @@ private fun TvCastCard(
 
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
-        modifier = Modifier
+        modifier = modifier
             .width(74.dp)
             .zIndex(if (focused) 1f else 0f)
             .scale(scale)
@@ -2366,7 +2481,7 @@ private fun TvCastCard(
             Text(
                 text = it,
                 style = MaterialTheme.typography.labelSmall,
-                color = Ash,
+                color = Silver,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
@@ -2375,11 +2490,11 @@ private fun TvCastCard(
 }
 
 @Composable
-private fun TvRatingChip(label: String, value: String, iconRes: Int? = null) {
+internal fun TvRatingChip(label: String, value: String, iconRes: Int? = null) {
     Row(
         modifier = Modifier
-            .background(Gunmetal, RoundedCornerShape(8.dp))
-            .padding(horizontal = 10.dp, vertical = 6.dp),
+            .tvGlassControl(focused = false, cornerRadius = 8.dp)
+            .padding(horizontal = 8.dp, vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
@@ -2394,9 +2509,9 @@ private fun TvRatingChip(label: String, value: String, iconRes: Int? = null) {
             )
         } else {
             Text(
-                text = label,
+                text = localizedUiText(label),
                 style = MaterialTheme.typography.labelSmall,
-                color = Ash,
+                color = Silver,
                 fontWeight = FontWeight.Medium,
             )
         }
@@ -2410,7 +2525,7 @@ private fun TvRatingChip(label: String, value: String, iconRes: Int? = null) {
 }
 
 @Composable
-private fun TvWatchedStatusPill() {
+private fun TvWatchedStatusPill(label: String? = null) {
     Row(
         modifier = Modifier
             .clip(RoundedCornerShape(999.dp))
@@ -2427,7 +2542,7 @@ private fun TvWatchedStatusPill() {
             modifier = Modifier.size(16.dp),
         )
         Text(
-            text = stringResource(R.string.tv_watched),
+            text = label ?: stringResource(R.string.tv_watched),
             style = MaterialTheme.typography.labelMedium,
             color = Snow,
             fontWeight = FontWeight.SemiBold,
@@ -2443,6 +2558,7 @@ private fun TvWatchedStatusPill() {
 @Composable
 internal fun TvStreamPreparingOverlay(
     state: com.torve.presentation.detail.PreparingStreamState,
+    mediaItem: MediaItem?,
     onCancel: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -2468,22 +2584,25 @@ internal fun TvStreamPreparingOverlay(
             },
         contentAlignment = Alignment.Center,
     ) {
+        com.torve.android.ui.components.CinematicContentLoading(
+            title = mediaItem?.title.orEmpty(),
+            backdropUrl = mediaItem?.backdropUrl,
+            posterUrl = mediaItem?.posterUrl,
+            logoUrl = mediaItem?.logoUrl,
+            tmdbId = mediaItem?.tmdbId,
+            mediaType = mediaItem?.type,
+        )
         Column(
             modifier = Modifier
+                .align(Alignment.BottomCenter)
                 .widthIn(max = 560.dp)
                 .fillMaxWidth()
-                .padding(horizontal = 48.dp)
+                .padding(horizontal = 48.dp, vertical = 26.dp)
                 .clip(RoundedCornerShape(22.dp))
-                .background(Gunmetal)
-                .padding(horizontal = 40.dp, vertical = 36.dp),
+                .background(Gunmetal.copy(alpha = 0.92f))
+                .padding(horizontal = 40.dp, vertical = 24.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            CircularProgressIndicator(
-                modifier = Modifier.size(64.dp),
-                strokeWidth = 4.dp,
-                color = Amber,
-            )
-            Spacer(Modifier.height(20.dp))
             Text(
                 stringResource(R.string.stream_preparing_title),
                 style = MaterialTheme.typography.headlineMedium,
@@ -2530,8 +2649,7 @@ internal fun TvStreamPreparingOverlay(
                             shape = RoundedCornerShape(14.dp),
                         )
                         .focusRequester(cancelFocus)
-                        .onFocusChanged { cancelFocused = it.isFocused }
-                        .focusable(),
+                        .onFocusChanged { cancelFocused = it.isFocused },
                     shape = RoundedCornerShape(14.dp),
                 ) {
                     Text(

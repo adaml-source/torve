@@ -1,0 +1,138 @@
+/* Torve editorial system: open compositions, device-led interaction, clear actions. */
+:root{--e-bg:#0b0c0d;--e-ink:#eeeae1;--e-muted:#a5a39d;--e-gold:#d6b672;--e-line:rgba(238,234,225,.17);--e-light:rgba(214,182,114,.12);--e-serif:Georgia,'Times New Roman',serif;--e-space:32px}
+body.torve-landing,body.modern-page{background:var(--e-bg);color:var(--e-ink)}
+.torve-landing{--l-bg:var(--e-bg);--l-ink:var(--e-ink);--l-gold:var(--e-gold);--l-muted:var(--e-muted);--l-border:var(--e-line);--l-surface:transparent}
+.modern-page{--m-bg:var(--e-bg);--m-ink:var(--e-ink);--m-gold:var(--e-gold);--m-muted:var(--e-muted);--m-border:var(--e-line);--m-surface:transparent;--m-shadow:none}
+.landing-header,.modern-page .site-header{background:var(--e-bg);border-bottom:1px solid var(--e-line)}
+.header-account,.modern-page .site-header-actions .t-btn-secondary{border:0;padding-right:0;background:none}
+.landing-shell,.modern-page .container{max-width:1224px}
+.hero{position:relative;padding-top:44px;padding-bottom:24px;min-height:530px;gap:48px}
+.hero:before{content:'';position:absolute;width:min(500px,100%);height:500px;right:0;top:-20px;pointer-events:none;background:radial-gradient(ellipse,var(--e-light),transparent 68%);z-index:-1}
+.hero h1{font-size:clamp(58px,6.5vw,84px);font-weight:500;letter-spacing:-.065em;line-height:1}
+.hero h1 span{font-family:var(--e-serif);font-style:italic;font-weight:400;color:var(--e-ink);letter-spacing:-.055em}
+.hero .eyebrow{color:var(--e-gold)}
+.hero-lead{font-size:16px;line-height:1.75}
+.action,.modern-page .btn,.modern-page .t-btn,.modern-page .pricing-cta{border-radius:3px;box-shadow:none}
+.action-primary{padding:13px 22px;background:var(--e-gold)}
+.hero-proof{padding-top:18px;border-top:1px solid var(--e-line);gap:22px;max-width:410px}
+.stage-grid{background-size:70px 70px;opacity:.12}
+.stage-orbit{border-color:var(--e-line);width:440px;height:440px;right:0;top:-8px;background:radial-gradient(circle,var(--e-light),transparent 70%)}
+.screen-tv{transform:rotate(-8deg);top:72px;border-radius:9px;box-shadow:0 36px 65px rgba(0,0,0,.65)}
+.screen-phone{transform:rotate(8deg);top:44px;right:3px;height:395px;box-shadow:0 36px 65px rgba(0,0,0,.6)}
+.stage-label{background:none;border:0;box-shadow:none;padding:0;left:0;bottom:50px}
+.label-mark{font-size:38px}
+.explore-section{border:0;border-radius:0;box-shadow:none;background:none;padding:24px 0 28px;border-top:1px solid var(--e-line);border-bottom:1px solid var(--e-line);grid-template-columns:.7fr 1.3fr;gap:48px}
+.explore-heading h2,.device-intro h2,.quick-answers h2{font-family:var(--e-serif);font-style:italic;font-weight:400;font-size:35px;letter-spacing:-.035em}
+.tab-row button{border:0!important;border-radius:0;background:none!important;padding-left:0;padding-right:0;margin-right:22px;color:var(--e-muted)}
+.tab-row button[aria-selected=true]{color:var(--e-ink);box-shadow:0 1px 0 var(--e-gold)}
+.feature-tabs{gap:8px}.feature-tabs button span{color:var(--e-gold)}
+.feature-panel{min-height:105px;padding-top:16px}
+.feature-caption{color:var(--e-muted);font-size:10px}
+.device-browser{padding:0;border:0;border-radius:0;box-shadow:none;background:none}
+.platform-tabs{padding-bottom:12px;border-bottom:1px solid var(--e-line)}
+.platform-tabs button{margin-right:16px;font-size:12px}
+.platform-panel{min-height:240px;animation:editorial-enter .3s ease}
+.platform-visual{background:none}
+.availability{border:0;border-radius:0;padding:0;color:var(--e-gold);letter-spacing:.08em;text-transform:uppercase;font-size:9px}
+.platform-panel h3{font-family:var(--e-serif);font-size:30px;font-weight:400;letter-spacing:-.035em}
+.quick-answers{border-top:1px solid var(--e-line);padding-top:32px}
+.landing-footer{background:none}
+.modern-page .page-hero{padding:38px 0 12px}
+.modern-page .page-hero .container{max-width:1144px}
+.modern-page .page-hero .section-title{font-family:var(--e-serif);font-weight:400;font-size:clamp(40px,5.5vw,68px);letter-spacing:-.04em}
+.modern-page .page-hero .section-subtitle{max-width:680px;font-size:14px;line-height:1.7}
+.modern-page .trust-grid{display:grid;grid-template-columns:1fr;gap:0}
+.modern-page .trust-item{border:0;border-bottom:1px solid var(--e-line);border-radius:0;background:none;box-shadow:none;padding:22px 0;display:grid;grid-template-columns:minmax(170px,.7fr) minmax(200px,1.4fr) minmax(130px,.5fr);gap:24px;align-items:center}
+.modern-page .trust-item h3{font-family:var(--e-serif);font-size:25px;font-weight:400;margin:0}
+.modern-page .trust-item p{margin:0;font-size:13px}
+.modern-page .trust-item .pricing-cta{margin:0;background:none;border:0;padding:8px 0;text-align:right;color:var(--e-gold);min-height:42px}
+.modern-page a.trust-item:hover{transform:none;background:var(--e-light);border-color:var(--e-line)}
+.modern-page .cta-block,.modern-page .step-card,.modern-page .method-block,.modern-page .rail-card,.modern-page .portal-rail-card,.modern-page .setup-card,.modern-page .automation-card,.modern-page .admin-card,.modern-page .tile{box-shadow:none;border-radius:0;border:0;background:none}
+.modern-page .cta-block{padding:20px 0;text-align:left;border-top:1px solid var(--e-line)}
+.modern-page .cta-block .button-row{justify-content:flex-start}
+.modern-page .cta-title{font-family:var(--e-serif);font-weight:400;font-size:34px}
+.modern-page .steps-grid{gap:28px;border-top:1px solid var(--e-line);padding-top:24px}
+.modern-page .step-card{padding:0}
+.modern-page .step-num{background:none;border:0;color:var(--e-gold);justify-content:flex-start;width:auto;font-size:12px;margin-bottom:10px}
+.modern-page .article-shell{grid-template-columns:200px minmax(0,1fr);gap:44px;padding-top:8px}
+.modern-page .article-shell>.article{border:0;border-radius:0;background:none;padding:0;box-shadow:none}
+.modern-page .article-nav{background:none;border:0;border-radius:0;padding:0 18px 0 0;border-right:1px solid var(--e-line)}
+.modern-page .article-nav summary{color:var(--e-gold);font-size:11px}
+.modern-page .article-nav a{font-size:12px;padding:6px 0}
+.modern-page .article h2{font-family:var(--e-serif);font-weight:400;font-size:29px;margin-top:38px}
+.modern-page .article p,.modern-page .article li{font-size:14px;line-height:1.85;max-width:740px}
+.modern-page .auth-container{border:0;border-radius:0;background:none;box-shadow:none;gap:60px;max-width:980px}
+.modern-page .auth-form-side{padding:28px 0}
+.modern-page .auth-form-title{font-family:var(--e-serif);font-size:43px;font-weight:400;letter-spacing:-.035em}
+.modern-page .auth-brand-side{position:relative;border:0;border-left:1px solid var(--e-line);background:none;padding:48px 0 48px 48px;text-align:left}
+.modern-page .auth-brand-side:before{content:'';width:290px;height:290px;border:1px solid var(--e-line);border-radius:50%;position:absolute;top:0;left:35%;pointer-events:none;background:radial-gradient(circle,var(--e-light),transparent 70%);z-index:-1}
+.modern-page .auth-brand-side h2{font-family:var(--e-serif);font-weight:400;font-size:38px;letter-spacing:-.04em}
+.modern-page .auth-brand-features{padding:0;align-items:flex-start;text-align:left}
+.modern-page .t-field input,.modern-page .t-field select,.modern-page .t-field textarea{border:0;border-bottom:1px solid var(--e-line);border-radius:0;background:none;padding:10px 0}
+.modern-page .t-field input:focus{border-color:var(--e-gold)}
+.modern-page .footer{background:none;margin-top:30px}
+.modern-page .footer-row{color:var(--e-muted)}
+.modern-page .site-header-nav a{background:none!important;border-radius:0!important}
+.modern-page .rail-card,.modern-page .portal-rail-card{border-left:1px solid var(--e-line);padding:18px 0 18px 24px}
+.modern-page .setup-card{border-bottom:1px solid var(--e-line)}
+.modern-page .device-row,.modern-page .pairing-row{border:0;border-bottom:1px solid var(--e-line);border-radius:0;background:none;box-shadow:none}
+.modern-page .automation-card,.modern-page .admin-card,.modern-page .method-block{border-top:1px solid var(--e-line);padding:24px 0}
+.modern-page .connection-sections button,.modern-page .account-nav a{border:0;border-bottom:1px solid transparent;border-radius:0;background:none;padding:10px 0;margin-right:18px}
+.modern-page .connection-sections button[aria-pressed=true]{background:none;border-color:var(--e-gold);color:var(--e-ink)}
+.modern-page .auth-gate,.modern-page .auth{background:none;border:0;border-top:1px solid var(--e-line);border-radius:0;padding:28px 0;box-shadow:none}
+/* Device atlas: the illustration, state, and download action move together. */
+.has-device-atlas #downloads>.container>.section-header{display:none}
+.has-device-atlas #downloads{padding-top:20px}
+.has-device-atlas #install-notes{padding-top:28px;border-top:1px solid var(--e-line);margin-top:20px}
+.has-device-atlas #install-notes .container{display:grid;grid-template-columns:.6fr 1.4fr;gap:48px}
+.has-device-atlas #install-notes .section-header{text-align:left;margin:0}
+.has-device-atlas #install-notes .section-title{font-family:var(--e-serif);font-size:31px;font-weight:400}
+.has-device-atlas #install-notes .faq-list{padding:0;border:0;border-radius:0;box-shadow:none;background:none;max-width:none}
+.has-device-atlas #install-notes .faq-item{border:0;border-bottom:1px solid var(--e-line);border-radius:0;background:none;box-shadow:none}
+.has-device-atlas #install-notes .faq-item summary{font-size:13px;padding:14px 0}
+.has-device-atlas #install-notes .faq-item p{font-size:12px;padding-left:0}
+.has-device-atlas main>.section-sm{display:none}
+.download-atlas{display:grid;grid-template-columns:230px minmax(0,1fr);gap:60px;align-items:start}
+.modern-page .download-atlas .download-tabs{display:flex;flex-direction:column;gap:0;margin:0;padding:4px 0;border-top:1px solid var(--e-line)}
+.modern-page .download-atlas .download-tabs button{display:flex;gap:14px;align-items:center;text-align:left;justify-content:flex-start;border:0;border-bottom:1px solid var(--e-line);border-radius:0;padding:17px 0;background:none;color:var(--e-muted);font-size:14px;min-height:54px;white-space:normal}
+.atlas-tab-index{font-size:9px;letter-spacing:.08em;opacity:.6;min-width:18px}
+.modern-page .download-atlas .download-tabs button[aria-selected=true]{color:var(--e-ink);background:none;border-color:var(--e-gold)}
+.modern-page .download-atlas .download-tabs button[aria-selected=true]:after{content:'↗';color:var(--e-gold);margin-left:auto;font-size:18px}
+.atlas-main{min-width:0}
+.atlas-art{position:relative;margin:0;min-height:335px;display:grid;place-items:center;isolation:isolate;overflow:visible;perspective:1000px}
+.atlas-art:before{content:'';position:absolute;inset:-15% 0;background:radial-gradient(ellipse at var(--pointer-x,55%) var(--pointer-y,45%),rgba(214,182,114,.2),transparent 62%);z-index:-1;pointer-events:none}
+.atlas-art svg{width:100%;max-width:760px;height:335px;overflow:visible;transform:rotateX(var(--tilt-x,0deg)) rotateY(var(--tilt-y,0deg));transition:transform .18s ease-out}
+.atlas-art .atlas-device{animation:atlas-arrive .65s cubic-bezier(.2,.8,.2,1)}
+.atlas-art image{mix-blend-mode:screen}
+.atlas-art .atlas-orbit{fill:none;stroke:var(--e-line);stroke-width:.8}
+.atlas-art figcaption{font-size:10px;color:var(--e-muted);line-height:1.5;position:absolute;bottom:0;left:0;right:0;text-align:center}
+.atlas-mobile-selector{display:none}
+.modern-page .download-atlas .downloads-interactive{margin:18px 0 0;max-width:none;display:block}
+.modern-page .download-atlas .trust-item{display:block;min-height:0;border:0;padding:0;animation:editorial-enter .22s ease}
+.modern-page .download-atlas .trust-item h3{font-family:var(--e-serif);font-size:37px;line-height:1.2;margin:0 0 10px;font-weight:400}
+.modern-page .download-atlas .trust-item p{font-size:13px;line-height:1.7;max-width:670px}
+.modern-page .download-atlas .button-row{justify-content:flex-start;margin-top:18px;gap:20px;flex-wrap:wrap}
+.modern-page .download-atlas .btn-secondary{border:0;background:none;padding:10px 0;color:var(--e-muted)}
+.atlas-state{display:block;font-size:9px;letter-spacing:.14em;text-transform:uppercase;color:var(--e-gold);margin-bottom:10px}
+@keyframes atlas-arrive{from{opacity:0;transform:translateY(18px) scale(.94)}to{opacity:1;transform:translateY(0) scale(1)}}
+@keyframes editorial-enter{from{opacity:0;transform:translateY(7px)}to{opacity:1;transform:none}}
+@media(max-width:1000px){.hero{gap:24px}.stage-orbit{width:330px;height:330px}.screen-phone{height:340px}.download-atlas{grid-template-columns:200px 1fr;gap:32px}.atlas-art svg{height:290px}.atlas-art{min-height:290px}.modern-page .trust-item{grid-template-columns:.8fr 1.2fr;gap:14px 24px}.modern-page .trust-item .pricing-cta{grid-column:2;text-align:left}}
+@media(max-width:760px){.hero{gap:0;padding-top:32px;min-height:0}.hero h1{font-size:62px}.stage-orbit{width:310px;height:310px}.screen-phone{height:287px}.explore-section{grid-template-columns:1fr;gap:20px;padding:24px 0}.explore-heading h2{font-size:31px}.media-stage .feature-tabs{border:0;border-radius:0;background:none;padding:0}.tab-row button{margin-right:0}.feature-tabs{gap:14px}.media-stage .feature-tabs button{padding:10px 0}.device-browser{padding:0}.devices-section{gap:24px;padding-top:34px}.platform-tabs button{margin-right:10px}.platform-panel{min-height:0}.modern-page .article-shell{display:block}.modern-page .article-nav{position:static;margin-bottom:28px;border-right:0;border-bottom:1px solid var(--e-line);padding:0 0 16px}.modern-page .auth-container{gap:0}.modern-page .auth-brand-side{padding:28px 0;border-left:0;border-top:1px solid var(--e-line)}.modern-page .auth-brand-side:before{display:none}.modern-page .trust-item{display:block;padding:22px 0}.modern-page .trust-item p{margin-top:8px}.modern-page .trust-item .pricing-cta{text-align:left;margin-top:10px}.modern-page .rail-card,.modern-page .portal-rail-card{border-left:0;border-top:1px solid var(--e-line);padding:20px 0}.download-atlas{display:block}.modern-page .download-atlas .download-tabs{display:none}.atlas-mobile-selector{display:flex;align-items:center;gap:16px;border-bottom:1px solid var(--e-line);padding-bottom:12px;margin-bottom:8px}.atlas-mobile-selector label{font-size:10px;color:var(--e-muted);white-space:nowrap}.atlas-mobile-selector select{min-width:0;width:100%;min-height:44px;color:var(--e-ink);border:0;border-radius:0;background:var(--e-bg);font-family:var(--t-font);font-size:15px;padding:8px 0}.atlas-art svg{height:235px}.atlas-art{min-height:235px}.modern-page .download-atlas .trust-item h3{font-size:33px}.has-device-atlas #install-notes .container{display:block}.has-device-atlas #install-notes .section-header{margin-bottom:16px}.modern-page .page-hero .section-title{font-size:45px}.modern-page .page-hero{padding-top:26px}.modern-page .article h2{font-size:27px}.modern-page .steps-grid{grid-template-columns:1fr 1fr}.modern-page .auth-form-title{font-size:37px}}
+@media(max-width:420px){.hero h1{font-size:56px}.screen-phone{height:254px}.stage-orbit{width:270px;height:270px}.modern-page .steps-grid{grid-template-columns:1fr}.platform-tabs{gap:8px}.platform-tabs button{margin-right:0}.modern-page .page-hero .section-title{font-size:42px}.modern-page .article p,.modern-page .article li{font-size:13px}.modern-page .auth-form-side{padding:24px 0}.hero-proof{gap:13px}}
+@media(prefers-reduced-motion:reduce){.atlas-art svg{transform:none!important}.atlas-art .atlas-device,.platform-panel,.download-atlas .trust-item{animation:none!important}.hero:before{display:none}}
+/* Carry the cinematic direction through every page without obscuring forms or policies. */
+:root{--e-bg:#0a080f;--e-ink:#f8f6f0;--e-muted:#aaa6b4;--e-gold:#e5c481;--e-serif:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;--e-light:rgba(174,121,205,.1)}
+.modern-page .page-hero .section-title,.modern-page .auth-form-title{font-weight:780;letter-spacing:-.055em;line-height:1.05}
+.modern-page .page-hero{position:relative;isolation:isolate;overflow:hidden;padding-bottom:24px;background:radial-gradient(ellipse at 86% 50%,rgba(142,80,169,.13),transparent 55%)}
+.modern-page .page-hero .section-title{max-width:850px;background:linear-gradient(100deg,#f8f6f0 30%,#e5c481 75%,#c7a4df);background-clip:text;-webkit-background-clip:text;color:transparent}
+.modern-page .trust-item h3,.modern-page .cta-title,.modern-page .article h2,.modern-page .auth-brand-side h2,.modern-page .download-atlas .trust-item h3,.has-device-atlas #install-notes .section-title{font-weight:650;letter-spacing:-.035em}
+.modern-page .btn,.modern-page .t-btn{border-radius:30px}
+.modern-page .auth-brand-side{border:0;padding:230px 0 30px 30px;overflow:hidden;isolation:isolate}
+.modern-page .auth-brand-side:before{top:0;left:30px;width:125px;height:185px;background:url('torve-cinema-art-v1.png') 0 0/300% 200%;border:0;border-radius:9px;transform:rotate(-9deg);opacity:.9;z-index:-1}
+.modern-page .auth-brand-side:after{content:'';position:absolute;right:20px;top:18px;width:120px;height:180px;background:url('torve-cinema-art-v1.png') 0 100%/300% 200%;border-radius:9px;transform:rotate(10deg);opacity:.85;z-index:-1;pointer-events:none}
+.modern-page .auth-brand-side h2{font-size:32px}
+.atlas-art:before{background:radial-gradient(ellipse at var(--pointer-x,55%) var(--pointer-y,45%),rgba(176,120,208,.2),transparent 62%)}
+@media(max-width:760px){.modern-page .auth-brand-side{padding:28px 0;border-top:1px solid var(--e-line)}.modern-page .auth-brand-side:before,.modern-page .auth-brand-side:after{display:none}.modern-page .page-hero .section-title{font-size:clamp(36px,10vw,48px)}}
+.modern-page .header-install{font-weight:650;white-space:nowrap}
+@media(max-width:760px){.modern-page .site-header-actions .header-install{font-size:10px;padding:9px 13px;min-height:36px}.modern-page .site-header-actions{gap:8px}.modern-page .site-header-actions .t-btn-secondary{font-size:10px}.modern-page .site-header-inner{gap:12px}}
+@media(max-width:420px){.modern-page .site-header-actions{max-width:100%;flex-wrap:wrap}.modern-page .portal-user-email{min-width:0;max-width:70px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}}

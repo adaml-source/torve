@@ -24,6 +24,12 @@ sealed interface PlaybackRoute {
         val headers: Map<String, String> = emptyMap(),
     ) : PlaybackRoute
 
+    /** A permanent copy served by the user's Jellyfin library. */
+    data class JellyfinStream(
+        val url: String,
+        val headers: Map<String, String> = emptyMap(),
+    ) : PlaybackRoute
+
     /** Original provider URL — debrid, addon, IPTV, anything else. */
     data class ProviderStream(val url: String) : PlaybackRoute
 
@@ -62,13 +68,14 @@ data class PlaybackRoutePreference(
          */
         fun of(
             localFile: PlaybackRoute.LocalFile? = null,
+            jellyfinStream: PlaybackRoute.JellyfinStream? = null,
             lanStream: PlaybackRoute.LanDesktopStream? = null,
             providerStream: PlaybackRoute.ProviderStream? = null,
             networkMode: NetworkMode = NetworkMode.UNKNOWN,
             wifiOnlyForLan: Boolean = true,
         ): PlaybackRoutePreference {
             val effectiveLan = if (wifiOnlyForLan && networkMode == NetworkMode.CELLULAR) null else lanStream
-            val items = listOfNotNull(localFile, effectiveLan, providerStream)
+            val items = listOfNotNull(localFile, jellyfinStream, effectiveLan, providerStream)
             return if (items.isEmpty()) {
                 PlaybackRoutePreference(listOf(PlaybackRoute.ReDownload))
             } else {
@@ -82,6 +89,7 @@ data class PlaybackRoutePreference(
          */
         internal fun pickInOrder(candidates: List<PlaybackRoute>): PlaybackRoute {
             candidates.firstOrNull { it is PlaybackRoute.LocalFile }?.let { return it }
+            candidates.firstOrNull { it is PlaybackRoute.JellyfinStream }?.let { return it }
             candidates.firstOrNull { it is PlaybackRoute.LanDesktopStream }?.let { return it }
             candidates.firstOrNull { it is PlaybackRoute.ProviderStream }?.let { return it }
             return PlaybackRoute.ReDownload

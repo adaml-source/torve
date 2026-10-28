@@ -1,5 +1,7 @@
 package com.torve.android.ui.legal
 
+import com.torve.android.ui.community.parityLabel as localizedUiText
+
 import android.content.Context
 import android.graphics.Color as AndroidColor
 import android.webkit.WebView
@@ -95,9 +97,7 @@ fun LegalScreen(
         TopAppBar(
             title = { Text(title) },
             navigationIcon = {
-                IconButton(onClick = onBack) {
-                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.common_back_cd))
-                }
+                com.torve.android.ui.components.BackButton(onClick = onBack)
             },
             colors = TopAppBarDefaults.topAppBarColors(
                 containerColor = MaterialTheme.colorScheme.surface,
@@ -146,7 +146,7 @@ fun LegalScreen(
                         )
                         if (state.message.isNotBlank()) {
                             Text(
-                                text = state.message,
+                                text = localizedUiText(state.message),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )

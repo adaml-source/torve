@@ -1,5 +1,7 @@
 package com.torve.android.ui.download
 
+import com.torve.android.ui.community.parityLabel as localizedUiText
+
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
@@ -108,7 +110,7 @@ fun DownloadScreen(
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .background(Brush.verticalGradient(listOf(Graphite, Obsidian)))
+                .background(Brush.verticalGradient(listOf(MaterialTheme.colorScheme.surface, MaterialTheme.colorScheme.background)))
                 .statusBarsPadding()
                 .padding(horizontal = 4.dp, vertical = 8.dp),
         ) {
@@ -116,23 +118,17 @@ fun DownloadScreen(
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier.fillMaxWidth(),
             ) {
-                IconButton(onClick = onBack) {
-                    Icon(
-                        Icons.AutoMirrored.Rounded.ArrowBack,
-                        contentDescription = stringResource(R.string.common_back),
-                        tint = Snow,
-                    )
-                }
+                com.torve.android.ui.components.BackButton(onClick = onBack)
                 Spacer(Modifier.width(4.dp))
                 Column {
                     Text(
                         text = stringResource(R.string.download_title),
                         style = MaterialTheme.typography.headlineMedium,
-                        color = Snow,
+                        color = MaterialTheme.colorScheme.onSurface,
                         fontWeight = FontWeight.Bold,
                     )
                     Text(
-                        text = "${state.downloads.size} items · ${state.activeDownloads.size} active",
+                        text = localizedUiText("${state.downloads.size} items · ${state.activeDownloads.size} active"),
                         style = MaterialTheme.typography.bodySmall,
                         color = Amber,
                     )
@@ -346,7 +342,7 @@ private fun DownloadCard(
                     color = statusColor.copy(alpha = 0.15f),
                 ) {
                     Text(
-                        text = statusText,
+                        text = localizedUiText(statusText),
                         modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
                         style = MaterialTheme.typography.labelSmall,
                         color = statusColor,

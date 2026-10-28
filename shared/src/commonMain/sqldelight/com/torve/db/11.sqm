@@ -1,0 +1,5 @@
+ALTER TABLE iptv_epg_programme ADD COLUMN sub_title TEXT;
+ALTER TABLE iptv_epg_programme ADD COLUMN description TEXT;
+
+-- Retain the last usable schedule while refreshing its previously title-only data.
+DELETE FROM preference WHERE key GLOB 'epg_load_state_*';

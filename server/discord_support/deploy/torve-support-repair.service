@@ -1,0 +1,24 @@
+[Unit]
+Description=One restricted Torve Codex repair proposal
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+User=torve-repair
+Group=torve-repair
+WorkingDirectory=/srv/torve-repair/runtime
+EnvironmentFile=/etc/torve-support/repair.env
+Environment=TMPDIR=/srv/torve-repair/tmp
+ExecStartPre=/usr/bin/mkdir -p /srv/torve-repair/tmp
+ExecStart=/srv/torve-repair/venv/bin/python -m discord_support.fix_runner --once --policy /etc/torve-support/fix-policy.json
+UMask=0077
+TimeoutStartSec=25min
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/srv/torve-repair
+
+[Install]
+WantedBy=multi-user.target

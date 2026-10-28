@@ -8,6 +8,7 @@ enum class TorveAppLinkTarget {
     HELP,
     SETUP,
     ACCOUNT,
+    DETAIL,
 }
 
 data class TorveAppLink(
@@ -39,6 +40,7 @@ object TorveAppLinkParser {
             "help" -> TorveAppLinkTarget.HELP
             "setup" -> TorveAppLinkTarget.SETUP
             "account" -> TorveAppLinkTarget.ACCOUNT
+            "watch" -> TorveAppLinkTarget.DETAIL
             else -> TorveAppLinkTarget.HOME
         }
         return TorveAppLink(target = target, uri = uri)

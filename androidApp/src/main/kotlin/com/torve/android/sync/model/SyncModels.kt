@@ -225,6 +225,7 @@ data class SyncSettingsPushPayload(
 )
 
 sealed class SyncInboundEvent {
+    data class RemoteCommand(val command: TorveRemoteCommand, val seekMs: Long = 10_000L) : SyncInboundEvent()
     data class SearchPush(
         val query: String,
         val filters: Map<String, String> = emptyMap(),
@@ -246,6 +247,16 @@ sealed class SyncInboundEvent {
         val payloadJson: String,
         val issuedByDeviceId: String? = null,
     ) : SyncInboundEvent()
+}
+
+@Serializable
+enum class TorveRemoteCommand { UP, DOWN, LEFT, RIGHT, SELECT, BACK, HOME, MENU, PLAY_PAUSE, STOP, SEEK_BACK, SEEK_FORWARD }
+
+@Serializable
+data class SyncRemoteCommandPayload(val command: TorveRemoteCommand, val senderInstallationId: String,
+    val issuedAtMs: Long, val seekMs: Long = 10_000L, val proof: String = "") {
+    fun transcript(eventId: String, targetInstallationId: String) =
+        "$eventId|$senderInstallationId|$targetInstallationId|${command.name}|$issuedAtMs|$seekMs"
 }
 
 /** Secure-channel state for a paired device. */

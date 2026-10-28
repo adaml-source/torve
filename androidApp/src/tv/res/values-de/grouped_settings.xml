@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="tv_grouped_ai_search">KI-Suche</string>
+    <string name="tv_grouped_library_sync">Bibliothek &amp; Synchronisierung</string>
+    <string name="tv_grouped_help_advanced">Hilfe &amp; Extras</string>
+    <string name="tv_grouped_theme_language">Design &amp; Sprache</string>
+    <string name="tv_grouped_hide_watched">Gesehene Titel beim Entdecken ausblenden</string>
+    <string name="tv_grouped_account_devices">Konto &amp; Geräte</string>
+    <string name="tv_grouped_account_summary">Anmeldung, Profile und Geräte</string>
+    <string name="tv_grouped_sources_summary">Wiedergabe, Tracking und verbundene Bibliotheken</string>
+    <string name="tv_grouped_playback_summary">Video, Audio, Untertitel und Folgen</string>
+    <string name="tv_grouped_appearance_summary">Anzeige, Karten und Startseitenlayout</string>
+    <string name="tv_grouped_library_summary">Listen, Sammlungen und Sicherungen</string>
+    <string name="tv_grouped_help_summary">Verbindungstests, KI-Suche und Support</string>
+    <string name="tv_grouped_devices_summary">Anmeldung und gekoppelte Geräte</string>
+    <string name="tv_grouped_profiles_summary">Haushalt verwalten</string>
+    <string name="tv_grouped_display_summary">Anzeigemodus und App-Sprache</string>
+    <string name="tv_grouped_system_theme">System</string>
+    <string name="tv_grouped_sources">Quellen</string>
+    <string name="tv_nav_shows_compact">Serien</string>
+    <string name="tv_nav_channels_compact">Sender</string>
+    <string name="tv_nav_library_compact">Bibliothek</string>
+    <string name="tv_nav_settings_compact">Einstell.</string>
+    <string name="tv_grouped_menu_streaming_extensions">Streaming &amp; Erweiterungen</string>
+    <string name="tv_grouped_menu_sports_replays">"Sport-Replays"</string>
+    <string name="tv_grouped_menu_streaming_services">Streamingdienste</string>
+    <string name="tv_grouped_menu_tracking_accounts">Tracking-Konten</string>
+    <string name="tv_grouped_menu_servers_requests">Medienserver &amp; Anfragen</string>
+    <string name="tv_grouped_menu_saved_collections">Sammlungen</string>
+    <string name="tv_grouped_menu_app_features">App-Funktionen</string>
+    <string name="tv_grouped_menu_connection_tests">Verbindungstests</string>
+    <string name="tv_grouped_menu_about_help">Info &amp; Hilfe</string>
+    <string name="tv_grouped_menu_additional_sources">Weitere Quellen</string>
+    <string name="tv_grouped_menu_kodi_devices">Kodi-Geräte</string>
+    <string name="tv_grouped_menu_video_sources">Video &amp; Quellen</string>
+    <string name="tv_grouped_menu_audio_subtitles">Audio &amp; Untertitel</string>
+    <string name="tv_grouped_menu_advanced_playback">Erweiterte Wiedergabe</string>
+    <string name="tv_grouped_menu_background_spacing">Hintergrund &amp; Abstände</string>
+    <string name="tv_grouped_menu_home_cards">Home &amp; Karten</string>
+    <string name="tv_grouped_menu_browsing_style">Ansicht</string>
+    <string name="tv_grouped_menu_episode_badges">Folgenanzeige</string>
+</resources>

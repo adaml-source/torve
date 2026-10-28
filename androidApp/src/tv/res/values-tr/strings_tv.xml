@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="tv_nav_iptv">Kanallar</string>
     <string name="tv_nav_search">Ara</string>
@@ -68,7 +68,7 @@
     <string name="tv_settings_section_app">Uygulama</string>
     <string name="tv_settings_section_about">Hakk\u0131nda</string>
     <string name="tv_settings_cloud_service">Bulut hizmeti</string>
-    <string name="tv_settings_trakt">Trakt</string>
+    <string name="tv_settings_trakt">"Trakt"</string>
     <string name="tv_settings_phone_pairing">Telefon e\u015fle\u015ftirme</string>
     <string name="tv_settings_language">Dil</string>
     <string name="tv_settings_playback_quality">Oynatma kalitesi</string>
@@ -101,9 +101,9 @@
     <string name="tv_iptv_no_channels_in_group">Bu grupta kanal yok</string>
     <string name="tv_iptv_search_hint">Kanal ara\u2026</string>
     <string name="tv_iptv_filter_all">T\u00fcm\u00fc</string>
-    <string name="tv_iptv_filter_hd">HD</string>
+    <string name="tv_iptv_filter_hd">"HD"</string>
     <string name="tv_iptv_filter_fhd">FHD</string>
-    <string name="tv_iptv_filter_4k">4K</string>
+    <string name="tv_iptv_filter_4k">"4K"</string>
     <string name="tv_iptv_filter_favorites">Favoriler</string>
     <string name="tv_iptv_preview">\u00d6nizleme</string>
     <string name="tv_iptv_hold_to_favorite">Favorilere eklemek i\u00e7in OK\'ye bas\u0131l\u0131 tutun</string>
@@ -128,7 +128,7 @@
     <string name="tv_settings_mode_ios_desc">Ayarlar\u0131 senkronize etmek i\u00e7in iPhone\'unuzu e\u015fle\u015ftirin</string>
     <string name="tv_settings_mode_tv_only">Yaln\u0131zca TV \u2014 telefon uygulamas\u0131 yok</string>
     <string name="tv_settings_mode_tv_only_desc">Her \u015feyi do\u011frudan TV\'nizde ayarlay\u0131n</string>
-    <string name="tv_settings_simkl">SIMKL</string>
+    <string name="tv_settings_simkl">"SIMKL"</string>
     <string name="tv_settings_change_provider">Bulut sa\u011flay\u0131c\u0131</string>
     <string name="tv_settings_sync_note">Ana sayfa d\u00fczeni, kart stilleri ve de\u011ferlendirme kaynaklar\u0131n\u0131 \u00f6zelle\u015ftirmek i\u00e7in \u2014 mobil uygulamada yap\u0131land\u0131r\u0131n ve Senkronize Et\'e dokunun.</string>
 
@@ -182,18 +182,18 @@
     <string name="tv_catalog_movies_preparing">Filmler arka planda haz\u0131rlan\u0131yor</string>
     <string name="tv_catalog_shows_preparing">Diziler arka planda haz\u0131rlan\u0131yor</string>
     <string name="tv_search_ai_provider_required">AI Arama\'y\u0131 kullanmadan \u00f6nce Ayarlar\'da bir AI sa\u011flay\u0131c\u0131s\u0131 kurun.</string>
-    <string name="tv_settings_panda_streaming_setup">Panda streaming kurulumu</string>
+    <string name="tv_settings_panda_streaming_setup">Yayın kaynakları</string>
     <string name="tv_settings_panda_streaming_setup_desc">Debrid, usenet, indirme istemcileri ve sa\u011flay\u0131c\u0131 durumunu tek yerden yap\u0131land\u0131r\u0131n.</string>
     <string name="tv_settings_panda_configured_enabled">Yap\u0131land\u0131r\u0131ld\u0131 ve etkin. Streaming sa\u011flay\u0131c\u0131lar\u0131n\u0131 ve otomasyonu yeniden yap\u0131land\u0131r\u0131n.</string>
-    <string name="tv_settings_panda_configured_disabled">Yap\u0131land\u0131r\u0131ld\u0131 ancak devre d\u0131\u015f\u0131. Etkinle\u015ftirmek veya yeniden yap\u0131land\u0131rmak i\u00e7in Panda\'y\u0131 a\u00e7\u0131n.</string>
+    <string name="tv_settings_panda_configured_disabled">Yap\u0131land\u0131r\u0131ld\u0131 ancak devre d\u0131\u015f\u0131. Etkinle\u015ftirmek veya yeniden yap\u0131land\u0131rmak i\u00e7in yayın kurulumunu a\u00e7\u0131n.</string>
     <string name="tv_settings_panda_setup_desc">Torve\'yi debrid, usenet ve indirme istemcileri ile streaming i\u00e7in haz\u0131rlay\u0131n.</string>
     <string name="tv_settings_realdebrid_connect">Real-Debrid\'i ba\u011fla</string>
-    <string name="tv_settings_realdebrid_connect_panda">Real-Debrid\'i Panda\'da ba\u011fla</string>
-    <string name="tv_settings_realdebrid_managed_authorize">Panda taraf\u0131ndan y\u00f6netilir. Real-Debrid\'i ba\u011flamak i\u00e7in cihaz yetkilendirmesini tamamlay\u0131n.</string>
-    <string name="tv_settings_realdebrid_managed_connected">Panda taraf\u0131ndan y\u00f6netilir. Ba\u011fl\u0131.</string>
-    <string name="tv_settings_realdebrid_managed_connected_as">Panda taraf\u0131ndan y\u00f6netilir. %1$s olarak ba\u011fl\u0131.</string>
-    <string name="tv_settings_realdebrid_managed_reconnect">Panda taraf\u0131ndan y\u00f6netilir. Yeniden ba\u011flanmas\u0131 gerekiyor: %1$s</string>
-    <string name="tv_settings_realdebrid_managed_not_connected">Panda taraf\u0131ndan y\u00f6netilir. Ba\u011fl\u0131 de\u011fil.</string>
+    <string name="tv_settings_realdebrid_connect_panda">Real-Debrid\'i bağla</string>
+    <string name="tv_settings_realdebrid_managed_authorize">Real-Debrid\'i ba\u011flamak i\u00e7in cihaz yetkilendirmesini tamamlay\u0131n.</string>
+    <string name="tv_settings_realdebrid_managed_connected">Yayın kurulumu üzerinden ba\u011fl\u0131.</string>
+    <string name="tv_settings_realdebrid_managed_connected_as">Yayın kurulumu üzerinden %1$s olarak ba\u011fl\u0131.</string>
+    <string name="tv_settings_realdebrid_managed_reconnect">Yeniden ba\u011flanmas\u0131 gerekiyor: %1$s</string>
+    <string name="tv_settings_realdebrid_managed_not_connected">Ba\u011fl\u0131 de\u011fil.</string>
     <string name="tv_settings_auth_waiting_authorization">Yetkilendirme bekleniyor\u2026</string>
     <string name="tv_settings_auth_open_url_code">URL\'yi ba\u015fka bir cihazda a\u00e7\u0131n ve kodu girin.</string>
     <string name="tv_settings_panda_health_monitor">Panda sa\u011fl\u0131k monit\u00f6r\u00fc</string>
@@ -221,20 +221,20 @@
 
     <!-- Integrations section -->
     <string name="tv_settings_section_integrations">Entegrasyonlar</string>
-    <string name="tv_settings_omdb">OMDB</string>
+    <string name="tv_settings_omdb">"OMDB"</string>
     <string name="tv_settings_omdb_api_key">OMDB API anahtar\u0131</string>
     <string name="tv_settings_omdb_test">OMDB\'yi test et</string>
-    <string name="tv_settings_mdblist">MDBList</string>
+    <string name="tv_settings_mdblist">"MDBList"</string>
     <string name="tv_settings_mdblist_api_key">MDBList API anahtar\u0131</string>
-    <string name="tv_settings_jellyfin">Jellyfin</string>
+    <string name="tv_settings_jellyfin">"Jellyfin"</string>
     <string name="tv_settings_jellyfin_url">Jellyfin sunucu URL\'si</string>
     <string name="tv_settings_jellyfin_api_key">Jellyfin API anahtar\u0131</string>
     <string name="tv_settings_jellyfin_test">Jellyfin\'i test et</string>
-    <string name="tv_settings_plex">Plex</string>
+    <string name="tv_settings_plex">"Plex"</string>
     <string name="tv_settings_plex_url">Plex sunucu URL\'si</string>
     <string name="tv_settings_plex_token">Plex eri\u015fim jetonu</string>
     <string name="tv_settings_plex_test">Plex\'i test et</string>
-    <string name="tv_settings_kodi">Kodi</string>
+    <string name="tv_settings_kodi">"Kodi"</string>
     <string name="tv_settings_kodi_name">Ad</string>
     <string name="tv_settings_kodi_ip">Ana bilgisayar / IP</string>
     <string name="tv_settings_kodi_port">Port</string>
@@ -448,10 +448,10 @@
     <string name="tv_live_audio_prefer_surround">Surround izleri tercih et</string>
     <string name="tv_live_audio_prefer_surround_desc">\u00c7ok kanall\u0131 sesi stereoya g\u00f6re \u00f6nceliklendir</string>
     <string name="tv_notification_device_removed_data_cleared">Bu TV aktif cihazlar\u0131n\u0131zdan kald\u0131r\u0131ld\u0131. Yerel Torve verileri temizlendi.</string>
-    <string name="tv_notification_setup_sync_premium_verify_failed">Setup sync could not refresh account access on this TV.</string>
-    <string name="tv_notification_setup_sync_premium_device_blocked">Setup sync is waiting for this TV device registration.</string>
-    <string name="tv_notification_setup_sync_premium_required">This TV needs account setup before receiving setup sync.</string>
-    <string name="tv_notification_setup_sync_premium_offline">Connect to Torve before receiving setup sync.</string>
+    <string name="tv_notification_setup_sync_premium_verify_failed">Kurulum eşitlemesi bu TV’deki hesap erişimini yenileyemedi.</string>
+    <string name="tv_notification_setup_sync_premium_device_blocked">Kurulum eşitlemesi bu TV’nin kaydını bekliyor.</string>
+    <string name="tv_notification_setup_sync_premium_required">Kurulumu eşitlemeden önce bu TV’de hesap kurulumu gerekiyor.</string>
+    <string name="tv_notification_setup_sync_premium_offline">Kurulumu eşitlemeden önce Torve’ye bağlanın.</string>
     <string name="tv_notification_invalid_settings_data">Ge\u00e7ersiz ayar verisi: %1$s</string>
     <string name="tv_notification_sync_import_failed">Senkronizasyon i\u00e7e aktar\u0131lamad\u0131: %1$s</string>
     <string name="tv_notification_settings_synced">Ayarlar senkronize edildi: %1$s</string>
@@ -464,8 +464,8 @@
     <string name="tv_notification_sync_summary_progress">%1$d ilerleme kayd\u0131</string>
     <string name="tv_notification_sync_error">Senkronizasyon hatas\u0131: %1$s</string>
     <string name="tv_notification_downloads_completed">%1$d indirme tamamland\u0131</string>
-    <string name="tv_unlock_purchase_phone_title">Torve is free software</string>
-    <string name="tv_unlock_purchase_phone_body">Torve is free software. No subscriptions. No paid tiers.</string>
+    <string name="tv_unlock_purchase_phone_title">Torve ücretsizdir</string>
+    <string name="tv_unlock_purchase_phone_body">Torve ücretsizdir. Abonelik veya ücretli paket yoktur.</string>
     <string name="tv_action_got_it">Anlad\u0131m</string>
     <string name="tv_home_on_now">\u015eimdi yay\u0131nda</string>
     <string name="tv_home_available_now">\u015eimdi kullan\u0131labilir</string>
@@ -502,14 +502,14 @@
     <string name="tv_auth_sign_out_second_press_hint">Yanl\u0131\u015fl\u0131kla \u00e7\u0131k\u0131\u015f\u0131 \u00f6nlemek i\u00e7in ikinci bas\u0131\u015f gerekir.</string>
     <string name="tv_settings_pair_phone_title">Telefonunuzla giri\u015f yap\u0131n</string>
     <string name="tv_settings_pair_phone_subtitle">Telefonunuzdaki Torve uygulamas\u0131yla QR taray\u0131n - yazmaya gerek yok.</string>
-    <string name="tv_purchase_verifying_premium">Access refresh received.</string>
-    <string name="tv_purchase_restore_started">Access refresh started.</string>
-    <string name="tv_purchase_cancelled">No purchase required.</string>
-    <string name="tv_purchase_verification_pending">Account access refresh is already pending.</string>
-    <string name="tv_purchase_billing_managed_by">No billing is required.</string>
-    <string name="tv_purchase_choose_billing_store">Torve is free software. No billing is required.</string>
-    <string name="tv_settings_receive_credentials_import_desc">Debrid, Plex ve Panda gizli bilgilerini yazmadan i\u00e7e aktarmak i\u00e7in tek kullan\u0131ml\u0131k e\u015fle\u015ftirme kodu g\u00f6sterin.</string>
-    <string name="tv_settings_receive_credentials_tv_desc">Masa\u00fcst\u00fc veya telefonun kumandada yazmadan Debrid, Plex ve Panda kimlik bilgilerini g\u00f6ndermesi i\u00e7in tek kullan\u0131ml\u0131k e\u015fle\u015ftirme kodu g\u00f6sterin.</string>
+    <string name="tv_purchase_verifying_premium">Erişim yenilemesi alındı.</string>
+    <string name="tv_purchase_restore_started">Erişim yenilemesi başlatıldı.</string>
+    <string name="tv_purchase_cancelled">Satın alma gerekmez.</string>
+    <string name="tv_purchase_verification_pending">Hesap erişimi yenilemesi zaten bekliyor.</string>
+    <string name="tv_purchase_billing_managed_by">Faturalandırma gerekmez.</string>
+    <string name="tv_purchase_choose_billing_store">Torve ücretsizdir. Faturalandırma gerekmez.</string>
+    <string name="tv_settings_receive_credentials_import_desc">Kimlik bilgilerini yazmadan içe aktarmak için tek kullanımlık eşleştirme kodu göster.</string>
+    <string name="tv_settings_receive_credentials_tv_desc">Bilgisayar veya telefondan bu TV’ye kimlik bilgileri göndermek için tek kullanımlık eşleştirme kodu göster.</string>
     <string name="tv_settings_open_transfer_arrow">Aktar\u0131m\u0131 a\u00e7 &gt;</string>
     <string name="tv_settings_open_diagnostics_arrow">Tan\u0131lamay\u0131 a\u00e7 &gt;</string>
     <string name="tv_settings_debrid_connecting_to">%1$s ba\u011flan\u0131yor...</string>
@@ -526,4 +526,19 @@
     <string name="tv_vod_rating_value">Puan %1$s</string>
     <!-- Added translations for recently introduced strings. -->
     <string name="tv_library_tab_vod">VOD</string>
+    <string name="tv_season_mark_watched">S%1$d izlendi olarak işaretle</string>
+    <string name="tv_season_watched">S%1$d izlendi</string>
+    <string name="tv_settings_custom_epg_url">Özel EPG URL\'si (isteğe bağlı)</string>
+    <string name="tv_settings_channels_count_pending">Kanallar henüz sayılmadı. Rehber verileri eksikse aşağıdaki EPG\'yi Yenile seçeneğini kullanın.</string>
+    <string name="tv_settings_import_refresh_subtitle">Hesabı, listeleri, kimlik bilgilerini, favorileri ve bağlantı durumunu yenile. Kanal veya program bilgileri eksikse Kanallar bölümünden rehberi yenile.</string>
+    <string name="tv_settings_open_panda_setup">Yayın kurulumunu aç</string>
+    <string name="tv_notification_setup_sync_refresh_failed">Kurulum eşitlemesi hesap durumunu yenileyemedi. Alınan kurulumla devam ediliyor.</string>
+    <string name="tv_unlock_purchase_options_title">Torve özgür bir yazılımdır</string>
+    <string name="tv_unlock_purchase_options_body">Torve özgür bir yazılımdır. Abonelik yok. Ücretli katman yok.</string>
+    <string name="tv_unlock_go_to_premium">Devam et</string>
+    <string name="tv_settings_account_refreshed_epg_hint">Hesap kurulumu yenilendi. Kanallar veya rehber verileri hâlâ eksikse Ayarlar &gt; Kanallar\'ı açın ve EPG\'yi Yenile\'yi seçin.</string>
+    <string name="tv_update_available">Torve %1$s kullanıma sunuldu ve indirilmeye hazır.</string>
+    <string name="tv_settings_refresh_channels_title">Kanalları yenile</string>
+    <string name="tv_settings_refresh_channels_subtitle">Program rehberini almadan kanal listesini yeniden indir</string>
+    <string name="tv_settings_refresh_channels_started">Kanal yenileme başlatıldı</string>
 </resources>

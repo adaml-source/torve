@@ -35,6 +35,55 @@ class AuthClientRefreshRotationTest {
     private val json = Json { ignoreUnknownKeys = true }
 
     @Test
+    fun cached_startup_restores_identity_without_waiting_for_network_or_refreshing_tokens() = runTest {
+        val storage = FakeSecureStorage(mutableMapOf(AuthClient.KEY_AUTH_ACCESS_TOKEN to "expired-access",
+            AuthClient.KEY_AUTH_REFRESH_TOKEN to "refresh", "auth_token_expires_at" to "1"))
+        val settings = FakeDeviceLocalSettingsRepository(mutableMapOf(AuthClient.KEY_AUTH_EMAIL to "user@torve.app",
+            AuthClient.KEY_AUTH_USER_ID to "user-1", AuthClient.KEY_AUTH_IS_VERIFIED to "true"))
+        var requests = 0
+        val client = buildAuthClient(storage, settings) { requests++; errorResponse(HttpStatusCode.ServiceUnavailable, "offline") }
+        val user = client.restoreCachedSessionUser()
+        assertEquals("user-1", user?.id)
+        assertTrue(user?.isVerified == true)
+        assertEquals(user, client.authUserFlow.value)
+        assertEquals(0, requests)
+        assertEquals("expired-access", storage.values[AuthClient.KEY_AUTH_ACCESS_TOKEN])
+    }
+
+    @Test
+    fun cached_metadata_without_a_stored_session_cannot_restore_an_account() = runTest {
+        val settings = FakeDeviceLocalSettingsRepository(mutableMapOf(AuthClient.KEY_AUTH_EMAIL to "old@torve.app",
+            AuthClient.KEY_AUTH_USER_ID to "old-user", AuthClient.KEY_AUTH_IS_VERIFIED to "true"))
+        val client = buildAuthClient(FakeSecureStorage(), settings) { error("Local restoration must never use the network") }
+        assertNull(client.restoreCachedSessionUser())
+        assertNull(client.authUserFlow.value)
+    }
+
+    @Test
+    fun cached_startup_migrates_legacy_tokens_but_keeps_email_verification_required() = runTest {
+        val settings = FakeDeviceLocalSettingsRepository(mutableMapOf(AuthClient.KEY_AUTH_EMAIL to "user@torve.app",
+            AuthClient.KEY_AUTH_USER_ID to "user-1", AuthClient.KEY_AUTH_IS_VERIFIED to "false",
+            AuthClient.KEY_AUTH_ACCESS_TOKEN to "legacy-access", AuthClient.KEY_AUTH_REFRESH_TOKEN to "legacy-refresh"))
+        val storage = FakeSecureStorage()
+        val client = buildAuthClient(storage, settings) { error("Local restoration must never use the network") }
+        val user = client.restoreCachedSessionUser()
+        assertNotNull(user)
+        assertFalse(user.isVerified)
+        assertEquals("legacy-refresh", storage.values[AuthClient.KEY_AUTH_REFRESH_TOKEN])
+        assertNull(settings.values[AuthClient.KEY_AUTH_ACCESS_TOKEN])
+        assertNull(settings.values[AuthClient.KEY_AUTH_REFRESH_TOKEN])
+    }
+
+    @Test
+    fun cached_startup_requires_a_nonempty_account_identity() = runTest {
+        val settings = FakeDeviceLocalSettingsRepository(mutableMapOf(AuthClient.KEY_AUTH_EMAIL to "user@torve.app"))
+        val storage = FakeSecureStorage(mutableMapOf(AuthClient.KEY_AUTH_REFRESH_TOKEN to "refresh"))
+        val client = buildAuthClient(storage, settings) { error("Local restoration must never use the network") }
+        assertNull(client.restoreCachedSessionUser())
+        assertNull(client.authUserFlow.value)
+    }
+
+    @Test
     fun refreshTokens_persists_rotated_refresh_token_and_uses_it_next_time() = runTest {
         val storage = FakeSecureStorage(
             mutableMapOf(
@@ -190,6 +239,92 @@ class AuthClientRefreshRotationTest {
         assertEquals("user@torve.app", user.email)
         assertEquals("refresh_1", storage.values[AuthClient.KEY_AUTH_REFRESH_TOKEN])
         assertEquals("Torve User", settings.values[AuthClient.KEY_AUTH_DISPLAY_NAME])
+    }
+
+    @Test
+    fun cancelled_screen_cannot_lose_a_token_already_rotated_by_the_server() = runTest {
+        val storage = FakeSecureStorage(mutableMapOf(AuthClient.KEY_AUTH_ACCESS_TOKEN to "old-access",
+            AuthClient.KEY_AUTH_REFRESH_TOKEN to "old-refresh"))
+        val settings = FakeDeviceLocalSettingsRepository(mutableMapOf(AuthClient.KEY_AUTH_EMAIL to "user@torve.app",
+            AuthClient.KEY_AUTH_USER_ID to "user-1"))
+        val serverRotated = kotlinx.coroutines.CompletableDeferred<Unit>()
+        val responseReady = kotlinx.coroutines.CompletableDeferred<Unit>()
+        val client = buildAuthClient(storage, settings) {
+            serverRotated.complete(Unit)
+            responseReady.await()
+            authResponse("new-access", "new-refresh")
+        }
+        val refresh = async { client.refreshTokens() }
+        serverRotated.await()
+        refresh.cancel() // A Home reload/navigation cancels the original caller.
+        responseReady.complete(Unit)
+        refresh.join()
+        assertEquals("new-refresh", storage.values[AuthClient.KEY_AUTH_REFRESH_TOKEN])
+        assertEquals("new-access", storage.values[AuthClient.KEY_AUTH_ACCESS_TOKEN])
+    }
+
+    @Test
+    fun cold_start_does_not_rotate_an_access_token_that_is_still_valid() = runTest {
+        val storage = FakeSecureStorage(mutableMapOf(AuthClient.KEY_AUTH_ACCESS_TOKEN to "valid-access",
+            AuthClient.KEY_AUTH_REFRESH_TOKEN to "valid-refresh", "auth_token_expires_at" to "9999999999999"))
+        val settings = FakeDeviceLocalSettingsRepository(mutableMapOf(AuthClient.KEY_AUTH_EMAIL to "user@torve.app",
+            AuthClient.KEY_AUTH_USER_ID to "user-1"))
+        var calls = 0
+        val client = buildAuthClient(storage, settings) { calls++; authResponse("new-access", "new-refresh") }
+        assertTrue(client.restoreSession())
+        assertEquals(0, calls)
+        assertEquals("valid-refresh", storage.values[AuthClient.KEY_AUTH_REFRESH_TOKEN])
+        assertEquals("user-1", client.authUserFlow.value?.id)
+    }
+
+    @Test
+    fun offline_cold_start_preserves_the_cached_account_and_session() = runTest {
+        val storage = FakeSecureStorage(mutableMapOf(AuthClient.KEY_AUTH_ACCESS_TOKEN to "expired-access",
+            AuthClient.KEY_AUTH_REFRESH_TOKEN to "saved-refresh", "auth_token_expires_at" to "1"))
+        val settings = FakeDeviceLocalSettingsRepository(mutableMapOf(AuthClient.KEY_AUTH_EMAIL to "user@torve.app",
+            AuthClient.KEY_AUTH_USER_ID to "user-1"))
+        val client = buildAuthClient(storage, settings) { errorResponse(HttpStatusCode.ServiceUnavailable, "offline") }
+        assertTrue(client.restoreSession())
+        assertEquals("user-1", client.authUserFlow.value?.id)
+        assertEquals("saved-refresh", storage.values[AuthClient.KEY_AUTH_REFRESH_TOKEN])
+    }
+
+    @Test
+    fun cold_start_does_not_restore_a_session_rejected_by_the_server() = runTest {
+        val storage = FakeSecureStorage(mutableMapOf(AuthClient.KEY_AUTH_ACCESS_TOKEN to "expired-access",
+            AuthClient.KEY_AUTH_REFRESH_TOKEN to "revoked-refresh", "auth_token_expires_at" to "1"))
+        val settings = FakeDeviceLocalSettingsRepository(mutableMapOf(AuthClient.KEY_AUTH_EMAIL to "user@torve.app",
+            AuthClient.KEY_AUTH_USER_ID to "user-1"))
+        val client = buildAuthClient(storage, settings) { errorResponse(HttpStatusCode.Unauthorized, "Refresh token is invalid or revoked") }
+        assertFalse(client.restoreSession())
+        assertNull(client.authUserFlow.value)
+        assertNull(storage.values[AuthClient.KEY_AUTH_REFRESH_TOKEN])
+        assertNull(settings.values[AuthClient.KEY_AUTH_USER_ID])
+    }
+
+    @Test
+    fun cold_start_recovers_when_only_the_refresh_token_was_saved() = runTest {
+        val storage = FakeSecureStorage(mutableMapOf(AuthClient.KEY_AUTH_REFRESH_TOKEN to "saved-refresh"))
+        val settings = FakeDeviceLocalSettingsRepository(mutableMapOf(AuthClient.KEY_AUTH_EMAIL to "user@torve.app",
+            AuthClient.KEY_AUTH_USER_ID to "user-1"))
+        val client = buildAuthClient(storage, settings) { authResponse("new-access", "new-refresh") }
+        assertTrue(client.restoreSession())
+        assertEquals("user-1", client.authUserFlow.value?.id)
+        assertEquals("new-refresh", storage.values[AuthClient.KEY_AUTH_REFRESH_TOKEN])
+    }
+
+    @Test
+    fun cold_start_refreshes_legacy_credentials_with_no_saved_expiry() = runTest {
+        val storage = FakeSecureStorage()
+        val settings = FakeDeviceLocalSettingsRepository(mutableMapOf(AuthClient.KEY_AUTH_EMAIL to "user@torve.app",
+            AuthClient.KEY_AUTH_USER_ID to "user-1", AuthClient.KEY_AUTH_ACCESS_TOKEN to "legacy-access",
+            AuthClient.KEY_AUTH_REFRESH_TOKEN to "legacy-refresh"))
+        var calls = 0
+        val client = buildAuthClient(storage, settings) { calls++; authResponse("new-access", "new-refresh") }
+        assertTrue(client.restoreSession())
+        assertEquals(1, calls)
+        assertEquals("new-refresh", storage.values[AuthClient.KEY_AUTH_REFRESH_TOKEN])
+        assertNull(settings.values[AuthClient.KEY_AUTH_REFRESH_TOKEN])
     }
 
     private fun buildAuthClient(

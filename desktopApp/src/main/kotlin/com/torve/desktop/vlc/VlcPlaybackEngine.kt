@@ -44,6 +44,7 @@ class VlcPlaybackEngine : DesktopPlaybackEngine {
     private var factory: MediaPlayerFactory? = null
     private val commandChannel = VlcCommandChannel()
     private var currentSession: VlcPlayerSession? = null
+    private var authenticatedProxy: com.torve.desktop.playback.AuthenticatedStreamProxy? = null
     private var eventCollectionJob: Job? = null
     private var runtimeDiscovery: VlcRuntimeLocator.DiscoveryResult? = null
 
@@ -124,6 +125,12 @@ class VlcPlaybackEngine : DesktopPlaybackEngine {
 
         // Release any existing session
         currentSession?.release()
+        authenticatedProxy?.close()
+        authenticatedProxy = null
+        val playbackUrl = if (session.requestHeaders.keys.any { !it.equals("Referer", true) && !it.equals("User-Agent", true) }) {
+            com.torve.desktop.playback.AuthenticatedStreamProxy(java.net.URI(url), session.requestHeaders)
+                .also { authenticatedProxy = it }.url
+        } else url
 
         // Create new session
         val eventBridge = VlcEventBridge()
@@ -161,9 +168,9 @@ class VlcPlaybackEngine : DesktopPlaybackEngine {
 
         startupTrace?.mark("media open start", if (autoPlay) "autoplay" else "paused")
         if (autoPlay) {
-            playerSession.play(url, *options.toTypedArray())
+            playerSession.play(playbackUrl, *options.toTypedArray())
         } else {
-            playerSession.startPaused(url, *options.toTypedArray())
+            playerSession.startPaused(playbackUrl, *options.toTypedArray())
         }
         startupTrace?.mark("media open end")
     }
@@ -173,6 +180,8 @@ class VlcPlaybackEngine : DesktopPlaybackEngine {
     override suspend fun stop() { currentSession?.stop() }
 
     override suspend fun close() {
+        authenticatedProxy?.close()
+        authenticatedProxy = null
         currentSession?.stop()
         currentSession?.release()
         currentSession = null
@@ -180,6 +189,8 @@ class VlcPlaybackEngine : DesktopPlaybackEngine {
     }
 
     override fun dispose() {
+        authenticatedProxy?.close()
+        authenticatedProxy = null
         println("TORVE VLC ENGINE | dispose")
         eventCollectionJob?.cancel()
         currentSession?.release()

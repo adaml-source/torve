@@ -16,8 +16,10 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -31,6 +33,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.focus.FocusRequester
@@ -60,6 +64,7 @@ import com.torve.domain.model.SpecificTmdbItem
 import com.torve.presentation.home.HomeViewModel
 import com.torve.presentation.settings.SettingsViewModel
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.yield
 import org.koin.compose.koinInject
 import java.util.UUID
 
@@ -82,6 +87,7 @@ fun TvHomeLayoutScreen(
     val settingsState by settingsViewModel.state.collectAsState()
     val sortedConfigs = remember(configs) { configs.sortedBy { it.order } }
     val scope = rememberCoroutineScope()
+    val listState = rememberLazyListState()
 
     // Create custom section form state
     var showCreateCustom by remember { mutableStateOf(false) }
@@ -105,6 +111,7 @@ fun TvHomeLayoutScreen(
     }
 
     LazyColumn(
+        state = listState,
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(start = 40.dp, top = 20.dp, end = 40.dp, bottom = 24.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -136,6 +143,18 @@ fun TvHomeLayoutScreen(
             )
         }
 
+        item(key = "catalogue_heroes") {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                listOf("Movies" to "movie", "TV Shows" to "tv").forEach { (label, type) ->
+                    val enabled = if (type == "movie") settingsState.moviesHeroEnabled else settingsState.showsHeroEnabled
+                    val requester = remember("hero_$type") { FocusRequester() }
+                    TvSettingCard(title = com.torve.android.tv.components.tvSettingsLabel("Show featured hero · $label"), subtitle = com.torve.android.tv.components.tvSettingsLabel(if (enabled) "On" else "Off"),
+                        modifier = Modifier.fillMaxWidth().focusProperties { left = railFocusRequester },
+                        focusRequester = requester, onFocused = { onContentFocused(requester) },
+                        onClick = { settingsViewModel.setCatalogueHeroEnabled(type, !enabled) })
+                }
+            }
+        }
         // Section rows
         itemsIndexed(
             sortedConfigs,
@@ -144,7 +163,7 @@ fun TvHomeLayoutScreen(
             val requester = remember("hl_${config.section.name}") { FocusRequester() }
             val rowKey = config.section.name
             HomeSectionRow(
-                config = config,
+                config = if (config.section == com.torve.domain.model.HomeSection.HERO) config.copy(customTitle = "Show featured hero · Home") else config,
                 railFocusRequester = railFocusRequester,
                 focusRequester = requester,
                 onContentFocused = onContentFocused,
@@ -165,6 +184,11 @@ fun TvHomeLayoutScreen(
                         mutableList[index - 1] = config.copy(order = prev.order)
                         mutableList[index] = prev.copy(order = config.order)
                         homeViewModel.updateSectionOrder(mutableList)
+                        scope.launch {
+                            val targetIndex = index - 1 + HOME_LAYOUT_STATIC_ITEM_COUNT
+                            centerHomeLayoutRow(listState, targetIndex)
+                            runCatching { requester.requestFocus() }
+                        }
                     }
                 },
                 onMoveDown = {
@@ -174,6 +198,11 @@ fun TvHomeLayoutScreen(
                         mutableList[index + 1] = config.copy(order = next.order)
                         mutableList[index] = next.copy(order = config.order)
                         homeViewModel.updateSectionOrder(mutableList)
+                        scope.launch {
+                            val targetIndex = index + 1 + HOME_LAYOUT_STATIC_ITEM_COUNT
+                            centerHomeLayoutRow(listState, targetIndex)
+                            runCatching { requester.requestFocus() }
+                        }
                     }
                 },
             )
@@ -413,6 +442,31 @@ fun TvHomeLayoutScreen(
     }
 }
 
+private const val HOME_LAYOUT_STATIC_ITEM_COUNT = 3
+
+private suspend fun centerHomeLayoutRow(
+    listState: LazyListState,
+    itemIndex: Int,
+) {
+    // Wait until the reordered keyed row has reached the new list position.
+    yield()
+    repeat(2) { withFrameNanos { } }
+
+    val layoutInfo = listState.layoutInfo
+    val visibleTarget = layoutInfo.visibleItemsInfo.firstOrNull { it.index == itemIndex }
+    val typicalRowSize = visibleTarget?.size
+        ?: layoutInfo.visibleItemsInfo
+            .filter { it.index >= HOME_LAYOUT_STATIC_ITEM_COUNT }
+            .map { it.size }
+            .average()
+            .takeIf { !it.isNaN() }
+            ?.toInt()
+        ?: 72
+    val viewportSize = layoutInfo.viewportEndOffset - layoutInfo.viewportStartOffset
+    val centeredOffset = -((viewportSize - typicalRowSize).coerceAtLeast(0) / 2)
+    listState.animateScrollToItem(itemIndex, centeredOffset)
+}
+
 @Composable
 private fun HomeSectionRow(
     config: HomeSectionConfig,
@@ -437,7 +491,7 @@ private fun HomeSectionRow(
         label = "sectionBorder",
     )
 
-    Column(
+    Row(
         modifier = Modifier
             .fillMaxWidth()
             .focusRequester(focusRequester)
@@ -511,45 +565,36 @@ private fun HomeSectionRow(
                 color = if (focused) Graphite.copy(alpha = 0.5f) else Charcoal.copy(alpha = 0.5f),
                 shape = RoundedCornerShape(16.dp),
             )
-            .padding(horizontal = 20.dp, vertical = 14.dp),
+            .padding(horizontal = 18.dp, vertical = 9.dp),
+        horizontalArrangement = Arrangement.spacedBy(16.dp),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(
-            text = config.customTitle ?: config.section.defaultTitle,
-            style = MaterialTheme.typography.titleMedium,
-            color = Snow,
-            fontWeight = FontWeight.SemiBold,
-        )
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(2.dp),
+        ) {
+            Text(
+                text = config.customTitle ?: config.section.defaultTitle,
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Text(
+                text = com.torve.android.tv.components.tvSettingsLabel(if (isMoveMode) {
+                    "UP/DOWN: reorder  •  LEFT or OK: finish"
+                } else {
+                    "OK: toggle  •  RIGHT: reorder"
+                }),
+                style = MaterialTheme.typography.labelSmall,
+                color = if (isMoveMode) Amber else Silver,
+            )
+        }
         Text(
             text = if (config.enabled) stringResource(R.string.tv_home_layout_enabled)
                    else stringResource(R.string.tv_home_layout_disabled),
             style = MaterialTheme.typography.bodySmall,
             color = if (config.enabled) Amber else Ash,
-            modifier = Modifier.padding(top = 4.dp),
+            fontWeight = FontWeight.SemiBold,
         )
-        Text(
-            text = if (isMoveMode) {
-                "Move mode active: UP or DOWN reorders this section. Press LEFT to finish."
-            } else {
-                "Press RIGHT to move this section."
-            },
-            style = MaterialTheme.typography.labelSmall,
-            color = if (isMoveMode) Amber else Silver,
-            modifier = Modifier.padding(top = 6.dp),
-        )
-        Row(
-            horizontalArrangement = Arrangement.spacedBy(16.dp),
-            modifier = Modifier.padding(top = 8.dp),
-        ) {
-            Text(
-                text = stringResource(R.string.tv_home_layout_move_up),
-                style = MaterialTheme.typography.labelMedium,
-                color = if (isMoveMode) Amber else Silver,
-            )
-            Text(
-                text = stringResource(R.string.tv_home_layout_move_down),
-                style = MaterialTheme.typography.labelMedium,
-                color = if (isMoveMode) Amber else Silver,
-            )
-        }
     }
 }

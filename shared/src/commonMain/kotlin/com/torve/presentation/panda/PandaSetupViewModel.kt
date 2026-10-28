@@ -8,7 +8,12 @@ import com.torve.data.panda.PandaApiClient
 import com.torve.data.panda.PandaConfigPatch
 import com.torve.data.panda.PandaConfigPayload
 import com.torve.data.panda.PandaConfigSecrets
+import com.torve.data.panda.UsenetAccountConfig
+import com.torve.data.panda.readUsenetConfig
 import com.torve.data.panda.PandaDebridConnection
+import com.torve.data.panda.debridActivationState
+import com.torve.data.panda.readPandaDebridActivationSnapshot
+import com.torve.data.panda.writePandaDebridActivationSnapshot
 import com.torve.data.panda.PandaProvider
 import com.torve.data.panda.PandaSchema
 import com.torve.data.panda.PandaSourceProvider
@@ -22,6 +27,7 @@ import com.torve.platform.torveVerboseLog
 import com.torve.presentation.integrations.findTorBoxCredential
 import com.torve.presentation.integrations.syncTorBoxCredentialPair
 import com.torve.presentation.settings.SettingsRefreshNotifier
+import com.torve.presentation.settings.SettingsViewModel
 import com.torve.util.ioDispatcher
 import com.torve.util.mainDispatcher
 import kotlinx.coroutines.CoroutineScope
@@ -42,7 +48,7 @@ enum class PandaSetupStep { SETUP_TYPE, PROVIDER, AUTH, SOURCES, USENET, QUALITY
 enum class PandaSetupMode { DEBRID, USENET_ONLY }
 
 data class PandaSetupUiState(
-    val currentStep: PandaSetupStep = PandaSetupStep.SETUP_TYPE,
+    val currentStep: PandaSetupStep = PandaSetupStep.AUTH,
     val setupMode: PandaSetupMode? = null,
     // Provider
     val providers: List<PandaProvider> = emptyList(),
@@ -54,7 +60,12 @@ data class PandaSetupUiState(
     val apiKeyInput: String = "",
     val debridApiKey: String = "",
     val debridApiKeys: Map<String, String> = emptyMap(),
+    /** Successful verification in this session, bound to the exact provider credential. */
+    val verifiedDebridApiKeys: Map<String, String> = emptyMap(),
+    /** Configured provider -> explicit user activation. Missing is legacy-enabled. */
+    val debridProviderEnabled: Map<String, Boolean> = emptyMap(),
     val authLoading: Boolean = false,
+    /** Aggregate wizard readiness, never the connection status of the selected provider. */
     val authConnected: Boolean = false,
     val existingCredentialDetected: Boolean = false,
     // Sources
@@ -101,6 +112,9 @@ data class PandaSetupUiState(
     // Config save
     val isSaving: Boolean = false,
     val saveError: String? = null,
+    /** A failed account read must never look like a new setup that can overwrite saved settings. */
+    val configLoadFailed: Boolean = false,
+    val isLoadingConfig: Boolean = false,
     val pandaToken: String? = null,
     val manifestUrl: String? = null,
     val addonInstalled: Boolean = false,
@@ -145,7 +159,35 @@ data class PandaSetupUiState(
      * `download_client_password`, `download_client_api_key`.
      */
     val serverHasSecrets: Set<String> = emptySet(),
-)
+) {
+    fun hasDebridCredential(providerId: String): Boolean = providerId != "none" &&
+        (debridCredential(providerId) != null || "debrid_api_key_$providerId" in serverHasSecrets)
+
+    fun isDebridVerified(providerId: String): Boolean = debridCredential(providerId)?.let {
+        verifiedDebridApiKeys[providerId] == it
+    } == true
+
+    fun isDebridEnabled(providerId: String): Boolean = debridProviderEnabled[providerId] != false
+
+    fun debridStatusLabel(providerId: String): String = when {
+        !hasDebridCredential(providerId) -> "Not connected"
+        !isDebridVerified(providerId) -> "Saved credentials · not checked"
+        debridProviderEnabled[providerId] == false -> "Connected · disabled"
+        else -> "Connected"
+    }
+
+    private fun debridCredential(providerId: String): String? =
+        cleanCredential(debridApiKeys[providerId]) ?: if (selectedProvider?.id == providerId) {
+            cleanCredential(debridApiKey)
+        } else null
+}
+
+/** A retained UI selection must never borrow the primary server provider's credential. */
+internal fun selectedPandaDebridCredential(
+    selectedId: String?, keys: Map<String, String>, legacyProviderId: String, legacyKey: String,
+): String = cleanCredential(keys[selectedId]).orEmpty().ifEmpty {
+    if (selectedId == legacyProviderId) cleanCredential(legacyKey).orEmpty() else ""
+}
 
 fun PandaSetupUiState.progressStepNumber(): Int {
     val steps = progressSteps()
@@ -157,23 +199,38 @@ fun PandaSetupUiState.progressStepCount(): Int = progressSteps().size
 private fun PandaSetupUiState.progressSteps(): List<PandaSetupStep> =
     if (setupMode == PandaSetupMode.USENET_ONLY || selectedProvider?.id == "none") {
         listOf(
-            PandaSetupStep.SETUP_TYPE,
+            PandaSetupStep.AUTH,
             PandaSetupStep.USENET,
             PandaSetupStep.QUALITY,
             PandaSetupStep.REVIEW,
         )
-    } else if (setupMode == PandaSetupMode.DEBRID) {
+    } else {
         listOf(
-            PandaSetupStep.SETUP_TYPE,
             PandaSetupStep.AUTH,
             PandaSetupStep.SOURCES,
             PandaSetupStep.USENET,
             PandaSetupStep.QUALITY,
             PandaSetupStep.REVIEW,
         )
-    } else {
-        PandaSetupStep.entries.toList()
     }
+
+/** Reopening resets navigation, while keeping all configured services and unsaved form values. */
+internal fun PandaSetupUiState.reopened(): PandaSetupUiState = copy(
+    currentStep = PandaSetupStep.AUTH,
+    deviceCode = null,
+    authLoading = false,
+    error = null,
+    saveError = null,
+    addonInstalled = false,
+)
+
+/** Direct entry changes navigation, not saved services, indexers, or secrets. */
+internal fun PandaSetupUiState.reopenedForUsenet(noDebrid: PandaProvider): PandaSetupUiState {
+    val provider = selectedProvider ?: providers.firstOrNull { it.id in debridApiKeys } ?: noDebrid
+    return reopened().copy(currentStep = PandaSetupStep.USENET, selectedProvider = provider,
+        setupMode = if (provider.id == "none") PandaSetupMode.USENET_ONLY else PandaSetupMode.DEBRID,
+        authConnected = authConnected || provider.id == "none" || debridApiKeys.isNotEmpty())
+}
 
 /**
  * Returns true if [value] looks like a server-side redaction placeholder
@@ -190,7 +247,7 @@ internal fun isRedactedPlaceholder(value: String?): Boolean {
 
 internal fun cleanCredential(value: String?): String? {
     val trimmed = value?.trim().orEmpty()
-    if (trimmed.isBlank() || isRedactedPlaceholder(trimmed)) return null
+    if (trimmed.isBlank() || isRedactedPlaceholder(trimmed) || trimmed.all { it == '*' || it == '•' }) return null
     return trimmed
 }
 
@@ -207,7 +264,11 @@ internal fun pandaDebridConnectionsForPayload(state: PandaSetupUiState): List<Pa
         cleanCredential(state.debridApiKey)?.let { merged[selectedId] = it }
     }
     return merged.map { (provider, apiKey) ->
-        PandaDebridConnection(provider = provider, apiKey = apiKey, enabled = true)
+        PandaDebridConnection(
+            provider = provider,
+            apiKey = apiKey,
+            enabled = state.debridProviderEnabled[provider] ?: true,
+        )
     }
 }
 
@@ -217,9 +278,25 @@ internal fun primaryPandaDebridConnection(state: PandaSetupUiState): PandaDebrid
     }
     val connections = pandaDebridConnectionsForPayload(state)
     val selectedId = state.selectedProvider?.id
-    return connections.firstOrNull { it.provider == selectedId }
-        ?: connections.firstOrNull()
+    return connections.firstOrNull { it.provider == selectedId && it.enabled }
+        ?: connections.firstOrNull { it.enabled }
         ?: PandaDebridConnection(provider = "none", apiKey = "", enabled = false)
+}
+
+internal fun hydratedPandaProviderSelection(
+    currentSelection: PandaProvider?,
+    availableProviders: List<PandaProvider>,
+    matchedServerProvider: PandaProvider?,
+    setupMode: PandaSetupMode,
+): PandaProvider? = if (setupMode == PandaSetupMode.DEBRID) {
+    currentSelection
+        ?.takeIf { selected ->
+            selected.id != "none" &&
+                availableProviders.any { provider -> provider.id == selected.id }
+        }
+        ?: matchedServerProvider
+} else {
+    matchedServerProvider
 }
 
 private val FALLBACK_DOWNLOAD_CLIENT_FIELDS: Map<String, DownloadClientFieldSpec> = mapOf(
@@ -260,13 +337,29 @@ class PandaSetupViewModel(
     private val settingsRefreshNotifier: SettingsRefreshNotifier,
     private val accountSessionCoordinator: com.torve.presentation.session.AccountSessionCoordinator,
     private val configStateStore: PandaConfigStateStore? = null,
+    private val userIdProvider: com.torve.data.auth.UserIdProvider? = null,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + mainDispatcher)
     private val _state = MutableStateFlow(PandaSetupUiState())
     val state: StateFlow<PandaSetupUiState> = _state.asStateFlow()
 
     private var pollJob: Job? = null
+    private var authJob: Job? = null
     private var configHydrationJob: Job? = null
+    private var configReadSequence = 0L
+    private var activationSyncJob: Job? = null
+    private val usenetDraft = PandaUsenetDraft()
+    private var savedIndexerRows: List<com.torve.data.panda.NzbIndexerRow>? = null
+    private fun draftOwner(): String = userIdProvider?.currentDataUserId().orEmpty()
+    private fun editUsenet(transform: (PandaSetupUiState) -> PandaSetupUiState) {
+        usenetDraft.edited(draftOwner())
+        _state.update { transform(it).copy(addonInstalled = false, saveError = null) }
+    }
+
+    /** Allows startup work to wait until cached/server activation has been reconciled. */
+    suspend fun awaitInitialConfigHydration() {
+        configHydrationJob?.join()
+    }
 
     // Synthetic "no debrid" option so users with their own Usenet setup can skip debrid entirely.
     // Selecting this provider jumps past the AUTH step and the save payload goes out with
@@ -326,11 +419,13 @@ class PandaSetupViewModel(
             }
             cleanCredential(key)?.let { entries[providerId] = it }
         }
-        return entries
+        val disconnected = prefsRepo.readPandaDebridActivationSnapshot().disconnectedProviderIds
+        return entries.filterKeys { it !in disconnected }
     }
 
     init {
         _state.update { it.copy(sourceProviders = allSourceProviders, enabledSources = defaultEnabledSources) }
+        loadLocalDebridActivation()
         loadSchema()
         loadProviders()
         checkExistingConfig()
@@ -429,6 +524,23 @@ class PandaSetupViewModel(
         loadProviders()
     }
 
+    fun openSetup() {
+        authJob?.cancel()
+        pollJob?.cancel()
+        _state.update { it.reopened() }
+    }
+
+    /** Open the existing account configuration, preserving other connected providers. */
+    fun openUsenetSetup(): Job = scope.launch {
+        awaitInitialConfigHydration()
+        if (!usenetDraft.hasEdits(draftOwner()) || _state.value.configLoadFailed) {
+            checkExistingConfig(userRequested = true)
+            awaitInitialConfigHydration()
+        }
+        openSetup()
+        _state.update { it.reopenedForUsenet(noDebridProvider) }
+    }
+
     fun selectSetupMode(mode: PandaSetupMode) {
         when (mode) {
             PandaSetupMode.DEBRID -> {
@@ -450,6 +562,8 @@ class PandaSetupViewModel(
     }
 
     private fun selectUsenetOnly() {
+        usenetDraft.edited(draftOwner())
+        authJob?.cancel()
         pollJob?.cancel()
         // Usenet-only path: skip provider auth and torrent sources entirely.
         // Keep a synthetic provider internally because the Panda payload still
@@ -473,6 +587,8 @@ class PandaSetupViewModel(
     }
 
     fun selectProvider(provider: PandaProvider) {
+        authJob?.cancel()
+        pollJob?.cancel()
         if (provider.id == "none") {
             selectUsenetOnly()
             return
@@ -484,6 +600,7 @@ class PandaSetupViewModel(
                 setupMode = PandaSetupMode.DEBRID,
                 selectedProvider = provider,
                 authMethod = defaultAuth,
+                authLoading = false,
                 authConnected = it.debridApiKeys.isNotEmpty(),
                 existingCredentialDetected = existingKey != null,
                 debridApiKey = existingKey.orEmpty(),
@@ -500,6 +617,9 @@ class PandaSetupViewModel(
     private fun checkExistingCredential(providerId: String) {
         val secretKey = providerSecretKeys[providerId] ?: return
         scope.launch {
+            if (
+                providerId in prefsRepo.readPandaDebridActivationSnapshot().disconnectedProviderIds
+            ) return@launch
             val existingKey = integrationSecretStore.get(secretKey)
             if (!existingKey.isNullOrBlank()) {
                 _state.update {
@@ -519,6 +639,7 @@ class PandaSetupViewModel(
     }
 
     fun setAuthMethod(method: String) {
+        authJob?.cancel()
         pollJob?.cancel()
         _state.update {
             it.copy(
@@ -528,6 +649,22 @@ class PandaSetupViewModel(
                 error = null,
             )
         }
+    }
+
+    private fun loadLocalDebridActivation() {
+        scope.launch {
+            val snapshot = prefsRepo.readPandaDebridActivationSnapshot()
+            _state.update { current ->
+                current.copy(
+                    debridProviderEnabled = current.debridProviderEnabled + snapshot.enabledByProvider,
+                )
+            }
+        }
+    }
+
+    /** Stops an in-progress browser/device-code authorization without removing credentials. */
+    fun cancelOAuth() {
+        setAuthMethod("apikey")
     }
 
     private fun toDebridServiceType(providerId: String): DebridServiceType? {
@@ -555,7 +692,9 @@ class PandaSetupViewModel(
             return
         }
 
-        scope.launch {
+        authJob?.cancel()
+        pollJob?.cancel()
+        authJob = scope.launch {
             _state.update { it.copy(authLoading = true, error = null, deviceCode = null) }
             try {
                 val code = debridClient.getDeviceCode(debridType)
@@ -568,6 +707,7 @@ class PandaSetupViewModel(
                     }
                 }
             } catch (e: Exception) {
+                if (e is CancellationException) throw e
                 _state.update {
                     it.copy(authLoading = false, authMethod = "apikey", error = "Browser sign-in failed. Enter your API key instead.")
                 }
@@ -584,6 +724,11 @@ class PandaSetupViewModel(
                 try {
                     val result = debridClient.pollDeviceAuth(debridType, code.deviceCode, code.userCode)
                     if (result.done && result.apiKey != null) {
+                        val providerId = providerIdForDebridType(debridType)
+                        prefsRepo.writePandaDebridActivationSnapshot(
+                            prefsRepo.readPandaDebridActivationSnapshot()
+                                .withExplicitMutation(providerId, enabled = true),
+                        )
                         // Persist credentials to IntegrationSecretStore so the
                         // shared rdTokenRefresher can find them at runtime.
                         // Without this, the access token expires after ~24h and
@@ -613,20 +758,23 @@ class PandaSetupViewModel(
                             )
                         }
                         _state.update {
-                            val providerId = providerIdForDebridType(debridType)
                             val updatedKeys = it.debridApiKeys + (providerId to result.apiKey)
                             val isSelected = it.selectedProvider?.id == providerId
-                            it.copy(
-                                debridApiKey = if (isSelected) result.apiKey else it.debridApiKey,
-                                apiKeyInput = if (isSelected) result.apiKey else it.apiKeyInput,
-                                debridApiKeys = updatedKeys,
-                                authConnected = updatedKeys.isNotEmpty(),
+                             it.copy(
+                                 debridApiKey = if (isSelected) result.apiKey else it.debridApiKey,
+                                 apiKeyInput = if (isSelected) result.apiKey else it.apiKeyInput,
+                                 debridApiKeys = updatedKeys,
+                                 verifiedDebridApiKeys = it.verifiedDebridApiKeys + (providerId to result.apiKey),
+                                 debridProviderEnabled = it.debridProviderEnabled +
+                                    (providerId to (it.debridProviderEnabled[providerId] ?: true)),
+                                 authConnected = updatedKeys.isNotEmpty(),
                                 deviceCode = null,
                             )
                         }
                         return@launch
                     }
-                } catch (_: Exception) {
+                } catch (e: Exception) {
+                    if (e is CancellationException) throw e
                     // keep polling
                 }
             }
@@ -669,10 +817,16 @@ class PandaSetupViewModel(
         val key = _state.value.apiKeyInput.trim()
         if (key.isBlank()) return
 
-        scope.launch {
+        authJob?.cancel()
+        pollJob?.cancel()
+        authJob = scope.launch {
             _state.update { it.copy(authLoading = true, error = null) }
             try {
                 pandaClient.validateApiKey(provider.id, key)
+                prefsRepo.writePandaDebridActivationSnapshot(
+                    prefsRepo.readPandaDebridActivationSnapshot()
+                        .withExplicitMutation(provider.id, enabled = true),
+                )
                 toDebridServiceType(provider.id)?.let { debridType ->
                     integrationSecretStore.put(debridSecretKey(debridType), key)
                     if (debridType == DebridServiceType.TORBOX) {
@@ -684,71 +838,242 @@ class PandaSetupViewModel(
                     it.copy(
                         debridApiKey = key,
                         debridApiKeys = updatedKeys,
+                        verifiedDebridApiKeys = it.verifiedDebridApiKeys + (provider.id to key),
+                        debridProviderEnabled = it.debridProviderEnabled +
+                            (provider.id to (it.debridProviderEnabled[provider.id] ?: true)),
                         authConnected = updatedKeys.isNotEmpty(),
                         authLoading = false,
                         existingCredentialDetected = false,
                     )
                 }
             } catch (e: Exception) {
-                _state.update { it.copy(authLoading = false, error = e.message) }
+                if (e is CancellationException) throw e
+                _state.update { it.copy(authLoading = false, error = e.message,
+                    verifiedDebridApiKeys = it.verifiedDebridApiKeys - provider.id) }
             }
         }
     }
 
     fun disconnectSelectedDebrid() {
-        val provider = _state.value.selectedProvider ?: return
+        val before = _state.value
+        if (before.authLoading) return
+        val provider = before.selectedProvider ?: return
         val debridType = toDebridServiceType(provider.id)
+        authJob?.cancel()
         pollJob?.cancel()
-        if (debridType != null) {
-            scope.launch {
-                integrationSecretStore.remove(debridSecretKey(debridType))
-                if (debridType == DebridServiceType.REAL_DEBRID) {
-                    integrationSecretStore.remove(IntegrationSecretKey.DEBRID_RD_REFRESH_TOKEN)
-                    integrationSecretStore.remove(IntegrationSecretKey.DEBRID_RD_CLIENT_ID)
-                    integrationSecretStore.remove(IntegrationSecretKey.DEBRID_RD_CLIENT_SECRET)
-                }
-            }
-        }
-        _state.update {
-            val updatedKeys = it.debridApiKeys - provider.id
-            it.copy(
+        configHydrationJob?.cancel()
+        val updatedKeys = before.debridApiKeys - provider.id
+        val disconnected = before.copy(
                 debridApiKeys = updatedKeys,
+                verifiedDebridApiKeys = before.verifiedDebridApiKeys - provider.id,
+                debridProviderEnabled = before.debridProviderEnabled - provider.id,
                 debridApiKey = "",
                 apiKeyInput = "",
                 authConnected = updatedKeys.isNotEmpty(),
                 existingCredentialDetected = false,
                 deviceCode = null,
-                authLoading = false,
+                // Keep Disconnect distinct from Re-authenticate. OAuthSection
+                // auto-starts whenever a disconnected OAuth provider is shown.
+                authMethod = "apikey",
+                authLoading = before.isEditMode,
                 error = null,
+            )
+        _state.value = disconnected
+        scope.launch {
+            persistDebridDisconnect(
+                before = before,
+                disconnected = disconnected,
+                provider = provider,
+                debridType = debridType,
             )
         }
     }
 
-    fun reconnectSelectedDebrid() {
-        val supportsOAuth = _state.value.selectedProvider?.authMethods?.contains("oauth") == true
-        disconnectSelectedDebrid()
-        _state.update {
-            it.copy(authMethod = if (supportsOAuth) "oauth" else "apikey")
+    fun setDebridProviderEnabled(providerId: String, enabled: Boolean) {
+        val before = _state.value
+        if (before.debridApiKeys[providerId].isNullOrBlank()) return
+        val updated = before.copy(
+            debridProviderEnabled = before.debridProviderEnabled + (providerId to enabled),
+            error = null,
+        )
+        _state.value = updated
+
+        activationSyncJob?.cancel()
+        activationSyncJob = scope.launch {
+            val pending = prefsRepo.readPandaDebridActivationSnapshot()
+                .withExplicitMutation(providerId, enabled)
+            prefsRepo.writePandaDebridActivationSnapshot(pending)
+            settingsRefreshNotifier.notifyRefresh(kotlinx.datetime.Clock.System.now().toEpochMilliseconds())
+
+            if (!updated.isEditMode) return@launch
+            val result = runCatching { persistDebridActivationPatch(updated) }
+            if (result.isSuccess) {
+                val latest = prefsRepo.readPandaDebridActivationSnapshot()
+                if (latest.enabledByProvider[providerId] == enabled) {
+                    prefsRepo.writePandaDebridActivationSnapshot(
+                        latest.markSynchronized(setOf(providerId)),
+                    )
+                }
+                settingsRefreshNotifier.notifyRefresh(kotlinx.datetime.Clock.System.now().toEpochMilliseconds())
+            } else {
+                _state.update {
+                    it.copy(
+                        error = "${if (enabled) "Enabled" else "Disabled"} locally. Panda will sync when it is reachable.",
+                    )
+                }
+            }
         }
+    }
+
+    private suspend fun persistDebridActivationPatch(state: PandaSetupUiState) {
+        val configId = requireNotNull(state.configId?.takeIf { it.isNotBlank() })
+        val bearer = accountSessionCoordinator.getTorveAccessToken()
+            ?: integrationSecretStore.get(
+                IntegrationSecretKey.PANDA_MANAGEMENT_TOKEN,
+                subKey = configId,
+            )
+            ?: error("Missing Panda management credential")
+        val connections = pandaDebridConnectionsForPayload(state)
+        val configuredIds = state.debridApiKeys.keys
+        val emittedIds = connections.mapTo(hashSetOf()) { it.provider }
+        check(configuredIds.all { it in emittedIds }) {
+            "A configured provider credential is not available on this device"
+        }
+        val primary = primaryPandaDebridConnection(state)
+        pandaClient.updateConfig(
+            configId = configId,
+            bearerToken = bearer,
+            patch = PandaConfigPatch(
+                debridService = primary.provider,
+                debridApiKey = primary.apiKey,
+                debridConnections = connections,
+            ),
+        )
+    }
+
+    private suspend fun persistDebridDisconnect(
+        before: PandaSetupUiState,
+        disconnected: PandaSetupUiState,
+        provider: PandaProvider,
+        debridType: DebridServiceType?,
+    ) {
+        val activationBefore = prefsRepo.readPandaDebridActivationSnapshot()
+        prefsRepo.writePandaDebridActivationSnapshot(
+            activationBefore.withExplicitDisconnect(provider.id),
+        )
+        if (before.isEditMode) {
+            val remoteResult = runCatching {
+                val configId = requireNotNull(before.configId?.takeIf { it.isNotBlank() })
+                val bearer = accountSessionCoordinator.getTorveAccessToken()
+                    ?: integrationSecretStore.get(
+                        IntegrationSecretKey.PANDA_MANAGEMENT_TOKEN,
+                        subKey = configId,
+                    )
+                    ?: error("Missing Panda management credential")
+                val primary = primaryPandaDebridConnection(disconnected)
+                pandaClient.updateConfig(
+                    configId = configId,
+                    bearerToken = bearer,
+                    patch = PandaConfigPatch(
+                        debridService = primary.provider,
+                        debridApiKey = primary.apiKey,
+                        // Empty is intentional and removes the final provider.
+                        debridConnections = pandaDebridConnectionsForPayload(disconnected),
+                    ),
+                )
+                if (debridType != null) {
+                    // Best effort here: the durable disconnect tombstone makes
+                    // account restore retry this deletion when connectivity or
+                    // authentication returns.
+                    accountSessionCoordinator.deleteIntegrationFromBackend(
+                        "DEBRID_API_KEY_${debridType.name}",
+                    )
+                }
+            }
+            if (remoteResult.isFailure) {
+                prefsRepo.writePandaDebridActivationSnapshot(activationBefore)
+                _state.value = before.copy(
+                    deviceCode = null,
+                    authMethod = "apikey",
+                    authLoading = false,
+                    error = "Could not disconnect " + provider.name + ". Nothing was removed.",
+                )
+                return
+            }
+        }
+
+        val localResult = runCatching {
+            if (debridType != null) {
+                integrationSecretStore.remove(debridSecretKey(debridType))
+                integrationSecretStore.remove(IntegrationSecretKey.DEBRID_API_KEY)
+                prefsRepo.remove(SettingsViewModel.KEY_DEBRID_API_KEY)
+                if (debridType == DebridServiceType.REAL_DEBRID) {
+                    integrationSecretStore.remove(IntegrationSecretKey.DEBRID_RD_REFRESH_TOKEN)
+                    integrationSecretStore.remove(IntegrationSecretKey.DEBRID_RD_CLIENT_ID)
+                    integrationSecretStore.remove(IntegrationSecretKey.DEBRID_RD_CLIENT_SECRET)
+                    prefsRepo.remove(SettingsViewModel.KEY_DEBRID_RD_EXPIRES_AT)
+                }
+            }
+            val activation = prefsRepo.readPandaDebridActivationSnapshot()
+                .withExplicitDisconnect(provider.id)
+            prefsRepo.writePandaDebridActivationSnapshot(activation)
+        }
+        _state.update {
+            val providerSecret = "debrid_api_key_" + provider.id
+            val retainedServerSecrets = if (disconnected.debridApiKeys.isEmpty()) {
+                it.serverHasSecrets - providerSecret - "debrid_api_key"
+            } else {
+                it.serverHasSecrets - providerSecret
+            }
+            it.copy(
+                authLoading = false,
+                error = localResult.exceptionOrNull()?.let {
+                    "Provider removed, but its local credential could not be cleared."
+                },
+                serverHasSecrets = retainedServerSecrets,
+            )
+        }
+        settingsRefreshNotifier.notifyRefresh(kotlinx.datetime.Clock.System.now().toEpochMilliseconds())
+    }
+
+    fun reconnectSelectedDebrid() {
+        val current = _state.value
+        val provider = current.selectedProvider ?: return
+        val supportsOAuth = provider.authMethods.contains("oauth")
+        authJob?.cancel()
+        pollJob?.cancel()
+        val remaining = current.debridApiKeys - provider.id
+        _state.value = current.copy(
+            debridApiKeys = remaining,
+            verifiedDebridApiKeys = current.verifiedDebridApiKeys - provider.id,
+            debridApiKey = "",
+            apiKeyInput = "",
+            authConnected = remaining.isNotEmpty(),
+            existingCredentialDetected = false,
+            deviceCode = null,
+            authMethod = if (supportsOAuth) "oauth" else "apikey",
+            authLoading = false,
+            error = null,
+        )
         if (supportsOAuth) {
             startOAuth()
         }
     }
 
     // Usenet setters
-    fun setEnableUsenet(enabled: Boolean) { _state.update { it.copy(enableUsenet = enabled) } }
-    fun setUsenetProvider(provider: String) { _state.update { it.copy(usenetProvider = provider) } }
-    fun setUsenetHost(host: String) { _state.update { it.copy(usenetHost = host) } }
-    fun setUsenetPort(port: Int) { _state.update { it.copy(usenetPort = port) } }
-    fun setUsenetUsername(username: String) { _state.update { it.copy(usenetUsername = username) } }
-    fun setUsenetPassword(password: String) { _state.update { it.copy(usenetPassword = password) } }
-    fun setUsenetSSL(ssl: Boolean) { _state.update { it.copy(usenetSSL = ssl) } }
-    fun setUsenetConnections(connections: Int) { _state.update { it.copy(usenetConnections = connections) } }
+    fun setEnableUsenet(enabled: Boolean) { editUsenet { it.copy(enableUsenet = enabled) } }
+    fun setUsenetProvider(provider: String) { editUsenet { it.copy(usenetProvider = provider) } }
+    fun setUsenetHost(host: String) { editUsenet { it.copy(usenetHost = host) } }
+    fun setUsenetPort(port: Int) { editUsenet { it.copy(usenetPort = port) } }
+    fun setUsenetUsername(username: String) { editUsenet { it.copy(usenetUsername = username) } }
+    fun setUsenetPassword(password: String) { editUsenet { it.copy(usenetPassword = password) } }
+    fun setUsenetSSL(ssl: Boolean) { editUsenet { it.copy(usenetSSL = ssl) } }
+    fun setUsenetConnections(connections: Int) { editUsenet { it.copy(usenetConnections = connections) } }
     // Legacy single-indexer setters — still used by any caller that hasn't
     // migrated to the per-row handlers. They also seed the array so the new UI
     // stays in sync.
     fun setNzbIndexer(indexer: String) {
-        _state.update {
+        editUsenet {
             val updatedRows = it.nzbIndexers.ifEmpty { listOf(com.torve.data.panda.NzbIndexerRow()) }
             it.copy(
                 nzbIndexer = indexer,
@@ -757,7 +1082,7 @@ class PandaSetupViewModel(
         }
     }
     fun setNzbIndexerUrl(url: String) {
-        _state.update {
+        editUsenet {
             val updatedRows = it.nzbIndexers.ifEmpty { listOf(com.torve.data.panda.NzbIndexerRow()) }
             it.copy(
                 nzbIndexerUrl = url,
@@ -766,7 +1091,7 @@ class PandaSetupViewModel(
         }
     }
     fun setNzbIndexerApiKey(apiKey: String) {
-        _state.update {
+        editUsenet {
             val updatedRows = it.nzbIndexers.ifEmpty { listOf(com.torve.data.panda.NzbIndexerRow()) }
             it.copy(
                 nzbIndexerApiKey = apiKey,
@@ -777,12 +1102,12 @@ class PandaSetupViewModel(
 
     /** Append a blank indexer row. UI uses this for the "Add another indexer" button. */
     fun addIndexer() {
-        _state.update { it.copy(nzbIndexers = it.nzbIndexers + com.torve.data.panda.NzbIndexerRow()) }
+        editUsenet { it.copy(nzbIndexers = it.nzbIndexers + com.torve.data.panda.NzbIndexerRow()) }
     }
 
     /** Remove the indexer row at [index]. Always leaves at least one (empty) row. */
     fun removeIndexer(index: Int) {
-        _state.update { state ->
+        editUsenet { state ->
             val remaining = state.nzbIndexers.filterIndexed { i, _ -> i != index }
                 .ifEmpty { listOf(com.torve.data.panda.NzbIndexerRow()) }
             // Keep legacy scalars pointed at the first remaining row so save-time
@@ -799,7 +1124,7 @@ class PandaSetupViewModel(
 
     /** Mutate one indexer row in place via [transform]. */
     fun updateIndexer(index: Int, transform: (com.torve.data.panda.NzbIndexerRow) -> com.torve.data.panda.NzbIndexerRow) {
-        _state.update { state ->
+        editUsenet { state ->
             val updated = state.nzbIndexers.mapIndexed { i, row ->
                 if (i == index) transform(row) else row
             }
@@ -815,13 +1140,13 @@ class PandaSetupViewModel(
     }
 
     fun setBandwidthSaver(on: Boolean) {
-        _state.update { it.copy(easynewsPreferNzb = on) }
+        editUsenet { it.copy(easynewsPreferNzb = on) }
     }
-    fun setDownloadClient(client: String) { _state.update { it.copy(downloadClient = client) } }
-    fun setDownloadClientUrl(url: String) { _state.update { it.copy(downloadClientUrl = url) } }
-    fun setDownloadClientUsername(username: String) { _state.update { it.copy(downloadClientUsername = username) } }
-    fun setDownloadClientPassword(password: String) { _state.update { it.copy(downloadClientPassword = password) } }
-    fun setDownloadClientApiKey(apiKey: String) { _state.update { it.copy(downloadClientApiKey = apiKey) } }
+    fun setDownloadClient(client: String) { editUsenet { it.copy(downloadClient = client) } }
+    fun setDownloadClientUrl(url: String) { editUsenet { it.copy(downloadClientUrl = url) } }
+    fun setDownloadClientUsername(username: String) { editUsenet { it.copy(downloadClientUsername = username) } }
+    fun setDownloadClientPassword(password: String) { editUsenet { it.copy(downloadClientPassword = password) } }
+    fun setDownloadClientApiKey(apiKey: String) { editUsenet { it.copy(downloadClientApiKey = apiKey) } }
 
     fun toggleSource(sourceId: String) {
         _state.update {
@@ -898,7 +1223,7 @@ class PandaSetupViewModel(
                     null -> PandaSetupStep.SETUP_TYPE
                 }
                 PandaSetupStep.PROVIDER -> PandaSetupStep.AUTH
-                PandaSetupStep.AUTH -> PandaSetupStep.SOURCES
+                PandaSetupStep.AUTH -> if (s.setupMode == PandaSetupMode.USENET_ONLY || s.selectedProvider?.id == "none") PandaSetupStep.USENET else PandaSetupStep.SOURCES
                 PandaSetupStep.SOURCES -> PandaSetupStep.USENET
                 PandaSetupStep.USENET -> PandaSetupStep.QUALITY
                 PandaSetupStep.QUALITY -> PandaSetupStep.REVIEW
@@ -913,13 +1238,12 @@ class PandaSetupViewModel(
         _state.update { s ->
             val skipDebrid = s.setupMode == PandaSetupMode.USENET_ONLY || s.selectedProvider?.id == "none"
             val prev = when (s.currentStep) {
-                PandaSetupStep.SETUP_TYPE -> PandaSetupStep.SETUP_TYPE
-                PandaSetupStep.PROVIDER -> PandaSetupStep.SETUP_TYPE
-                PandaSetupStep.AUTH -> PandaSetupStep.SETUP_TYPE
-                // "No debrid" path never enters AUTH — jump straight back to PROVIDER.
-                PandaSetupStep.SOURCES -> if (skipDebrid) PandaSetupStep.SETUP_TYPE else PandaSetupStep.AUTH
-                // "No debrid" path skips SOURCES entirely — back from USENET → PROVIDER.
-                PandaSetupStep.USENET -> if (skipDebrid) PandaSetupStep.SETUP_TYPE else PandaSetupStep.SOURCES
+                PandaSetupStep.SETUP_TYPE -> PandaSetupStep.AUTH
+                PandaSetupStep.PROVIDER -> PandaSetupStep.AUTH
+                PandaSetupStep.AUTH -> PandaSetupStep.AUTH
+                PandaSetupStep.SOURCES -> PandaSetupStep.AUTH
+                // Usenet-only skips the torrent sources page.
+                PandaSetupStep.USENET -> if (skipDebrid) PandaSetupStep.AUTH else PandaSetupStep.SOURCES
                 PandaSetupStep.QUALITY -> PandaSetupStep.USENET
                 PandaSetupStep.REVIEW -> PandaSetupStep.QUALITY
             }
@@ -928,7 +1252,9 @@ class PandaSetupViewModel(
     }
 
     fun saveConfigAndInstall() {
+        if (_state.value.isSaving || _state.value.configLoadFailed || _state.value.isLoadingConfig) return
         scope.launch {
+            val saveRead = usenetDraft.read(draftOwner())
             _state.update { it.copy(isSaving = true, saveError = null) }
             try {
                 val s = _state.value
@@ -937,15 +1263,9 @@ class PandaSetupViewModel(
                 val debridConnections = pandaDebridConnectionsForPayload(s)
                 val primaryDebrid = primaryPandaDebridConnection(s)
 
-                // Filter out the blank placeholder rows (type=="none" or empty key)
-                // before emitting. The first surviving row also drives the legacy
-                // scalar fields so older Panda deploys still see a usable indexer.
-                val configuredIndexers = s.nzbIndexers.filter {
-                    it.type != "none" && it.apiKey.isNotBlank()
-                }
-                val firstIndexer = configuredIndexers.firstOrNull()
+                var configuredIndexers: List<com.torve.data.panda.NzbIndexerRow>?
 
-                if (s.isEditMode && s.pandaToken != null) {
+                if (s.isEditMode) {
                     val configId = s.configId
                     if (configId.isNullOrBlank()) {
                         _state.update {
@@ -995,40 +1315,25 @@ class PandaSetupViewModel(
                         keepOrNull(s.downloadClientPassword, "download_client_password")
                     val patchedDownloadClientApiKey =
                         keepOrNull(s.downloadClientApiKey, "download_client_api_key")
-                    // Indexer preservation: if ANY row has a blank apiKey
-                    // whose position was server-redacted on read, the user
-                    // hasn't re-typed it. Sending the current `nzbIndexers`
-                    // would either drop the row (filtered above) or push
-                    // an empty key, both of which clear the server's stored
-                    // indexers — and that's exactly what wiped usenet
-                    // sources from the picker. Bail out: send `null` for
-                    // the array AND the legacy scalars so the server keeps
-                    // its existing list intact. Trade-off: a user who edits
-                    // one indexer must re-type the others; the alternative
-                    // (silent data loss) is worse.
-                    val hasUnchangedIndexerSecret = s.nzbIndexers.withIndex().any { (idx, row) ->
-                        row.type != "none" &&
-                            row.apiKey.isBlank() &&
-                            ("indexer_api_key_$idx" in s.serverHasSecrets ||
-                                (idx == 0 && "indexer_api_key_legacy" in s.serverHasSecrets))
-                    }
-                    val patchedIndexers: List<com.torve.data.panda.NzbIndexerRow>? =
-                        if (hasUnchangedIndexerSecret) null else configuredIndexers
-                    val patchedFirstIndexer = configuredIndexers.firstOrNull()
-                    val patchedNzbIndexer: String? =
-                        if (hasUnchangedIndexerSecret) null else patchedFirstIndexer?.type ?: "none"
-                    val patchedNzbIndexerUrl: String? =
-                        if (hasUnchangedIndexerSecret) null else patchedFirstIndexer?.url.orEmpty()
-                    val patchedNzbIndexerApiKey: String? =
-                        if (hasUnchangedIndexerSecret) null else patchedFirstIndexer?.apiKey.orEmpty()
-                    torveVerboseLog { "TORVE PANDA | saveConfigAndInstall edit hasUnchangedIndexerCredential=$hasUnchangedIndexerSecret indexerRows=${s.nzbIndexers.size} configured=${configuredIndexers.size}" }
+                    val recoveredIndexerSecrets = if (s.nzbIndexers.any {
+                        it.type != "none" && (it.apiKey.isBlank() || it.apiKey == "[redacted]")
+                    } && !torveToken.isNullOrBlank()) {
+                        runCatching { pandaClient.getConfigSecrets(configId, torveToken).nzbIndexers }.getOrDefault(emptyList())
+                    } else emptyList()
+                    configuredIndexers = pandaIndexersForUpdate(s.nzbIndexers, savedIndexerRows, recoveredIndexerSecrets)
+                    val firstIndexer = configuredIndexers?.firstOrNull()
+                    val patchedNzbIndexer = if (configuredIndexers == null) null else firstIndexer?.type ?: "none"
+                    val patchedNzbIndexerUrl = if (configuredIndexers == null) null else firstIndexer?.url.orEmpty()
+                    val patchedNzbIndexerApiKey = if (configuredIndexers == null) null else firstIndexer?.apiKey.orEmpty()
                     pandaClient.updateConfig(
                         configId = configId,
                         bearerToken = bearer,
                         patch = PandaConfigPatch(
                             debridService = primaryDebrid.provider,
                             debridApiKey = patchedDebridApiKey,
-                            debridConnections = debridConnections.takeIf { it.isNotEmpty() },
+                            // Empty deliberately clears the final provider; null
+                            // would preserve the stale server-side connection.
+                            debridConnections = debridConnections,
                             enabledProviders = s.enabledSources.toList(),
                             maxQuality = s.maxQuality,
                             qualityProfile = s.qualityProfile,
@@ -1050,7 +1355,7 @@ class PandaSetupViewModel(
                             nzbIndexerUrl = patchedNzbIndexerUrl,
                             nzbIndexerApiKey = patchedNzbIndexerApiKey,
                             // Preferred multi-indexer array (null preserves server).
-                            nzbIndexers = patchedIndexers,
+                            nzbIndexers = configuredIndexers,
                             downloadClient = s.downloadClient,
                             downloadClientUrl = s.downloadClientUrl,
                             downloadClientUsername = s.downloadClientUsername,
@@ -1059,14 +1364,17 @@ class PandaSetupViewModel(
                             easynewsPreferNzb = s.easynewsPreferNzb,
                         ),
                     )
+                    usenetDraft.saved(saveRead, draftOwner())
                     _state.update {
                         it.copy(
                             isSaving = false,
-                            addonInstalled = true,
+                            addonInstalled = !usenetDraft.hasEdits(draftOwner()),
                             saveCompletionToken = it.saveCompletionToken + 1,
                         )
                     }
                 } else {
+                    configuredIndexers = pandaIndexersForSave(s.nzbIndexers)
+                    val firstIndexer = configuredIndexers.firstOrNull()
                     val configPayload = PandaConfigPayload(
                         enabledProviders = s.enabledSources.toList(),
                         debridService = primaryDebrid.provider,
@@ -1097,7 +1405,7 @@ class PandaSetupViewModel(
                         downloadClientApiKey = s.downloadClientApiKey,
                         easynewsPreferNzb = s.easynewsPreferNzb,
                     )
-                    val response = pandaClient.createConfig(configPayload)
+                    val response = pandaClient.createConfig(configPayload, accountSessionCoordinator.getTorveAccessToken())
                     val token = response.pandaToken ?: throw Exception("No token returned")
                     val manifestUrl = response.manifestUrl ?: throw Exception("No manifest URL returned")
                     val configId = response.configId
@@ -1139,48 +1447,51 @@ class PandaSetupViewModel(
                                 if (!configId.isNullOrBlank()) put("config_id", configId)
                                 if (!managementToken.isNullOrBlank()) put("management_token", managementToken)
                             },
-                            displayIdentifier = "Panda",
+                            displayIdentifier = "Usenet",
                         )
                     }
 
-                    // Dedupe: Panda may already be installed under the base manifest URL
-                    // (panda.torve.app/manifest.json — e.g. from the addon catalog "Install"
-                    // button) or under a prior config's URL (panda.torve.app/{id}/manifest.json).
-                    // Keep exactly one Panda row: remove any existing Panda installation
-                    // (matched by manifest id or by PANDA base URL), then install the
-                    // freshly-configured manifest URL.
-                    val newNormalizedUrl = AddonViewModel.normalizeManifestUrl(manifestUrl)
-                    runCatching {
-                        addonRepo.getInstalledAddons()
-                            .filter { a ->
-                                val aUrl = a.manifestUrl
-                                val normalizedExisting = AddonViewModel.normalizeManifestUrl(aUrl)
-                                val isPanda = a.manifest.id == "com.torve.panda" ||
-                                    aUrl.contains("panda.torve.app") ||
-                                    normalizedExisting.contains("panda.torve.app")
-                                // Don't remove the one we're about to install (can't happen here
-                                // since we just created a new config, but guard anyway).
-                                isPanda && normalizedExisting != newNormalizedUrl
-                            }
-                            .forEach { stale ->
-                                runCatching { addonRepo.removeAddon(stale.manifestUrl) }
-                            }
-                    }
+                    if (com.torve.data.addon.ExtensionRuntimePolicy.restorePandaFromAccount) {
+                        // Dedupe: Panda may already be installed under the base manifest URL
+                        // (panda.torve.app/manifest.json — e.g. from the addon catalog "Install"
+                        // button) or under a prior config's URL (panda.torve.app/{id}/manifest.json).
+                        // Keep exactly one Panda row: remove any existing Panda installation
+                        // (matched by manifest id or by PANDA base URL), then install the
+                        // freshly-configured manifest URL.
+                        val newNormalizedUrl = AddonViewModel.normalizeManifestUrl(manifestUrl)
+                        runCatching {
+                            addonRepo.getInstalledAddons()
+                                .filter { a ->
+                                    val aUrl = a.manifestUrl
+                                    val normalizedExisting = AddonViewModel.normalizeManifestUrl(aUrl)
+                                    val isPanda = a.manifest.id == "com.torve.panda" ||
+                                        aUrl.contains("panda.torve.app") ||
+                                        normalizedExisting.contains("panda.torve.app")
+                                    // Don't remove the one we're about to install (can't happen here
+                                    // since we just created a new config, but guard anyway).
+                                    isPanda && normalizedExisting != newNormalizedUrl
+                                }
+                                .forEach { stale ->
+                                    runCatching { addonRepo.removeAddon(stale.manifestUrl) }
+                                }
+                        }
 
-                    val existing = try { addonRepo.getAddon(newNormalizedUrl) } catch (_: Exception) { null }
-                    if (existing == null) {
-                        val installed = addonRepo.installAddon(manifestUrl)
-                        scope.launch(ioDispatcher) {
-                            addonSyncService.onAddonInstalled(installed)
+                        val existing = try { addonRepo.getAddon(newNormalizedUrl) } catch (_: Exception) { null }
+                        if (existing == null) {
+                            val installed = addonRepo.installAddon(manifestUrl)
+                            scope.launch(ioDispatcher) {
+                                addonSyncService.onAddonInstalled(installed)
+                            }
+                        }
+                        // Persist config_id on the addon row so later management-token
+                        // calls know which config to address. Done unconditionally so
+                        // a stale id from a prior install is overwritten.
+                        if (!configId.isNullOrBlank()) {
+                            runCatching { addonRepo.setAddonConfigId(newNormalizedUrl, configId) }
                         }
                     }
-                    // Persist config_id on the addon row so later management-token
-                    // calls know which config to address. Done unconditionally so
-                    // a stale id from a prior install is overwritten.
-                    if (!configId.isNullOrBlank()) {
-                        runCatching { addonRepo.setAddonConfigId(newNormalizedUrl, configId) }
-                    }
 
+                    usenetDraft.saved(saveRead, draftOwner())
                     _state.update {
                         it.copy(
                             isSaving = false,
@@ -1190,11 +1501,14 @@ class PandaSetupViewModel(
                             hasManagementToken = !managementToken.isNullOrBlank(),
                             pendingManagementTokenDisplay = managementToken?.takeIf { it.isNotBlank() },
                             managementTokenNotice = response.managementTokenNotice,
-                            addonInstalled = true,
+                            isEditMode = !configId.isNullOrBlank(),
+                            addonInstalled = !usenetDraft.hasEdits(draftOwner()),
                             saveCompletionToken = it.saveCompletionToken + 1,
                         )
                     }
                 }
+
+                if (configuredIndexers != null) savedIndexerRows = configuredIndexers
 
                 // Also store every debrid credential locally so Torve's direct
                 // streaming services can use the same keys Panda has.
@@ -1225,7 +1539,7 @@ class PandaSetupViewModel(
                 // redacted server value. DEVICE_ONLY: a re-issued
                 // management token from a different device shouldn't be
                 // able to read these via the Torve account sync.
-                s.nzbIndexers.forEachIndexed { idx, row ->
+                (configuredIndexers ?: s.nzbIndexers).forEachIndexed { idx, row ->
                     if (row.type != "none" && row.apiKey.isNotBlank() &&
                         !isRedactedPlaceholder(row.apiKey)
                     ) {
@@ -1276,6 +1590,16 @@ class PandaSetupViewModel(
                     )
                 }
 
+                val activation = prefsRepo.readPandaDebridActivationSnapshot()
+                val savedActivation = activation.copy(
+                    enabledByProvider = activation.enabledByProvider +
+                        debridConnections.associate { it.provider to it.enabled },
+                ).markSynchronized(
+                    providerIds = debridConnections.mapTo(hashSetOf()) { it.provider } +
+                        activation.pendingProviderIds,
+                )
+                prefsRepo.writePandaDebridActivationSnapshot(savedActivation)
+
                 settingsRefreshNotifier.notifyRefresh(kotlinx.datetime.Clock.System.now().toEpochMilliseconds())
                 torveVerboseLog { "TORVE PANDA | saveConfigAndInstall succeeded" }
             } catch (e: Exception) {
@@ -1286,22 +1610,55 @@ class PandaSetupViewModel(
         }
     }
 
-    private fun checkExistingConfig() {
+    private fun checkExistingConfig(userRequested: Boolean = false) {
         configHydrationJob?.cancel()
-        configHydrationJob = scope.launch {
-            val token = integrationSecretStore.get(IntegrationSecretKey.PANDA_TOKEN) ?: return@launch
-
+        val readSequence = ++configReadSequence
+        _state.update { it.copy(isLoadingConfig = true) }
+        val owner = userIdProvider?.let { com.torve.data.auth.PersonalDataScope(it.currentUserId(), it.currentProfileId()) }
+        configHydrationJob = scope.launch(owner ?: kotlin.coroutines.EmptyCoroutineContext) {
+            val hydrationRead = usenetDraft.read(draftOwner())
             try {
-                // First read with the manifest token to discover config_id (may be
-                // missing from the local addon row on a fresh restore).
-                val manifestRecord = pandaClient.getConfig(token)
-
+                val accountConfig = accountSessionCoordinator.getUsenetAccountConfig()
+                val token = if (accountConfig != null) accountConfig.manifestToken
+                    else integrationSecretStore.get(IntegrationSecretKey.PANDA_TOKEN)
+                if (hydrationRead.owner != draftOwner()) return@launch
+                if (accountConfig == null && token.isNullOrBlank()) {
+                    if (usenetDraft.hasEdits(draftOwner())) return@launch
+                    savedIndexerRows = null
+                    val catalog = _state.value
+                    _state.value = PandaSetupUiState(
+                        providers = catalog.providers.ifEmpty { allPandaProviders },
+                        sourceProviders = catalog.sourceProviders.ifEmpty { allSourceProviders },
+                        enabledSources = defaultEnabledSources,
+                        schema = catalog.schema,
+                    )
+                    return@launch
+                }
                 var pandaAddon = runCatching {
                     addonRepo.getInstalledAddons().firstOrNull { a ->
                         a.manifest.id == "com.torve.panda" ||
                             a.manifestUrl.contains("panda.torve.app")
                     }
                 }.getOrNull()
+
+                val torveToken = accountSessionCoordinator.getTorveAccessToken()
+                val knownConfigId = accountConfig?.configId ?: pandaAddon?.configId
+                val cachedManagementToken = knownConfigId?.let {
+                    integrationSecretStore.get(IntegrationSecretKey.PANDA_MANAGEMENT_TOKEN, subKey = it)
+                }
+                val managementToken = accountConfig?.managementToken ?: cachedManagementToken
+                val record = pandaClient.readUsenetConfig(
+                    UsenetAccountConfig(knownConfigId, token, managementToken), torveToken,
+                )
+                val config = record.config ?: error("Saved Usenet settings are unavailable")
+                val resolvedConfigId = record.configId ?: knownConfigId
+                userIdProvider?.let { owner?.check(it) }
+                if (accountConfig != null) {
+                    token?.let { integrationSecretStore.put(IntegrationSecretKey.PANDA_TOKEN, it) }
+                    if (resolvedConfigId != null && managementToken != null) {
+                        integrationSecretStore.put(IntegrationSecretKey.PANDA_MANAGEMENT_TOKEN, managementToken, resolvedConfigId)
+                    }
+                }
 
                 // Self-heal: the local addon row may have been GC'd by
                 // AddonSyncService when the server's `/me/addons` list
@@ -1311,7 +1668,8 @@ class PandaSetupViewModel(
                 // — so re-install the addon under its canonical URL instead
                 // of nuking the user's setup. Without this, every restart
                 // after a sync GC looked like a fresh-install wizard.
-                if (pandaAddon == null) {
+                if (pandaAddon == null && !userRequested && token != null &&
+                    com.torve.data.addon.ExtensionRuntimePolicy.restorePandaFromAccount) {
                     val rebuiltManifestUrl = "${com.torve.data.panda.PandaApiClient.BASE_URL}/u/$token/manifest.json"
                     runCatching {
                         val installed = addonRepo.installAddon(rebuiltManifestUrl)
@@ -1325,66 +1683,9 @@ class PandaSetupViewModel(
                     }
                 }
 
-                val resolvedConfigId = pandaAddon?.configId ?: manifestRecord.configId
                 if (!resolvedConfigId.isNullOrBlank() && pandaAddon?.configId.isNullOrBlank() && pandaAddon != null) {
                     runCatching { addonRepo.setAddonConfigId(pandaAddon!!.manifestUrl, resolvedConfigId) }
                 }
-
-                // Prefer the Torve JWT for the un-redacted read — Panda
-                // binds configs to Torve accounts (commit 972fa4a), so
-                // any owner can read the full config without needing a
-                // management_token. Fall back to a cached management
-                // token if the JWT call fails (e.g. legacy rows where
-                // owner_torve_user_id wasn't backfilled).
-                val torveToken = accountSessionCoordinator.getTorveAccessToken()
-                val managementToken = if (!resolvedConfigId.isNullOrBlank()) {
-                    integrationSecretStore.get(
-                        IntegrationSecretKey.PANDA_MANAGEMENT_TOKEN,
-                        subKey = resolvedConfigId,
-                    )
-                } else null
-
-                torveVerboseLog { "TORVE PANDA | checkExistingConfig hasConfigId=${!resolvedConfigId.isNullOrBlank()} hasAuth=${!torveToken.isNullOrBlank()} hasManagementCredential=${!managementToken.isNullOrBlank()}" }
-                val record = if (!resolvedConfigId.isNullOrBlank() && !torveToken.isNullOrBlank()) {
-                    val viaJwt = runCatching {
-                        pandaClient.getConfigAsManager(resolvedConfigId, torveToken)
-                    }
-                    if (viaJwt.isSuccess) {
-                        torveVerboseLog { "TORVE PANDA | checkExistingConfig hydrated via account auth" }
-                    } else {
-                        torveVerboseLog { "TORVE PANDA | checkExistingConfig account-auth path failed: ${DiagnosticsRedactor.redact(viaJwt.exceptionOrNull()?.message)}" }
-                    }
-                    viaJwt.getOrNull()
-                        ?: managementToken?.takeIf { it.isNotBlank() }?.let { mgmt ->
-                            val viaMgmt = runCatching {
-                                pandaClient.getConfigAsManager(resolvedConfigId, mgmt)
-                            }
-                            if (viaMgmt.isSuccess) {
-                                torveVerboseLog { "TORVE PANDA | checkExistingConfig hydrated via management credential" }
-                            } else {
-                                torveVerboseLog { "TORVE PANDA | checkExistingConfig management credential path failed: ${DiagnosticsRedactor.redact(viaMgmt.exceptionOrNull()?.message)}" }
-                            }
-                            viaMgmt.getOrNull()
-                        }
-                        ?: run {
-                            torveVerboseLog { "TORVE PANDA | checkExistingConfig falling back to manifest credential read" }
-                            manifestRecord
-                        }
-                } else if (!resolvedConfigId.isNullOrBlank() && !managementToken.isNullOrBlank()) {
-                    val viaMgmt = runCatching {
-                        pandaClient.getConfigAsManager(resolvedConfigId, managementToken)
-                    }
-                    if (viaMgmt.isSuccess) {
-                        torveVerboseLog { "TORVE PANDA | checkExistingConfig hydrated via management credential without account auth" }
-                    } else {
-                        torveVerboseLog { "TORVE PANDA | checkExistingConfig management credential path failed: ${DiagnosticsRedactor.redact(viaMgmt.exceptionOrNull()?.message)}; falling back to manifest read" }
-                    }
-                    viaMgmt.getOrNull() ?: manifestRecord
-                } else {
-                    torveVerboseLog { "TORVE PANDA | checkExistingConfig no account auth or management credential; manifest credential read only" }
-                    manifestRecord
-                }
-                val config = record.config ?: return@launch
 
                 var attempts = 0
                 while (_state.value.providersLoading && attempts < 20) {
@@ -1457,18 +1758,30 @@ class PandaSetupViewModel(
                     secretsOnServer += key
                     return ""
                 }
-                val cleanDebridApiKey = cleanSecret(
-                    config.debridApiKey,
-                    "debrid_api_key",
-                    secret(secrets?.debridApiKey),
-                )
+                val cachedActivation = prefsRepo.readPandaDebridActivationSnapshot()
+                val disconnectedProviderIds = cachedActivation.disconnectedProviderIds
+                val cleanDebridApiKey = if (config.debridService in disconnectedProviderIds) {
+                    ""
+                } else {
+                    cleanSecret(
+                        config.debridApiKey,
+                        "debrid_api_key",
+                        secret(secrets?.debridApiKey),
+                    )
+                }
                 val localDebridApiKeys = readStoredDebridApiKeys()
+                if ("debrid_api_key" in secretsOnServer && config.debridService != "none") {
+                    secretsOnServer += "debrid_api_key_${config.debridService}"
+                }
                 val secretDebridApiKeys = secrets?.debridConnections.orEmpty()
+                    .filterNot { row -> row.provider in disconnectedProviderIds }
                     .mapNotNull { row -> cleanCredential(row.apiKey)?.let { row.provider to it } }
                     .toMap()
                 val cleanedDebridApiKeys = linkedMapOf<String, String>().apply {
                     putAll(localDebridApiKeys)
-                    config.debridConnections.forEach { row ->
+                    config.debridConnections
+                        .filterNot { row -> row.provider in disconnectedProviderIds }
+                        .forEach { row ->
                         val key = cleanSecret(
                             row.apiKey,
                             "debrid_api_key_${row.provider}",
@@ -1476,10 +1789,29 @@ class PandaSetupViewModel(
                         )
                         cleanCredential(key)?.let { put(row.provider, it) }
                     }
-                    if (config.debridService != "none") {
+                    if (
+                        config.debridService != "none" &&
+                        config.debridService !in disconnectedProviderIds
+                    ) {
                         cleanCredential(cleanDebridApiKey)?.let { put(config.debridService, it) }
                     }
                     putAll(secretDebridApiKeys)
+                }
+                val activationSnapshot = cachedActivation.mergeServerState(
+                    serverState = config.debridActivationState(),
+                    updatedAt = record.updatedAt,
+                )
+                cleanedDebridApiKeys.keys.removeAll(activationSnapshot.disconnectedProviderIds)
+                val effectiveDisconnectedProviderIds = activationSnapshot.disconnectedProviderIds
+                prefsRepo.writePandaDebridActivationSnapshot(activationSnapshot)
+                if (
+                    activationSnapshot.enabledByProvider != cachedActivation.enabledByProvider ||
+                    activationSnapshot.pendingProviderIds != cachedActivation.pendingProviderIds ||
+                    activationSnapshot.disconnectedProviderIds != cachedActivation.disconnectedProviderIds
+                ) {
+                    settingsRefreshNotifier.notifyRefresh(
+                        kotlinx.datetime.Clock.System.now().toEpochMilliseconds(),
+                    )
                 }
                 val cachedUsenetPassword = if (config.usenetProvider != "none") {
                     integrationSecretStore.get(
@@ -1548,14 +1880,16 @@ class PandaSetupViewModel(
                 if (secrets != null) {
                     secret(secrets.debridApiKey)?.let { key ->
                         val dtype = toDebridServiceType(config.debridService)
-                        if (dtype != null) {
+                        if (dtype != null && config.debridService !in effectiveDisconnectedProviderIds) {
                             integrationSecretStore.put(debridSecretKey(dtype), key)
                             if (dtype == DebridServiceType.TORBOX) {
                                 integrationSecretStore.syncTorBoxCredentialPair(key)
                             }
                         }
                     }
-                    secrets.debridConnections.forEach { row ->
+                    secrets.debridConnections
+                        .filterNot { row -> row.provider in effectiveDisconnectedProviderIds }
+                        .forEach { row ->
                         val key = cleanCredential(row.apiKey) ?: return@forEach
                         val dtype = toDebridServiceType(row.provider) ?: return@forEach
                         integrationSecretStore.put(debridSecretKey(dtype), key)
@@ -1619,22 +1953,40 @@ class PandaSetupViewModel(
 
                 torveVerboseLog { "TORVE PANDA | checkExistingConfig hydrated serverHasCredentials=$secretsOnServer enableUsenet=${config.enableUsenet} usenetProvider=${config.usenetProvider} indexerCount=${cleanedIndexerRows.size} cachedIndexerCredentialCount=${cleanedIndexerRows.count { it.apiKey.isNotBlank() }}" }
 
-                _state.update {
-                    it.copy(
+                if (hydrationRead.owner != draftOwner()) return@launch
+                _state.update { current ->
+                    val hydratedSetupMode = if (
+                        config.debridService == "none" &&
+                        config.debridConnections.none { row -> row.provider != "none" }
+                    ) {
+                        PandaSetupMode.USENET_ONLY
+                    } else {
+                        PandaSetupMode.DEBRID
+                    }
+                    // A settings-refresh notification is also emitted by an
+                    // enable/disable mutation. Keep the provider the user is
+                    // actively editing instead of replacing it with the
+                    // server's primary provider and destroying its focus
+                    // subtree during hydration.
+                    val hydratedSelection = hydratedPandaProviderSelection(
+                        currentSelection = current.selectedProvider,
+                        availableProviders = current.providers,
+                        matchedServerProvider = matchedProvider,
+                        setupMode = hydratedSetupMode,
+                    )
+                    val refreshed = current.copy(
                         isEditMode = true,
+                        configLoadFailed = false,
                         pandaToken = token,
                         configId = resolvedConfigId,
                         hasManagementToken = hasMgmt,
                         editRequiresRecovery = false,
-                        setupMode = if (config.debridService == "none") {
-                            PandaSetupMode.USENET_ONLY
-                        } else {
-                            PandaSetupMode.DEBRID
-                        },
-                        selectedProvider = matchedProvider,
-                        debridApiKey = cleanedDebridApiKeys[primarySavedProviderId] ?: cleanDebridApiKey,
-                        apiKeyInput = cleanedDebridApiKeys[primarySavedProviderId] ?: cleanDebridApiKey,
+                        setupMode = hydratedSetupMode,
+                        selectedProvider = hydratedSelection,
+                        debridApiKey = selectedPandaDebridCredential(hydratedSelection?.id, cleanedDebridApiKeys, config.debridService, cleanDebridApiKey),
+                        apiKeyInput = selectedPandaDebridCredential(hydratedSelection?.id, cleanedDebridApiKeys, config.debridService, cleanDebridApiKey),
                         debridApiKeys = cleanedDebridApiKeys,
+                        debridProviderEnabled = activationSnapshot.enabledByProvider,
                         // Treat "no debrid" saved configs as "auth satisfied" so the save
                         // button in edit mode stays enabled. A redacted debrid_api_key
                         // (which we cleared above) still counts as "auth connected" —
@@ -1689,17 +2041,32 @@ class PandaSetupViewModel(
                         easynewsPreferNzb = config.easynewsPreferNzb,
                         serverHasSecrets = secretsOnServer.toSet(),
                     )
+                    savedIndexerRows = refreshed.nzbIndexers
+                    usenetDraft.merge(current, refreshed, hydrationRead, draftOwner())
+                }
+                if (activationSnapshot.pendingProviderIds.isNotEmpty()) {
+                    val pendingState = _state.value
+                    runCatching { persistDebridActivationPatch(pendingState) }
+                        .onSuccess {
+                            val latest = prefsRepo.readPandaDebridActivationSnapshot()
+                            prefsRepo.writePandaDebridActivationSnapshot(
+                                latest.markSynchronized(activationSnapshot.pendingProviderIds),
+                            )
+                            settingsRefreshNotifier.notifyRefresh(
+                                kotlinx.datetime.Clock.System.now().toEpochMilliseconds(),
+                            )
+                        }
                 }
             } catch (e: CancellationException) {
                 throw e
-            } catch (e: com.torve.data.panda.PandaApiException) {
-                // Only drop the token if the server says the config is definitely gone.
-                // Transient 5xx / auth / network errors must not wipe cross-device sync state.
-                if (e.httpStatus == 404 || e.httpStatus == 410) {
-                    integrationSecretStore.remove(IntegrationSecretKey.PANDA_TOKEN)
-                }
             } catch (_: Exception) {
-                // Network/parse errors: leave the token in place so a later retry succeeds.
+                // Failed reads are not empty configurations. Preserve all credentials and drafts;
+                // require a successful retry before allowing a create or update.
+                if (hydrationRead.owner == draftOwner()) _state.update { it.copy(configLoadFailed = true) }
+            } finally {
+                if (readSequence == configReadSequence && hydrationRead.owner == draftOwner()) {
+                    _state.update { it.copy(isLoadingConfig = false) }
+                }
             }
         }
     }
@@ -1724,10 +2091,12 @@ class PandaSetupViewModel(
                 )
             }
             integrationSecretStore.remove(IntegrationSecretKey.PANDA_TOKEN)
+            usenetDraft.discarded(draftOwner())
+            savedIndexerRows = null
             _state.update {
                 PandaSetupUiState(
                     providers = it.providers,
-                    currentStep = PandaSetupStep.SETUP_TYPE,
+                    currentStep = PandaSetupStep.AUTH,
                     schema = it.schema,
                     sourceProviders = it.sourceProviders,
                     enabledSources = defaultEnabledSources,

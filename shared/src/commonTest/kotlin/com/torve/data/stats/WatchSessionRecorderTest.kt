@@ -11,6 +11,7 @@ import com.torve.domain.stats.WatchStatsSummary
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class WatchSessionRecorderTest {
@@ -163,6 +164,43 @@ class WatchSessionRecorderTest {
         assertEquals(1, repo.sessions.getValue(first).episodeNumber)
         assertEquals(WatchSessionStatus.STARTED, repo.sessions.getValue(second).status)
         assertEquals(2, repo.sessions.getValue(second).episodeNumber)
+    }
+
+    @Test fun unfinishedEpisodeRecoveryUsesTheMeasuredPositionDespiteANewerManualMark() = runTest {
+        val repo = FakeWatchStatsRepository()
+        val recorder = WatchSessionRecorder(repo) { "user-a" }
+        val identity = WatchSessionMediaIdentity("show-1", MediaType.SERIES, "Episode", showTitle = "The Show", seasonNumber = 3, episodeNumber = 11)
+        val id = recorder.startPlayerSession(identity, 1_000)
+        recorder.finishPlayerSession(id, 600_000, 2_400_000, 2_000)
+        recorder.recordManualCompleted(identity, 3_000, 2_400_000)
+        val bookmark = recorder.getUnfinishedEpisodeBookmark("show-1", 3, 11)
+        assertNotNull(bookmark)
+        assertEquals(600_000L, bookmark.positionMs)
+        assertEquals(2_400_000L, bookmark.durationMs)
+        assertEquals(11, bookmark.episodeNumber)
+    }
+
+    @Test fun recoveryNeverRevivesAnOlderPartialAfterCompletedPlayback() = runTest {
+        val repo = FakeWatchStatsRepository()
+        val recorder = WatchSessionRecorder(repo) { "user-a" }
+        val identity = WatchSessionMediaIdentity("show-1", MediaType.SERIES, "Episode", seasonNumber = 3, episodeNumber = 11)
+        val partial = recorder.startPlayerSession(identity, 1_000)
+        recorder.finishPlayerSession(partial, 600_000, 2_400_000, 2_000)
+        val completed = recorder.startPlayerSession(identity, 3_000)
+        recorder.finishPlayerSession(completed, 2_400_000, 2_400_000, 4_000)
+        assertNull(recorder.getUnfinishedEpisodeBookmark("show-1", 3, 11))
+    }
+
+    @Test fun recoveryDoesNotReplaceTheLatestPlaybackOfAnotherEpisodeOrProfile() = runTest {
+        val repo = FakeWatchStatsRepository()
+        var person = "user-a"
+        val recorder = WatchSessionRecorder(repo) { person }
+        val identity = WatchSessionMediaIdentity("show-1", MediaType.SERIES, "Episode", seasonNumber = 3, episodeNumber = 11)
+        val id = recorder.startPlayerSession(identity, 1_000)
+        recorder.finishPlayerSession(id, 600_000, 2_400_000, 2_000)
+        assertNull(recorder.getUnfinishedEpisodeBookmark("show-1", 3, 12))
+        person = "user-b"
+        assertNull(recorder.getUnfinishedEpisodeBookmark("show-1", 3, 11))
     }
 
     private fun movieIdentity(id: String = "movie-1") =

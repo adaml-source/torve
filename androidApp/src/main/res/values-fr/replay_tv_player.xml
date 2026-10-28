@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="replay_highlight_tv_playback">Les résumés s’ouvrent en plein écran dans YouTube ou SmartTube. Appuyez sur Retour pour revenir ici.</string>
+    <string name="replay_highlight_tv_missing_player">Installez YouTube ou SmartTube pour lire les résumés en plein écran.</string>
+</resources>

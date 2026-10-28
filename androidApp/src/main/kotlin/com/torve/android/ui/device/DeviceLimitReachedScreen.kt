@@ -1,5 +1,7 @@
 package com.torve.android.ui.device
 
+import com.torve.android.ui.community.parityLabel as localizedUiText
+
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -79,9 +81,7 @@ fun DeviceLimitReachedScreen(
         TopAppBar(
             title = { Text(stringResource(R.string.device_limit_title)) },
             navigationIcon = {
-                IconButton(onClick = onBack) {
-                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.common_back_cd))
-                }
+                com.torve.android.ui.components.BackButton(onClick = onBack)
             },
         )
 
@@ -143,7 +143,7 @@ fun DeviceLimitReachedScreen(
                     item {
                         Spacer(Modifier.height(8.dp))
                         Text(
-                            text = message,
+                            text = localizedUiText(message),
                             color = MaterialTheme.colorScheme.error,
                             style = MaterialTheme.typography.bodySmall,
                         )

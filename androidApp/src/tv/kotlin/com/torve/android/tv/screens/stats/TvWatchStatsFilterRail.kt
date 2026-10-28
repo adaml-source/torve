@@ -1,5 +1,7 @@
 package com.torve.android.tv.screens.stats
 
+import com.torve.android.tv.components.tvSettingsLabel as localizedUiText
+
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.width
@@ -32,7 +34,7 @@ internal fun TvWatchStatsFilterRail(
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         item(key = "range_label") {
-            TvStatsSectionLabel("Time range")
+            TvStatsSectionLabel(localizedUiText("Time range"))
         }
         TvWatchStatsTimeRange.entries.forEachIndexed { index, range ->
             item(key = "range_${range.name}") {
@@ -50,7 +52,7 @@ internal fun TvWatchStatsFilterRail(
         }
 
         item(key = "content_label") {
-            TvStatsSectionLabel("Content")
+            TvStatsSectionLabel(localizedUiText("Content"))
         }
         TvWatchStatsContentFilter.entries.forEach { content ->
             item(key = "content_${content.name}") {
@@ -68,7 +70,7 @@ internal fun TvWatchStatsFilterRail(
         }
 
         item(key = "status_label") {
-            TvStatsSectionLabel("Status")
+            TvStatsSectionLabel(localizedUiText("Status"))
         }
         TvWatchStatsStatusFilter.entries.forEach { status ->
             item(key = "status_${status.name}") {
@@ -86,7 +88,7 @@ internal fun TvWatchStatsFilterRail(
         }
 
         item(key = "source_label") {
-            TvStatsSectionLabel("Source")
+            TvStatsSectionLabel(localizedUiText("Source"))
         }
         TvWatchStatsSourceFilter.entries
             .filter { it != TvWatchStatsSourceFilter.SIMKL || hasSimklData }
@@ -106,15 +108,15 @@ internal fun TvWatchStatsFilterRail(
             }
 
         item(key = "advanced_label") {
-            TvStatsSectionLabel("Advanced")
+            TvStatsSectionLabel(localizedUiText("Advanced"))
         }
         when {
             !isPremium -> {
                 item(key = "advanced_locked") {
                     val requester = remember("advanced_locked") { FocusRequester() }
                     TvStatsFocusCard(
-                        title = "Advanced filters",
-                        subtitle = "Unlock genre, rating, year, actor, and studio insights.",
+                        title = localizedUiText("Advanced filters"),
+                        subtitle = localizedUiText("Unlock genre, rating, year, actor, and studio insights."),
                         meta = "Go Premium",
                         locked = true,
                         focusRequester = requester,
@@ -129,8 +131,8 @@ internal fun TvWatchStatsFilterRail(
                 item(key = "advanced_unavailable") {
                     val requester = remember("advanced_unavailable") { FocusRequester() }
                     TvStatsFocusCard(
-                        title = "Metadata unavailable",
-                        subtitle = "Advanced filters appear after Torve has local genre, year, or rating data.",
+                        title = localizedUiText("Metadata unavailable"),
+                        subtitle = localizedUiText("Advanced filters appear after Torve has local genre, year, or rating data."),
                         focusRequester = requester,
                         left = railFocusRequester,
                         right = mainStageRequester,
@@ -144,7 +146,7 @@ internal fun TvWatchStatsFilterRail(
                     item(key = "advanced_clear") {
                         val requester = remember("advanced_clear") { FocusRequester() }
                         TvStatsChip(
-                            label = "Clear advanced",
+                            label = localizedUiText("Clear advanced"),
                             selected = false,
                             focusRequester = requester,
                             left = railFocusRequester,

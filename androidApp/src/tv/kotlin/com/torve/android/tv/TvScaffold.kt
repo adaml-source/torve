@@ -2,11 +2,13 @@ package com.torve.android.tv
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.background
+import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -14,19 +16,25 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
 import com.torve.android.ui.theme.Obsidian
+import com.torve.android.tv.settings.rememberTvReduceMotionPreference
 
-/** Collapsed rail width — content always starts here, never shifts. */
-internal val TV_NAV_RAIL_WIDTH = 86.dp
-internal val TV_CONTENT_START_INSET = 60.dp
-// TV_CONTENT_START_INSET is the scaffold baseline only. Top-level TV pages
-// add TV_PAGE_CONTENT_GUTTER exactly once so first functional content starts
-// at 88.dp. The edge gutters below define the normal TV page bounds; avoid
+/** Fixed icon strip; focused labels sit below their icon. */
+internal val TV_NAV_RAIL_WIDTH = 52.dp
+internal val TV_CONTENT_START_INSET = TV_NAV_RAIL_WIDTH + 2.dp
+// Reserve the complete collapsed navigation width plus focus-outline room.
+// Top-level TV pages add TV_PAGE_CONTENT_GUTTER exactly once. The edge
+// gutters below define the normal TV page bounds; avoid
 // custom first-layer 0/12/22/24/32/34/40/48.dp edge values unless a page is
 // intentionally special, or the value is inner card/chip/focus spacing.
 internal val TV_PAGE_CONTENT_GUTTER = 28.dp
@@ -42,43 +50,58 @@ internal val TV_FILTER_ROW_NESTED_END_GUTTER = 4.dp
 /** Width of the left contextual info panel. */
 internal val INFO_PANEL_WIDTH = 280.dp
 
+@OptIn(ExperimentalComposeUiApi::class)
 @Composable
 fun TvScaffold(
     leftRail: @Composable () -> Unit,
     background: @Composable () -> Unit,
     content: @Composable () -> Unit,
     isFullscreen: Boolean = false,
+    showRail: Boolean = !isFullscreen,
     infoPanel: (@Composable () -> Unit)? = null,
     showInfoPanel: Boolean = false,
+    contentFocusEnabled: Boolean = true,
+    pageBackground: @Composable () -> Unit = {},
 ) {
+    val allowContentFocus by rememberUpdatedState(contentFocusEnabled)
+    // Opening navigation must not resize the rails or move the focused poster.
+    val contentInset = if (isFullscreen) 0.dp else TV_CONTENT_START_INSET
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(Obsidian),
+            .background(if (com.torve.android.ui.community.LocalPersonalAppearance.current.active) androidx.compose.ui.graphics.Color.Transparent else Obsidian),
     ) {
         // Full-bleed hero backdrop sits behind content and the collapsed rail.
         background()
 
-        Box(
+        if (!isFullscreen && !com.torve.android.ui.community.LocalPersonalAppearance.current.active) Box(
             modifier = Modifier
                 .fillMaxHeight()
-                .width(260.dp)
+                .width(940.dp)
                 .background(
                     Brush.horizontalGradient(
-                        colors = listOf(
-                            Obsidian.copy(alpha = 0.76f),
-                            Obsidian.copy(alpha = 0.62f),
-                            Obsidian.copy(alpha = 0f),
-                        ),
+                        0f to Obsidian.copy(alpha = 0.88f),
+                        0.62f to Obsidian.copy(alpha = 0.66f),
+                        1f to Obsidian.copy(alpha = 0f),
                     ),
                 ),
         )
 
-        // Content area starts after the collapsed rail width.
+        // A page-owned backdrop covers the whole viewport, including beneath
+        // the transparent menu. Only foreground controls receive the inset.
+        pageBackground()
+
+        // Keep browse geometry stable; detail and playback remain full-screen.
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .then(if (isFullscreen) Modifier else Modifier.padding(start = TV_CONTENT_START_INSET)),
+                .padding(start = contentInset)
+                // Page previews can compose their own entry/restore effects.
+                // Keep those requests inside the page until Right/OK grants entry.
+                .focusProperties {
+                    enter = { if (allowContentFocus) FocusRequester.Default else FocusRequester.Cancel }
+                }
+                .focusGroup(),
         ) {
             // Info panel + scrollable content side by side.
             Row(modifier = Modifier.fillMaxSize()) {
@@ -119,7 +142,7 @@ fun TvScaffold(
             }
         }
 
-        // Rail renders on top (overlays content when expanded).
+        // Navigation stays inside its fixed strip while content keeps its width.
         Box(modifier = Modifier.zIndex(1f)) {
             leftRail()
         }

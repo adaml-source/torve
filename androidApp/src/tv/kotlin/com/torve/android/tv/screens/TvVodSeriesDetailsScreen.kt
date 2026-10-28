@@ -1,5 +1,7 @@
 package com.torve.android.tv.screens
 
+import com.torve.android.tv.components.tvSettingsLabel as localizedUiText
+
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.focusable
@@ -229,7 +231,7 @@ internal fun TvVodSeriesDetailsScreen(
                 verticalArrangement = Arrangement.spacedBy(18.dp),
             ) {
                 Text(
-                    text = "Episodes",
+                    text = localizedUiText("Episodes"),
                     style = MaterialTheme.typography.headlineMedium,
                     color = Snow,
                     fontWeight = FontWeight.Bold,
@@ -263,7 +265,7 @@ internal fun TvVodSeriesDetailsScreen(
 
                     error != null -> {
                         Text(
-                            text = error.orEmpty(),
+                            text = localizedUiText(error.orEmpty()),
                             style = MaterialTheme.typography.titleLarge,
                             color = Silver,
                         )
@@ -338,7 +340,7 @@ private fun TvVodSeriesSeasonChip(
             .padding(horizontal = 18.dp, vertical = 10.dp),
     ) {
         Text(
-            text = "Season $season",
+            text = localizedUiText("Season $season"),
             style = MaterialTheme.typography.titleSmall,
             color = if (focused || selected) Snow else Silver,
             fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,

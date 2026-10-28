@@ -4,9 +4,30 @@ import com.torve.domain.model.AddonManifest
 import com.torve.domain.model.InstalledAddon
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNull
+import kotlin.test.assertTrue
 
 class StreamAggregatorTest {
+
+    @Test
+    fun userManagedManifestsNeverReceiveSavedDebridCredentials() {
+        val addon = installedAddon("https://torrentio.strem.fun/manifest.json", listOf("stream"))
+        val urls = resolveStreamAddonBaseUrls(
+            addons = listOf(addon),
+            debridAccounts = mapOf(com.torve.domain.model.DebridServiceType.TORBOX to "private-test-key"),
+            configureProviders = false,
+        )
+        assertEquals(listOf("https://torrentio.strem.fun"), urls)
+        assertFalse(urls.any { "private-test-key" in it })
+    }
+
+    @Test
+    fun userManagedConfiguredManifestsRemainUnchanged() {
+        val base = "https://provider.example/u/user-configured-token"
+        val addon = installedAddon("$base/manifest.json", listOf("stream"))
+        assertEquals(listOf(base), resolveStreamAddonBaseUrls(listOf(addon), configureProviders = false))
+    }
 
     @Test
     fun parseSizeToBytes_gb() {
@@ -98,6 +119,30 @@ class StreamAggregatorTest {
 
         assertEquals(listOf("https://legacy-addon.example"), urls)
     }
+
+    @Test
+    fun mergeDebridPreflightResults_preservesUnverifiedAndUncheckedCandidates() {
+        val verifiedCandidate = parsedStream("verified", "hash-1")
+        val transientFailure = parsedStream("transient", "hash-2")
+        val beyondPreflightLimit = parsedStream("unchecked", "hash-3")
+
+        val merged = mergeDebridPreflightResults(
+            candidates = listOf(verifiedCandidate, transientFailure, beyondPreflightLimit),
+            verified = listOf(verifiedCandidate.copy(isCached = true)),
+        )
+
+        assertEquals(3, merged.size)
+        assertTrue(merged.first { it.infoHash == "hash-1" }.isCached)
+        assertFalse(merged.first { it.infoHash == "hash-2" }.isCached)
+        assertFalse(merged.first { it.infoHash == "hash-3" }.isCached)
+    }
+
+    private fun parsedStream(title: String, infoHash: String): ParsedStream = ParsedStream(
+        addonName = "test",
+        quality = "1080p",
+        title = title,
+        infoHash = infoHash,
+    )
 
     private fun installedAddon(
         manifestUrl: String,

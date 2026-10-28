@@ -1,6 +1,7 @@
 package com.torve.android.tv.screens
 
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
@@ -16,10 +17,13 @@ import com.torve.android.tv.components.TvMediaRails
 import com.torve.android.tv.components.TvRailsPresentationMode
 import com.torve.android.tv.components.TvOnNowRail
 import com.torve.android.tv.components.TvProviderHealthBanner
+import com.torve.android.tv.components.rememberTvProviderNoticeVisible
 import com.torve.android.tv.components.dedupeAcrossRails
 import com.torve.android.tv.components.rememberTvFocusMemory
 import com.torve.android.tv.focus.TvScreenFocusHandle
+import com.torve.android.tv.isTvCatalogProgress
 import com.torve.android.tv.toMediaItemOrNull
+import com.torve.android.ui.home.ALL_STREAMING_SERVICES
 import com.torve.domain.lanlibrary.NetworkMode
 import com.torve.domain.model.CatalogShelf
 import com.torve.domain.model.CustomSection
@@ -29,6 +33,7 @@ import com.torve.domain.model.HomeSectionConfig
 import com.torve.domain.model.MediaItem
 import com.torve.domain.model.MediaRatings
 import com.torve.domain.model.MediaType
+import com.torve.domain.model.PersonSummary
 import com.torve.domain.model.withEnrichedRatingsFrom
 import com.torve.platform.NetworkMonitor
 import com.torve.platform.NetworkType
@@ -42,7 +47,41 @@ import com.torve.presentation.tvhome.TvHomeOutcomeViewModel
 import com.torve.presentation.tvhome.TvHomePlaybackDecision
 import com.torve.presentation.tvhome.TvHomePlaybackRouter
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.distinctUntilChanged
 import org.koin.compose.koinInject
+
+private data class TvHomeServices(
+    val outcomeViewModel: TvHomeOutcomeViewModel,
+    val playbackRouter: TvHomePlaybackRouter,
+    val networkMonitor: NetworkMonitor,
+    val lanLibraryConsumer: LanLibraryConsumer,
+    val catalogGroups: com.torve.data.catalog.CatalogGroupRepository,
+    val watching: com.torve.presentation.watching.WatchingHubViewModel,
+)
+
+private data class TvHomeWatchingState(
+    val personalDataUserId: String? = null,
+    val upNext: List<com.torve.presentation.watching.WatchingEpisode> = emptyList(),
+    val hideSpoilers: Boolean = false,
+)
+
+private data class TvHomeRailsInputs(
+    val state: HomeUiState,
+    val sectionConfigs: List<HomeSectionConfig>,
+    val customSections: List<CustomSection>,
+    val homeLayoutOrder: List<String>,
+    val enabledStreamingServiceIds: Set<Int>,
+    val providerLogos: Map<Int, String>,
+    val outcomeState: TvHomeOutcomeUiState,
+    val groupDefinitions: List<com.torve.domain.model.CatalogGroup>,
+    val watchingState: TvHomeWatchingState,
+    val tmdbCatalogueEnabled: Boolean,
+    val showRemainingEpisodes: Boolean,
+    val availableNowTitle: String,
+    val downloadsOnDesktopTitle: String,
+    val recentlyAddedTitle: String,
+)
 
 private sealed interface TvHomeRenderItem {
     val order: Int
@@ -100,21 +139,43 @@ internal fun TvHomeScreen(
      * player route. Hidden when null.
      */
     onLiveChannelClick: ((EnrichedChannel) -> Unit)? = null,
-    /** Provider banner action. When null, the banner stays informational. */
-    onProviderBannerAction: (() -> Unit)? = null,
+    isActive: Boolean = true,
+    onEpisodeClick: ((com.torve.presentation.watching.WatchingEpisode) -> Unit)? = null,
+    onWebReplayClick: (String) -> Unit = {},
+    onWebReplaySettingsClick: () -> Unit = {},
+    onWebReplaysClick: () -> Unit = {},
 ) {
+    val replayCatalogue: com.torve.data.replays.WebReplayCatalogue = koinInject()
+    val replayState by replayCatalogue.state.collectAsState()
     val homeViewModel: HomeViewModel = koinInject()
     val settingsViewModel: SettingsViewModel = koinInject()
-    val outcomeViewModel: TvHomeOutcomeViewModel = koinInject()
-    val playbackRouter: TvHomePlaybackRouter = koinInject()
-    val networkMonitor: NetworkMonitor = koinInject()
-    val lanLibraryConsumer: LanLibraryConsumer = koinInject()
+    val services by androidx.compose.runtime.produceState<TvHomeServices?>(null) {
+        value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            val koin = org.koin.java.KoinJavaComponent.getKoin()
+            TvHomeServices(koin.get(), koin.get(), koin.get(), koin.get(), koin.get(), koin.get())
+        }
+    }
+    val emptyGroups = remember { kotlinx.coroutines.flow.MutableStateFlow(emptyList<com.torve.domain.model.CatalogGroup>()) }
+    val emptyWatching = remember { kotlinx.coroutines.flow.MutableStateFlow(com.torve.presentation.watching.WatchingHubState()) }
+    val emptyOutcomes = remember { kotlinx.coroutines.flow.MutableStateFlow(TvHomeOutcomeUiState()) }
+    val groupDefinitions by (services?.catalogGroups?.groups ?: emptyGroups).collectAsState()
+    val watchingFlow = services?.watching?.state ?: emptyWatching
+    val homeWatchingFlow = remember(watchingFlow) {
+        watchingFlow.map { TvHomeWatchingState(it.personalDataUserId, it.upNext, it.hideSpoilers) }
+            .distinctUntilChanged()
+    }
+    val rawWatchingState by homeWatchingFlow.collectAsState(TvHomeWatchingState())
+    val ids: com.torve.data.auth.UserIdProvider = koinInject()
+    val watchingState = rawWatchingState.takeIf { it.personalDataUserId == ids.currentDataUserId() }
+        ?: TvHomeWatchingState()
 
     val state by homeViewModel.state.collectAsState()
     val sectionConfigs by homeViewModel.sectionConfigs.collectAsState()
     val customSections by homeViewModel.customSections.collectAsState()
     val homeLayoutOrder by homeViewModel.homeLayoutOrder.collectAsState()
-    val outcomeState by outcomeViewModel.state.collectAsState()
+    val enabledStreamingServiceIds by homeViewModel.enabledServiceIds.collectAsState()
+    val providerLogos by homeViewModel.providerLogos.collectAsState()
+    val outcomeState by (services?.outcomeViewModel?.state ?: emptyOutcomes).collectAsState()
     val settingsState by settingsViewModel.state.collectAsState()
     val coroutineScope = rememberCoroutineScope()
     val onNowFocusRequester = remember { FocusRequester() }
@@ -126,30 +187,65 @@ internal fun TvHomeScreen(
     val downloadsOnDesktopTitle = stringResource(R.string.tv_home_downloads_on_desktop)
     val recentlyAddedTitle = stringResource(R.string.tv_home_recently_added_sources)
 
-    val rails = remember(
+    // Building/deduplicating a large installed catalogue is independent of UI
+    // rendering. Keep the last rails visible while a new snapshot is prepared.
+    val railInputs = TvHomeRailsInputs(
         state,
         sectionConfigs,
         customSections,
         homeLayoutOrder,
+        enabledStreamingServiceIds,
+        providerLogos,
         outcomeState,
-        state.continueWatchingRatings,
+        groupDefinitions,
+        watchingState,
+        settingsState.tmdbCatalogueEnabled,
+        settingsState.showRemainingEpisodes,
         availableNowTitle,
         downloadsOnDesktopTitle,
         recentlyAddedTitle,
-    ) {
-        buildOutcomeRails(
-            outcome = outcomeState,
-            availableNowTitle = availableNowTitle,
-            downloadsOnDesktopTitle = downloadsOnDesktopTitle,
-            recentlyAddedTitle = recentlyAddedTitle,
-            ratingsByKey = state.continueWatchingRatings,
-        ) +
-            buildTvHomeRails(
-                state = state,
-                sectionConfigs = sectionConfigs,
-                customSections = customSections,
-                homeLayoutOrder = homeLayoutOrder,
-            )
+    )
+    val rails by androidx.compose.runtime.produceState<List<TvContentRail>>(emptyList(), railInputs) {
+        value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+            // Read one immutable input snapshot, never Compose state from the worker.
+            with(railInputs) {
+                val outcomeRails = buildOutcomeRails(
+                    outcome = outcomeState,
+                    availableNowTitle = availableNowTitle,
+                    downloadsOnDesktopTitle = downloadsOnDesktopTitle,
+                    recentlyAddedTitle = recentlyAddedTitle,
+                    ratingsByKey = state.continueWatchingRatings,
+                )
+                val configuredRails = buildTvHomeRails(
+                    state = state,
+                    sectionConfigs = sectionConfigs.filter { tmdbCatalogueEnabled || it.section !in com.torve.android.ui.community.tmdbHomeSections },
+                    customSections = customSections.takeIf { tmdbCatalogueEnabled }.orEmpty(),
+                    homeLayoutOrder = homeLayoutOrder,
+                    enabledStreamingServiceIds = enabledStreamingServiceIds,
+                    providerLogos = providerLogos,
+                    catalogGroups = groupDefinitions,
+                    upNext = watchingState.upNext,
+                    hideSpoilers = watchingState.hideSpoilers,
+                    showRemainingEpisodes = showRemainingEpisodes,
+                )
+                mergeTvHomePlaybackRails(configuredRails, outcomeRails)
+            }
+        }
+    }
+
+    val replayRails = if (replayState.enabled && replayState.owner == ids.currentDataUserId() && replayState.events.isNotEmpty()) listOf(
+        TvContentRail("web_replays", "Sports Replays", replayState.events.take(20).map { it.mediaItem() },
+            cardStyle = TvCardStyle.BACKDROP)) else emptyList()
+
+    if (!replayState.enabled && !settingsState.tmdbCatalogueEnabled && rails.isEmpty() && !state.isLoading &&
+        sectionConfigs.isNotEmpty() && state.addonShelves.isEmpty() &&
+        state.continueWatching.isEmpty() && state.watchlistItems.isEmpty()) {
+        val entry = remember { FocusRequester() }
+        LaunchedEffect(entry) { onFirstContentRequester(entry) }
+        com.torve.android.ui.community.ExtensionCatalogueHome("all", onMediaClick, isTv = true,
+            entryFocus = entry, railFocus = railFocusRequester, requestEntryFocus = shouldAutoFocus, onEntryFocused = onContentFocused,
+            onFirstContentRequester = onFirstContentRequester)
+        return
     }
 
     // Map a tap into a one-shot decision. Router lookup is suspend
@@ -159,48 +255,70 @@ internal fun TvHomeScreen(
     // gone away between the snapshot and the tap, we fall back to
     // opening detail rather than crashing or staring at a black screen.
     val handleMediaClick: (MediaItem) -> Unit = { item ->
-        coroutineScope.launch {
-            val networkMode = networkMonitor.currentNetworkType().toLanlibraryMode()
-            val decision = playbackRouter.resolve(
-                item = item,
-                availability = outcomeState.availabilityByTmdbId,
-                lanTitlesLowercase = outcomeState.lanTitlesLowercase,
-                networkMode = networkMode,
-                wifiOnlyForLan = settingsState.lanPlaybackWifiOnly,
-            )
-            when (decision) {
-                is TvHomePlaybackDecision.AutoplayLocal -> {
-                    val launch = onPlayLocalFile
-                    if (launch != null) launch(item, decision.absolutePath)
-                    else onMediaClick(item)
-                }
-                is TvHomePlaybackDecision.AutoplayLan -> {
-                    val launch = onPlayLanRoute
-                    val route = runCatching {
-                        lanLibraryConsumer.findLanRoute(
-                            title = decision.title,
-                            seasonNumber = decision.seasonNumber,
-                            episodeNumber = decision.episodeNumber,
-                        )
-                    }.getOrNull()
-                    if (launch != null && route != null) {
-                        // Stage headers BEFORE navigating so the player
-                        // attaches `X-Torve-Lan-Auth` on the same frame
-                        // it calls play().
-                        PendingLanPlaybackHandoff.stage(route)
-                        launch(item, route.url)
-                    } else {
-                        onMediaClick(item)
+        val providerId = item.id.removePrefix(TV_HOME_PROVIDER_ID_PREFIX)
+            .takeIf { item.id.startsWith(TV_HOME_PROVIDER_ID_PREFIX) }
+            ?.toIntOrNull()
+        val personId = item.id.removePrefix(TV_HOME_PERSON_ID_PREFIX)
+            .takeIf { item.id.startsWith(TV_HOME_PERSON_ID_PREFIX) }
+            ?.toIntOrNull()
+        if (item.id == "web-replay-settings") {
+            onWebReplaySettingsClick()
+        } else if (item.id.startsWith("web-replay:")) {
+            onWebReplayClick(item.id)
+        } else if (providerId != null) {
+            onSeeAll?.invoke("provider_movie_$providerId", item.title)
+        } else if (personId != null) {
+            onSeeAll?.invoke("person_credits_$personId", item.title)
+        } else if (services == null) {
+            onMediaClick(item)
+        } else {
+            val readyServices = services!!
+            coroutineScope.launch {
+                val networkMode = readyServices.networkMonitor.currentNetworkType().toLanlibraryMode()
+                val decision = readyServices.playbackRouter.resolve(
+                    item = item,
+                    availability = outcomeState.availabilityByTmdbId,
+                    lanTitlesLowercase = outcomeState.lanTitlesLowercase,
+                    networkMode = networkMode,
+                    wifiOnlyForLan = settingsState.lanPlaybackWifiOnly,
+                )
+                when (decision) {
+                    is TvHomePlaybackDecision.AutoplayLocal -> {
+                        val launch = onPlayLocalFile
+                        if (launch != null) launch(item, decision.absolutePath)
+                        else onMediaClick(item)
                     }
+                    is TvHomePlaybackDecision.AutoplayLan -> {
+                        val launch = onPlayLanRoute
+                        val route = runCatching {
+                            readyServices.lanLibraryConsumer.findLanRoute(
+                                title = decision.title,
+                                seasonNumber = decision.seasonNumber,
+                                episodeNumber = decision.episodeNumber,
+                            )
+                        }.getOrNull()
+                        if (launch != null && route != null) {
+                            // Stage headers BEFORE navigating so the player
+                            // attaches `X-Torve-Lan-Auth` on the same frame
+                            // it calls play().
+                            PendingLanPlaybackHandoff.stage(route)
+                            launch(item, route.url)
+                        } else {
+                            onMediaClick(item)
+                        }
+                    }
+                    TvHomePlaybackDecision.OpenDetail -> onMediaClick(item)
                 }
-                TvHomePlaybackDecision.OpenDetail -> onMediaClick(item)
             }
         }
     }
 
+    val noticeVisible = rememberTvProviderNoticeVisible(outcomeState.providerBanner != null, isActive)
+    val visibleProviderBanner = outcomeState.providerBanner.takeIf { noticeVisible }
     val composedHeroOverlay: (@Composable () -> Unit)? = remember(
-        outcomeState.providerBanner,
+        visibleProviderBanner,
         outcomeState.onNow,
+        settingsState.optionalAppFeatures.channels,
         sectionConfigs,
         heroOverlay,
         onLiveChannelClick,
@@ -209,24 +327,25 @@ internal fun TvHomeScreen(
         railFocusRequester,
         onContentFocused,
     ) {
-        val banner = outcomeState.providerBanner
+        val banner = visibleProviderBanner
         val onNow = outcomeState.onNow
+        val showConfiguredHero = sectionConfigs
+            .firstOrNull { it.section == HomeSection.HERO }
+            ?.enabled
+            ?: HomeSection.HERO.defaultEnabled
         val showOnNow = sectionConfigs
             .firstOrNull { it.section == HomeSection.ON_NOW }
             ?.enabled
             ?: HomeSection.ON_NOW.defaultEnabled
-        val showOnNowRail = showOnNow && onNow.isNotEmpty() && onLiveChannelClick != null
-        if (banner == null && !showOnNowRail && heroOverlay == null) {
+        val showOnNowRail = settingsState.optionalAppFeatures.channels && showOnNow && onNow.isNotEmpty() && onLiveChannelClick != null
+        if (banner == null && !showOnNowRail && (!showConfiguredHero || heroOverlay == null)) {
             null
         } else {
             @Composable {
                 if (banner != null) {
-                    TvProviderHealthBanner(
-                        banner = banner,
-                        onClick = { onProviderBannerAction?.invoke() },
-                    )
+                    TvProviderHealthBanner(banner = banner)
                 }
-                heroOverlay?.invoke()
+                if (showConfiguredHero) heroOverlay?.invoke()
                 if (showOnNowRail) {
                     TvOnNowRail(
                         title = onNowTitle,
@@ -242,7 +361,7 @@ internal fun TvHomeScreen(
     }
 
     TvMediaRails(
-        rails = rails,
+        rails = replayRails + rails,
         railFocusRequester = railFocusRequester,
         headerFocusRequester = headerFocusRequester,
         onMediaClick = handleMediaClick,
@@ -252,13 +371,41 @@ internal fun TvHomeScreen(
         loading = state.isLoading,
         emptyMessage = emptyMessage,
         focusMemory = focusMemory,
-        onMediaFocused = onMediaFocused,
-        onSeeAll = onSeeAll,
+        onMediaFocused = { item ->
+            if (!item.id.startsWith(TV_HOME_PROVIDER_ID_PREFIX)) {
+                onMediaFocused?.invoke(item)
+            }
+        },
+        onRailMediaClick = { railKey, item ->
+            if (railKey == "up_next" && onEpisodeClick != null) {
+                watchingState.upNext.firstOrNull { it.show.id == item.id }?.let(onEpisodeClick)
+                true
+            } else {
+            val watchedSourceRail = state.becauseYouWatched.firstOrNull { shelf ->
+                shelf.id == railKey && shelf.items.any { it.hasSameTvRecommendationIdentity(item) }
+            }
+            if (watchedSourceRail == null) {
+                false
+            } else {
+                val destination = item.tvMoreLikeRailKey()
+                if (destination != null) {
+                    onSeeAll?.invoke(
+                        destination,
+                        "$TV_HOME_BECAUSE_YOU_WATCHED_COLLECTION_PREFIX ${item.title}",
+                    )
+                }
+                // Never fall through to the normal detail-page click path for
+                // posters in these watched-source rails.
+                true
+            }
+            }
+        },
+        onSeeAll = { key, title -> if (key == "web_replays") onWebReplaysClick() else onSeeAll?.invoke(key, title) },
         heroOverlay = composedHeroOverlay,
         presentationMode = TvRailsPresentationMode.CatalogHero,
         focusExclusive = true,
         heroOverlayFocusRequester = onNowFocusRequester.takeIf {
-            outcomeState.onNow.isNotEmpty() &&
+            settingsState.optionalAppFeatures.channels && outcomeState.onNow.isNotEmpty() &&
                 onLiveChannelClick != null &&
                 (
                     sectionConfigs.firstOrNull { config -> config.section == HomeSection.ON_NOW }?.enabled
@@ -318,11 +465,17 @@ private fun buildOutcomeRails(
     return out
 }
 
-private fun buildTvHomeRails(
+internal fun buildTvHomeRails(
     state: HomeUiState,
     sectionConfigs: List<HomeSectionConfig>,
     customSections: List<CustomSection>,
     homeLayoutOrder: List<String>,
+    enabledStreamingServiceIds: Set<Int> = emptySet(),
+    providerLogos: Map<Int, String> = emptyMap(),
+    catalogGroups: List<com.torve.domain.model.CatalogGroup> = emptyList(),
+    upNext: List<com.torve.presentation.watching.WatchingEpisode> = emptyList(),
+    hideSpoilers: Boolean = false,
+    showRemainingEpisodes: Boolean = true,
 ): List<TvContentRail> {
     val orderIndex = homeLayoutOrder.withIndex().associate { it.value to it.index }
     val addonShelfVisibility = state.addonShelfVisibility
@@ -334,9 +487,13 @@ private fun buildTvHomeRails(
     }
 
     val renderItems = buildList<TvHomeRenderItem> {
+        val addonSectionEnabled = sectionConfigs
+            .firstOrNull { it.section == HomeSection.ADDON_SHELVES }
+            ?.enabled
+            ?: HomeSection.ADDON_SHELVES.defaultEnabled
         sectionConfigs.filter { it.enabled }.forEach { add(BuiltInHomeItem(it)) }
         customSections.filter { it.enabled }.forEach { add(CustomHomeItem(it)) }
-        state.addonShelves.forEachIndexed { index, shelf ->
+        state.addonShelves.takeIf { addonSectionEnabled }.orEmpty().forEachIndexed { index, shelf ->
             if (addonShelfVisibility[shelf.id] != false) {
                 add(
                     AddonShelfHomeItem(
@@ -353,13 +510,34 @@ private fun buildTvHomeRails(
     )
 
     val rails = mutableListOf<TvContentRail>()
+    val sources = com.torve.presentation.home.catalogGroupSources(state, customSections)
+    val groupRails = catalogGroups.filter { it.pinned }.mapNotNull { group ->
+        val items = com.torve.domain.model.mergeCatalogGroup(group, sources)
+        if (items.isNotEmpty()) TvContentRail("group:${group.id}", group.name, items,
+            cardStyle = if (group.presentation == com.torve.domain.model.CatalogGroupPresentation.LANDSCAPE) TvCardStyle.BACKDROP else TvCardStyle.POSTER,
+            showSeeAllCard = false, allowCrossRailDuplicates = true) else null
+    }
     renderItems.forEach { item ->
         when (item) {
             is BuiltInHomeItem -> {
-                rails += buildBuiltInRails(item.config, state)
+                if (item.config.section == HomeSection.UP_NEXT) {
+                    if (upNext.isNotEmpty()) rails += TvContentRail("up_next", "Up Next", upNext.map { next ->
+                        next.show.copy(title = "S${next.season} E${next.episode.episodeNumber} · ${next.show.title}",
+                            overview = "${if (hideSpoilers && !next.watched) "Episode ${next.episode.episodeNumber}" else next.episode.name} · ${next.remainingAired} aired episodes left. ${next.show.overview.orEmpty()}")
+                    }, cardStyle = TvCardStyle.BACKDROP, allowCrossRailDuplicates = true,
+                        remainingEpisodesByMediaId = if (showRemainingEpisodes) upNext.filter { it.remainingAired > 0 }
+                            .associate { it.show.id to it.remainingAired } else emptyMap())
+                } else {
+                rails += buildBuiltInRails(
+                    config = item.config,
+                    state = state,
+                    enabledStreamingServiceIds = enabledStreamingServiceIds,
+                    providerLogos = providerLogos,
+                )
+                }
             }
             is CustomHomeItem -> {
-                val items = state.customShelves[item.section.id].orEmpty().take(24)
+                val items = state.customShelves[item.section.id].orEmpty().tvHomeCardItems()
                 if (items.isNotEmpty()) {
                     rails += TvContentRail(
                         key = "custom:${item.section.id}",
@@ -369,7 +547,7 @@ private fun buildTvHomeRails(
                 }
             }
             is AddonShelfHomeItem -> {
-                val items = item.shelf.items.take(24)
+                val items = item.shelf.items.tvHomeCardItems()
                 if (items.isNotEmpty()) {
                     rails += TvContentRail(
                         key = "addon:${item.shelf.id}",
@@ -381,31 +559,84 @@ private fun buildTvHomeRails(
         }
     }
 
-    return rails.dedupeAcrossRails()
+    // Explicitly enabled Home rails remain visible whenever they have at
+    // least one unique item. The generic 20-item threshold is useful for
+    // discovery pagination, but made Appearance toggles appear broken.
+    val groupPosition = rails.indexOfLast { it.key.startsWith("continue_watching") || it.key == "up_next" }
+    rails.addAll((groupPosition + 1).coerceAtLeast(0), groupRails)
+    return rails.dedupeAcrossRails(minItemsPerRail = 1)
 }
 
 private fun buildBuiltInRails(
     config: HomeSectionConfig,
     state: HomeUiState,
+    enabledStreamingServiceIds: Set<Int>,
+    providerLogos: Map<Int, String>,
 ): List<TvContentRail> {
     val title = config.customTitle ?: config.section.defaultTitle
     return when (config.section) {
         HomeSection.SEARCH_BAR,
         HomeSection.HERO,
+        HomeSection.UP_NEXT,
         HomeSection.ON_NOW,
-        HomeSection.STREAMING_SERVICES,
-        HomeSection.ACTORS,
-        HomeSection.DIRECTORS,
-        HomeSection.UPCOMING_SCHEDULE,
-        HomeSection.ADDON_SHELVES -> {
+        HomeSection.ADDON_SHELVES,
+        HomeSection.BECAUSE_YOU_WATCHED -> {
             emptyList()
+        }
+
+        HomeSection.STREAMING_SERVICES -> {
+            val items = ALL_STREAMING_SERVICES
+                .sortedBy { service ->
+                    // Saved services stay at the front for quick access, but
+                    // the discovery rail must not silently hide the rest of
+                    // Torve's supported providers.
+                    if (service.tmdbProviderId in enabledStreamingServiceIds) 0 else 1
+                }
+                .map { service ->
+                    MediaItem(
+                        id = "$TV_HOME_PROVIDER_ID_PREFIX${service.tmdbProviderId}",
+                        type = MediaType.MOVIE,
+                        title = service.name,
+                        posterUrl = providerLogos[service.tmdbProviderId],
+                        backdropUrl = providerLogos[service.tmdbProviderId],
+                    )
+                }
+            if (items.isEmpty()) {
+                emptyList()
+            } else {
+                listOf(
+                    TvContentRail(
+                        key = "streaming_services",
+                        title = title,
+                        items = items,
+                        cardStyle = TvCardStyle.SERVICE,
+                    ),
+                )
+            }
+        }
+
+        HomeSection.UPCOMING_SCHEDULE -> {
+            val items = state.upcomingSchedule.tvHomeCardItems()
+            if (items.isEmpty()) emptyList()
+            else listOf(TvContentRail(key = "upcoming_schedule", title = title, items = items, allowCrossRailDuplicates = true))
+        }
+
+        HomeSection.ACTORS -> {
+            val items = state.popularActors.map { it.toTvHomePersonItem() }
+            if (items.isEmpty()) emptyList()
+            else listOf(TvContentRail(key = "popular_actors", title = title, items = items))
+        }
+
+        HomeSection.DIRECTORS -> {
+            val items = state.popularDirectors.map { it.toTvHomePersonItem() }
+            if (items.isEmpty()) emptyList()
+            else listOf(TvContentRail(key = "popular_directors", title = title, items = items))
         }
 
         HomeSection.CONTINUE_WATCHING -> {
             val items = state.continueWatching
                 .mapNotNull { it.toMediaItemOrNull() }
-                .filter { it.tmdbId != null }
-                .take(20)
+                .tvHomeCardItems(limit = 20)
                 .withEnrichedRatingsFrom(state.continueWatchingRatings)
             if (items.isEmpty()) emptyList()
             else {
@@ -416,7 +647,7 @@ private fun buildBuiltInRails(
                         items = items,
                         cardStyle = TvCardStyle.BACKDROP,
                         progressByMediaId = state.continueWatching
-                            .filter { it.progressPercent > 0f }
+                            .filter { it.isTvCatalogProgress() && it.progressPercent > 0f }
                             .associate { it.mediaId to it.progressPercent },
                     ),
                 )
@@ -424,7 +655,7 @@ private fun buildBuiltInRails(
         }
 
         HomeSection.WATCHLIST -> {
-            val items = state.watchlistItems.take(24)
+            val items = state.watchlistItems.tvHomeCardItems()
             if (items.isEmpty()) emptyList()
             else listOf(TvContentRail(key = "watchlist", title = title, items = items))
         }
@@ -432,7 +663,7 @@ private fun buildBuiltInRails(
         HomeSection.WATCHLIST_MOVIES -> {
             val items = state.watchlistItems
                 .filter { it.type == MediaType.MOVIE }
-                .take(24)
+                .tvHomeCardItems()
             if (items.isEmpty()) emptyList()
             else listOf(TvContentRail(key = "watchlist_movies", title = title, items = items))
         }
@@ -440,7 +671,7 @@ private fun buildBuiltInRails(
         HomeSection.WATCHLIST_TV -> {
             val items = state.watchlistItems
                 .filter { it.type == MediaType.SERIES }
-                .take(24)
+                .tvHomeCardItems()
             if (items.isEmpty()) emptyList()
             else listOf(TvContentRail(key = "watchlist_tv", title = title, items = items))
         }
@@ -452,7 +683,7 @@ private fun buildBuiltInRails(
         HomeSection.NEW_RELEASES,
         HomeSection.TOP_RATED -> {
             val shelf = state.shelves.firstOrNull { it.id == config.section.shelfId }
-            val items = shelf?.items?.take(24).orEmpty()
+            val items = shelf?.items?.tvHomeCardItems().orEmpty()
             if (items.isEmpty()) emptyList()
             else {
                 listOf(
@@ -466,41 +697,45 @@ private fun buildBuiltInRails(
         }
 
         HomeSection.RECOMMENDED -> {
-            val items = state.recommendedItems.map { it.item }.take(24)
+            val items = state.recommendedItems.map { it.item }.tvHomeCardItems()
             if (items.isEmpty()) emptyList()
             else listOf(TvContentRail(key = "recommended", title = title, items = items))
         }
 
         HomeSection.RECENTLY_WATCHED -> {
-            val items = state.recentlyWatched.take(24)
+            val items = state.recentlyWatched.tvHomeCardItems()
             if (items.isEmpty()) emptyList()
             else listOf(TvContentRail(key = "recently_watched", title = title, items = items))
         }
 
         HomeSection.HIDDEN_GEMS -> {
             val shelf = state.hiddenGemsShelf
-            val items = shelf?.items?.take(24).orEmpty()
+            val items = shelf?.items?.tvHomeCardItems().orEmpty()
             if (items.isEmpty()) emptyList()
             else listOf(TvContentRail(key = shelf?.id ?: "hidden_gems", title = title, items = items))
         }
 
-        HomeSection.BECAUSE_YOU_WATCHED -> {
-            state.becauseYouWatched.mapNotNull { shelf ->
-                shelf.items.take(24)
-                    .takeIf { it.isNotEmpty() }
-                    ?.let { items ->
-                        TvContentRail(
-                            key = shelf.id,
-                            title = shelf.title,
-                            items = items,
-                        )
-                    }
-            }
+        HomeSection.BECAUSE_YOU_WATCHED_MOVIES,
+        HomeSection.BECAUSE_YOU_WATCHED_TV -> {
+            val shelf = state.becauseYouWatched.firstOrNull { it.id == config.section.shelfId }
+            val watchedSources = shelf?.items?.tvHomeCardItems().orEmpty()
+            if (shelf == null || watchedSources.isEmpty()) emptyList()
+            else listOf(
+                TvContentRail(
+                    key = shelf.id,
+                    title = config.customTitle ?: shelf.title,
+                    items = watchedSources,
+                    showSeeAllCard = false,
+                    // Watched posters intentionally also appear in Recently
+                    // Watched, but every poster here opens recommendations.
+                    allowCrossRailDuplicates = true,
+                ),
+            )
         }
 
         HomeSection.MDBLIST_SHELVES -> {
             state.mdbListShelves.mapNotNull { shelf ->
-                shelf.items.take(24)
+                shelf.items.tvHomeCardItems()
                     .takeIf { it.isNotEmpty() }
                     ?.let { items ->
                         TvContentRail(
@@ -513,3 +748,42 @@ private fun buildBuiltInRails(
         }
     }
 }
+
+private fun List<MediaItem>.tvHomeCardItems(limit: Int = 24): List<MediaItem> =
+    asSequence()
+        .filter { it.isTvHomeDisplayable() }
+        .take(limit)
+        .toList()
+
+private fun MediaItem.isTvHomeDisplayable(): Boolean =
+    !isContentPlaceholder &&
+        !isStubDetail &&
+        title.isNotBlank()
+
+private const val TV_HOME_PERSON_ID_PREFIX = "person:"
+private const val TV_HOME_PROVIDER_ID_PREFIX = "provider:"
+internal const val TV_HOME_BECAUSE_YOU_WATCHED_COLLECTION_PREFIX = "Because You Watched"
+
+internal fun MediaItem.tvMoreLikeRailKey(): String? {
+    val id = tmdbId?.takeIf { it > 0 } ?: return null
+    val mediaType = if (type == MediaType.SERIES) "tv" else "movie"
+    return "more_like_${mediaType}_$id"
+}
+
+private fun MediaItem.hasSameTvRecommendationIdentity(other: MediaItem): Boolean {
+    val canonicalTmdbId = tmdbId?.takeIf { it > 0 }
+    return if (canonicalTmdbId != null && other.tmdbId != null) {
+        canonicalTmdbId == other.tmdbId && type == other.type
+    } else {
+        id == other.id && type == other.type
+    }
+}
+
+private fun PersonSummary.toTvHomePersonItem(): MediaItem = MediaItem(
+    id = "$TV_HOME_PERSON_ID_PREFIX$id",
+    type = MediaType.MOVIE,
+    title = name,
+    overview = knownForDepartment,
+    posterUrl = profileUrl,
+    backdropUrl = profileUrl,
+)

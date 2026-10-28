@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Torve Source Code</title>
+  <meta name="description" content="Torve source code, AGPL license, issue tracker, contribution guide, and security reporting resources." />
+  <link rel="canonical" href="https://torve.app/source.html" />
+  <meta property="og:title" content="Torve Source Code" />
+  <meta property="og:description" content="Public source and contribution resources for Torve." />
+  <meta property="og:type" content="website" />
+  <meta property="og:url" content="https://torve.app/source.html" />
+  <meta property="og:image" content="https://torve.app/assets/torve-logo-transparent.png" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="robots" content="index,follow,max-image-preview:large" />
+  <link rel="icon" type="image/png" href="assets/favicon.png" />
+  <link rel="stylesheet" href="assets/site-base.css?v=20260701-storecopy" />
+  <link rel="stylesheet" href="assets/style.css?v=20260701-storecopy" />
+  <link rel="stylesheet" href="/assets/modern-site.css?v=20261012-7" />
+</head>
+<body class="modern-page">
+  <a class="skip-link" href="#main">Skip to content</a>
+  <header class="site-header" data-site-header>
+    <div class="site-header-inner">
+      <a class="site-brand" href="/" aria-label="Torve home"><img src="/assets/torve-logo-transparent.png" alt="Torve" class="site-header-logo" /></a>
+      <nav id="site-navigation" class="site-header-nav" aria-label="Main navigation"><a href="/#explore">Explore</a><a href="/download.html">Downloads</a><a href="/app/help.html">Guide</a><a href="/support.html">Support</a></nav>
+      <div class="site-header-actions"><a class="site-account-link t-btn t-btn-secondary" href="/signin.html">Sign in</a><a class="t-btn t-btn-primary" href="/download.html"><span class="install-label-full">Install Torve</span><span class="install-label-short">Install</span><svg class="button-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M12 3v12m-4-4 4 4 4-4M5 16v4h14v-4"/></svg></a></div>
+      <button class="site-menu-toggle" type="button" aria-label="Open menu" aria-controls="site-navigation" aria-expanded="false"><span></span><span></span></button>
+    </div>
+  </header>
+
+  <main id="main">
+    <section class="page-hero">
+      <div class="container article-wide center">
+        <div class="eyebrow">Public source</div>
+        <h1 class="section-title">Source code and contribution</h1>
+        <p class="section-subtitle">Torve source code is licensed under AGPL-3.0-or-later. Explore the public source, contribution guide, and security reporting resources. App access is described separately for each platform.</p>
+      </div>
+    </section>
+
+    <section class="section" aria-label="Source and contribution links">
+      <div class="container">
+        <div class="section-header center">
+          <div class="eyebrow">Project resources</div>
+          <h2 class="section-title">Work in the open</h2>
+          <p class="section-subtitle">Use these links to inspect the code, understand the license, report issues, or contribute changes.</p>
+        </div>
+
+        <div class="trust-grid">
+          <a class="trust-item fade-in" href="https://github.com/adaml-source/torve/tree/91dd20699cf8973f420d6de7e15e3273c7c0684b">
+            <h3>1.6.0 source base</h3>
+            <p>Explore the base commit for 1.6.0. This build also includes local changes recorded in the release provenance. Individual platform downloads may have different versions.</p>
+            <span class="pricing-cta">Open source base</span>
+          </a>
+          <a class="trust-item fade-in" href="https://github.com/adaml-source/torve/blob/master/LICENSE">
+            <h3>AGPL license</h3>
+            <p>Read the AGPL-3.0-or-later license text that applies to Torve.</p>
+            <span class="pricing-cta">Read license</span>
+          </a>
+          <a class="trust-item fade-in" href="https://github.com/adaml-source/torve/issues">
+            <h3>Issue tracker</h3>
+            <p>Report bugs, request improvements, and follow public project work.</p>
+            <span class="pricing-cta">Open issues</span>
+          </a>
+          <a class="trust-item fade-in" href="https://github.com/adaml-source/torve/blob/master/CONTRIBUTING.md">
+            <h3>Contributing</h3>
+            <p>Set up local development, run tests, and keep contributions aligned with the free-software model.</p>
+            <span class="pricing-cta">Read guide</span>
+          </a>
+          <a class="trust-item fade-in" href="https://github.com/adaml-source/torve/blob/master/SECURITY.md">
+            <h3>Security reporting</h3>
+            <p>Report vulnerabilities privately and avoid posting sensitive data in public issues.</p>
+            <span class="pricing-cta">Read policy</span>
+          </a>
+          <a class="trust-item fade-in" href="https://torve.app/downloads/provenance/torve-1.6.0.json">
+            <h3>Release provenance</h3>
+            <p>Verify the 1.6.0 source base, local-change record, artifact sizes, checksums, and Android signing certificate.</p>
+            <span class="pricing-cta">Verify 1.6.0</span>
+          </a>
+          <a class="trust-item fade-in hidden" data-donation-link href="#">
+            <h3>Support Torve</h3>
+            <p>Donations are optional and never unlock features.</p>
+            <span class="pricing-cta pricing-cta-featured">Donate</span>
+          </a>
+        </div>
+      </div>
+    </section>
+
+    <section class="section section-dark">
+      <div class="container">
+        <div class="section-header center">
+          <div class="eyebrow">Account boundary</div>
+          <h2 class="section-title">Open source. Clear account access.</h2>
+          <p class="section-subtitle">Authentication protects sync, device linking, account-backed watch state, preferences, exports, and account deletion.</p>
+        </div>
+        <div class="steps-grid">
+          <div class="step-card fade-in">
+            <div class="step-num">1</div>
+            <h3>Review the source</h3>
+            <p>Inspect the public code and build behavior before running Torve on your own devices.</p>
+          </div>
+          <div class="step-card fade-in">
+            <div class="step-num">2</div>
+            <h3>Open an issue</h3>
+            <p>Report reproducible bugs with clear steps and without private credentials or sensitive user data.</p>
+          </div>
+          <div class="step-card fade-in">
+            <div class="step-num">3</div>
+            <h3>Send a change</h3>
+            <p>Use the contributing guide to run local checks and keep changes scoped to the affected workflow.</p>
+          </div>
+          <div class="step-card fade-in">
+            <div class="step-num">4</div>
+            <h3>Report security privately</h3>
+            <p>Use the security policy for vulnerability reports instead of posting sensitive findings publicly.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section-sm">
+      <div class="container">
+        <div class="cta-block fade-in">
+          <h2 class="cta-title">Get Torve or inspect the code</h2>
+          <p class="cta-sub">Torve is free software under AGPL-3.0-or-later.</p>
+          <div class="button-row">
+            <a class="btn btn-primary" href="https://github.com/adaml-source/torve/tree/91dd20699cf8973f420d6de7e15e3273c7c0684b">View 1.6.0 source base</a>
+            <a class="btn btn-secondary" href="/downloads/provenance/torve-1.6.0.json">Verify release</a>
+            <a class="btn btn-secondary" href="/download.html">Download Torve</a>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer"><div class="container footer-main"><div><a class="footer-wordmark" href="/">TORVE<span aria-hidden="true">.</span></a><p>For the love of film.<br>Your sources. Your watchlist. Your media.</p></div><nav aria-label="Explore Torve"><span>Explore</span><a href="/#explore">The app</a><a href="/download.html">Downloads</a><a href="/firetv.html">Fire TV setup</a></nav><nav aria-label="Torve help"><span>Here to help</span><a href="/support.html">Support</a><a href="/app/help.html">Documentation</a><a href="/signin.html">Sign in</a><a href="/source.html">Open source</a><a href="/status.html">Service status</a></nav><nav aria-label="Torve policies"><span>The details</span><a href="/privacy.html">Privacy</a><a href="/terms.html">Terms</a><a href="/account-deletion.html">Delete account</a><a href="/credits.html">Image credits</a></nav></div><div class="container footer-bottom"><span>© <span data-current-year>2026</span> Torve · AGPL-3.0-or-later</span><span>Bring your own lawful media.</span></div></footer>
+
+  <script src="assets/script.js"></script>
+  <script src="/site.js"></script>
+  <script src="/assets/modern-site.js?v=20261012-7" defer></script>
+</body>
+</html>

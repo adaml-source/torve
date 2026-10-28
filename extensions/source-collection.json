@@ -1,0 +1,61 @@
+{
+  "schemaVersion": 1,
+  "name": "Torve Sources",
+  "description": "Choose the extensions you want. Configure providers at their own websites and add the personal manifest URL they supply. Nothing installs automatically.",
+  "extensions": [
+    {
+      "name": "Panda",
+      "manifestUrl": "https://panda.torve.app/manifest.json",
+      "configurationUrl": "https://panda.torve.app/configure",
+      "description": "Configure playback providers, debrid and Usenet at Panda, then add the personal manifest URL it supplies. The public manifest is a setup entry point.",
+      "capabilities": ["stream"]
+    },
+    {
+      "name": "Torrentio",
+      "manifestUrl": "https://torrentio.strem.fun/manifest.json",
+      "configurationUrl": "https://torrentio.strem.fun/configure",
+      "description": "Configure supported playback providers at Torrentio, then add its configured manifest URL. Source compatibility depends on the provider and playback URL returned.",
+      "capabilities": ["stream"]
+    },
+    {
+      "name": "Cinemeta",
+      "manifestUrl": "https://v3-cinemeta.strem.io/manifest.json",
+      "description": "Movie and series catalogues and metadata.",
+      "capabilities": ["catalog", "meta"]
+    },
+    {
+      "name": "The Movie Database Addon",
+      "manifestUrl": "https://94c8cb9f702d-tmdb-addon.baby-beamup.club/manifest.json",
+      "configurationUrl": "https://94c8cb9f702d-tmdb-addon.baby-beamup.club/configure",
+      "description": "TMDB catalogues and metadata, with optional provider configuration.",
+      "capabilities": ["catalog", "meta"]
+    },
+    {
+      "name": "Trakt Tv",
+      "manifestUrl": "https://2ecbbd610840-trakt.baby-beamup.club/manifest.json",
+      "configurationUrl": "https://2ecbbd610840-trakt.baby-beamup.club/configure",
+      "description": "The base manifest supplies metadata. Configure with the provider to add your chosen Trakt catalogue lists.",
+      "capabilities": ["meta"]
+    },
+    {
+      "name": "IMDB Catalogs",
+      "manifestUrl": "https://1fe84bc728af-imdb-catalogs.baby-beamup.club/manifest.json",
+      "configurationUrl": "https://1fe84bc728af-imdb-catalogs.baby-beamup.club/configure",
+      "description": "Movie and series catalogue lists, configurable at the provider.",
+      "capabilities": ["catalog"]
+    },
+    {
+      "name": "RPDB Catalogs",
+      "manifestUrl": "https://1fe84bc728af-rpdb.baby-beamup.club/manifest.json",
+      "configurationUrl": "https://1fe84bc728af-rpdb.baby-beamup.club/configure",
+      "description": "Catalogue lists with rating posters. Provider configuration is required before installing its personal manifest URL.",
+      "capabilities": ["catalog"]
+    },
+    {
+      "name": "OpenSubtitles v3",
+      "manifestUrl": "https://opensubtitles-v3.strem.io/manifest.json",
+      "description": "Subtitle lookup for movies and series.",
+      "capabilities": ["subtitles"]
+    }
+  ]
+}

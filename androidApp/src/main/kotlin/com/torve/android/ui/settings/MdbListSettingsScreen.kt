@@ -1,5 +1,7 @@
 package com.torve.android.ui.settings
 
+import com.torve.android.ui.community.parityLabel as localizedUiText
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -99,7 +101,7 @@ fun MdbListSettingsScreen(
             Text(
                 stringResource(R.string.mdblist_title),
                 style = MaterialTheme.typography.titleLarge,
-                color = Snow,
+                color = MaterialTheme.colorScheme.onSurface,
                 fontWeight = FontWeight.Bold,
                 modifier = Modifier.padding(start = 8.dp),
             )
@@ -112,12 +114,12 @@ fun MdbListSettingsScreen(
             // API key
             item {
                 Spacer(Modifier.height(8.dp))
-                Text(stringResource(R.string.settings_api_key), style = MaterialTheme.typography.titleMedium, color = Snow, fontWeight = FontWeight.SemiBold)
+                Text(stringResource(R.string.settings_api_key), style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.SemiBold)
                 Spacer(Modifier.height(4.dp))
                 Text(
                     stringResource(R.string.mdblist_api_key_hint),
                     style = MaterialTheme.typography.bodySmall,
-                    color = Silver,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 Spacer(Modifier.height(8.dp))
                 var apiKeyRevealed by remember { mutableStateOf(false) }
@@ -135,8 +137,8 @@ fun MdbListSettingsScreen(
                                 IconButton(onClick = { apiKeyRevealed = !apiKeyRevealed }) {
                                     Icon(
                                         imageVector = if (apiKeyRevealed) Icons.Outlined.VisibilityOff else Icons.Outlined.Visibility,
-                                        contentDescription = if (apiKeyRevealed) "Hide" else "Show",
-                                        tint = Silver,
+                                        contentDescription = localizedUiText(if (apiKeyRevealed) "Hide" else "Show"),
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
                                     )
                                 }
                             }
@@ -196,7 +198,7 @@ fun MdbListSettingsScreen(
                         colors = FilterChipDefaults.filterChipColors(
                             selectedContainerColor = Amber,
                             selectedLabelColor = Obsidian,
-                            containerColor = Gunmetal,
+                            containerColor = MaterialTheme.colorScheme.surface,
                             labelColor = Snow,
                         ),
                     )
@@ -207,7 +209,7 @@ fun MdbListSettingsScreen(
                         colors = FilterChipDefaults.filterChipColors(
                             selectedContainerColor = Amber,
                             selectedLabelColor = Obsidian,
-                            containerColor = Gunmetal,
+                            containerColor = MaterialTheme.colorScheme.surface,
                             labelColor = Snow,
                         ),
                     )
@@ -218,7 +220,7 @@ fun MdbListSettingsScreen(
                 MdbListTab.POPULAR -> {
                     // Top / Popular lists
                     item {
-                        Text(stringResource(R.string.mdblist_most_popular), style = MaterialTheme.typography.titleMedium, color = Snow, fontWeight = FontWeight.SemiBold)
+                        Text(stringResource(R.string.mdblist_most_popular), style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.SemiBold)
                         if (mdbState.topLists.isEmpty() && !mdbState.isLoadingTop && mdbState.apiKey.isNotBlank()) {
                             Spacer(Modifier.height(4.dp))
                             TextButton(onClick = { mdbListViewModel.loadTopLists() }) {
@@ -245,7 +247,7 @@ fun MdbListSettingsScreen(
                 MdbListTab.SEARCH -> {
                     // Search
                     item {
-                        Text(stringResource(R.string.mdblist_search_lists), style = MaterialTheme.typography.titleMedium, color = Snow, fontWeight = FontWeight.SemiBold)
+                        Text(stringResource(R.string.mdblist_search_lists), style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.SemiBold)
                         Spacer(Modifier.height(8.dp))
                         var searchInput by remember { mutableStateOf(mdbState.searchQuery) }
                         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -280,7 +282,7 @@ fun MdbListSettingsScreen(
                     // Search results
                     if (mdbState.searchResults.isNotEmpty()) {
                         item {
-                            Text(stringResource(R.string.mdblist_search_results), style = MaterialTheme.typography.titleSmall, color = Silver)
+                            Text(stringResource(R.string.mdblist_search_results), style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                         items(mdbState.searchResults, key = { "sr_${it.id}" }) { listInfo ->
                             ListInfoRow(
@@ -296,10 +298,10 @@ fun MdbListSettingsScreen(
             // Installed lists (always visible)
             item {
                 Spacer(Modifier.height(12.dp))
-                Text(stringResource(R.string.mdblist_installed), style = MaterialTheme.typography.titleMedium, color = Snow, fontWeight = FontWeight.SemiBold)
+                Text(stringResource(R.string.mdblist_installed), style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.SemiBold)
                 if (mdbState.savedLists.isEmpty()) {
                     Spacer(Modifier.height(8.dp))
-                    Text(stringResource(R.string.mdblist_no_lists), color = Silver, style = MaterialTheme.typography.bodySmall)
+                    Text(stringResource(R.string.mdblist_no_lists), color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
                 }
             }
 
@@ -312,7 +314,7 @@ fun MdbListSettingsScreen(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
-                        Text(config.name, color = Snow, fontWeight = FontWeight.Medium)
+                        Text(config.name, color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.Medium)
                     }
                     Switch(
                         checked = config.enabled,
@@ -332,7 +334,7 @@ fun MdbListSettingsScreen(
             // Error
             mdbState.error?.let { error ->
                 item {
-                    Text(error, color = Ruby, style = MaterialTheme.typography.bodySmall)
+                    Text(localizedUiText(error), color = Ruby, style = MaterialTheme.typography.bodySmall)
                 }
             }
 
@@ -355,12 +357,12 @@ private fun ListInfoRow(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(modifier = Modifier.weight(1f)) {
-            Text(listInfo.name, color = Snow, fontWeight = FontWeight.Medium)
+            Text(listInfo.name, color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.Medium)
             if (listInfo.description.isNotBlank()) {
                 Text(
                     listInfo.description.take(80),
                     style = MaterialTheme.typography.bodySmall,
-                    color = Silver,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 2,
                 )
             }
@@ -391,7 +393,7 @@ private fun ListInfoRow(
                 Icon(Icons.Default.Add, contentDescription = stringResource(R.string.common_add), tint = Amber)
             }
         } else {
-            Text(stringResource(R.string.mdblist_added), color = Silver, style = MaterialTheme.typography.bodySmall)
+            Text(stringResource(R.string.mdblist_added), color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
         }
     }
 }

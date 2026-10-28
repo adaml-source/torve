@@ -16,6 +16,10 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import io.ktor.client.plugins.logging.Logging
+import io.ktor.client.plugins.logging.LogLevel
 
 /**
  * Direct TorBox Usenet integration shared between the desktop and TV
@@ -27,7 +31,7 @@ import kotlinx.serialization.json.jsonPrimitive
  *  2. POST it as multipart to `/api/v1/api/usenet/createusenetdownload`.
  *  3. Poll `/api/v1/api/usenet/mylist?id=...` until `download_state`
  *     is `"completed"` (or one of TorBox's terminal-success synonyms).
- *  4. Pick the largest video file in the result.
+ *  4. Pick the requested episode, or the largest video for a movie.
  *  5. GET `/api/v1/api/usenet/requestdl?token=...&usenet_id=...&file_id=...`
  *     for a streamable URL.
  *
@@ -37,6 +41,7 @@ import kotlinx.serialization.json.jsonPrimitive
 class TorBoxUsenetClient(
     private val httpClient: HttpClient,
 ) {
+    private val transport = httpClient.config { install(Logging) { level = LogLevel.NONE } }
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
 
     /**
@@ -49,13 +54,20 @@ class TorBoxUsenetClient(
         nzbUrl: String,
         torboxApiKey: String,
         onStatus: (String) -> Unit,
+    ): Result<ResolvedNzb> = resolveForEpisode(nzbUrl, torboxApiKey, null, null, onStatus)
+
+    suspend fun resolveForEpisode(
+        nzbUrl: String,
+        torboxApiKey: String,
+        season: Int?,
+        episode: Int?,
+        onStatus: (String) -> Unit,
     ): Result<ResolvedNzb> = runCatching {
         require(nzbUrl.isNotBlank()) { "NZB URL is empty" }
         require(torboxApiKey.isNotBlank()) { "TorBox API key not set" }
 
         onStatus("Downloading NZB from indexer…")
         val nzbBytes = fetchBytes(nzbUrl)
-            ?: error("Could not download NZB file from indexer")
 
         onStatus("Uploading NZB to TorBox…")
         val createResp = uploadNzbMultipart(torboxApiKey, nzbBytes)
@@ -71,24 +83,35 @@ class TorBoxUsenetClient(
         val files = info.files
         require(files.isNotEmpty()) { "TorBox download has no files" }
 
-        val target = files
-            .filter { isPlayableVideo(it.name) }
-            .maxByOrNull { it.size }
-            ?: files.maxByOrNull { it.size }
-            ?: files.first()
+        val videos = files.filter { isPlayableVideo(it.name) &&
+            !Regex("(?i)(?:^|[./_ -])sample(?:[./_ -]|$)").containsMatchIn(it.name) }
+        val target = if (season != null && episode != null) {
+            val tag = Regex("(?i)(?:s0*${season}e0*${episode}(?!\\d)|(?<!\\d)0*${season}x0*${episode}(?!\\d))")
+            videos.filter { tag.containsMatchIn(it.name) }.maxByOrNull { it.size }
+                ?: videos.singleOrNull()?.takeUnless { Regex("(?i)(?:s\\d+e\\d+|\\d+x\\d+)").containsMatchIn(it.name) }
+        } else videos.maxByOrNull { it.size }
+        requireNotNull(target) { "TorBox returned no matching playable video for this title or episode." }
 
         onStatus("Resolving stream link…")
         val streamUrl = requestDownloadUrl(torboxApiKey, usenetId, target.id)
             ?: error("TorBox returned no download URL for file id ${target.id}")
 
         ResolvedNzb(streamUrl = streamUrl, fileName = target.name, sizeBytes = target.size)
-    }
+    }.onFailure { if (it is kotlinx.coroutines.CancellationException) throw it }
 
-    private suspend fun fetchBytes(url: String): ByteArray? = try {
-        val response = httpClient.get(url)
-        if (response.status.isSuccess()) response.bodyAsBytes() else null
-    } catch (_: Throwable) {
-        null
+    private suspend fun fetchBytes(url: String): ByteArray {
+        val response = transport.get(url) { header("User-Agent", NewznabClient.USER_AGENT) }
+        check(response.status.isSuccess()) {
+            "The indexer refused the NZB (HTTP ${response.status.value}). Check its allowed tools and download quota."
+        }
+        val bytes = response.bodyAsBytes()
+        val prefix = bytes.take(4096).toByteArray().decodeToString()
+        val error = Regex("<error[^>]*description=[\"']([^\"']*)[\"']", RegexOption.IGNORE_CASE).find(prefix)
+        check(error == null) { "The indexer refused the NZB: ${com.torve.domain.diagnostics.DiagnosticsRedactor.redact(error!!.groupValues[1]).take(240)}" }
+        check(Regex("<(?:\\w+:)?nzb(?:\\s|>)", RegexOption.IGNORE_CASE).containsMatchIn(prefix)) {
+            "The indexer returned a page instead of an NZB. Check its API URL and download permission for Torve."
+        }
+        return bytes
     }
 
     private suspend fun uploadNzbMultipart(apiKey: String, nzbBytes: ByteArray): String {
@@ -104,7 +127,7 @@ class TorBoxUsenetClient(
         val body = partHeader + nzbBytes + partFooter
 
         return try {
-            val response = httpClient.post(
+            val response = transport.post(
                 "https://api.torbox.app/v1/api/usenet/createusenetdownload",
             ) {
                 header(HttpHeaders.Authorization, "Bearer $apiKey")
@@ -113,6 +136,7 @@ class TorBoxUsenetClient(
             }
             response.bodyAsText()
         } catch (t: Throwable) {
+            if (t is kotlinx.coroutines.CancellationException) throw t
             "{\"success\":false,\"error\":\"NETWORK\",\"detail\":\"${t.message ?: "request failed"}\"}"
         }
     }
@@ -184,7 +208,7 @@ class TorBoxUsenetClient(
     }
 
     private suspend fun fetchUsenetInfo(apiKey: String, usenetId: String): UsenetInfo? = runCatching {
-        val response = httpClient.get("https://api.torbox.app/v1/api/usenet/mylist?id=$usenetId") {
+        val response = transport.get("https://api.torbox.app/v1/api/usenet/mylist?id=$usenetId") {
             header(HttpHeaders.Authorization, "Bearer $apiKey")
         }
         if (!response.status.isSuccess()) return@runCatching null
@@ -211,14 +235,14 @@ class TorBoxUsenetClient(
                 UsenetFile(id = id, name = name, size = size)
             },
         )
-    }.getOrNull()
+    }.onFailure { if (it is kotlinx.coroutines.CancellationException) throw it }.getOrNull()
 
     private suspend fun requestDownloadUrl(
         apiKey: String,
         usenetId: String,
         fileId: String,
     ): String? = runCatching {
-        val response = httpClient.get(
+        val response = transport.get(
             "https://api.torbox.app/v1/api/usenet/requestdl?token=$apiKey&usenet_id=$usenetId&file_id=$fileId",
         ) {
             header(HttpHeaders.Authorization, "Bearer $apiKey")
@@ -229,11 +253,11 @@ class TorBoxUsenetClient(
         // object with `data.data`. Walk both.
         runCatching {
             val root = json.parseToJsonElement(body).jsonObject
-            (root["data"]?.jsonPrimitive?.content)
-                ?: root["data"]?.jsonObject?.get("data")?.jsonPrimitive?.content
-                ?: root["url"]?.jsonPrimitive?.content
+            (root["data"] as? JsonPrimitive)?.content
+                ?: ((root["data"] as? JsonObject)?.get("data") as? JsonPrimitive)?.content
+                ?: (root["url"] as? JsonPrimitive)?.content
         }.getOrNull() ?: body.takeIf { it.startsWith("http") }?.trim()
-    }.getOrNull()
+    }.onFailure { if (it is kotlinx.coroutines.CancellationException) throw it }.getOrNull()
 
     private fun isPlayableVideo(name: String): Boolean {
         val lower = name.lowercase()

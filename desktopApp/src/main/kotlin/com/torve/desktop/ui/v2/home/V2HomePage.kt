@@ -4,6 +4,8 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.background
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.Box
@@ -23,6 +25,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -53,6 +56,7 @@ import com.torve.domain.model.HomeSection
 import com.torve.domain.model.HomeSectionConfig
 import com.torve.domain.model.MediaItem
 import com.torve.domain.model.resolvedWidthDp
+import com.torve.domain.model.extractTmdbIdOrNull
 import com.torve.presentation.home.HomeUiState
 import kotlin.math.absoluteValue
 
@@ -77,6 +81,9 @@ fun V2HomePage(
     // docs/onboarding-simplification-plan.md).
     onSetUpSources: () -> Unit = {},
     onConnectTrakt: () -> Unit = {},
+    onOpenShows: () -> Unit = {},
+    onOpenEpisode: (com.torve.presentation.watching.WatchingEpisode) -> Unit = {},
+    customSections: List<com.torve.domain.model.CustomSection> = emptyList(),
 ) {
     val colors = TorveDesktopThemeTokens.colors
 
@@ -105,9 +112,15 @@ fun V2HomePage(
         val resolved = style.size.resolvedWidthDp()
         return if (resolved == CardStyle().size.resolvedWidthDp()) 150.dp else resolved.dp
     }
-    val heroItem = remember(homeState) {
+    val heroItem = remember(homeState, sectionConfigs) {
+        val resume = com.torve.presentation.home.latestHomeResume(homeState.continueWatching)
+            ?.takeIf { isSectionVisible(HomeSection.CONTINUE_WATCHING) }
         // Prefer items with full metadata (logo, overview) for the hero
-        homeState.heroItem
+        resume?.let { wp ->
+            val saved = (homeState.shelves.flatMap { it.items } + homeState.watchlistItems).firstOrNull { it.id == wp.mediaId && it.type == wp.mediaType }
+            saved ?: MediaItem(id = wp.mediaId, tmdbId = wp.mediaId.extractTmdbIdOrNull(), type = wp.mediaType,
+                title = wp.showTitle ?: wp.title, posterUrl = wp.posterUrl, backdropUrl = wp.backdropUrl)
+        } ?: homeState.heroItem
             ?: homeState.shelves.firstOrNull()?.items?.firstOrNull { it.logoUrl != null }
             ?: homeState.recommendedItems.firstOrNull()?.item
             ?: homeState.watchlistItems.firstOrNull()
@@ -148,6 +161,8 @@ fun V2HomePage(
             )
 
             Column(Modifier.fillMaxWidth().height(vpH).verticalScroll(scrollState)) {
+                val watching = remember { org.koin.mp.KoinPlatform.getKoin().get<com.torve.presentation.watching.WatchingHubViewModel>() }
+                val watchingState by watching.state.collectAsState()
                 // ── Hero area ──
                 if (isSectionVisible(HomeSection.HERO)) {
                 Box(Modifier.fillMaxWidth().height(vpH * 0.78f)) {
@@ -186,6 +201,17 @@ fun V2HomePage(
                     Spacer(Modifier.height(96.dp))
                 }
 
+                if (watchingState.upNext.isNotEmpty() && isSectionVisible(HomeSection.CONTINUE_WATCHING)) {
+                    Column(Modifier.fillMaxWidth().padding(start = 72.dp, end = 42.dp, top = 24.dp, bottom = 16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        com.torve.desktop.ui.components.TorveGhostButton(ds("Your shows"), onOpenShows)
+                        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                            watchingState.upNext.take(3).forEach { row ->
+                                Box(Modifier.width(340.dp)) { com.torve.desktop.ui.v2.library.DesktopWatchingRow(row, watchingState.hideSpoilers, { onOpenEpisode(row) }) }
+                            }
+                        }
+                    }
+                }
+
                 // ── Zero-source empty state ──
                 // When the user skipped onboarding (no sources
                 // configured) and the home data is genuinely empty,
@@ -213,6 +239,23 @@ fun V2HomePage(
 
                 // ── Shelves - continuous stage ──
                 Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                    val groupRepo = remember { org.koin.mp.KoinPlatform.getKoin().get<com.torve.data.catalog.CatalogGroupRepository>() }
+                    val groups by groupRepo.groups.collectAsState()
+                    val groupSources = com.torve.presentation.home.catalogGroupSources(homeState, customSections)
+                    groups.filter { it.pinned }.forEach { group ->
+                        val items = com.torve.domain.model.mergeCatalogGroup(group, groupSources)
+                        if (items.isNotEmpty()) V2Shelf(group.name, Modifier.padding(start = 72.dp)) {
+                            items.take(30).forEach { item ->
+                                val landscape = group.presentation == com.torve.domain.model.CatalogGroupPresentation.LANDSCAPE
+                                V2PosterCard(item.title, if (landscape) item.backdropUrl ?: item.posterUrl else item.posterUrl,
+                                    Modifier.width(if (landscape) 240.dp else 150.dp),
+                                    year = item.year?.toString(), ratings = item.ratings,
+                                    backdropUrl = item.backdropUrl, overview = item.overview,
+                                    cardStyle = CardStyle(size = com.torve.domain.model.CardSizePrefs(orientation = if (landscape) com.torve.domain.model.CardOrientation.LANDSCAPE else com.torve.domain.model.CardOrientation.PORTRAIT)),
+                                    onClick = { onOpenDetail(item) })
+                            }
+                        }
+                    }
                     if (homeState.continueWatching.size > 1 && isSectionVisible(HomeSection.CONTINUE_WATCHING)) {
                         // Group by mediaId (show TMDb ID for series, unique per movie)
                         val grouped = homeState.continueWatching.drop(1)
@@ -304,10 +347,51 @@ fun V2HomePage(
                         }
                     }
 
-                    val curatedItems = homeState.becauseYouWatched.firstOrNull()?.items ?: homeState.recommendedItems.map { it.item }
-                    val curatedSection = if (homeState.becauseYouWatched.isNotEmpty()) HomeSection.BECAUSE_YOU_WATCHED else HomeSection.RECOMMENDED
+                    homeState.becauseYouWatched.forEach { shelf ->
+                        val watchedSection = when (shelf.id) {
+                            "because_you_watched_movies" -> HomeSection.BECAUSE_YOU_WATCHED_MOVIES
+                            "because_you_watched_tv" -> HomeSection.BECAUSE_YOU_WATCHED_TV
+                            else -> null
+                        }
+                        if (watchedSection != null && shelf.items.isNotEmpty() && isSectionVisible(watchedSection)) {
+                            val watchedTitle = titleFor(watchedSection, shelf.title)
+                            val watchedStyle = cardStyleForOrDefault(watchedSection)
+                            val watchedWidth = widthFor(watchedSection)
+                            V2Shelf(
+                                watchedTitle,
+                                modifier = Modifier.padding(start = 72.dp),
+                            ) {
+                                shelf.items.forEach { item ->
+                                    V2PosterCard(
+                                        item.title,
+                                        item.posterUrl,
+                                        Modifier.width(watchedWidth),
+                                        year = item.year?.toString(),
+                                        rating = item.rating?.let { String.format("%.1f", it) },
+                                        ratings = item.ratings,
+                                        backdropUrl = item.backdropUrl,
+                                        overview = item.overview,
+                                        cardStyle = watchedStyle,
+                                        onClick = {
+                                            val tmdbId = item.tmdbId ?: return@V2PosterCard
+                                            val type = if (item.type == com.torve.domain.model.MediaType.SERIES) "tv" else "movie"
+                                            onSeeAll(
+                                                SeeAllRequest(
+                                                    "more_like_${type}_$tmdbId",
+                                                    "Because You Watched ${item.title}",
+                                                ),
+                                            )
+                                        },
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    val curatedItems = homeState.recommendedItems.map { it.item }
+                    val curatedSection = HomeSection.RECOMMENDED
                     if (curatedItems.isNotEmpty() && isSectionVisible(curatedSection)) {
-                        val curatedTitle = if (homeState.becauseYouWatched.isNotEmpty()) ds("Because You Watched") else ds("Recommended")
+                        val curatedTitle = ds("Recommended")
                         val curatedShelfKey = "shelf:recommended_${curatedTitle.hashCode()}"
                         val curatedStyle = cardStyleForOrDefault(curatedSection)
                         val curatedWidth = widthFor(curatedSection)
@@ -674,7 +758,7 @@ private fun HomeZeroSourceEmptyState(
             Text(
                 text = "You're signed in, but no streaming source is connected yet. " +
                     "Built-in addons + Plex/Jellyfin auto-discovery will populate Home as soon as they find content. " +
-                    "To enable debrid / Newznab / Usenet sources, set up Panda or configure them in Settings.",
+                    "To enable debrid, Newznab, or Usenet sources, open streaming-source setup from Settings → Connections.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = colors.textSecondary,
             )

@@ -36,6 +36,7 @@ data class CatalogUiState(
     val shelvesLoaded: Boolean = false,
     // Provider filter (TMDB watch provider ID)
     val providerId: Int? = null,
+    val providerRegion: String? = null,
     // View mode selector
     val viewMode: CatalogViewMode = CatalogViewMode.GRID_MEDIUM,
     // AI search
@@ -55,15 +56,15 @@ enum class CatalogCategory(val label: String) {
 
 data class CatalogFilter(
     val minRating: Float? = null,
-    val ratingSource: DiscoveryRatingSource = DiscoveryRatingSource.TMDB,
+    val ratingSource: DiscoveryRatingSource = DiscoveryRatingSource.IMDB,
     val year: Int? = null,
     val yearTo: Int? = null,
     val runtimeFilter: RuntimeFilter? = null,
-    val sortBy: SortOption = SortOption.POPULARITY_DESC,
+    val sortBy: SortOption = SortOption.IMDB_SCORE_DESC,
 ) {
     val isActive: Boolean
         get() = minRating != null || year != null || yearTo != null ||
-            runtimeFilter != null || sortBy != SortOption.POPULARITY_DESC
+            runtimeFilter != null || sortBy != SortOption.IMDB_SCORE_DESC
 
     val activeCount: Int
         get() {
@@ -71,7 +72,7 @@ data class CatalogFilter(
             if (minRating != null) count++
             if (year != null || yearTo != null) count++
             if (runtimeFilter != null) count++
-            if (sortBy != SortOption.POPULARITY_DESC) count++
+            if (sortBy != SortOption.IMDB_SCORE_DESC) count++
             return count
         }
 }
@@ -83,10 +84,11 @@ enum class RuntimeFilter(val label: String, val minMinutes: Int?, val maxMinutes
 }
 
 enum class SortOption(val apiValue: String, val label: String) {
+    RELEVANCE("popularity.desc", "Best Match"),
     POPULARITY_DESC("popularity.desc", "Most Popular"),
     TORVE_SCORE_DESC("popularity.desc", "Torve Score"),
     VOTE_AVERAGE_DESC("vote_average.desc", "Highest TMDB Rating"),
-    IMDB_SCORE_DESC("popularity.desc", "Highest IMDB Rating"),
+    IMDB_SCORE_DESC("vote_average.desc", "Highest IMDb Rating"),
     VOTE_COUNT_DESC("vote_count.desc", "Most Votes"),
     RELEASE_DATE_DESC("primary_release_date.desc", "Newest First"),
     RELEASE_DATE_ASC("primary_release_date.asc", "Oldest First"),

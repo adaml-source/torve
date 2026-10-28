@@ -1,8 +1,8 @@
 {
   "project_info": {
     "project_number": "000000000000",
-    "project_id": "torve-public-placeholder",
-    "storage_bucket": "torve-public-placeholder.appspot.com"
+    "project_id": "torve-amazon-placeholder",
+    "storage_bucket": "placeholder.invalid"
   },
   "client": [
     {
@@ -12,17 +12,26 @@
           "package_name": "com.torve.app.amazon"
         }
       },
-      "oauth_client": [],
       "api_key": [
         {
-          "current_key": "REPLACE_WITH_PUBLIC_SAFE_FIREBASE_API_KEY"
+          "current_key": "placeholder-not-a-live-api-key"
         }
       ],
-      "services": {
-        "appinvite_service": {
-          "other_platform_oauth_client": []
+      "services": {}
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:000000000000:android:0000000000000000000000",
+        "android_client_info": {
+          "package_name": "com.torve.app.amazon.debug"
         }
-      }
+      },
+      "api_key": [
+        {
+          "current_key": "placeholder-not-a-live-api-key"
+        }
+      ],
+      "services": {}
     }
   ],
   "configuration_version": "1"

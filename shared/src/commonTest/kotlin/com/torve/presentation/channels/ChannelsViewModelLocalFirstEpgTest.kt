@@ -32,8 +32,7 @@ import kotlin.test.assertTrue
  * Locks down three invariants:
  * 1. Persisted EPG renders the guide without a blocking network refresh.
  * 2. getEpg() hydrates the in-memory cache from the DB result.
- * 3. Background EPG refresh does not put the guide back into Loading state
- *    when a renderable local catalog already exists.
+ * 3. A renderable local guide never starts an automatic foreground refresh.
  */
 @OptIn(ExperimentalCoroutinesApi::class)
 class ChannelsViewModelLocalFirstEpgTest {
@@ -81,9 +80,7 @@ class ChannelsViewModelLocalFirstEpgTest {
         assertIs<EpgState.Loaded>(state.epgState, "EPG state should be Loaded, not ${state.epgState}")
         assertFalse(state.isLoadingGuide, "Guide should not be in loading state")
         assertTrue(state.guideProgrammes.isNotEmpty(), "Guide programmes should be populated from local EPG")
-        // refreshEpg was called only by the background refresh, never as a blocking call
-        // before the guide was rendered. The key assertion: epgState reached Loaded
-        // before any network call was needed.
+        assertEquals(0, repo.epgRefreshCalls, "Cached EPG must not start a provider download")
         assertEquals(0, repo.blockingEpgRefreshCalls, "No blocking EPG refresh should occur when local EPG exists")
     }
 
@@ -118,9 +115,7 @@ class ChannelsViewModelLocalFirstEpgTest {
         assertEquals(dbReadsBefore, repo.epgDbReads, "Second getEpg() call should use cache, not re-read DB")
     }
 
-    // ── Case 3: background EPG refresh does not set Loading state ──
-    // When local catalog exists, the background EPG refresh must update
-    // guideProgrammes without ever setting epgState back to Loading.
+    // ── Case 3: cached EPG remains foreground-only ──
     @Test
     fun background_epg_refresh_does_not_block_guide_when_local_catalog_exists() = runTest(dispatcher) {
         val channel = sampleChannel("p1", "ARD HD", tvgId = "ard.hd")
@@ -165,10 +160,12 @@ class ChannelsViewModelLocalFirstEpgTest {
         advanceUntilIdle()
         collectJob.cancel()
 
-        // After full startup + background refresh, guide should be Loaded.
+        // After startup, the persisted guide is loaded without provider IO.
         val finalState = vm.state.value
         assertIs<EpgState.Loaded>(finalState.epgState)
         assertFalse(finalState.isLoadingGuide)
+        assertEquals(0, repo.epgRefreshCalls)
+        assertEquals("Tagesschau (stale)", finalState.guideProgrammes[epgKey]?.firstOrNull()?.title)
 
         // Verify that once epgState reached Loaded, it never went back to Loading.
         val loadingAfterFirstLoaded = observedEpgStates.any { it is EpgState.Loading }
@@ -176,6 +173,79 @@ class ChannelsViewModelLocalFirstEpgTest {
             loadingAfterFirstLoaded,
             "epgState must never revert to Loading after reaching Loaded. Observed: $observedEpgStates",
         )
+    }
+
+    @Test
+    fun selected_group_reads_programmes_outside_bounded_playlist_snapshot() = runTest(dispatcher) {
+        val channel = sampleChannel("p1", "US: ABC (WPLG) Miami", "wplg.miami")
+            .copy(groupTitle = "Miami / 60fps")
+        val channelKey = "p1::wplg.miami"
+        val expected = sampleProgramme(channelKey, "Miami evening news")
+        val cached = (1..160).associate { index ->
+            val key = "p1::other.$index"
+            key to listOf(sampleProgramme(key, "Other schedule $index"))
+        }
+        val repo = EpgFakeChannelRepository(
+            playlists = listOf(samplePlaylist("p1", epgUrl = "https://epg.example.com/xmltv")),
+            persistedChannels = mutableMapOf("p1" to listOf(channel)),
+            remoteChannels = mutableMapOf("p1" to listOf(channel)),
+            persistedEpg = mutableMapOf("p1" to EpgData(programmesByChannelKey = cached, programmes = cached.values.flatten(), generationId = 1L)),
+            databaseProgrammes = mapOf(channelKey to listOf(expected)),
+        )
+        val vm = ChannelsViewModel(repo, FakePrefs(mutableMapOf("channels_selected_playlist" to "p1")), backgroundDispatcher = dispatcher)
+        advanceUntilIdle()
+        vm.loadCategoryChannels("Miami / 60fps")
+        advanceUntilIdle()
+        vm.selectSubTab(ChannelsSubTab.GUIDE)
+        advanceUntilIdle()
+
+        assertEquals(listOf(expected), vm.guideProgrammesForChannel(channel))
+        assertEquals(0, repo.epgRefreshCalls, "Already imported programmes must be read without another provider download")
+        assertFalse(vm.state.value.isLoadingGuide)
+    }
+
+    @Test
+    fun large_playlist_guide_uses_category_rows_and_rebuilds_after_group_switch() = runTest(dispatcher) {
+        val first = sampleChannel("p1", "News", "news").copy(groupTitle = "DE| News")
+        val second = sampleChannel("p1", "Sport", "sport").copy(groupTitle = "DE| Sport")
+        val news = sampleProgramme("p1::news", "News programme")
+        val sport = sampleProgramme("p1::sport", "Sport programme")
+        val repo = EpgFakeChannelRepository(
+            playlists = listOf(samplePlaylist("p1", "https://epg.example.com/xmltv")),
+            persistedChannels = mutableMapOf("p1" to listOf(first, second)),
+            remoteChannels = mutableMapOf("p1" to listOf(first, second)),
+            persistedEpg = mutableMapOf("p1" to EpgData(programmesByChannelKey = mapOf("p1::news" to listOf(news)))),
+            databaseProgrammes = mapOf("p1::sport" to listOf(sport)),
+            totalRows = 70_000L,
+        )
+        val vm = ChannelsViewModel(repo, FakePrefs(mutableMapOf("channels_selected_playlist" to "p1")), backgroundDispatcher = dispatcher)
+        advanceUntilIdle()
+        vm.selectSubTab(ChannelsSubTab.GUIDE)
+        advanceUntilIdle()
+        assertTrue(vm.state.value.channels.isEmpty(), "Large playlist must stay out of memory")
+        assertEquals(listOf(first), vm.state.value.guideChannels.map { it.channel })
+        vm.loadCategoryChannels("Germany Sport")
+        advanceUntilIdle()
+        assertEquals(listOf(second), vm.state.value.guideChannels.map { it.channel })
+        assertEquals(listOf(sport), vm.guideProgrammesForChannel(second))
+        assertFalse(vm.state.value.isLoadingGuide)
+        assertEquals(0, repo.epgRefreshCalls)
+        assertEquals(0, repo.fullLoadCalls)
+    }
+
+    @Test
+    fun count_rebuild_keeps_loaded_channels_in_expanded_groups() = runTest(dispatcher) {
+        val channel = sampleChannel("p1", "News", "news").copy(groupTitle = "DE| News")
+        val repo = EpgFakeChannelRepository(listOf(samplePlaylist("p1")),
+            mutableMapOf("p1" to listOf(channel)), mutableMapOf("p1" to listOf(channel)), totalRows = 70_000L)
+        val vm = ChannelsViewModel(repo, FakePrefs(mutableMapOf("channels_selected_playlist" to "p1")), backgroundDispatcher = dispatcher)
+        advanceUntilIdle()
+        vm.toggleCategoryExpanded("Germany News")
+        advanceUntilIdle()
+        vm.setSort(ChannelsSortType.NAME_AZ)
+        advanceUntilIdle()
+        assertTrue("Germany News" in vm.state.value.expandedCategories)
+        assertEquals(listOf(channel), vm.state.value.categories.first().channels.map { it.channel })
     }
 
     // ── Helpers ──
@@ -215,11 +285,14 @@ private class EpgFakeChannelRepository(
     private val remoteChannels: MutableMap<String, List<Channel>>,
     private val persistedEpg: MutableMap<String, EpgData> = mutableMapOf(),
     private val refreshedEpg: MutableMap<String, EpgData> = mutableMapOf(),
+    private val databaseProgrammes: Map<String, List<EpgProgramme>> = emptyMap(),
+    private val totalRows: Long? = null,
 ) : ChannelRepository {
     private val favorites = linkedMapOf<String, Channel>()
     private val recents = linkedMapOf<String, Channel>()
     private val epgCache = mutableMapOf<String, EpgData>()
 
+    var fullLoadCalls: Int = 0; private set
     var refreshCalls: Int = 0; private set
     var epgRefreshCalls: Int = 0; private set
     var blockingEpgRefreshCalls: Int = 0; private set
@@ -229,6 +302,7 @@ private class EpgFakeChannelRepository(
     override suspend fun getChannels(playlistId: String): List<Channel> = persistedChannels[playlistId].orEmpty()
 
     override suspend fun getEnrichedChannels(playlistId: String): List<EnrichedChannel> {
+        fullLoadCalls++
         return getChannels(playlistId).map { ch ->
             val fav = favorites[stableChannelId(ch)]
             EnrichedChannel(channel = fav?.copy(isFavorite = true) ?: ch)
@@ -266,7 +340,7 @@ private class EpgFakeChannelRepository(
     }
 
     override suspend fun getEpgLoadError(playlistId: String): String? = null
-    override suspend fun getProgrammes(channelId: String): List<EpgProgramme> = emptyList()
+    override suspend fun getProgrammes(channelId: String): List<EpgProgramme> = databaseProgrammes[channelId].orEmpty()
     override suspend fun searchChannels(query: String): List<Channel> = emptyList()
     override suspend fun getChannelsByGroup(playlistId: String): Map<String, List<Channel>> =
         getChannels(playlistId).groupBy { it.groupTitle ?: "Ungrouped" }
@@ -343,7 +417,7 @@ private class EpgFakeChannelRepository(
     }
 
     override suspend fun getTotalChannelCount(playlistId: String): Long {
-        return getChannels(playlistId).size.toLong()
+        return totalRows ?: getChannels(playlistId).size.toLong()
     }
 
     override fun syncHiddenChannelsToDb(hiddenIds: Set<String>) = Unit

@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Discord Pages Admin - Torve</title>
+  <link rel="icon" type="image/png" href="/assets/favicon.png" />
+  <link rel="stylesheet" href="/assets/site-base.css?v=20260517-mobile" />
+  <style>
+    body { background: var(--t-bg); color: var(--t-text); font-family: Inter, system-ui, sans-serif; margin: 0; padding: 0; }
+    .admin-wrap { max-width: 1280px; margin: 0 auto; padding: 32px 20px 64px; }
+    .admin-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 24px; flex-wrap: wrap; gap: 12px; }
+    .admin-header h1 { font-size: 22px; font-weight: 800; color: #fff; margin: 0; }
+    .admin-header-links { display: flex; gap: 14px; font-size: 13px; }
+    .admin-header-links a { color: var(--t-accent); text-decoration: none; }
+    .admin-header-links a:hover { text-decoration: underline; }
+
+    .auth-gate { max-width: 400px; margin: 80px auto; text-align: center; }
+    .auth-gate h2 { font-size: 18px; color: #fff; margin-bottom: 12px; }
+    .auth-gate p { font-size: 13px; color: #888; margin-bottom: 20px; }
+
+    .field { margin-bottom: 12px; }
+    .field label { display: block; font-size: 11px; font-weight: 700; color: #aaa; margin-bottom: 5px; text-transform: uppercase; letter-spacing: .04em; }
+    .field input, .field textarea, .field select { width: 100%; padding: 9px 12px; font-size: 13px; background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.1); border-radius: 8px; color: #fff; outline: none; box-sizing: border-box; }
+    .field textarea { min-height: 104px; line-height: 1.45; resize: vertical; font-family: inherit; }
+    .field input:focus, .field textarea:focus, .field select:focus { border-color: var(--t-accent); }
+
+    .btn { display: inline-flex; align-items: center; justify-content: center; padding: 8px 14px; border-radius: 8px; font-size: 12px; font-weight: 700; border: none; cursor: pointer; transition: opacity .2s, background .2s; min-height: 34px; }
+    .btn-primary { background: linear-gradient(135deg, var(--t-accent), #dbb95c); color: #08080e; }
+    .btn-secondary { background: rgba(255,255,255,.06); color: #ccc; border: 1px solid rgba(255,255,255,.1); }
+    .btn-danger { background: rgba(239,68,68,.12); color: #f87171; border: 1px solid rgba(239,68,68,.2); }
+    .btn:hover { opacity: .9; }
+    .btn:disabled { opacity: .45; cursor: default; }
+    .btn-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+
+    .msg { font-size: 12px; padding: 7px 10px; border-radius: 7px; margin-top: 10px; }
+    .msg-ok { background: rgba(34,197,94,.08); color: #4ade80; }
+    .msg-error { background: rgba(239,68,68,.08); color: #f87171; }
+    .msg-muted { background: rgba(255,255,255,.05); color: #aaa; }
+
+    .layout { display: grid; grid-template-columns: 240px minmax(0, 1fr) minmax(320px, 420px); gap: 16px; align-items: start; }
+    .panel { background: rgba(255,255,255,.03); border: 1px solid rgba(255,255,255,.08); border-radius: 12px; padding: 16px; }
+    .panel h2 { color: #fff; font-size: 13px; font-weight: 800; margin: 0 0 12px; text-transform: uppercase; letter-spacing: .04em; }
+
+    .page-list { display: grid; gap: 8px; }
+    .page-btn { text-align: left; width: 100%; border: 1px solid rgba(255,255,255,.08); background: rgba(255,255,255,.04); color: #ddd; border-radius: 8px; padding: 10px; cursor: pointer; }
+    .page-btn.active { border-color: var(--t-accent); background: rgba(245,179,1,.09); }
+    .page-btn strong { display: block; color: #fff; font-size: 13px; margin-bottom: 3px; }
+    .page-btn span { display: block; color: #888; font-size: 11px; line-height: 1.35; }
+
+    .status-grid { display: grid; gap: 8px; margin-top: 14px; }
+    .status-row { display: flex; justify-content: space-between; gap: 10px; font-size: 12px; color: #888; border-top: 1px solid rgba(255,255,255,.06); padding-top: 8px; }
+    .status-row strong { color: #ddd; font-weight: 700; }
+
+    .editor-toolbar { display: flex; justify-content: space-between; gap: 12px; align-items: center; margin-bottom: 14px; flex-wrap: wrap; }
+    .editor-toolbar h2 { margin: 0; }
+    .embed-editor { border: 1px solid rgba(255,255,255,.08); border-radius: 10px; padding: 14px; margin-bottom: 12px; background: rgba(0,0,0,.18); }
+    .embed-editor-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 10px; }
+    .embed-editor-head strong { color: #fff; font-size: 12px; }
+    .embed-grid { display: grid; grid-template-columns: minmax(0, 1fr) 142px; gap: 12px; }
+    .color-field { display: grid; grid-template-columns: 34px minmax(0, 1fr); gap: 8px; align-items: end; }
+    .swatch { width: 34px; height: 34px; border-radius: 8px; border: 1px solid rgba(255,255,255,.16); box-sizing: border-box; }
+
+    .preview-surface { background: #313338; border: 1px solid rgba(255,255,255,.08); border-radius: 12px; padding: 16px; min-height: 400px; }
+    .preview-user { color: #fff; font-weight: 800; font-size: 14px; margin-bottom: 10px; }
+    .discord-embed { display: grid; grid-template-columns: 4px minmax(0, 1fr); background: #2b2d31; border-radius: 6px; overflow: hidden; margin-bottom: 10px; max-width: 520px; }
+    .discord-bar { background: var(--embed-color); }
+    .discord-body { padding: 12px 14px; }
+    .discord-title { color: #fff; font-size: 14px; font-weight: 800; margin-bottom: 7px; overflow-wrap: anywhere; }
+    .discord-desc { color: #dbdee1; font-size: 13px; line-height: 1.4; white-space: pre-wrap; overflow-wrap: anywhere; }
+
+    @media (max-width: 1060px) {
+      .layout { grid-template-columns: 220px minmax(0, 1fr); }
+      .preview-panel { grid-column: 1 / -1; }
+    }
+    @media (max-width: 720px) {
+      .layout { grid-template-columns: 1fr; }
+      .embed-grid { grid-template-columns: 1fr; }
+      .btn-row { align-items: stretch; }
+      .btn-row .btn { flex: 1; }
+    }
+  </style>
+  <link rel="stylesheet" href="/assets/modern-site.css?v=20261012-7" />
+  <meta name="robots" content="noindex, nofollow" />
+</head>
+<body class="modern-page admin-page">
+<header class="site-header" data-site-header>
+    <div class="site-header-inner">
+      <a class="site-brand" href="/" aria-label="Torve home"><img src="/assets/torve-logo-transparent.png" alt="Torve" class="site-header-logo" /></a>
+      <nav id="site-navigation" class="site-header-nav" aria-label="Main navigation"><a href="/#explore">Explore</a><a href="/download.html">Downloads</a><a href="/app/help.html">Guide</a><a href="/support.html">Support</a></nav>
+      <div class="site-header-actions"><a class="site-account-link t-btn t-btn-secondary" href="/signin.html">Sign in</a><a class="t-btn t-btn-primary" href="/download.html"><span class="install-label-full">Install Torve</span><span class="install-label-short">Install</span><svg class="button-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M12 3v12m-4-4 4 4 4-4M5 16v4h14v-4"/></svg></a></div>
+      <button class="site-menu-toggle" type="button" aria-label="Open menu" aria-controls="site-navigation" aria-expanded="false"><span></span><span></span></button>
+    </div>
+  </header>
+  <div class="admin-wrap">
+    <div class="admin-header">
+      <h1>Discord Pages</h1>
+      <div class="admin-header-links">
+        <a href="/app/admin.html">&larr; Admin home</a>
+        <a href="/app/">Back to portal</a>
+      </div>
+    </div>
+
+    <div id="authGate" class="auth-gate">
+      <h2>Admin Access</h2>
+      <p>Enter the admin secret.</p>
+      <div class="field">
+        <input type="password" id="secretInput" placeholder="Admin secret" autocomplete="off" />
+      </div>
+      <div style="display:flex;justify-content:center;margin-top:10px">
+        <button class="btn btn-primary" id="authBtn">Sign in</button>
+      </div>
+      <div id="authMsg" class="msg" style="background:none"></div>
+    </div>
+
+    <div id="adminPanel" style="display:none">
+      <div class="layout">
+        <aside class="panel">
+          <h2>Pages</h2>
+          <div id="pageList" class="page-list"></div>
+          <div id="pageStatus" class="status-grid"></div>
+        </aside>
+
+        <main class="panel">
+          <div class="editor-toolbar">
+            <h2 id="editorTitle">Editor</h2>
+            <div class="btn-row">
+              <button class="btn btn-secondary" id="addEmbedBtn">Add card</button>
+              <button class="btn btn-secondary" id="saveBtn">Save</button>
+              <button class="btn btn-danger" id="resetBtn">Reset</button>
+              <button class="btn btn-primary" id="publishBtn">Publish to Discord</button>
+            </div>
+          </div>
+          <div class="field">
+            <label>Webhook Username</label>
+            <input type="text" id="usernameInput" maxlength="80" />
+          </div>
+          <div id="embedEditors"></div>
+          <div id="pageMsg" class="msg msg-muted">Loading...</div>
+        </main>
+
+        <aside class="panel preview-panel">
+          <h2>Preview</h2>
+          <div class="preview-surface" id="previewSurface"></div>
+        </aside>
+      </div>
+    </div>
+  </div>
+
+  <script src="/assets/app/page-admin-discord.js?v=20260524"></script>
+  <script src="/assets/modern-site.js?v=20261012-7" defer></script>
+</body>
+</html>

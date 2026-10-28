@@ -82,6 +82,7 @@ class TorBoxUsenetClient {
 
     private fun fetchBytes(url: String): ByteArray? = runCatching {
         val req = HttpRequest.newBuilder(URI(url))
+            .header("User-Agent", com.torve.data.usenet.NewznabClient.USER_AGENT)
             .timeout(Duration.ofSeconds(60))
             .GET()
             .build()

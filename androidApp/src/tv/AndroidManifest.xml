@@ -1,6 +1,7 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
+    <uses-permission android:name="com.android.providers.tv.permission.WRITE_EPG_DATA" />
 
     <uses-feature
         android:name="android.hardware.touchscreen"
@@ -16,9 +17,23 @@
         android:name="android.hardware.type.television"
         android:required="false" />
 
+    <queries>
+        <package android:name="org.smarttube.stable" />
+        <package android:name="org.smarttube.beta" />
+        <package android:name="com.amazon.firetv.youtube" />
+        <package android:name="com.google.android.youtube.tv" />
+    </queries>
+
     <application
         android:banner="@drawable/tv_banner"
-        android:isGame="false">
+        android:isGame="false"
+        tools:replace="android:banner">
+
+        <provider android:name=".search.TvSearchProvider" android:authorities="@string/tv_search_authority"
+            android:exported="true" android:readPermission="android.permission.GLOBAL_SEARCH" />
+        <!-- QR scanning is initialized by the scanner screen when requested. -->
+        <provider android:name="com.google.mlkit.common.internal.MlKitInitProvider"
+            tools:node="remove" />
 
         <activity
             android:name=".MainActivity"
@@ -27,11 +42,20 @@
 
         <activity
             android:name=".TvMainActivity"
+            android:launchMode="singleTask"
             android:banner="@drawable/tv_banner"
-            android:theme="@style/Theme.Torve.Splash"
+            android:theme="@style/Theme.Torve.TvSplash"
             android:exported="true"
-            android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout"
+            android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|locale|layoutDirection"
             android:supportsPictureInPicture="true">
+            <meta-data android:name="android.app.searchable" android:resource="@xml/searchable" />
+            <intent-filter><action android:name="android.intent.action.SEARCH" /></intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="https" android:host="torve.app" android:path="/app/watch" />
+            </intent-filter>
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LEANBACK_LAUNCHER" />

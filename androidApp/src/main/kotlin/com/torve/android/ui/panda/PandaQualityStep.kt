@@ -112,20 +112,7 @@ private fun LanguageChips(
     ) {
         available.forEach { code ->
             val isSelected = code in selectedSet
-            val interactionSource = remember { MutableInteractionSource() }
-            val isFocused by interactionSource.collectIsFocusedAsState()
-            FilterChip(
-                selected = isSelected,
-                onClick = { onToggle(code, !isSelected) },
-                label = { Text(labelForLanguage(code)) },
-                interactionSource = interactionSource,
-                colors = FilterChipDefaults.filterChipColors(
-                    containerColor = if (isFocused) Steel.copy(alpha = 0.28f) else Snow.copy(alpha = 0.06f),
-                    labelColor = if (isFocused) Snow else Silver,
-                    selectedContainerColor = if (isFocused) Amber.copy(alpha = 0.32f) else Amber.copy(alpha = 0.2f),
-                    selectedLabelColor = if (isFocused) Snow else Amber,
-                ),
-            )
+            PandaChip(isSelected, { onToggle(code, !isSelected) }, labelForLanguage(code))
         }
     }
 }
@@ -139,42 +126,5 @@ private fun DropdownField(
     onSelect: (String) -> Unit,
     entryFocusRequester: FocusRequester? = null,
 ) {
-    var expanded by remember { mutableStateOf(false) }
-    val displayValue = options.find { it.first == value }?.second ?: value
-
-    Text(label, style = MaterialTheme.typography.bodyMedium, color = Silver)
-    Spacer(Modifier.height(6.dp))
-    ExposedDropdownMenuBox(
-        expanded = expanded,
-        onExpandedChange = { expanded = it },
-    ) {
-        OutlinedTextField(
-            value = displayValue,
-            onValueChange = {},
-            readOnly = true,
-            modifier = Modifier
-                .fillMaxWidth()
-                .then(entryFocusRequester?.let { Modifier.focusRequester(it) } ?: Modifier)
-                .menuAnchor(MenuAnchorType.PrimaryNotEditable),
-            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded) },
-            shape = RoundedCornerShape(12.dp),
-            colors = OutlinedTextFieldDefaults.colors(
-                focusedBorderColor = Amber,
-                unfocusedBorderColor = Steel,
-                focusedTextColor = Snow,
-                unfocusedTextColor = Snow,
-            ),
-        )
-        ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-            options.forEach { (key, display) ->
-                DropdownMenuItem(
-                    text = { Text(display) },
-                    onClick = {
-                        onSelect(key)
-                        expanded = false
-                    },
-                )
-            }
-        }
-    }
+    PandaDropdown(value, options, onSelect, label = label, entryFocusRequester = entryFocusRequester)
 }

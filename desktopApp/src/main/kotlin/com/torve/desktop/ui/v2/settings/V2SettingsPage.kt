@@ -103,15 +103,16 @@ import com.torve.domain.repository.AddonRepository
 import com.torve.presentation.channels.EpgState
 import com.torve.presentation.channels.ChannelsUiState
 import com.torve.presentation.channels.ChannelsViewModel
+import com.torve.presentation.channels.userMessage
+import com.torve.domain.repository.EpgRefreshProgress
 import com.torve.presentation.session.AccountSessionCoordinator
 import com.torve.presentation.settings.AppLanguage
+import com.torve.presentation.settings.IntegrationReadinessStatus
+import com.torve.presentation.settings.IntegrationReadinessSummary
 import com.torve.presentation.settings.SettingsUiState
 import com.torve.presentation.settings.SettingsViewModel
 import com.torve.presentation.settings.ThemeMode
-import com.torve.presentation.beta.BetaProgramCopy
-import com.torve.presentation.beta.BetaProgramUiState
-import com.torve.presentation.beta.BetaProgramViewModel
-import com.torve.presentation.beta.shouldShowBetaProgramSettingsEntry
+import com.torve.presentation.settings.buildIntegrationReadinessSummary
 import com.torve.domain.streams.StreamRulePatternValidator
 import java.time.Instant
 import java.time.ZoneId
@@ -122,7 +123,7 @@ private enum class SettingsCategory(
     val label: String,
     val description: String,
 ) {
-    SOURCES("Sources", "Setup intents and provider health"),
+    SOURCES("Connections", "Set up, check, and repair connected services"),
     CUSTOMIZATION("Preferences", "Playback, quality, language, browsing"),
     ACCOUNT("Account", "Session, access, identity"),
     INTEGRATIONS("Integrations", "Sync, APIs, media servers"),
@@ -203,6 +204,7 @@ fun V2SettingsPage(
     onOpenManageDevices: () -> Unit = {},
     onOpenStats: () -> Unit = {},
     onOpenRecordings: () -> Unit = {},
+    onOpenProfiles: () -> Unit = {},
     /**
      * Onboarding deep-link entry: when the user picked "Set up
      * Plex/Jellyfin" from the credential-first hub the shell completes
@@ -218,6 +220,13 @@ fun V2SettingsPage(
         }
         mutableStateOf(resolved ?: SettingsCategory.SOURCES)
     }
+    var showResetFeedback by remember { mutableStateOf(false) }
+    if (showResetFeedback) androidx.compose.material3.AlertDialog(
+        onDismissRequest = { showResetFeedback = false }, title = { Text(ds("Reset recommendation feedback?")) },
+        text = { Text(ds("Titles marked not interested can appear in recommendations again.")) },
+        confirmButton = { androidx.compose.material3.TextButton(onClick = { homeViewModel.resetRecommendationFeedback(); showResetFeedback = false }) { Text(ds("Reset")) } },
+        dismissButton = { androidx.compose.material3.TextButton(onClick = { showResetFeedback = false }) { Text(ds("Cancel")) } },
+    )
     var addonManifestUrl by remember { mutableStateOf("") }
     var addonMessage by remember { mutableStateOf<String?>(null) }
     var addonError by remember { mutableStateOf<String?>(null) }
@@ -301,21 +310,13 @@ fun V2SettingsPage(
                 subtitle = ds(selectedCategory.description),
             )
 
-            // Persistent (until-dismissed) Panda nudge - easiest path to
-            // wiring debrid + indexer access. Shown to signed-in verified
-            // users; add-ons are no longer payment-gated.
+            // Persistent (until dismissed) streaming-source setup nudge.
             val pandaNudgeEligible = authState.user != null &&
                 authState.user?.isVerified == true
             DesktopPandaSetupNudgeCard(
                 onSetupClick = onOpenPandaSetup,
                 eligible = pandaNudgeEligible,
             )
-            DesktopBetaProgramSection(
-                compact = true,
-                hasPremiumAccess = true,
-                onOpenAccount = { selectedCategory = SettingsCategory.ACCOUNT },
-            )
-
             when (selectedCategory) {
                 SettingsCategory.SOURCES -> SourcesSection(
                     setupIntentsViewModel = setupIntentsViewModel,
@@ -328,13 +329,18 @@ fun V2SettingsPage(
                     settingsState = settingsState,
                     settingsViewModel = settingsViewModel,
                     homeViewModel = homeViewModel,
+                    onResetFeedback = { showResetFeedback = true },
                 )
-                SettingsCategory.ACCOUNT -> AccountSection(
+                SettingsCategory.ACCOUNT -> Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                    TorveGhostButton(ds("Household profiles"), onOpenProfiles)
+                    DesktopSyncStatus(settingsState, settingsViewModel)
+                    AccountSection(
                     authState = authState,
                     authController = authController,
                     onOpenManageDevices = onOpenManageDevices,
                     onOpenStats = onOpenStats,
                 )
+                }
                 SettingsCategory.INTEGRATIONS -> IntegrationsSection(
                     settingsState = settingsState,
                     settingsViewModel = settingsViewModel,
@@ -399,8 +405,36 @@ private fun CustomizationSection(
     settingsState: SettingsUiState,
     settingsViewModel: SettingsViewModel,
     homeViewModel: com.torve.presentation.home.HomeViewModel,
+    onResetFeedback: () -> Unit,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+        TorveGhostButton(ds("Reset recommendation feedback"), onResetFeedback)
+        TorveSectionCard(title = ds("Playback preset"), supportingText = ds("Choose a starting point, then adjust individual settings as needed.")) {
+            val preferences = settingsViewModel.buildStreamPreferences()
+            val selected = com.torve.domain.model.PlaybackPreset.recognize(preferences)
+            com.torve.domain.model.PlaybackPreset.entries.forEach { preset ->
+                TorveGhostButton(
+                    text = "${if (preset == selected) "✓ " else ""}${ds(preset.label)}",
+                    onClick = { settingsViewModel.applyPlaybackPreset(preset) },
+                    enabled = preset.isAvailable(preferences) && preset != com.torve.domain.model.PlaybackPreset.CUSTOM,
+                )
+                if (preset == selected) Text(ds(preset.description), style = MaterialTheme.typography.bodySmall)
+            }
+        }
+        TorveSectionCard(title = ds("Optional features"), supportingText = ds("Choose the services and sections you use.")) {
+            com.torve.presentation.settings.OptionalAppFeature.availableEntries.forEach { feature ->
+                PreferenceToggleRow(
+                    title = ds(when (feature) {
+                        com.torve.presentation.settings.OptionalAppFeature.JELLYFIN -> "Jellyfin"
+                        com.torve.presentation.settings.OptionalAppFeature.SPORTS -> "Sports"
+                        com.torve.presentation.settings.OptionalAppFeature.CHANNELS -> "Live TV"
+                        com.torve.presentation.settings.OptionalAppFeature.ARR_STACK -> "Requests and automation"
+                    }),
+                    subtitle = "", checked = settingsState.optionalAppFeatures.isEnabled(feature),
+                    onCheckedChange = { settingsViewModel.setOptionalAppFeature(feature, it) },
+                )
+            }
+        }
         TorveSectionCard(
             title = ds("Appearance"),
             supportingText = ds("Theme, language, and region for this device."),
@@ -471,6 +505,12 @@ private fun CustomizationSection(
             )
         }
 
+        TorveSectionCard(title = "Show featured hero", supportingText = "Turn off a spotlight to start that page at its rows.") {
+            val configs by homeViewModel.sectionConfigs.collectAsState()
+            PreferenceToggleRow("Home", "Featured spotlight", configs.firstOrNull { it.section == com.torve.domain.model.HomeSection.HERO }?.enabled ?: true) { homeViewModel.toggleSection(com.torve.domain.model.HomeSection.HERO, it) }
+            PreferenceToggleRow("Movies", "Featured spotlight", settingsState.moviesHeroEnabled) { settingsViewModel.setCatalogueHeroEnabled("movie", it) }
+            PreferenceToggleRow("TV Shows", "Featured spotlight", settingsState.showsHeroEnabled) { settingsViewModel.setCatalogueHeroEnabled("tv", it) }
+        }
         HomeShelfEditorCard(
             settingsState = settingsState,
             homeViewModel = homeViewModel,
@@ -762,12 +802,6 @@ private fun CustomizationSection(
                 onClear = { settingsViewModel.setAdultDownloadPath("") },
             )
             FolderPickerRow(
-                label = "Sports Download Folder",
-                path = settingsState.sportsDownloadPath,
-                onPick = { picked -> settingsViewModel.setSportsDownloadPath(picked) },
-                onClear = { settingsViewModel.setSportsDownloadPath("") },
-            )
-            FolderPickerRow(
                 label = "Recordings Folder",
                 path = settingsState.recordingDownloadPath,
                 onPick = { picked -> settingsViewModel.setRecordingDownloadPath(picked) },
@@ -1052,185 +1086,6 @@ private fun formatIsoDateForDisplay(iso: String): String {
 }
 
 @Composable
-private fun DesktopBetaProgramSection(
-    compact: Boolean = false,
-    hasPremiumAccess: Boolean = false,
-    onOpenAccount: (() -> Unit)? = null,
-) {
-    val betaViewModel = remember {
-        org.koin.mp.KoinPlatform.getKoin().get<BetaProgramViewModel>()
-    }
-    val state by betaViewModel.state.collectAsState()
-    val discordInviteUrl = resolveDesktopDiscordInviteUrl(state.discordInviteUrl)
-    LaunchedEffect(Unit) {
-        betaViewModel.onOpenBetaProgram()
-    }
-    if (!shouldShowBetaProgramSettingsEntry(state, hasPremiumAccess = hasPremiumAccess)) {
-        return
-    }
-
-    TorveSectionCard(
-        title = ds("Torve Beta Program"),
-        supportingText = if (compact) {
-            ds("Want early access? Apply from Settings.")
-        } else {
-            BetaProgramCopy.DETAIL_INTRO
-        },
-        trailing = {
-            TorveBadge(
-                text = state.primaryBadge,
-                tone = betaBadgeTone(state),
-            )
-        },
-    ) {
-        Text(
-            text = BetaProgramCopy.DEADLINE,
-            style = MaterialTheme.typography.bodyMedium,
-            color = TorveDesktopThemeTokens.colors.textSecondary,
-        )
-        Text(
-            text = state.body,
-            style = MaterialTheme.typography.bodyMedium,
-            color = TorveDesktopThemeTokens.colors.textPrimary,
-        )
-        if (hasPremiumAccess) {
-            Text(
-                text = BetaProgramCopy.PREMIUM_TESTER_APPLICATION,
-                style = MaterialTheme.typography.bodyMedium,
-                color = TorveDesktopThemeTokens.colors.textPrimary,
-                fontWeight = FontWeight.SemiBold,
-            )
-            Text(
-                text = BetaProgramCopy.FREE_PREMIUM_NON_PREMIUM_ONLY,
-                style = MaterialTheme.typography.bodySmall,
-                color = TorveDesktopThemeTokens.colors.textSecondary,
-            )
-        }
-
-        state.generatedCode?.takeIf { it.isNotBlank() }?.let { code ->
-            Surface(
-                color = TorveDesktopThemeTokens.colors.fieldSurface,
-                shape = RoundedCornerShape(TorveDesktopThemeTokens.radii.md),
-                border = BorderStroke(1.dp, TorveDesktopThemeTokens.colors.accentContainerStrong),
-            ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(14.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp),
-                ) {
-                    Text(
-                        text = ds("Discord link code"),
-                        style = MaterialTheme.typography.labelMedium,
-                        color = TorveDesktopThemeTokens.colors.accent,
-                        fontWeight = FontWeight.SemiBold,
-                    )
-                    Text(
-                        text = code,
-                        style = MaterialTheme.typography.headlineMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = TorveDesktopThemeTokens.colors.textPrimary,
-                    )
-                    state.generatedCodeExpiresAt?.let {
-                        Text(
-                            text = ds("Expires at") + " $it",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = TorveDesktopThemeTokens.colors.textSecondary,
-                        )
-                    }
-                    Text(
-                        text = BetaProgramCopy.DISCORD_INSTRUCTION,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = TorveDesktopThemeTokens.colors.textSecondary,
-                    )
-                    Text(
-                        text = ds("Torve Discord") + ": $discordInviteUrl",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = TorveDesktopThemeTokens.colors.textSecondary,
-                    )
-                }
-            }
-        }
-
-        if (!compact || state.generatedCode != null || state.errorMessage != null) {
-            Text(
-                text = BetaProgramCopy.SAFETY,
-                style = MaterialTheme.typography.bodySmall,
-                color = TorveDesktopThemeTokens.colors.textSecondary,
-            )
-        }
-
-        state.errorMessage?.let { message ->
-            TorveBanner(
-                title = ds("Beta status issue"),
-                description = message,
-                tone = TorveBannerTone.Error,
-            )
-        }
-
-        FlowRow(
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            TorvePrimaryButton(
-                text = if (state.isGeneratingCode) ds("Generating...") else state.primaryActionLabel,
-                onClick = {
-                    handleDesktopBetaPrimaryAction(
-                        state = state,
-                        viewModel = betaViewModel,
-                        onOpenAccount = onOpenAccount,
-                    )
-                },
-                enabled = !state.isGeneratingCode && !state.isRefreshing && !state.isLoading,
-            )
-            if (discordInviteUrl != null) {
-                TorveSecondaryButton(
-                    text = ds("Open Discord"),
-                    onClick = { openDesktopUrl(discordInviteUrl) },
-                )
-            }
-            if (state.showVerifyEmail) {
-                TorveSecondaryButton(
-                    text = ds("Resend Verification Email"),
-                    onClick = betaViewModel::onResendVerificationEmail,
-                )
-            }
-            TorveGhostButton(
-                text = if (state.isRefreshing) ds("Refreshing...") else ds("Refresh Status"),
-                onClick = betaViewModel::onRefreshStatus,
-                enabled = !state.isRefreshing && !state.isLoading,
-            )
-        }
-    }
-}
-
-private fun handleDesktopBetaPrimaryAction(
-    state: BetaProgramUiState,
-    viewModel: BetaProgramViewModel,
-    onOpenAccount: (() -> Unit)?,
-) {
-    when {
-        !state.isSignedIn -> onOpenAccount?.invoke()
-        state.showVerifyEmail -> viewModel.onVerifyEmail()
-        state.showGenerateCode -> viewModel.onGenerateCode()
-        state.showCopyCode && !state.generatedCode.isNullOrBlank() -> {
-            if (copyDesktopText(state.generatedCode.orEmpty())) {
-                viewModel.onCopyCode()
-            }
-        }
-        else -> viewModel.onRefreshStatus()
-    }
-}
-
-private fun betaBadgeTone(state: BetaProgramUiState): TorveBadgeTone = when {
-    state.betaAccessActive -> TorveBadgeTone.Success
-    state.isEmailVerificationRequired -> TorveBadgeTone.Warning
-    state.errorMessage != null -> TorveBadgeTone.Error
-    state.applicationStatus == com.torve.domain.beta.BetaApplicationStatus.SUBMITTED -> TorveBadgeTone.Accent
-    else -> TorveBadgeTone.Accent
-}
-
-@Composable
 private fun AccountSection(
     authState: DesktopAuthUiState,
     authController: DesktopAuthController,
@@ -1251,9 +1106,6 @@ private fun AccountSection(
                 },
             )
         }
-        DesktopBetaProgramSection(
-            hasPremiumAccess = true,
-        )
         TorveSectionCard(
             title = ds("Identity"),
             supportingText = ds("Desktop account status, verification, and access are visible here."),
@@ -1338,8 +1190,50 @@ private fun IntegrationsSection(
     onKodiPortChange: (String) -> Unit,
     onOpenPandaSetup: () -> Unit,
 ) {
+    val accountSyncScope = rememberCoroutineScope()
+    val automationSettingsViewModel = remember {
+        org.koin.mp.KoinPlatform.getKoin()
+            .get<com.torve.presentation.integrations.AutomationSettingsViewModel>()
+    }
+    val automationSettingsState by automationSettingsViewModel.state.collectAsState()
+    val readiness = remember(settingsState, automationSettingsState.instances) {
+        buildIntegrationReadinessSummary(settingsState, automationSettingsState.instances)
+    }
+    var accountSyncBusy by remember { mutableStateOf(false) }
+    var accountSyncMessage by remember { mutableStateOf<String?>(null) }
     Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+        DesktopIntegrationReadinessCard(readiness)
+        TorveSectionCard(
+            title = ds("Account setup sync"),
+            supportingText = ds("Refresh saved providers, Seerr and account-enabled ARR connections on this computer."),
+        ) {
+            TorvePrimaryButton(
+                text = if (accountSyncBusy) ds("Refreshing...") else ds("Refresh all"),
+                enabled = !accountSyncBusy,
+                onClick = {
+                    accountSyncBusy = true
+                    accountSyncMessage = null
+                    accountSyncScope.launch {
+                        val result = accountSessionCoordinator.refreshAccountDataAfterCredentialTransfer(
+                            initialMessage = "Refreshing account setup...",
+                        )
+                        settingsViewModel.refreshSettings()
+                        accountSyncMessage = result.error ?: "Account setup refreshed"
+                        accountSyncBusy = false
+                    }
+                },
+            )
+            accountSyncMessage?.let {
+                TorveBanner(
+                    title = ds("Account sync"),
+                    description = it,
+                    tone = if (it.contains("issue", ignoreCase = true)) TorveBannerTone.Error else TorveBannerTone.Success,
+                )
+            }
+            if (accountSyncBusy) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+        }
         PandaSection(onOpenPandaSetup = onOpenPandaSetup)
+        DesktopAutomationSection()
         TraktSection(settingsState, settingsViewModel)
         SimklSection(settingsState, settingsViewModel)
         AiSection(settingsState, settingsViewModel, accountSessionCoordinator)
@@ -1359,13 +1253,50 @@ private fun IntegrationsSection(
 }
 
 @Composable
+private fun DesktopIntegrationReadinessCard(summary: IntegrationReadinessSummary) {
+    TorveSectionCard(
+        title = ds("Your media setup"),
+        supportingText = ds("One status view for immediate playback, personal media, library requests, tracking and advanced automation."),
+    ) {
+        summary.items.forEach { item ->
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = ds(item.title),
+                        color = TorveDesktopThemeTokens.colors.textPrimary,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    Text(
+                        text = ds(item.detail),
+                        color = TorveDesktopThemeTokens.colors.textSecondary,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+                TorveBadge(
+                    text = ds(item.statusLabel),
+                    tone = when (item.status) {
+                        IntegrationReadinessStatus.READY -> TorveBadgeTone.Success
+                        IntegrationReadinessStatus.NEEDS_ATTENTION -> TorveBadgeTone.Warning
+                        IntegrationReadinessStatus.NOT_CONFIGURED -> TorveBadgeTone.Neutral
+                    },
+                )
+            }
+        }
+    }
+}
+
+@Composable
 private fun PandaSection(onOpenPandaSetup: () -> Unit) {
     TorveSectionCard(
-        title = ds("Panda (guided setup)"),
-        supportingText = ds("Configure debrid providers, torrent sources, usenet, and quality - Panda installs itself as an add-on."),
+        title = ds("Streaming sources"),
+        supportingText = ds("Connect Debrid or Usenet, choose source and quality preferences, and check connection health in one place."),
     ) {
         TorvePrimaryButton(
-            text = ds("Open Panda setup"),
+            text = ds("Open streaming setup"),
             onClick = onOpenPandaSetup,
         )
     }
@@ -1474,6 +1405,7 @@ private fun SimklSection(
                 onClick = settingsViewModel::disconnectSimkl,
                 enabled = settingsState.simklConnected,
             )
+            TorveGhostButton(ds("Sync Now"), settingsViewModel::checkSimklConnection, enabled = settingsState.simklConnected && !settingsState.simklLoading)
         }
         settingsState.simklUser?.let {
             TorveListRow(title = it.username, subtitle = ds("SIMKL account connected"))
@@ -1636,8 +1568,8 @@ private fun MediaServersSection(
     val scope = rememberCoroutineScope()
     val noneLabel = ds("None")
     TorveSectionCard(
-        title = ds("Jellyfin and Plex"),
-        supportingText = ds("Server URLs and auth tokens are configurable directly in the desktop shell."),
+        title = ds("Jellyfin, Plex and Seerr"),
+        supportingText = ds("Connect playback libraries and the request service used by Add to my library."),
     ) {
         TorveTextField(
             value = settingsState.jellyfinServerUrl,
@@ -1655,20 +1587,7 @@ private fun MediaServersSection(
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             TorvePrimaryButton(
                 text = ds("Save and Test Jellyfin"),
-                onClick = {
-                    settingsViewModel.saveAndTestJellyfinConnection()
-                    val apiKey = settingsState.jellyfinApiKey
-                    if (apiKey.isNotBlank()) {
-                        scope.launch {
-                            accountSessionCoordinator.saveIntegrationToBackend(
-                                integrationType = "JELLYFIN_API_KEY",
-                                credentials = mapOf("api_key" to apiKey),
-                                displayIdentifier = "Jellyfin",
-                                config = mapOf("server_url" to settingsState.jellyfinServerUrl),
-                            )
-                        }
-                    }
-                },
+                onClick = { settingsViewModel.saveAndTestJellyfinConnection() },
                 enabled = settingsState.jellyfinServerUrl.isNotBlank() && settingsState.jellyfinApiKey.isNotBlank(),
             )
         }
@@ -1734,6 +1653,51 @@ private fun MediaServersSection(
         if (settingsState.plexLoading) {
             LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
         }
+        Text(ds("Seerr library requests"), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+        Text(
+            ds("Seerr safely sends movie and selected-season requests to Radarr and Sonarr while Watch now keeps streaming immediately."),
+            style = MaterialTheme.typography.bodySmall,
+            color = TorveDesktopThemeTokens.colors.textSecondary,
+        )
+        TorveTextField(
+            value = settingsState.seerrServerUrl,
+            onValueChange = settingsViewModel::setSeerrServerUrl,
+            label = ds("Seerr Server URL"),
+            modifier = Modifier.fillMaxWidth(),
+        )
+        TorveTextField(
+            value = settingsState.seerrApiKey,
+            onValueChange = settingsViewModel::updateSeerrApiKeyInput,
+            label = ds("Seerr API Key"),
+            modifier = Modifier.fillMaxWidth(),
+            visualTransformation = PasswordVisualTransformation(),
+        )
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            TorvePrimaryButton(
+                text = ds("Save and Test Seerr"),
+                onClick = {
+                    settingsViewModel.saveAndTestSeerrConnection(
+                        com.torve.domain.integrations.IntegrationStorageMode.ACCOUNT,
+                    )
+                },
+                enabled = settingsState.seerrServerUrl.isNotBlank() &&
+                    settingsState.seerrApiKey.isNotBlank() &&
+                    !settingsState.seerrLoading,
+            )
+            TorveGhostButton(
+                text = ds("Disconnect Seerr"),
+                onClick = settingsViewModel::disconnectSeerr,
+                enabled = settingsState.seerrConnected,
+            )
+        }
+        settingsState.seerrStatusMessage?.let {
+            TorveBanner(
+                title = ds("Seerr status"),
+                description = it,
+                tone = if (settingsState.seerrConnected) TorveBannerTone.Success else TorveBannerTone.Info,
+            )
+        }
+        if (settingsState.seerrLoading) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
     }
 }
 
@@ -2481,7 +2445,7 @@ private fun PlaylistsSection(
             }
             TorveListRow(
                 title = selectedPlaylist?.name ?: ds("No playlist selected"),
-                subtitle = describeEpgState(channelsState.epgState),
+                subtitle = describeEpgState(channelsState.epgState, channelsState.epgRefreshProgress),
                 trailing = {
                     Row(
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -3325,8 +3289,8 @@ private fun AboutSection(
             )
 
             // Update channel
-            val updateRepo = System.getenv(com.torve.desktop.updates.UpdateChecker.REPO_ENV)?.takeIf { it.isNotBlank() }
-            val updateFeed = System.getenv(com.torve.desktop.updates.UpdateChecker.FEED_ENV)?.takeIf { it.isNotBlank() }
+            val updateRepo = com.torve.desktop.updates.UpdateChecker.resolveDefaultRepo()
+            val updateFeed = com.torve.desktop.updates.UpdateChecker.resolveDefaultFeed()
             val updateChannel = updateFeed ?: updateRepo?.let { "github.com/$it" }
             TorveListRow(
                 title = ds("Update channel"),
@@ -3401,7 +3365,7 @@ private fun AboutSection(
                     },
                 )
                 val statusText: String? = when {
-                    !checkerEnabled -> "Disabled — set TORVE_UPDATE_REPO or TORVE_UPDATE_FEED."
+                    !checkerEnabled -> "Update checks are unavailable in this build."
                     checkInProgress -> null  // button label already conveys this
                     lastCheckedAt == null -> null  // never run yet from this button
                     else -> when (val s = updaterState) {
@@ -3713,8 +3677,8 @@ private fun formatCategoryLabel(
     return if (code != null) "[$code] $resolvedName" else resolvedName
 }
 
-private fun describeEpgState(state: EpgState): String = when (state) {
-    EpgState.Loading -> "Loading programme guide data for the selected playlist."
+private fun describeEpgState(state: EpgState, progress: EpgRefreshProgress? = null): String = when (state) {
+    EpgState.Loading -> progress?.userMessage() ?: "Loading programme guide data for the selected playlist."
     EpgState.NotConfigured -> "No EPG source is configured for the selected playlist."
     is EpgState.Loaded -> buildString {
         append("Loaded ${state.sourceProgrammeCount} programmes across ${state.sourceChannelCount} EPG channels")
@@ -4382,8 +4346,8 @@ private fun SourcesSection(
     val colors = TorveDesktopThemeTokens.colors
     if (setupIntentsViewModel == null) {
         TorveSectionCard(
-            title = ds("Setup & Sources"),
-            supportingText = ds("Provider health is initializing..."),
+            title = ds("Connections"),
+            supportingText = ds("Connection health is initializing..."),
         ) {}
         return
     }
@@ -4391,8 +4355,8 @@ private fun SourcesSection(
     val rawEntries by setupIntentsViewModel.rawEntries.collectAsState()
 
     TorveSectionCard(
-        title = ds("Setup & Sources"),
-        supportingText = ds("Tell Torve what you have. Each path is tested as soon as you save credentials."),
+        title = ds("Connections"),
+        supportingText = ds("Choose what you want to connect. Torve checks each path after credentials are saved."),
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
             summaries.forEach { summary ->
@@ -4411,13 +4375,8 @@ private fun SourcesSection(
                     },
                     onOpenSetup = {
                         when (summary.intent) {
-                            // Debrid + Usenet both flow through Panda's
-                            // guided setup. Routing DEBRID to the
-                            // Account category was the legacy path
-                            // (account-attached API keys); the modern
-                            // path is the Panda OAuth/API-key wizard
-                            // which also handles AllDebrid / Premiumize
-                            // / TorBox under the same surface.
+                            // Debrid + Usenet share the guided streaming-source
+                            // flow; Panda remains an internal orchestration detail.
                             com.torve.presentation.setup.SetupIntent.DEBRID ->
                                 onOpenPandaSetup()
                             com.torve.presentation.setup.SetupIntent.IPTV ->
@@ -4521,6 +4480,9 @@ private fun SourcesSection(
                 com.torve.domain.transfer.SecretCategory.PANDA ->
                     "Usenet / Easynews / NZB indexers" to
                         "Usenet warming, downloads, and instant playback for cached items are off."
+                com.torve.domain.transfer.SecretCategory.ARR_STACK ->
+                    "Media automation" to
+                        "Permanent-library requests and automation status are unavailable."
             }
         }
         TorveSectionCard(
@@ -4596,14 +4558,14 @@ private fun SourcesSection(
                 ) {
                     // "Set up manually" used to just close the card -
                     // now it dismisses the recovery card AND nudges the
-                    // user to use the per-provider Setup & Sources rows
+                    // user to use the per-provider Connections rows
                     // above. The card naturally re-appears on next
                     // refresh if categories are still missing.
                     TorveGhostButton(
                         text = ds("Set up manually"),
                         onClick = {
                             recoverySnap = null
-                            redirectNotice = "Use the Setup & Sources cards above - " +
+                            redirectNotice = "Use the Connections cards above - " +
                                 "tap \"Open setup\" on each row that says \"Not set up\"."
                         },
                     )
@@ -4667,7 +4629,8 @@ private fun SourcesSection(
                         }
                         com.torve.domain.providerhealth.ProviderHealthCategory.PLEX_JELLYFIN,
                         com.torve.domain.providerhealth.ProviderHealthCategory.TRAKT,
-                        com.torve.domain.providerhealth.ProviderHealthCategory.SIMKL -> {
+                        com.torve.domain.providerhealth.ProviderHealthCategory.SIMKL,
+                        com.torve.domain.providerhealth.ProviderHealthCategory.REQUEST_MANAGER -> {
                             redirectNotice = null
                             onSwitchToCategory(SettingsCategory.INTEGRATIONS)
                         }

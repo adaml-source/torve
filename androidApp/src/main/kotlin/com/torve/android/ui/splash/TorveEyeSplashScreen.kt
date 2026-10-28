@@ -60,6 +60,25 @@ private enum class SplashPhase {
     PORTAL,
 }
 
+internal object TorveSplashTiming {
+    const val SOUND_FADE_IN_STEPS = 4
+    const val SOUND_FADE_IN_STEP_MS = 8L
+    const val SOUND_LEAD_IN_MS = 8L
+    const val EYE_OPEN_MS = 220L
+    const val LETTER_EMERGE_MS = 320L
+    const val HOLD_MS = 380L
+    const val TAGLINE_DELAY_MS = 80L
+    const val TAGLINE_FADE_MS = 180L
+    const val CONSUMPTION_MS = 300L
+    const val PORTAL_FADE_STEPS = 12
+    const val PORTAL_FADE_STEP_MS = 15L
+    const val PORTAL_MS = PORTAL_FADE_STEPS * PORTAL_FADE_STEP_MS
+
+    const val EXPECTED_TOTAL_MS =
+        SOUND_FADE_IN_STEPS * SOUND_FADE_IN_STEP_MS + SOUND_LEAD_IN_MS +
+            EYE_OPEN_MS + LETTER_EMERGE_MS + HOLD_MS + CONSUMPTION_MS + PORTAL_MS
+}
+
 // ── Colors ──
 private val AmberMain = Color(0xFFD4A03C)
 private val AmberHot = Color(0xFFECC44E)
@@ -79,9 +98,9 @@ private data class LetterDef(
 private val LETTERS = listOf(
     LetterDef('T', 0L, PI.toFloat(), 1.2f),
     // O is the eye — not in this list
-    LetterDef('R', 120L, 0.3f, 1.0f),
-    LetterDef('V', 240L, -PI.toFloat() / 3f, 1.5f),
-    LetterDef('E', 360L, PI.toFloat() / 4f, 2.0f),
+    LetterDef('R', 45L, 0.3f, 1.0f),
+    LetterDef('V', 90L, -PI.toFloat() / 3f, 1.5f),
+    LetterDef('E', 135L, PI.toFloat() / 4f, 2.0f),
 )
 
 @Composable
@@ -132,12 +151,12 @@ fun TorveEyeSplashScreen(
     LaunchedEffect(Unit) {
         // Start playback then fade in over ~80ms to mask MP3 decoder priming pop
         mediaPlayer?.start()
-        for (step in 1..8) {
-            val vol = targetVolume * step / 8f
+        for (step in 1..TorveSplashTiming.SOUND_FADE_IN_STEPS) {
+            val vol = targetVolume * step / TorveSplashTiming.SOUND_FADE_IN_STEPS.toFloat()
             try { mediaPlayer?.setVolume(vol, vol) } catch (_: Exception) {}
-            delay(10)
+            delay(TorveSplashTiming.SOUND_FADE_IN_STEP_MS)
         }
-        delay(20) // remaining time to align with original 100ms delay
+        delay(TorveSplashTiming.SOUND_LEAD_IN_MS)
 
         // Act 1: Eye opening
         phase = SplashPhase.EYE_OPENING
@@ -145,7 +164,7 @@ fun TorveEyeSplashScreen(
         // Animate eye opening over 400ms with overshoot
         while (eyeOpenProgress < 1f) {
             val elapsed = (System.currentTimeMillis() - eyeOpenStart).toFloat()
-            eyeOpenProgress = (elapsed / 400f).coerceIn(0f, 1f)
+            eyeOpenProgress = (elapsed / TorveSplashTiming.EYE_OPEN_MS).coerceIn(0f, 1f)
             delay(16)
         }
 
@@ -154,7 +173,7 @@ fun TorveEyeSplashScreen(
         val emergeStart = System.currentTimeMillis()
         while (letterEmergeProgress < 1f) {
             val elapsed = (System.currentTimeMillis() - emergeStart).toFloat()
-            letterEmergeProgress = (elapsed / 800f).coerceIn(0f, 1f)
+            letterEmergeProgress = (elapsed / TorveSplashTiming.LETTER_EMERGE_MS).coerceIn(0f, 1f)
             delay(16)
         }
 
@@ -162,9 +181,11 @@ fun TorveEyeSplashScreen(
         phase = SplashPhase.HOLD
         // Fade in tagline at ~400ms into hold
         val holdStart = System.currentTimeMillis()
-        while (System.currentTimeMillis() - holdStart < 1600L) {
+        while (System.currentTimeMillis() - holdStart < TorveSplashTiming.HOLD_MS) {
             val elapsed = (System.currentTimeMillis() - holdStart).toFloat()
-            taglineAlpha = ((elapsed - 400f) / 400f).coerceIn(0f, 1f)
+            taglineAlpha = (
+                (elapsed - TorveSplashTiming.TAGLINE_DELAY_MS) / TorveSplashTiming.TAGLINE_FADE_MS
+                ).coerceIn(0f, 1f)
             delay(16)
         }
 
@@ -173,7 +194,7 @@ fun TorveEyeSplashScreen(
         val consumeStart = System.currentTimeMillis()
         while (consumptionProgress < 1f) {
             val elapsed = (System.currentTimeMillis() - consumeStart).toFloat()
-            consumptionProgress = (elapsed / 1000f).coerceIn(0f, 1f)
+            consumptionProgress = (elapsed / TorveSplashTiming.CONSUMPTION_MS).coerceIn(0f, 1f)
             delay(16)
         }
 
@@ -185,13 +206,15 @@ fun TorveEyeSplashScreen(
     LaunchedEffect(phase) {
         if (phase == SplashPhase.PORTAL) {
             val portalStart = System.currentTimeMillis()
-            val steps = 20
-            val stepDelay = 25L // 20 × 25ms = 500ms
+            val steps = TorveSplashTiming.PORTAL_FADE_STEPS
+            val stepDelay = TorveSplashTiming.PORTAL_FADE_STEP_MS
             for (i in steps downTo 0) {
                 val vol = targetVolume * i.toFloat() / steps
                 try { mediaPlayer?.setVolume(vol, vol) } catch (_: Exception) {}
                 // Also advance portal progress
-                portalProgress = ((System.currentTimeMillis() - portalStart).toFloat() / 500f)
+                portalProgress = (
+                    (System.currentTimeMillis() - portalStart).toFloat() / TorveSplashTiming.PORTAL_MS
+                    )
                     .coerceIn(0f, 1f)
                 delay(stepDelay)
             }
@@ -495,7 +518,11 @@ fun TorveEyeSplashScreen(
                         }
                         SplashPhase.LETTERS_EMERGING -> {
                             // Staggered emergence from eye center
-                            val staggeredProgress = ((letterEmergeProgress * 800f - letter.emergeDelay) / (800f - letter.emergeDelay))
+                            val emergeMs = TorveSplashTiming.LETTER_EMERGE_MS.toFloat()
+                            val staggeredProgress = (
+                                (letterEmergeProgress * emergeMs - letter.emergeDelay) /
+                                    (emergeMs - letter.emergeDelay)
+                                )
                                 .coerceIn(0f, 1f)
                             // Ease-out for smooth deceleration
                             val easedProgress = 1f - (1f - staggeredProgress) * (1f - staggeredProgress)

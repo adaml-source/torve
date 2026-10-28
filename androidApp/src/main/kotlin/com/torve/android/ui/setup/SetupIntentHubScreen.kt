@@ -1,5 +1,7 @@
 package com.torve.android.ui.setup
 
+import com.torve.android.ui.community.parityLabel as localizedUiText
+
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -103,16 +105,16 @@ fun SetupIntentHubScreen(
                 onClick = onExit,
                 modifier = Modifier.align(Alignment.End),
             ) {
-                Text("Close setup")
+                Text(localizedUiText("Close setup"))
             }
         }
         Text(
-            text = "Set up Torve for watching.",
+            text = localizedUiText("Set up Torve for watching."),
             style = MaterialTheme.typography.headlineSmall,
             fontWeight = FontWeight.Bold,
         )
         Text(
-            text = "Start with one source. Panda covers Debrid and Usenet; IPTV is separate for live TV; Plex/Jellyfin connects your existing library.",
+            text = localizedUiText("Start with one source. Connect Debrid or Usenet for streaming, IPTV for live TV, or Plex/Jellyfin for an existing library."),
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -156,7 +158,7 @@ fun SetupIntentHubScreen(
             // reads as two ways to do the same thing. Hide it then.
             if (!summary.canStartWatching) {
                 TextButton(onClick = onUseGuidedWizard) {
-                    Text("Use guided wizard instead")
+                    Text(localizedUiText("Use guided wizard instead"))
                 }
             } else {
                 Spacer(Modifier.width(0.dp))
@@ -168,7 +170,7 @@ fun SetupIntentHubScreen(
                 // Use a verb that signals "you're done with setup, this
                 // takes you out". "Continue" was ambiguous — readers
                 // expected it to advance setup, not exit.
-                Text(if (summary.canStartWatching) "Start watching" else "Set up at least one path")
+                Text(localizedUiText(if (summary.canStartWatching) "Start watching" else "Set up at least one path"))
             }
         }
         if (!summary.canStartWatching && onSkipToApp != null) {
@@ -176,7 +178,7 @@ fun SetupIntentHubScreen(
                 onClick = onSkipToApp,
                 modifier = Modifier.align(Alignment.End),
             ) {
-                Text("Explore without sources")
+                Text(localizedUiText("Explore without sources"))
             }
         }
     }
@@ -201,7 +203,7 @@ private fun ReadyToWatchSummaryCard(summary: ReadyToWatchSummary) {
     ) {
         Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Text(
-                text = when {
+                text = localizedUiText(when {
                     summary.canStartWatching && summary.attentionCount == 0 ->
                         "Ready to watch — ${summary.ready.size} path${if (summary.ready.size == 1) "" else "s"} green."
                     summary.canStartWatching ->
@@ -209,7 +211,7 @@ private fun ReadyToWatchSummaryCard(summary: ReadyToWatchSummary) {
                     summary.invalid.isNotEmpty() ->
                         "Setup incomplete — ${summary.invalid.size} path${if (summary.invalid.size == 1) "" else "s"} need fixing."
                     else -> "Pick a path to start."
-                },
+                }),
                 style = MaterialTheme.typography.titleSmall,
                 fontWeight = FontWeight.SemiBold,
             )
@@ -219,7 +221,7 @@ private fun ReadyToWatchSummaryCard(summary: ReadyToWatchSummary) {
                 if (summary.invalid.isNotEmpty()) add("Fix: " + summary.invalid.joinToString(", ") { it.shortName() })
             }
             Text(
-                text = parts.joinToString(" • ").ifBlank { "No paths configured yet." },
+                text = localizedUiText(parts.joinToString(" • ").ifBlank { "No paths configured yet." }),
                 style = MaterialTheme.typography.bodySmall,
             )
         }
@@ -273,16 +275,16 @@ private fun SetupIntentRow(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Button(onClick = onSetUp) {
-                    Text(if (resolvedStatus == SetupIntentStatus.READY) "Edit" else "Set up")
+                    Text(localizedUiText(if (resolvedStatus == SetupIntentStatus.READY) "Edit" else "Set up"))
                 }
                 OutlinedButton(
                     onClick = onValidate,
                     enabled = state.status != SetupIntentStatus.VALIDATING,
                 ) {
-                    Text("Validate")
+                    Text(localizedUiText("Validate"))
                 }
                 if (resolvedStatus != SetupIntentStatus.NOT_STARTED) {
-                    TextButton(onClick = onReset) { Text("Reset") }
+                    TextButton(onClick = onReset) { Text(localizedUiText("Reset")) }
                 }
                 if (state.status == SetupIntentStatus.VALIDATING) {
                     CircularProgressIndicator(
@@ -331,7 +333,7 @@ private fun StatusChip(status: SetupIntentStatus) {
     }
     AssistChip(
         onClick = {},
-        label = { Text(label, style = MaterialTheme.typography.labelSmall) },
+        label = { Text(localizedUiText(label), style = MaterialTheme.typography.labelSmall) },
         colors = AssistChipDefaults.assistChipColors(
             containerColor = container,
             labelColor = content,

@@ -17,7 +17,17 @@ class TorvePlayerView @JvmOverloads constructor(
     attrs: AttributeSet? = null,
     defStyleAttr: Int = 0,
 ) : PlayerView(context, attrs, defStyleAttr) {
+    private val frameRateMatcher = VideoFrameRateMatcher()
+    fun configurePresentation(matchFrameRate: Boolean, subtitleClearancePx: Int) {
+        val exo = player as? androidx.media3.exoplayer.ExoPlayer
+        exo?.setVideoChangeFrameRateStrategy(androidx.media3.common.C.VIDEO_CHANGE_FRAME_RATE_STRATEGY_OFF)
+        val surface = (videoSurfaceView as? android.view.SurfaceView)?.holder?.surface
+        frameRateMatcher.apply(surface, matchFrameRate, exo?.videoFormat?.frameRate, exo?.isPlaying == true)
+        subtitleView?.setPadding(0, 0, 0, subtitleClearancePx.coerceAtLeast(0))
+    }
+
     override fun onDetachedFromWindow() {
+        frameRateMatcher.clear()
         try {
             super.onDetachedFromWindow()
         } catch (error: IllegalStateException) {

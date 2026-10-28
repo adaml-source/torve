@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="usenet_setup_menu">Usenet &amp; NZB-Indexer</string>
+    <string name="usenet_setup_summary">Newsserver, Indexer und Download-Client</string>
+    <string name="usenet_setup_server">@string/panda_setup_usenet_generic</string>
+    <string name="usenet_setup_key_saved">@string/usenet_setup_saved_secrets</string>
+    <string name="usenet_setup_remove">@string/common_remove</string>
+    <string name="usenet_setup_load_failed">Gespeicherte Usenet-Einstellungen konnten nicht geladen werden. Deine Einrichtung bleibt erhalten.</string>
+    <string name="usenet_setup_retry">Erneut laden</string>
+</resources>

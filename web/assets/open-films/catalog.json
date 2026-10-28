@@ -1,0 +1,101 @@
+{
+  "reviewed": "2026-10-12",
+  "films": [
+    {
+      "id": "charge",
+      "title": "Charge",
+      "year": 2022,
+      "poster": "charge-poster.jpg",
+      "assets": [
+        "charge-poster.jpg",
+        "charge-scene.png"
+      ],
+      "creator": "Blender Foundation / Blender Studio. Poster artwork by Andy Goralczyk; design by Hjalti Hjalmarsson.",
+      "source": "https://studio.blender.org/projects/charge/?asset=6234",
+      "license": "CC BY 4.0",
+      "license_url": "https://creativecommons.org/licenses/by/4.0/",
+      "terms": "https://studio.blender.org/terms-and-conditions/",
+      "changes": "Original image files retained. Responsive crops, scaling, dark overlays and Torve interface text are applied in the website and recreated preview captures."
+    },
+    {
+      "id": "spring",
+      "title": "Spring",
+      "year": 2019,
+      "poster": "spring-poster.jpg",
+      "assets": [
+        "spring-poster.jpg",
+        "spring-scene.png"
+      ],
+      "creator": "Blender Foundation / Blender Studio.",
+      "source": "https://studio.blender.org/projects/spring/?asset=909",
+      "license": "CC BY 4.0",
+      "license_url": "https://creativecommons.org/licenses/by/4.0/",
+      "terms": "https://studio.blender.org/terms-and-conditions/",
+      "changes": "Original image files retained. Responsive crops, scaling, dark overlays and Torve interface text are applied in the website and recreated preview captures."
+    },
+    {
+      "id": "sprite-fright",
+      "title": "Sprite Fright",
+      "year": 2021,
+      "poster": "sprite-fright-poster.jpg",
+      "assets": [
+        "sprite-fright-poster.jpg",
+        "sprite-fright-scene.jpg"
+      ],
+      "creator": "Blender Foundation / Blender Studio.",
+      "source": "https://studio.blender.org/projects/sprite-fright/?asset=5448",
+      "license": "CC BY 4.0",
+      "license_url": "https://creativecommons.org/licenses/by/4.0/",
+      "terms": "https://studio.blender.org/terms-and-conditions/",
+      "changes": "Original image files retained. Responsive crops, scaling, dark overlays and Torve interface text are applied in the website and recreated preview captures."
+    },
+    {
+      "id": "wing-it",
+      "title": "Wing It!",
+      "year": 2023,
+      "poster": "wing-it-poster.png",
+      "assets": [
+        "wing-it-poster.png"
+      ],
+      "creator": "Blender Foundation / Blender Studio. Poster design by Rik Schutte, with painting and finishing by Vivien Lulkowski.",
+      "source": "https://studio.blender.org/blog/creating-the-poster-for-wing-it/",
+      "license": "CC BY 4.0",
+      "license_url": "https://creativecommons.org/licenses/by/4.0/",
+      "terms": "https://studio.blender.org/terms-and-conditions/",
+      "additional_changes": "The right-hand finished poster is displayed from the published comparison image using a CSS crop.",
+      "changes": "Original image files retained. Responsive crops, scaling, dark overlays and Torve interface text are applied in the website and recreated preview captures."
+    },
+    {
+      "id": "sintel",
+      "title": "Sintel",
+      "year": 2010,
+      "poster": "sintel-poster.jpg",
+      "assets": [
+        "sintel-poster.jpg"
+      ],
+      "creator": "© copyright Blender Foundation | durian.blender.org.",
+      "source": "https://durian.blender.org/news/movie-poster/",
+      "license": "CC BY 3.0",
+      "license_url": "https://creativecommons.org/licenses/by/3.0/",
+      "terms": "https://durian.blender.org/sharing/",
+      "changes": "Original image files retained. Responsive crops, scaling, dark overlays and Torve interface text are applied in the website and recreated preview captures."
+    },
+    {
+      "id": "tears-of-steel",
+      "title": "Tears of Steel",
+      "year": 2012,
+      "poster": "tears-of-steel-poster.jpg",
+      "assets": [
+        "tears-of-steel-poster.jpg",
+        "tears-of-steel-scene.jpg"
+      ],
+      "creator": "(CC) Blender Foundation | mango.blender.org.",
+      "source": "https://mango.blender.org/production/film-poster/",
+      "scene_source": "https://mango.blender.org/gallery/",
+      "license": "CC BY 3.0",
+      "license_url": "https://creativecommons.org/licenses/by/3.0/",
+      "terms": "https://mango.blender.org/sharing/",
+      "changes": "Original image files retained. Responsive crops, scaling, dark overlays and Torve interface text are applied in the website and recreated preview captures."
+    }
+  ]
+}

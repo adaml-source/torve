@@ -6,6 +6,7 @@ import com.torve.domain.model.AddonCatalog
 import com.torve.domain.model.AddonExtra
 import com.torve.domain.model.AddonManifest
 import com.torve.domain.model.InstalledAddon
+import com.torve.domain.model.withoutAiRecommendations
 import com.torve.domain.repository.AddonRepository
 import kotlinx.datetime.Clock
 import kotlinx.serialization.json.Json
@@ -15,10 +16,10 @@ class AddonRepositoryImpl(
     private val addonClient: StremioAddonClient,
     private val json: Json,
     private val userIdProvider: UserIdProvider,
+    private val family: com.torve.data.profile.FamilyControls? = null,
 ) : AddonRepository {
 
-    private fun userId(): String = userIdProvider.currentUserId()
-    private fun isSignedIn(): Boolean = userIdProvider.isSignedIn()
+    private fun userId(): String = userIdProvider.currentDataUserId()
 
     override suspend fun installAddon(
         url: String,
@@ -28,21 +29,30 @@ class AddonRepositoryImpl(
         syncedAt: Long?,
         installedFrom: String,
     ): InstalledAddon {
+        family?.initialize(); family?.requireParent()
+        // Bind a network installation to the account that initiated it.
+        val uid = userId()
         val baseUrl = url.trimEnd('/').removeSuffix("/manifest.json")
         val stremioManifest = addonClient.getManifest(baseUrl)
         val manifest = stremioManifest.toDomain(
             fallbackId = baseUrl,
             fallbackName = fallbackNameFromUrl(baseUrl),
         )
+        family?.requireParent()
         val manifestUrl = "$baseUrl/manifest.json"
         val now = Clock.System.now().toEpochMilliseconds()
         val manifestJson = json.encodeToString(AddonManifest.serializer(), manifest)
 
-        val uid = userId()
         val maxPriority = database.torveQueries.getAllAddons(userId = uid).executeAsList()
             .maxOfOrNull { it.priority } ?: -1
         val storedPriority = priority ?: (maxPriority + 1).toInt()
-        val storedInstalledFrom = normalizeInstallSource(installedFrom)
+        val panda = isPandaExtension(manifest.id, manifestUrl)
+        check(ExtensionRuntimePolicy.restorePandaFromAccount || !panda || serverId == null) {
+            "Install this extension using its manifest URL on this device."
+        }
+        val storedInstalledFrom = if (!ExtensionRuntimePolicy.restorePandaFromAccount && panda) {
+            DEVICE_MANIFEST_INSTALL
+        } else normalizeInstallSource(installedFrom)
 
         // Preserve any config_id already on disk. Install-flow paths (e.g. the
         // addon catalog "Install" button) don't know the Panda config_id; the
@@ -73,7 +83,7 @@ class AddonRepositoryImpl(
 
         return InstalledAddon(
             manifestUrl = manifestUrl,
-            manifest = manifest,
+            manifest = manifest.withoutAiRecommendations(),
             isEnabled = enabled,
             priority = storedPriority,
             installedAt = now,
@@ -85,7 +95,6 @@ class AddonRepositoryImpl(
     }
 
     override suspend fun setAddonConfigId(manifestUrl: String, configId: String?) {
-        if (!isSignedIn()) return
         database.torveQueries.updateAddonConfigId(
             configId = configId,
             userId = userId(),
@@ -94,22 +103,20 @@ class AddonRepositoryImpl(
     }
 
     override suspend fun removeAddon(manifestUrl: String) {
-        if (!isSignedIn()) return
+        family?.initialize(); family?.requireParent()
         database.torveQueries.deleteAddon(userId = userId(), manifestUrl = manifestUrl)
     }
 
     override suspend fun getInstalledAddons(): List<InstalledAddon> {
-        if (!isSignedIn()) return emptyList()
-        return database.torveQueries.getAllAddons(userId = userId()).executeAsList().map(::mapRow)
+        return database.torveQueries.getAllAddons(userId = userId()).executeAsList().map(::mapRow).filter(::permittedOnDevice).onEach { family?.rememberExtension(it) }
     }
 
     override suspend fun getEnabledAddons(): List<InstalledAddon> {
-        if (!isSignedIn()) return emptyList()
-        return database.torveQueries.getEnabledAddons(userId = userId()).executeAsList().map(::mapRow)
+        return database.torveQueries.getEnabledAddons(userId = userId()).executeAsList().map(::mapRow).filter(::permittedOnDevice).onEach { family?.rememberExtension(it) }
     }
 
     override suspend fun toggleAddon(manifestUrl: String, enabled: Boolean) {
-        if (!isSignedIn()) return
+        family?.initialize(); family?.requireParent()
         database.torveQueries.updateAddonEnabled(
             isEnabled = if (enabled) 1 else 0,
             userId = userId(),
@@ -118,7 +125,7 @@ class AddonRepositoryImpl(
     }
 
     override suspend fun reorderAddons(orderedUrls: List<String>) {
-        if (!isSignedIn()) return
+        family?.initialize(); family?.requireParent()
         val uid = userId()
         orderedUrls.forEachIndexed { index, url ->
             database.torveQueries.updateAddonPriority(
@@ -138,11 +145,10 @@ class AddonRepositoryImpl(
     }
 
     override suspend fun getAddon(manifestUrl: String): InstalledAddon? {
-        if (!isSignedIn()) return null
         return database.torveQueries.getAddonByUrl(
             userId = userId(),
             manifestUrl = manifestUrl,
-        ).executeAsOneOrNull()?.let(::mapRow)
+        ).executeAsOneOrNull()?.let(::mapRow)?.takeIf(::permittedOnDevice)
     }
 
     override suspend fun markAddonSynced(
@@ -151,7 +157,6 @@ class AddonRepositoryImpl(
         syncedAt: Long?,
         installedFrom: String,
     ) {
-        if (!isSignedIn()) return
         database.torveQueries.markAddonSynced(
             serverId = serverId,
             syncedAt = syncedAt,
@@ -169,7 +174,6 @@ class AddonRepositoryImpl(
         syncedAt: Long,
         installedFrom: String,
     ) {
-        if (!isSignedIn()) return
         database.torveQueries.syncAddonWithServer(
             serverId = serverId,
             syncedAt = syncedAt,
@@ -182,7 +186,6 @@ class AddonRepositoryImpl(
     }
 
     override suspend fun clearSyncMetadata() {
-        if (!isSignedIn()) return
         database.torveQueries.clearAddonSyncMetadata(userId = userId())
     }
 
@@ -228,7 +231,7 @@ class AddonRepositoryImpl(
         }
         return InstalledAddon(
             manifestUrl = row.manifest_url,
-            manifest = manifest,
+            manifest = manifest.withoutAiRecommendations(),
             isEnabled = row.is_enabled == 1L,
             priority = row.priority.toInt(),
             installedAt = row.installed_at,
@@ -241,10 +244,14 @@ class AddonRepositoryImpl(
 
     private fun normalizeInstallSource(installedFrom: String?): String {
         return when (installedFrom?.lowercase()) {
+            DEVICE_MANIFEST_INSTALL -> DEVICE_MANIFEST_INSTALL
             "app" -> "app"
             "web" -> "web"
             "sync" -> "sync"
             else -> "app"
         }
     }
+
+    private fun permittedOnDevice(addon: InstalledAddon): Boolean =
+        permitsLocalExtension(addon.manifest.id, addon.manifestUrl, addon.installedFrom)
 }

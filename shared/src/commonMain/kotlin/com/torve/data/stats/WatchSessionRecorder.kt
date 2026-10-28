@@ -1,6 +1,7 @@
 package com.torve.data.stats
 
 import com.torve.domain.model.MediaType
+import com.torve.domain.model.WatchProgress
 import com.torve.domain.model.extractImdbIdOrNull
 import com.torve.domain.model.extractTmdbIdOrNull
 import com.torve.domain.stats.RuntimeConfidence
@@ -30,6 +31,22 @@ class WatchSessionRecorder(
     private val watchStatsRepository: WatchStatsRepository,
     private val currentUserId: () -> String,
 ) {
+    /** Only measured playback can recover a bookmark lost to imported watched history. */
+    suspend fun getUnfinishedEpisodeBookmark(mediaId: String, season: Int, episode: Int): WatchProgress? {
+        val person = currentUserId()
+        val session = watchStatsRepository.getLatestPlayerSession(mediaId) ?: return null
+        val duration = session.durationMs?.takeIf { it > 0L } ?: return null
+        if (person != currentUserId() || session.userId != person || session.mediaId != mediaId ||
+            session.mediaType != MediaType.SERIES || session.seasonNumber != season || session.episodeNumber != episode ||
+            session.source != WatchSessionSource.TORVE_PLAYER || session.runtimeConfidence != RuntimeConfidence.MEASURED ||
+            session.status !in setOf(WatchSessionStatus.STARTED, WatchSessionStatus.PARTIAL, WatchSessionStatus.ABANDONED) ||
+            session.maxPositionMs <= 0 || session.maxPositionMs.toDouble() / duration >= WATCHED_THRESHOLD_PERCENT) return null
+        return WatchProgress(mediaId = mediaId, mediaType = MediaType.SERIES,
+            title = session.showTitle ?: session.title, posterUrl = session.posterUrl, backdropUrl = session.backdropUrl,
+            positionMs = session.maxPositionMs, durationMs = duration, seasonNumber = season, episodeNumber = episode,
+            showTitle = session.showTitle, updatedAt = session.updatedAt)
+    }
+
     suspend fun startPlayerSession(
         identity: WatchSessionMediaIdentity,
         startedAt: Long,

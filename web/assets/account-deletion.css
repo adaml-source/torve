@@ -1,0 +1,64 @@
+#account-deleted-dialog {
+  width: min(440px, calc(100% - 40px));
+  max-height: calc(100dvh - 40px);
+  overflow: auto;
+  margin: auto;
+  padding: 32px;
+  border: 1px solid var(--m-border);
+  border-radius: var(--m-radius);
+  background: var(--m-surface);
+  color: var(--m-ink);
+  font-family: var(--t-font);
+  box-shadow: 0 24px 80px #0008;
+}
+
+#account-deleted-dialog::backdrop {
+  background: #050708b8;
+  backdrop-filter: blur(6px);
+}
+
+.deletion-success-icon {
+  display: grid;
+  place-items: center;
+  width: 52px;
+  height: 52px;
+  margin-bottom: 24px;
+  border: 1px solid var(--m-gold);
+  border-radius: 50%;
+  background: var(--m-gold-soft);
+  color: var(--m-gold);
+}
+
+#account-deleted-dialog h2 {
+  margin: 0 0 16px;
+  font-size: 28px;
+}
+
+#account-deleted-dialog p {
+  margin: 0 0 20px;
+  font-size: 15px;
+  line-height: 1.7;
+  color: var(--m-muted);
+}
+
+#account-deleted-dialog .deletion-billing-note {
+  padding-top: 20px;
+  border-top: 1px solid var(--m-border);
+  font-size: 13px;
+}
+
+#account-deleted-dialog form {
+  display: flex;
+  justify-content: flex-end;
+  margin: 24px 0 0;
+}
+
+[data-delete-account-form] :disabled {
+  cursor: default;
+  opacity: .65;
+}
+
+@media (max-width: 480px) {
+  #account-deleted-dialog { padding: 28px 24px; }
+  #account-deleted-dialog .t-btn { width: 100%; }
+}

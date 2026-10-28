@@ -69,6 +69,11 @@ tv_banner_source.png
 *.crt
 *.key
 
+# Public Apple trust roots required to verify App Store signatures.
+!/server/app/apple_certificates/AppleIncRootCertificate.cer
+!/server/app/apple_certificates/AppleRootCA-G2.cer
+!/server/app/apple_certificates/AppleRootCA-G3.cer
+
 # Env files anywhere in tree (server/.env, server/.env.tvtest, etc.)
 .env
 .env.*
@@ -110,12 +115,29 @@ tv_focus_audit.txt
 /desktop_login_fullscreen_check.png
 /tv_landing_*.png
 /tv_validation_screen.png
+/black_window.xml
+/window_home.xml
+/torve_home_fixed_final.xml
+/fire*_diag.png
+/focus-*.xml
+/hero-*.xml
+/provider-*.png
+/latest_*_data_app_anr.txt
 /docs_extract_frontend.zip
 
 # Per-host Gradle/Android scratch dirs (siblings of the already-ignored .gradle / .android/)
 .gradle-*/
 .android-*/
 .codex_tmp/
+/.codex*/
+/release/epg/*.xml.gz
+/release/epg/*.xml.gz.json
+/release/epg/*.xml.gz.sha256
+/.codex*.png
+/.codex*.txt
+/.public-export/
+/pytest-cache-files-*/
+**/.pytest_cache/
 
 # Build outputs not yet covered
 desktopApp/build/
@@ -137,6 +159,15 @@ script.video.*/
 /desktopApp/picexamples/
 
 # Python bytecode caches under server/
+iosApp/Build.local.xcconfig
+iosApp/build/
+*.certSigningRequest
+iosApp/Torve.xcodeproj/
+iosApp/tvOSApp/Assets.xcassets/
+build/apple/
+# Local regulatory filing packs contain the publisher's personal details.
+/output/pdf/torve-anssi-private/
+/tmp/pdfs/torve-anssi-private/
 __pycache__/
 *.pyc
 
@@ -157,3 +188,14 @@ smoke-kit/feed-url.txt
 # Stray VLC runtime that landed at the repo root rather than under
 # the structured runtime/windows/vlc/ tree (recovered from previous
 # packaging troubleshooting).
+
+# Private Apple project and local publication artifacts
+/iosApp/
+/ios_assets/
+/tools/apple/
+/shared/src/iosMain/
+/output/
+/tmp/
+**/google-services.json
+# The Amazon build has no Firebase SDK and uses a nonfunctional build placeholder.
+!/androidApp/src/amazon/google-services.json

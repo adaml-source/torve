@@ -1,0 +1,16 @@
+{
+  "id": "com.torve.demo.subtitles",
+  "version": "1.0.0",
+  "name": "Demo Subtitles",
+  "description": "Public testing extension using original synthetic media only.",
+  "resources": [
+    "subtitles"
+  ],
+  "types": [
+    "movie"
+  ],
+  "idPrefixes": [
+    "torve-original-"
+  ],
+  "catalogs": []
+}

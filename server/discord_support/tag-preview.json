@@ -1,0 +1,87 @@
+{
+  "forum_id": "1508057928005845102",
+  "status": "preview_not_applied_by_bot",
+  "max_applied_per_post": 5,
+  "tags": [
+    {
+      "name": "Android TV",
+      "moderated": false
+    },
+    {
+      "name": "Fire TV",
+      "moderated": false
+    },
+    {
+      "name": "Windows",
+      "moderated": false
+    },
+    {
+      "name": "Android Mobile",
+      "moderated": false
+    },
+    {
+      "name": "iOS / tvOS",
+      "moderated": false
+    },
+    {
+      "name": "Setup",
+      "moderated": false
+    },
+    {
+      "name": "Playback",
+      "moderated": false
+    },
+    {
+      "name": "IPTV / EPG",
+      "moderated": false
+    },
+    {
+      "name": "Sources",
+      "moderated": false
+    },
+    {
+      "name": "Addons",
+      "moderated": false
+    },
+    {
+      "name": "Libraries",
+      "moderated": false
+    },
+    {
+      "name": "Account",
+      "moderated": false
+    },
+    {
+      "name": "Feature",
+      "moderated": false
+    },
+    {
+      "name": "Question",
+      "moderated": false
+    },
+    {
+      "name": "Duplicate",
+      "moderated": true
+    },
+    {
+      "name": "Investigating",
+      "moderated": true
+    },
+    {
+      "name": "Needs Info",
+      "moderated": true
+    },
+    {
+      "name": "New",
+      "moderated": true
+    },
+    {
+      "name": "Resolved",
+      "moderated": true
+    },
+    {
+      "name": "Solution",
+      "moderated": true
+    }
+  ]
+}

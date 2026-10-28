@@ -14,6 +14,8 @@ import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 class AndroidKeystoreSecretStore(
     context: Context,
@@ -21,6 +23,8 @@ class AndroidKeystoreSecretStore(
 
     private val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
     private val keyStore = KeyStore.getInstance(ANDROID_KEYSTORE).apply { load(null) }
+    // Cache the non-exportable key handle, never decrypted account values.
+    private var secretKeyHandle: SecretKey? = null
 
     override suspend fun put(key: IntegrationSecretKey, value: String, subKey: String?) =
         putString(storageKey(key, subKey), value)
@@ -71,14 +75,14 @@ class AndroidKeystoreSecretStore(
         editor.apply()
     }
 
-    override suspend fun putString(key: String, value: String) {
+    override suspend fun putString(key: String, value: String): Unit = withContext(Dispatchers.IO) {
         val encrypted = encrypt(value)
         prefs.edit().putString(key, encrypted).apply()
     }
 
-    override suspend fun getString(key: String): String? {
-        val stored = prefs.getString(key, null) ?: return null
-        return runCatching { decrypt(stored) }.getOrNull()
+    override suspend fun getString(key: String): String? = withContext(Dispatchers.IO) {
+        val stored = prefs.getString(key, null) ?: return@withContext null
+        runCatching { decrypt(stored) }.getOrNull()
     }
 
     override suspend fun remove(key: String) {
@@ -93,7 +97,7 @@ class AndroidKeystoreSecretStore(
         editor.apply()
     }
 
-    override suspend fun updateStrings(updates: Map<String, String?>) {
+    override suspend fun updateStrings(updates: Map<String, String?>): Unit = withContext(Dispatchers.IO) {
         val editor = prefs.edit()
         updates.forEach { (key, value) ->
             if (value == null) {
@@ -103,6 +107,7 @@ class AndroidKeystoreSecretStore(
             }
         }
         editor.commit()
+        Unit
     }
 
     private fun encrypt(plain: String): String {
@@ -129,9 +134,11 @@ class AndroidKeystoreSecretStore(
         return String(decoded, StandardCharsets.UTF_8)
     }
 
+    @Synchronized
     private fun getOrCreateSecretKey(): SecretKey {
+        secretKeyHandle?.let { return it }
         val existing = keyStore.getKey(KEY_ALIAS, null) as? SecretKey
-        if (existing != null) return existing
+        if (existing != null) return existing.also { secretKeyHandle = it }
 
         val keyGenerator = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, ANDROID_KEYSTORE)
         val spec = KeyGenParameterSpec.Builder(
@@ -143,7 +150,7 @@ class AndroidKeystoreSecretStore(
             .setKeySize(256)
             .build()
         keyGenerator.init(spec)
-        return keyGenerator.generateKey()
+        return keyGenerator.generateKey().also { secretKeyHandle = it }
     }
 
     private companion object {

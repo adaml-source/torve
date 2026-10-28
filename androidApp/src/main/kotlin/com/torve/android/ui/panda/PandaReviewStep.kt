@@ -1,5 +1,7 @@
 ﻿package com.torve.android.ui.panda
 
+import com.torve.android.ui.community.parityLabel as localizedUiText
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -77,12 +79,12 @@ fun PandaReviewStep(
         ) {
             ReviewRow(
                 label = stringResource(R.string.panda_setup_review_provider),
-                value = state.selectedProvider?.name ?: "â€”",
+                value = state.selectedProvider?.name ?: "—",
             )
             HorizontalDivider(color = Steel.copy(alpha = 0.15f), modifier = Modifier.padding(vertical = 10.dp))
             ReviewRow(
                 label = stringResource(R.string.panda_setup_review_auth),
-                value = if (state.authConnected) stringResource(R.string.panda_setup_auth_connected) else "â€”",
+                value = if (state.authConnected) stringResource(R.string.panda_setup_auth_connected) else "—",
             )
             HorizontalDivider(color = Steel.copy(alpha = 0.15f), modifier = Modifier.padding(vertical = 10.dp))
             ReviewRow(
@@ -115,7 +117,7 @@ fun PandaReviewStep(
                         label = stringResource(R.string.panda_setup_review_indexer),
                         value = when (state.nzbIndexer) {
                             "nzbgeek" -> "NZBgeek"
-                            "scenenzbs" -> "SceneNZBs"
+                            "scenenzbs" -> "Treasure Maps"
                             "dognzb" -> "DogNZB"
                             "nzbplanet" -> "NZBPlanet"
                             "custom" -> "Custom"
@@ -170,27 +172,14 @@ fun PandaReviewStep(
                 )
             }
             Spacer(Modifier.height(16.dp))
-            val doneInteractionSource = remember { MutableInteractionSource() }
-            val doneFocused by doneInteractionSource.collectIsFocusedAsState()
-            val doneShape = RoundedCornerShape(12.dp)
-            Button(
+            PandaButton(
                 onClick = onComplete,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .then(entryFocusRequester?.let { Modifier.focusRequester(it) } ?: Modifier)
-                    .clip(doneShape)
-                    .border(
-                        width = if (doneFocused) 2.dp else 1.dp,
-                        color = if (doneFocused) Snow else Amber.copy(alpha = 0.35f),
-                        shape = doneShape,
-                    ),
-                colors = ButtonDefaults.buttonColors(containerColor = Amber),
-                shape = doneShape,
-                interactionSource = doneInteractionSource,
+                    .then(entryFocusRequester?.let { Modifier.focusRequester(it) } ?: Modifier),
             ) {
                 Text(
                     stringResource(R.string.panda_setup_review_done),
-                    color = Gunmetal,
                     fontWeight = FontWeight.SemiBold,
                 )
             }
@@ -215,44 +204,29 @@ fun PandaReviewStep(
                 Spacer(Modifier.height(12.dp))
             }
             // Save button
-            val saveInteractionSource = remember { MutableInteractionSource() }
-            val saveFocused by saveInteractionSource.collectIsFocusedAsState()
-            val saveShape = RoundedCornerShape(12.dp)
-            Button(
+            PandaButton(
                 onClick = { viewModel.saveConfigAndInstall() },
                 enabled = !state.isSaving,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .then(entryFocusRequester?.let { Modifier.focusRequester(it) } ?: Modifier)
-                    .clip(saveShape)
-                    .border(
-                        width = if (saveFocused) 2.dp else 1.dp,
-                        color = if (saveFocused) Snow else Amber.copy(alpha = 0.35f),
-                        shape = saveShape,
-                    ),
-                colors = ButtonDefaults.buttonColors(containerColor = Amber),
-                shape = saveShape,
-                interactionSource = saveInteractionSource,
+                    .then(entryFocusRequester?.let { Modifier.focusRequester(it) } ?: Modifier),
             ) {
                 if (state.isSaving) {
                     CircularProgressIndicator(
                         modifier = Modifier.size(18.dp),
-                        color = Gunmetal,
-                        strokeWidth = 2.dp,
+                            strokeWidth = 2.dp,
                     )
                     Spacer(Modifier.width(8.dp))
                     Text(
                         stringResource(R.string.panda_setup_review_saving),
-                        color = Gunmetal,
-                    )
+                        )
                 } else {
                     Text(
                         stringResource(
                             if (state.isEditMode) R.string.panda_setup_review_update
                             else R.string.panda_setup_review_save,
                         ),
-                        color = Gunmetal,
-                        fontWeight = FontWeight.SemiBold,
+                            fontWeight = FontWeight.SemiBold,
                     )
                 }
             }
@@ -260,7 +234,7 @@ fun PandaReviewStep(
             // Error
             state.saveError?.let { error ->
                 Spacer(Modifier.height(12.dp))
-                Text(error, color = Ruby, style = MaterialTheme.typography.bodySmall)
+                Text(localizedUiText(error), color = Ruby, style = MaterialTheme.typography.bodySmall)
             }
         }
     }
@@ -272,7 +246,7 @@ private fun ReviewRow(label: String, value: String) {
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.SpaceBetween,
     ) {
-        Text(label, style = MaterialTheme.typography.bodyMedium, color = Silver)
+        Text(localizedUiText(label), style = MaterialTheme.typography.bodyMedium, color = Silver)
         Text(value, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium, color = Snow)
     }
 }

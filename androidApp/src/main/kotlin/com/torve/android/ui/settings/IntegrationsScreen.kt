@@ -1,5 +1,7 @@
 package com.torve.android.ui.settings
 
+import com.torve.android.ui.community.parityLabel as localizedUiText
+
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
@@ -22,6 +24,11 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.runtime.withFrameNanos
+import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -47,6 +54,13 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.RadioButtonDefaults
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.activity.compose.BackHandler
+import androidx.compose.runtime.saveable.rememberSaveable
+import com.torve.android.ui.community.PhoneGroupedSettingsMenu
+import com.torve.android.ui.community.SettingsMenuEntry
+import com.torve.android.ui.community.SettingsMenus
+import com.torve.android.ui.community.parityLabel
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -76,21 +90,45 @@ import androidx.compose.ui.res.stringResource
 import com.torve.android.R
 import com.torve.domain.integrations.IntegrationSecretKey
 import com.torve.domain.integrations.IntegrationSecretStore
+import com.torve.domain.integrations.AutomationInstanceRole
+import com.torve.domain.integrations.AutomationServiceType
 import com.torve.domain.model.DebridServiceType
 import com.torve.presentation.settings.SettingsViewModel
+import com.torve.presentation.settings.IntegrationReadinessStatus
+import com.torve.presentation.settings.IntegrationReadinessSummary
+import com.torve.presentation.settings.buildIntegrationReadinessSummary
+import com.torve.presentation.integrations.AutomationSettingsViewModel
 import com.torve.presentation.usenet.NzbdavSetupViewModel
 import com.torve.presentation.usenet.NzbdavStatus
 import com.torve.presentation.usenet.NzbdavTestResult
 import kotlinx.coroutines.launch
 import org.koin.compose.koinInject
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun IntegrationsScreen(
     onBack: () -> Unit,
+    onAutomationAdminClick: () -> Unit = {},
+    initialService: String = "",
     viewModel: SettingsViewModel = koinInject(),
+    automationViewModel: AutomationSettingsViewModel = koinInject(),
 ) {
     val state by viewModel.state.collectAsState()
+    val automationState by automationViewModel.state.collectAsState()
+    val health: com.torve.presentation.providerhealth.ProviderHealthCoordinator = koinInject()
+    val healthEntries by health.entries.collectAsState()
+    val readiness = remember(state, automationState.instances, healthEntries) {
+        buildIntegrationReadinessSummary(state, automationState.instances, healthEntries)
+    }
     val context = LocalContext.current
+    val integrationScroll = rememberScrollState()
+    val serviceNames = remember { linkedMapOf("debrid" to "Streaming services", "omdb" to "OMDb", "trakt" to "Trakt", "simkl" to "SIMKL", "seerr" to "Seerr", "automation" to "Library automation", "jellyfin" to "Jellyfin", "plex" to "Plex", "nzbdav" to "NzbDAV", "opensubtitles" to "OpenSubtitles") }
+    var selectedService by rememberSaveable(initialService) { mutableStateOf(initialService.takeIf { it in serviceNames }.orEmpty()) }
+    var serviceNode by rememberSaveable { mutableStateOf<String?>(null) }
+    fun goBack() { if (initialService.isBlank() && selectedService.isNotBlank()) selectedService = "" else onBack() }
+    BackHandler(onBack = ::goBack)
+    fun repairAnchor(service: String) = Modifier
+    LaunchedEffect(selectedService) { integrationScroll.scrollTo(0) }
     val secretStore: IntegrationSecretStore = koinInject()
     val authClient: com.torve.data.auth.AuthClient = koinInject()
     val authUser by authClient.authUserFlow.collectAsState()
@@ -101,15 +139,31 @@ fun IntegrationsScreen(
     var omdbStorageMode by remember(defaultStorageMode) { mutableStateOf(defaultStorageMode) }
     var jellyfinStorageMode by remember(defaultStorageMode) { mutableStateOf(defaultStorageMode) }
     var plexStorageMode by remember(defaultStorageMode) { mutableStateOf(defaultStorageMode) }
+    var seerrStorageMode by remember(defaultStorageMode) { mutableStateOf(defaultStorageMode) }
 
-    LaunchedEffect(Unit) {
-        secretStore.get(IntegrationSecretKey.JELLYFIN_API_KEY)?.let { stored ->
-            viewModel.setJellyfinApiKey(stored)
+    LaunchedEffect(selectedService) {
+        when (selectedService) {
+            "jellyfin" -> {
+                secretStore.get(IntegrationSecretKey.JELLYFIN_API_KEY)?.let { stored ->
+                    viewModel.setJellyfinApiKey(stored)
+                    jellyfinStorageMode = secretStore.getStorageMode(IntegrationSecretKey.JELLYFIN_API_KEY)
+                }
+                viewModel.loadJellyfinProfiles()
+            }
+            "plex" -> secretStore.get(IntegrationSecretKey.PLEX_ACCESS_TOKEN)?.let(viewModel::setPlexAccessToken)
+            "seerr" -> secretStore.get(IntegrationSecretKey.SEERR_API_KEY)?.let(viewModel::updateSeerrApiKeyInput)
         }
-        viewModel.loadJellyfinProfiles()
-        secretStore.get(IntegrationSecretKey.PLEX_ACCESS_TOKEN)?.let { stored ->
-            viewModel.setPlexAccessToken(stored)
+    }
+    if (selectedService.isBlank()) {
+        fun supported(items: List<SettingsMenuEntry>): List<SettingsMenuEntry> = items.mapNotNull { item ->
+            if (item.children.isEmpty()) item.takeIf { it.id in serviceNames }
+            else supported(item.children).takeIf { it.isNotEmpty() }?.let { item.copy(children = it) }
         }
+        val entries = remember { supported(SettingsMenus.sources()) }
+        PhoneGroupedSettingsMenu(entries, localizedUiText("Sources & services"), serviceNode, { serviceNode = it }, onBack) { action ->
+            selectedService = if (action == "Connections") "debrid" else action.lowercase()
+        }
+        return
     }
 
     Column(
@@ -118,31 +172,40 @@ fun IntegrationsScreen(
             .background(MaterialTheme.colorScheme.background)
             .statusBarsPadding()
             .padding(16.dp)
-            .verticalScroll(rememberScrollState()),
+            .verticalScroll(integrationScroll),
     ) {
-        BackButton(onClick = onBack)
+        BackButton(onClick = ::goBack)
         Spacer(Modifier.height(8.dp))
         Text(
-            stringResource(R.string.integrations_title),
+            localizedUiText(serviceNames.getValue(selectedService)),
             style = MaterialTheme.typography.titleLarge,
-            color = Snow,
+            color = MaterialTheme.colorScheme.onSurface,
             fontWeight = FontWeight.Bold,
         )
         Spacer(Modifier.height(8.dp))
-        com.torve.android.ui.components.StorageModeExplainer()
+        var showStorageHelp by rememberSaveable(selectedService) { mutableStateOf(false) }
+        TextButton(onClick = { showStorageHelp = !showStorageHelp }) {
+            Text(stringResource(R.string.storage_how_title) + if (showStorageHelp) " ▴" else " ▾")
+        }
+        if (showStorageHelp) com.torve.android.ui.components.StorageModeExplainer()
         Spacer(Modifier.height(4.dp))
         Text(
             stringResource(R.string.integrations_subtitle),
             style = MaterialTheme.typography.bodySmall,
-            color = Silver,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
 
         Spacer(Modifier.height(16.dp))
 
+
+        Spacer(Modifier.height(16.dp))
+
+        if (selectedService == "debrid") {
         // ── Debrid ──────────────────────────────────────────────────────────
         IntegrationCard(
-            title = "Debrid",
-            description = "Stream torrents instantly via Real-Debrid, AllDebrid, Premiumize, or TorBox.",
+            title = localizedUiText("Debrid"),
+            modifier = repairAnchor("debrid"),
+            description = localizedUiText("Stream torrents instantly via Real-Debrid, AllDebrid, Premiumize, or TorBox."),
         ) {
             when {
                 state.debridConnected && state.debridDeviceCode == null -> {
@@ -162,7 +225,7 @@ fun IntegrationsScreen(
                     )
                     state.debridUser?.expiresAt?.let { exp ->
                         Spacer(Modifier.height(2.dp))
-                        Text("Premium until $exp", color = Silver, style = MaterialTheme.typography.bodySmall)
+                        Text(localizedUiText("Premium until $exp"), color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
                     }
                     Spacer(Modifier.height(10.dp))
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -170,20 +233,20 @@ fun IntegrationsScreen(
                             onClick = { viewModel.disconnectDebrid() },
                             colors = ButtonDefaults.outlinedButtonColors(contentColor = Ruby),
                             modifier = Modifier.weight(1f),
-                        ) { Text("Disconnect") }
+                        ) { Text(localizedUiText("Disconnect")) }
                         Button(
                             onClick = { viewModel.startDebridDeviceAuth() },
                             colors = ButtonDefaults.buttonColors(containerColor = Amber, contentColor = Obsidian),
                             modifier = Modifier.weight(1f),
-                        ) { Text("Re-authenticate") }
+                        ) { Text(localizedUiText("Re-authenticate")) }
                     }
                 }
                 state.debridDeviceCode != null -> {
                     // Device auth in progress
                     val code = state.debridDeviceCode!!
                     Text(
-                        "Visit the link below and enter the code to connect:",
-                        color = Silver,
+                        localizedUiText("Visit the link below and enter the code to connect:"),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                         style = MaterialTheme.typography.bodySmall,
                     )
                     Spacer(Modifier.height(8.dp))
@@ -192,8 +255,8 @@ fun IntegrationsScreen(
                     OutlinedButton(
                         onClick = { viewModel.disconnectDebrid() },
                         modifier = Modifier.fillMaxWidth(),
-                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Silver),
-                    ) { Text("Cancel") }
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.onSurfaceVariant),
+                    ) { Text(localizedUiText("Cancel")) }
                 }
                 else -> {
                     // Not connected: provider picker + connect button
@@ -216,7 +279,7 @@ fun IntegrationsScreen(
                                 onClick = { viewModel.setDebridProvider(provider) },
                                 colors = RadioButtonDefaults.colors(selectedColor = Amber),
                             )
-                            Text(label, color = Snow, style = MaterialTheme.typography.bodyMedium)
+                            Text(localizedUiText(label), color = MaterialTheme.colorScheme.onSurface, style = MaterialTheme.typography.bodyMedium)
                         }
                     }
                     state.debridError?.let { err ->
@@ -234,7 +297,7 @@ fun IntegrationsScreen(
                             CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp, color = Obsidian)
                             Spacer(Modifier.width(8.dp))
                         }
-                        Text("Connect via device code")
+                        Text(localizedUiText("Connect via device code"))
                     }
                 }
             }
@@ -242,9 +305,11 @@ fun IntegrationsScreen(
 
         Spacer(Modifier.height(12.dp))
 
+        }
+        if (selectedService == "omdb") {
         // ── OMDB ──
         IntegrationCard(
-            title = "OMDB",
+            title = localizedUiText("OMDB"),
             description = stringResource(R.string.integrations_omdb_desc),
         ) {
             IntegrationTextField(
@@ -297,21 +362,24 @@ fun IntegrationsScreen(
             Spacer(Modifier.height(4.dp))
             Text(
                 stringResource(R.string.integrations_omdb_hint),
-                color = Silver.copy(alpha = 0.6f),
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
                 style = MaterialTheme.typography.bodySmall,
             )
         }
 
         Spacer(Modifier.height(12.dp))
 
+        }
+        if (selectedService == "trakt") {
         // ── Trakt ──
         IntegrationCard(
-            title = "Trakt",
+            title = localizedUiText("Trakt"),
+            modifier = repairAnchor("trakt"),
             description = stringResource(R.string.integrations_trakt_desc),
         ) {
             Text(
                 if (state.traktConnected) stringResource(R.string.integrations_status_connected) else stringResource(R.string.integrations_status_not_connected),
-                color = if (state.traktConnected) Snow else Silver,
+                color = if (state.traktConnected) Snow else MaterialTheme.colorScheme.onSurfaceVariant,
                 style = MaterialTheme.typography.bodySmall,
             )
             state.traktLastSyncTime?.let { lastSync ->
@@ -319,7 +387,7 @@ fun IntegrationsScreen(
                 Text(
                     stringResource(R.string.integrations_last_sync, java.text.SimpleDateFormat("MMM d, HH:mm", java.util.Locale.getDefault())
                         .format(java.util.Date(lastSync))),
-                    color = Silver,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                     style = MaterialTheme.typography.bodySmall,
                 )
             }
@@ -340,7 +408,7 @@ fun IntegrationsScreen(
                         Spacer(Modifier.width(8.dp))
                         Text(
                             stringResource(R.string.settings_waiting_auth),
-                            color = Silver,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                             style = MaterialTheme.typography.bodySmall,
                         )
                     }
@@ -351,6 +419,7 @@ fun IntegrationsScreen(
                 if (!state.traktConnected) {
                     Button(
                         onClick = { viewModel.startTraktDeviceAuth() },
+                        enabled = !state.traktLoading && !state.isPollingTrakt,
                         colors = ButtonDefaults.buttonColors(containerColor = Amber, contentColor = Obsidian),
                     ) { Text(if (state.traktLoading) stringResource(R.string.integrations_connecting) else stringResource(R.string.common_connect)) }
                 } else {
@@ -376,21 +445,24 @@ fun IntegrationsScreen(
                     Spacer(Modifier.weight(1f))
                     OutlinedButton(
                         onClick = { viewModel.disconnectTrakt() },
-                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Silver),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.onSurfaceVariant),
                     ) { Text(stringResource(R.string.common_disconnect)) }
                 }
             }
             state.traktError?.let {
                 Spacer(Modifier.height(6.dp))
-                Text(it, color = Silver, style = MaterialTheme.typography.bodySmall)
+                Text(localizedUiText(it), color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
             }
         }
 
         Spacer(Modifier.height(12.dp))
 
+        }
+        if (selectedService == "simkl") {
         // ── SIMKL ──
         IntegrationCard(
-            title = "SIMKL",
+            title = localizedUiText("SIMKL"),
+            modifier = repairAnchor("simkl"),
             description = stringResource(R.string.integrations_simkl_desc),
         ) {
             val simklUser = state.simklUser
@@ -401,7 +473,7 @@ fun IntegrationsScreen(
             }
             Text(
                 simklStatus,
-                color = if (state.simklUser != null) Snow else Silver,
+                color = if (state.simklUser != null) Snow else MaterialTheme.colorScheme.onSurfaceVariant,
                 style = MaterialTheme.typography.bodySmall,
             )
             state.simklDeviceCode?.let { code ->
@@ -421,21 +493,265 @@ fun IntegrationsScreen(
                 } else {
                     OutlinedButton(
                         onClick = { viewModel.disconnectSimkl() },
-                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Silver),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.onSurfaceVariant),
                     ) { Text(stringResource(R.string.common_disconnect)) }
                 }
             }
             state.simklError?.let {
                 Spacer(Modifier.height(6.dp))
-                Text(it, color = Silver, style = MaterialTheme.typography.bodySmall)
+                Text(localizedUiText(it), color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
             }
         }
 
         Spacer(Modifier.height(12.dp))
 
+        }
+        if (selectedService == "seerr") {
         // ── Jellyfin ──
         IntegrationCard(
-            title = "Jellyfin",
+            title = stringResource(R.string.integrations_seerr_title),
+            modifier = repairAnchor("seerr"),
+            description = stringResource(R.string.integrations_seerr_desc),
+        ) {
+            IntegrationTextField(
+                label = stringResource(R.string.integrations_server_url),
+                value = state.seerrServerUrl,
+                onValueChange = viewModel::setSeerrServerUrl,
+            )
+            Spacer(Modifier.height(8.dp))
+            IntegrationTextField(
+                label = stringResource(R.string.settings_api_key),
+                value = state.seerrApiKey,
+                onValueChange = viewModel::updateSeerrApiKeyInput,
+                isSensitive = true,
+            )
+            Spacer(Modifier.height(4.dp))
+            com.torve.android.ui.components.StorageModeSelector(
+                selected = seerrStorageMode,
+                onModeSelected = { seerrStorageMode = it },
+                isSignedIn = authUser != null,
+            )
+            Spacer(Modifier.height(8.dp))
+            if (!state.seerrConnected) {
+                Button(
+                    onClick = { viewModel.saveAndTestSeerrConnection(seerrStorageMode) },
+                    enabled = !state.seerrLoading && state.seerrServerUrl.isNotBlank() && state.seerrApiKey.isNotBlank(),
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.buttonColors(containerColor = Amber, contentColor = Obsidian),
+                ) {
+                    if (state.seerrLoading) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(18.dp),
+                            strokeWidth = 2.dp,
+                            color = Obsidian,
+                        )
+                        Spacer(Modifier.width(8.dp))
+                    }
+                    Text(stringResource(R.string.integrations_save_test))
+                }
+            } else {
+                OutlinedButton(
+                    onClick = viewModel::disconnectSeerr,
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.onSurfaceVariant),
+                ) {
+                    Text(stringResource(R.string.common_disconnect))
+                }
+            }
+            state.seerrStatusMessage?.let { message ->
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    localizedUiText(message),
+                    color = if (state.seerrConnected) Emerald else MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+        }
+
+        Spacer(Modifier.height(12.dp))
+
+        }
+        if (selectedService == "automation") {
+        IntegrationCard(
+            title = stringResource(R.string.integrations_automation_title),
+            modifier = repairAnchor("automation"),
+            description = stringResource(R.string.integrations_automation_desc),
+        ) {
+            Button(
+                onClick = onAutomationAdminClick,
+                enabled = automationState.instances.isNotEmpty(),
+                modifier = Modifier.fillMaxWidth(),
+                colors = ButtonDefaults.buttonColors(containerColor = Amber, contentColor = Obsidian),
+            ) {
+                Text(localizedUiText("Open administration dashboard"))
+            }
+            Spacer(Modifier.height(8.dp))
+            Text(
+                stringResource(R.string.integrations_automation_admin_warning),
+                color = Amber,
+                style = MaterialTheme.typography.bodySmall,
+            )
+            automationState.instances.forEach { instance ->
+                Spacer(Modifier.height(8.dp))
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(8.dp))
+                        .padding(10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text(instance.name, color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.SemiBold)
+                        val supportsQualityRole = instance.serviceType == AutomationServiceType.SONARR ||
+                            instance.serviceType == AutomationServiceType.RADARR
+                        Text(
+                            localizedUiText(buildString {
+                                append(instance.serviceType.name.lowercase().replaceFirstChar { it.uppercase() })
+                                if (supportsQualityRole) {
+                                    append(" · ")
+                                    append(if (instance.role == AutomationInstanceRole.UHD) "4K" else "Standard")
+                                    if (instance.isDefault) append(" · Default")
+                                }
+                            }),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    }
+                    TextButton(onClick = { automationViewModel.edit(instance) }) {
+                        Text(stringResource(R.string.common_edit_cd))
+                    }
+                    TextButton(onClick = { automationViewModel.remove(instance) }) {
+                        Text(stringResource(R.string.common_remove), color = Ruby)
+                    }
+                }
+            }
+
+            Spacer(Modifier.height(10.dp))
+            Text(stringResource(R.string.integrations_automation_service), color = MaterialTheme.colorScheme.onSurfaceVariant)
+            AutomationServiceType.entries.forEach { type ->
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable(enabled = !automationState.isBusy) {
+                            automationViewModel.selectService(type)
+                        },
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    RadioButton(
+                        selected = automationState.serviceType == type,
+                        onClick = { automationViewModel.selectService(type) },
+                        colors = RadioButtonDefaults.colors(selectedColor = Amber),
+                    )
+                    Text(type.name.lowercase().replaceFirstChar { it.uppercase() }, color = MaterialTheme.colorScheme.onSurface)
+                }
+            }
+            IntegrationTextField(
+                label = stringResource(R.string.integrations_automation_name),
+                value = automationState.name,
+                onValueChange = automationViewModel::updateName,
+            )
+            Spacer(Modifier.height(8.dp))
+            IntegrationTextField(
+                label = stringResource(R.string.integrations_server_url),
+                value = automationState.serverUrl,
+                onValueChange = automationViewModel::updateServerUrl,
+            )
+            Spacer(Modifier.height(8.dp))
+            if (automationState.serviceType == AutomationServiceType.TDARR) {
+                Text(
+                    stringResource(R.string.integrations_tdarr_read_only_probe),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            } else {
+                IntegrationTextField(
+                    label = stringResource(R.string.settings_api_key),
+                    value = automationState.apiKey,
+                    onValueChange = automationViewModel::updateApiKey,
+                    isSensitive = true,
+                )
+            }
+            val supportsQualityRole = automationState.serviceType == AutomationServiceType.SONARR ||
+                automationState.serviceType == AutomationServiceType.RADARR
+            if (supportsQualityRole) {
+                Spacer(Modifier.height(8.dp))
+                Text(stringResource(R.string.integrations_automation_role), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                AutomationInstanceRole.entries.forEach { role ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable(enabled = !automationState.isBusy) {
+                                automationViewModel.selectRole(role)
+                            },
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        RadioButton(
+                            selected = automationState.role == role,
+                            onClick = { automationViewModel.selectRole(role) },
+                            colors = RadioButtonDefaults.colors(selectedColor = Amber),
+                        )
+                        Text(
+                            if (role == AutomationInstanceRole.UHD) {
+                                stringResource(R.string.integrations_automation_uhd)
+                            } else {
+                                stringResource(R.string.integrations_automation_standard)
+                            },
+                            color = MaterialTheme.colorScheme.onSurface,
+                        )
+                    }
+                }
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable(enabled = !automationState.isBusy) {
+                            automationViewModel.setDefault(!automationState.isDefault)
+                        },
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    RadioButton(
+                        selected = automationState.isDefault,
+                        onClick = { automationViewModel.setDefault(!automationState.isDefault) },
+                        colors = RadioButtonDefaults.colors(selectedColor = Amber),
+                    )
+                    Text(stringResource(R.string.integrations_automation_default), color = MaterialTheme.colorScheme.onSurface)
+                }
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(
+                    onClick = automationViewModel::saveAndTest,
+                    enabled = !automationState.isBusy,
+                    modifier = Modifier.weight(1f),
+                    colors = ButtonDefaults.buttonColors(containerColor = Amber, contentColor = Obsidian),
+                ) {
+                    if (automationState.isBusy) {
+                        CircularProgressIndicator(Modifier.size(18.dp), color = Obsidian, strokeWidth = 2.dp)
+                        Spacer(Modifier.width(8.dp))
+                    }
+                    Text(stringResource(R.string.integrations_save_test))
+                }
+                if (automationState.editingId != null) {
+                    OutlinedButton(onClick = automationViewModel::cancelEdit) {
+                        Text(stringResource(R.string.common_cancel))
+                    }
+                }
+            }
+            automationState.message?.let {
+                Spacer(Modifier.height(6.dp))
+                Text(localizedUiText(it), color = Emerald, style = MaterialTheme.typography.bodySmall)
+            }
+            automationState.error?.let {
+                Spacer(Modifier.height(6.dp))
+                Text(localizedUiText(it), color = Ruby, style = MaterialTheme.typography.bodySmall)
+            }
+        }
+
+        Spacer(Modifier.height(12.dp))
+
+        }
+        if (selectedService == "jellyfin") {
+        IntegrationCard(
+            title = localizedUiText("Jellyfin"),
+            modifier = repairAnchor("jellyfin"),
             description = stringResource(R.string.integrations_jellyfin_desc),
         ) {
             IntegrationTextField(
@@ -459,17 +775,7 @@ fun IntegrationsScreen(
             Spacer(Modifier.height(8.dp))
             OutlinedButton(
                 onClick = {
-                    viewModel.saveAndTestJellyfinConnection()
-                    if (jellyfinStorageMode == com.torve.domain.integrations.IntegrationStorageMode.ACCOUNT) {
-                        scope.launch {
-                            accountSessionCoordinator.saveIntegrationToBackend(
-                                integrationType = "JELLYFIN_API_KEY",
-                                credentials = mapOf("api_key" to state.jellyfinApiKey),
-                                displayIdentifier = "Jellyfin",
-                                config = mapOf("server_url" to state.jellyfinServerUrl),
-                            )
-                        }
-                    }
+                    viewModel.saveAndTestJellyfinConnection(jellyfinStorageMode)
                 },
                 modifier = Modifier.fillMaxWidth(),
                 colors = ButtonDefaults.outlinedButtonColors(contentColor = Amber),
@@ -478,13 +784,13 @@ fun IntegrationsScreen(
             }
             state.jellyfinStatusMessage?.let {
                 Spacer(Modifier.height(6.dp))
-                Text(it, color = Silver, style = MaterialTheme.typography.bodySmall)
+                Text(localizedUiText(it), color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
             }
 
             // Profile selector (visible after successful connection)
             if (state.jellyfinProfiles.isNotEmpty()) {
                 Spacer(Modifier.height(12.dp))
-                Text(stringResource(R.string.integrations_user_profile), color = Snow, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.bodyMedium)
+                Text(stringResource(R.string.integrations_user_profile), color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.bodyMedium)
                 Spacer(Modifier.height(4.dp))
                 state.jellyfinProfiles.forEach { profile ->
                     Row(
@@ -501,7 +807,7 @@ fun IntegrationsScreen(
                         )
                         Text(
                             text = profile.name + if (profile.isAdmin) " (" + stringResource(R.string.integrations_admin) + ")" else "",
-                            color = Snow,
+                            color = MaterialTheme.colorScheme.onSurface,
                             style = MaterialTheme.typography.bodyMedium,
                         )
                     }
@@ -511,9 +817,12 @@ fun IntegrationsScreen(
 
         Spacer(Modifier.height(12.dp))
 
+        }
+        if (selectedService == "plex") {
         // ── Plex ──
         IntegrationCard(
-            title = "Plex",
+            title = localizedUiText("Plex"),
+            modifier = repairAnchor("plex"),
             description = stringResource(R.string.integrations_plex_desc),
         ) {
             IntegrationTextField(
@@ -537,7 +846,7 @@ fun IntegrationsScreen(
             Spacer(Modifier.height(4.dp))
             Text(
                 stringResource(R.string.integrations_plex_token_hint),
-                color = Silver.copy(alpha = 0.6f),
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
                 style = MaterialTheme.typography.bodySmall,
             )
             Spacer(Modifier.height(8.dp))
@@ -566,14 +875,14 @@ fun IntegrationsScreen(
             if (state.plexConnected) {
                 Text(
                     stringResource(R.string.integrations_status_connected),
-                    color = Snow,
+                    color = MaterialTheme.colorScheme.onSurface,
                     style = MaterialTheme.typography.bodySmall,
                 )
                 Spacer(Modifier.height(4.dp))
             }
 
             state.plexError?.let {
-                Text(it, color = Silver, style = MaterialTheme.typography.bodySmall)
+                Text(localizedUiText(it), color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
                 Spacer(Modifier.height(4.dp))
             }
 
@@ -591,7 +900,7 @@ fun IntegrationsScreen(
                     Spacer(Modifier.weight(1f))
                     OutlinedButton(
                         onClick = { viewModel.disconnectPlex() },
-                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Silver),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.onSurfaceVariant),
                     ) { Text(stringResource(R.string.common_disconnect)) }
                 }
             }
@@ -599,11 +908,26 @@ fun IntegrationsScreen(
 
         Spacer(Modifier.height(12.dp))
 
+        }
+        if (selectedService == "nzbdav") {
         // ── NzbDAV ──
         // Backend-managed integration. The app never talks to the user's
         // NzbDAV instance directly — base URL + API key are forwarded to
         // the Torve backend which owns the connection.
-        NzbdavSetupSection()
+        NzbdavSetupSection()        }
+
+        if (selectedService == "opensubtitles") {
+            var apiKey by remember { mutableStateOf("") }
+            IntegrationCard(title = localizedUiText("OpenSubtitles"), description = localizedUiText("Subtitle service API key")) {
+                Text(localizedUiText(if (state.opensubtitlesApiKey.isBlank()) "Not configured" else "Credentials saved"), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Spacer(Modifier.height(12.dp))
+                IntegrationTextField(localizedUiText("New API key"), apiKey, { apiKey = it }, isSensitive = true)
+                Spacer(Modifier.height(12.dp))
+                Button(onClick = { viewModel.setOpenSubtitlesApiKey(apiKey); apiKey = "" }, enabled = apiKey.isNotBlank()) { Text(stringResource(R.string.common_save)) }
+            }
+        }
+        Spacer(Modifier.height(110.dp))
+
     }
 }
 
@@ -681,13 +1005,13 @@ private fun NzbdavSetupSection(
                 onClick = { vm.remove() },
                 enabled = state.status !is NzbdavStatus.NotConfigured &&
                     !state.isRemoving && !state.isSaving && !state.isTesting,
-                colors = ButtonDefaults.outlinedButtonColors(contentColor = Silver),
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.onSurfaceVariant),
             ) {
                 if (state.isRemoving) {
                     CircularProgressIndicator(
                         modifier = Modifier.size(14.dp),
                         strokeWidth = 2.dp,
-                        color = Silver,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                     Spacer(Modifier.width(6.dp))
                 }
@@ -759,18 +1083,18 @@ private fun DeviceCodeSection(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .background(Gunmetal, RoundedCornerShape(8.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(8.dp))
             .padding(horizontal = 12.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween,
     ) {
         Column {
-            Text(stringResource(R.string.integrations_your_code), style = MaterialTheme.typography.bodySmall, color = Silver)
+            Text(stringResource(R.string.integrations_your_code), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Text(
                 text = userCode,
                 style = MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.Bold,
-                color = Snow,
+                color = MaterialTheme.colorScheme.onSurface,
                 letterSpacing = MaterialTheme.typography.titleLarge.letterSpacing,
             )
         }
@@ -811,19 +1135,76 @@ private fun DeviceCodeSection(
 }
 
 @Composable
+private fun IntegrationReadinessCard(summary: IntegrationReadinessSummary) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+    ) {
+        Column(
+            modifier = Modifier.padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Text(
+                text = localizedUiText("Your media setup"),
+                color = MaterialTheme.colorScheme.onSurface,
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+            )
+            Text(
+                text = localizedUiText("See what is ready before opening individual connection settings."),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style = MaterialTheme.typography.bodySmall,
+            )
+            summary.items.forEach { item ->
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalAlignment = Alignment.Top,
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = item.title,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                        Text(
+                            text = item.detail,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    }
+                    Text(
+                        text = item.statusLabel,
+                        color = when (item.status) {
+                            IntegrationReadinessStatus.READY -> Emerald
+                            IntegrationReadinessStatus.NEEDS_ATTENTION -> Amber
+                            IntegrationReadinessStatus.NOT_CONFIGURED -> Silver
+                        },
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
 private fun IntegrationCard(
     title: String,
     description: String,
+    modifier: Modifier = Modifier,
     content: @Composable (() -> Unit)? = null,
 ) {
     Card(
-        modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = Charcoal),
+        modifier = modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
     ) {
         Column(Modifier.padding(14.dp)) {
-            Text(title, color = Snow, fontWeight = FontWeight.SemiBold)
+            Text(title, color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.SemiBold)
             Spacer(Modifier.height(4.dp))
-            Text(description, color = Silver, style = MaterialTheme.typography.bodySmall)
+            Text(description, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
             if (content != null) {
                 Spacer(Modifier.height(10.dp))
                 content()
@@ -842,13 +1223,13 @@ private fun IntegrationTextField(
     var revealed by remember { mutableStateOf(false) }
     val peekTransformation = com.torve.android.ui.components.rememberPeekPasswordTransformation(value)
     Column {
-        Text(label, style = MaterialTheme.typography.bodySmall, color = Torve.colors.textSecondary)
+        Text(localizedUiText(label), style = MaterialTheme.typography.bodySmall, color = Torve.colors.textSecondary)
         Spacer(Modifier.height(4.dp))
         BasicTextField(
             value = value,
             onValueChange = onValueChange,
             singleLine = true,
-            textStyle = MaterialTheme.typography.bodyMedium.copy(color = Snow),
+            textStyle = MaterialTheme.typography.bodyMedium.copy(color = MaterialTheme.colorScheme.onSurface),
             cursorBrush = SolidColor(Amber),
             visualTransformation = if (isSensitive && !revealed) peekTransformation else VisualTransformation.None,
             keyboardOptions = if (isSensitive) KeyboardOptions(keyboardType = KeyboardType.Password) else KeyboardOptions.Default,
@@ -857,13 +1238,13 @@ private fun IntegrationTextField(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .background(Gunmetal, RoundedCornerShape(8.dp))
+                        .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(8.dp))
                         .padding(start = 12.dp, end = if (isSensitive) 4.dp else 12.dp, top = 10.dp, bottom = 10.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Box(modifier = Modifier.weight(1f)) {
                         if (value.isBlank()) {
-                            Text(label, color = Torve.colors.textHint, style = MaterialTheme.typography.bodySmall)
+                            Text(localizedUiText(label), color = Torve.colors.textHint, style = MaterialTheme.typography.bodySmall)
                         }
                         inner()
                     }
@@ -871,8 +1252,8 @@ private fun IntegrationTextField(
                         IconButton(onClick = { revealed = !revealed }, modifier = Modifier.size(32.dp)) {
                             Icon(
                                 imageVector = if (revealed) Icons.Outlined.VisibilityOff else Icons.Outlined.Visibility,
-                                contentDescription = if (revealed) "Hide" else "Show",
-                                tint = Silver,
+                                contentDescription = localizedUiText(if (revealed) "Hide" else "Show"),
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
                                 modifier = Modifier.size(18.dp),
                             )
                         }

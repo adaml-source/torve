@@ -10,6 +10,7 @@ import com.torve.domain.model.RecentSuccessCandidate
 import com.torve.domain.model.StartupCandidate
 import com.torve.domain.model.StartupConfidenceReasonCode
 import com.torve.domain.model.StreamQuality
+import com.torve.util.DisplayTextDecoder
 import kotlin.math.roundToInt
 
 object SourceAccelerationMapper {
@@ -17,16 +18,16 @@ object SourceAccelerationMapper {
     fun toStartupCandidate(model: StartupCandidateBackendModel): StartupCandidate {
         return StartupCandidate(
             streamKey = model.streamKey,
-            title = model.title,
+            title = DisplayTextDecoder.decodeReleaseTitle(model.title),
             qualityLabel = model.qualityLabel,
             quality = StreamQuality.fromString(model.qualityLabel),
-            addonName = model.addonName,
-            sourceLabel = model.sourceLabel,
+            addonName = DisplayTextDecoder.decode(model.addonName),
+            sourceLabel = model.sourceLabel?.let(DisplayTextDecoder::decode),
             readinessState = model.readinessState,
             provenance = CandidateProvenance(
                 kind = model.provenanceKind,
-                providerLabel = model.provenanceProviderLabel,
-                sourceLabel = model.sourceLabel,
+                providerLabel = model.provenanceProviderLabel?.let(DisplayTextDecoder::decode),
+                sourceLabel = model.sourceLabel?.let(DisplayTextDecoder::decode),
             ),
             confidenceReasons = model.confidenceReasons.ifEmpty {
                 listOf(com.torve.domain.model.StartupConfidenceReasonCode.NO_ACCELERATION_SIGNAL)
@@ -44,8 +45,8 @@ object SourceAccelerationMapper {
     fun toInventoryMatch(model: InventoryMatchBackendModel): InventoryMatch {
         return InventoryMatch(
             matchKey = model.matchKey,
-            providerLabel = model.providerLabel,
-            displayTitle = model.displayTitle,
+            providerLabel = DisplayTextDecoder.decode(model.providerLabel),
+            displayTitle = DisplayTextDecoder.decodeReleaseTitle(model.displayTitle),
             matchType = model.matchType,
             readinessState = model.readinessState,
             confidenceReasons = model.confidenceReasons,
@@ -60,7 +61,7 @@ object SourceAccelerationMapper {
     ): KnownHashAvailabilityObservation {
         return KnownHashAvailabilityObservation(
             infoHash = model.infoHash,
-            providerLabel = model.providerLabel,
+            providerLabel = DisplayTextDecoder.decode(model.providerLabel),
             availabilityState = model.availabilityState,
             readinessState = model.readinessState,
             confidenceReasons = model.confidenceReasons,
@@ -72,12 +73,12 @@ object SourceAccelerationMapper {
     fun toRecentSuccessCandidate(model: RecentSuccessCandidateBackendModel): RecentSuccessCandidate {
         return RecentSuccessCandidate(
             streamKey = model.streamKey,
-            title = model.title,
-            providerLabel = model.providerLabel,
-            addonName = model.addonName,
+            title = DisplayTextDecoder.decodeReleaseTitle(model.title),
+            providerLabel = model.providerLabel?.let(DisplayTextDecoder::decode),
+            addonName = DisplayTextDecoder.decode(model.addonName),
             qualityLabel = model.qualityLabel,
             quality = StreamQuality.fromString(model.qualityLabel),
-            sourceLabel = model.sourceLabel,
+            sourceLabel = model.sourceLabel?.let(DisplayTextDecoder::decode),
             readinessState = model.readinessState,
             confidenceReasons = model.confidenceReasons.ifEmpty {
                 listOf(com.torve.domain.model.StartupConfidenceReasonCode.RECENT_SUCCESS)
@@ -99,7 +100,7 @@ object SourceAccelerationMapper {
 
         val reasons = backendReasonCodes(model.reasons)
         val providerLabel = model.providerType?.prettyProviderLabel()
-        val sourceLabel = model.sourceLabel?.takeIf { it.isNotBlank() } ?: providerLabel
+        val sourceLabel = model.sourceLabel?.let(DisplayTextDecoder::decode)?.takeIf { it.isNotBlank() } ?: providerLabel
         val qualityLabel = model.quality?.takeIf { it.isNotBlank() }
             ?: StreamParser.extractQuality(model.title.orEmpty())
         val normalizedScore = normalizeBackendScore(model.score)
@@ -118,9 +119,9 @@ object SourceAccelerationMapper {
         }
 
         return ParsedStream(
-            addonName = model.addonName?.takeIf { it.isNotBlank() } ?: providerLabel ?: "Torve",
+            addonName = model.addonName?.let(DisplayTextDecoder::decode)?.takeIf { it.isNotBlank() } ?: providerLabel ?: "Torve",
             quality = qualityLabel,
-            title = model.title?.takeIf { it.isNotBlank() } ?: "Recommended source",
+            title = model.title?.let(DisplayTextDecoder::decodeReleaseTitle)?.takeIf { it.isNotBlank() } ?: "Recommended source",
             infoHash = infoHash,
             fileIdx = model.fileIdx,
             directUrl = directUrl,

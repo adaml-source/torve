@@ -21,7 +21,10 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.Renderer
 import androidx.media3.exoplayer.analytics.AnalyticsListener
 import androidx.media3.exoplayer.audio.DefaultAudioSink
+import androidx.media3.exoplayer.text.TextOutput
+import androidx.media3.exoplayer.text.TextRenderer
 import androidx.media3.datasource.DefaultHttpDataSource
+import androidx.media3.datasource.HttpDataSource
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.exoplayer.source.MediaSource
 import androidx.media3.exoplayer.trackselection.DefaultTrackSelector
@@ -91,6 +94,14 @@ class ExoPlayerEngine(
     var onCodecError: ((errorCode: Int) -> Unit)? = null
 
     /**
+     * Set by the player screen to recover from a malformed or incorrectly labelled
+     * media container at the stream-selection layer. ExoPlayer reports some MKV
+     * parser failures as ERROR_CODE_UNSPECIFIED, so classification also inspects
+     * the exception chain instead of relying on the numeric error code alone.
+     */
+    var onRecoverableSourceError: ((errorCode: Int) -> Unit)? = null
+
+    /**
      * Gives the live TV screen one last chance to move playback to the alternate engine before
      * ExoPlayer declares the channel audio-incompatible and disables audio.
      */
@@ -121,11 +132,16 @@ class ExoPlayerEngine(
     private var videoDecoderName: String? = null
     private var audioDecoderName: String? = null
     private var currentUrl: String? = null
+    private var audioSinkErrorCount = 0
+    private var lastAudioSinkErrorElapsedMs = 0L
+    private var lastAudioSinkErrorSummary: String? = null
     internal var liveBufferDurationMs: Int = DEFAULT_LIVE_BUFFER_MS
     private var preferSoftwareAudioDecoding = false
     private var currentRendererPrefersSoftwareAudio = false
     private val liveTuneStateMachine = LiveTuneStateMachine(AUDIO_READINESS_TIMEOUT_MS)
     private val mainHandler = Handler(Looper.getMainLooper())
+    private var subtitleDelayMs = 0
+    private val subtitleDelayState = SubtitleDelayState()
     private val audioReadinessTimeoutRunnable = Runnable {
         handleAudioReadinessTimeout("bounded_readiness_timeout")
     }
@@ -164,7 +180,7 @@ class ExoPlayerEngine(
                     liveTuneStateMachine.onPlaybackBuffering(SystemClock.elapsedRealtime()),
                 )
                 Player.STATE_READY -> {
-                    _state = _state.copy(durationMs = exoPlayer?.duration ?: 0)
+                    exoPlayer?.let(::refreshPlaybackWindowState)
                     if (!_state.isEngineFallbackAllowed) {
                         applyTuneSnapshot(
                             liveTuneStateMachine.onPlaybackReady(SystemClock.elapsedRealtime()),
@@ -182,12 +198,28 @@ class ExoPlayerEngine(
         }
 
         override fun onPlayerError(error: PlaybackException) {
+            Log.e(TAG, "Playback failure ${error.playbackFailureSummary()}")
+            val causeChain = error.buildCauseChainSummary()
+            if (
+                currentPlaybackContext == null &&
+                isRecoverableContainerFailure(error.errorCode, causeChain)
+            ) {
+                val callback = onRecoverableSourceError
+                if (callback != null) {
+                    Log.w(
+                        TAG,
+                        "Recoverable container failure; requesting source fallback: " +
+                            causeChain.take(320),
+                    )
+                    callback(error.errorCode)
+                    return
+                }
+            }
             // When no compatibility failure handler is set (TV live playback),
             // skip all custom audio recovery — let ExoPlayer + FFmpeg handle
             // codec fallback automatically via setEnableDecoderFallback(true),
             // exactly like TiviMate does.
             if (onLiveAudioCompatibilityFailure == null) {
-                Log.w(TAG, "Player error (${error.errorCode}): ${error.message}")
                 if (error.errorCode == PlaybackException.ERROR_CODE_BEHIND_LIVE_WINDOW ||
                     error.errorCode == PlaybackException.ERROR_CODE_AUDIO_TRACK_WRITE_FAILED
                 ) {
@@ -229,7 +261,6 @@ class ExoPlayerEngine(
             if (isCodecError) {
                 val player = exoPlayer
                 val msg = error.message.orEmpty()
-                val causeChain = error.buildCauseChainSummary()
                 val selectedAudio = player?.selectedAudioTrackSnapshot()
                 val isAudioCodecError = msg.contains("AudioRenderer", ignoreCase = true) ||
                     msg.contains("AudioSink", ignoreCase = true) ||
@@ -340,6 +371,7 @@ class ExoPlayerEngine(
             maybeConfirmTune("tracks_changed")
             listeners.forEach { it.onTracksChanged(audios, subs) }
         }
+
     }
 
     private val analyticsListener = object : AnalyticsListener {
@@ -409,6 +441,27 @@ class ExoPlayerEngine(
             maybeConfirmTune("rendered_first_frame")
             notifyStateChanged()
         }
+
+        override fun onTimelineChanged(eventTime: AnalyticsListener.EventTime, reason: Int) {
+            exoPlayer?.let(::refreshPlaybackWindowState)
+            notifyStateChanged()
+        }
+
+        override fun onAudioSinkError(
+            eventTime: AnalyticsListener.EventTime,
+            audioSinkError: Exception,
+        ) {
+            recordAudioSinkError(audioSinkError)
+        }
+
+        override fun onAudioCodecError(
+            eventTime: AnalyticsListener.EventTime,
+            audioCodecError: Exception,
+        ) {
+            if (audioCodecError.buildCauseChainSummary().contains("AudioSink", ignoreCase = true)) {
+                recordAudioSinkError(audioCodecError)
+            }
+        }
     }
 
     fun initialize() {
@@ -417,13 +470,38 @@ class ExoPlayerEngine(
     }
 
     private fun createPlayer(preferSoftwareAudioDecoding: Boolean) {
-        // TiviMate-aligned: no custom audio processors for live TV — they add
-        // variable latency that causes A/V sync drift and microstutter.
         val renderersFactory = object : DefaultRenderersFactory(context) {
             override fun buildImageRenderers(out: java.util.ArrayList<Renderer>) {
                 // Torve playback does not use Media3 image tracks. Leaving the
                 // renderer out avoids a Media3 duplicate ImageOutputBuffer
                 // release crash seen during rapid TV focus/navigation churn.
+            }
+
+            override fun buildAudioSink(
+                context: Context,
+                enableFloatOutput: Boolean,
+                enableAudioTrackPlaybackParams: Boolean,
+            ): DefaultAudioSink {
+                return DefaultAudioSink.Builder(context)
+                    .setAudioProcessorChain(
+                        DefaultAudioSink.DefaultAudioProcessorChain(delayProcessor, equalizerProcessor),
+                    )
+                    .build()
+            }
+
+            override fun buildTextRenderers(
+                context: Context,
+                output: TextOutput,
+                outputLooper: Looper,
+                extensionRendererMode: Int,
+                out: java.util.ArrayList<Renderer>,
+            ) {
+                out.add(
+                    SubtitleDelayRenderer(
+                        delegate = TextRenderer(output, outputLooper),
+                        delayState = subtitleDelayState,
+                    ),
+                )
             }
         }
             .setEnableDecoderFallback(true)
@@ -640,6 +718,7 @@ class ExoPlayerEngine(
                 "softwareAudio=$preferSoftwareAudioDecoding " +
                 "sessionRecoverySkipped=$sessionIncompatibleRecoverySkipped",
         )
+        resetAudioSinkErrorTelemetry()
         exoPlayer?.apply {
             stop()
             clearMediaItems()
@@ -1234,7 +1313,7 @@ class ExoPlayerEngine(
         )
     }
 
-    private fun PlaybackException.buildCauseChainSummary(maxDepth: Int = 8): String {
+    private fun Throwable.buildCauseChainSummary(maxDepth: Int = 8): String {
         val parts = mutableListOf<String>()
         var current: Throwable? = this
         var depth = 0
@@ -1246,6 +1325,33 @@ class ExoPlayerEngine(
             depth++
         }
         return parts.joinToString(" <- ")
+    }
+
+    private fun PlaybackException.playbackFailureSummary(maxDepth: Int = 8): String {
+        val causes = mutableListOf<String>()
+        var current: Throwable? = this
+        var depth = 0
+        var httpStatus: Int? = null
+        while (current != null && depth < maxDepth) {
+            causes += current::class.simpleName ?: current::class.java.simpleName
+            if (current is HttpDataSource.InvalidResponseCodeException) {
+                httpStatus = current.responseCode
+            }
+            current = current.cause
+            depth++
+        }
+        return buildString {
+            append("code=")
+            append(errorCode)
+            append(" name=")
+            append(errorCodeName)
+            httpStatus?.let {
+                append(" http=")
+                append(it)
+            }
+            append(" causes=")
+            append(causes.joinToString("<-"))
+        }
     }
 
     private fun ExoPlayer.setPlaybackSource(url: String) {
@@ -1266,7 +1372,8 @@ class ExoPlayerEngine(
         pendingExternalSubtitles = emptyList()
         // Capture and consume headers before the MediaSource build so a
         // build failure doesn't carry them across.
-        val headers = pendingRequestHeaders
+        val scopedOrigin = pendingRequestHeaders["Torve-Internal-Origin-Scope"]
+        val headers = pendingRequestHeaders.filterKeys { it != "Torve-Internal-Origin-Scope" }
         pendingRequestHeaders = emptyMap()
         val builder = MediaItem.Builder().setUri(url)
         if (subtitleConfigs.isNotEmpty()) {
@@ -1289,9 +1396,9 @@ class ExoPlayerEngine(
             // Custom HTTP data source so `X-Torve-Lan-Auth` (and any
             // other staged header) is attached to every request the
             // player issues for this URL.
-            val httpFactory = DefaultHttpDataSource.Factory()
-                .setDefaultRequestProperties(headers)
-                .setAllowCrossProtocolRedirects(false)
+            val httpFactory: androidx.media3.datasource.DataSource.Factory = if (scopedOrigin == url) {
+                com.torve.android.files.OriginBoundDataSource.Factory(url, headers)
+            } else DefaultHttpDataSource.Factory().setDefaultRequestProperties(headers).setAllowCrossProtocolRedirects(false)
             val mediaSourceFactory = DefaultMediaSourceFactory(context)
                 .setDataSourceFactory(httpFactory)
             setMediaSource(mediaSourceFactory.createMediaSource(builder.build()))
@@ -1704,6 +1811,27 @@ class ExoPlayerEngine(
         listeners.remove(listener)
     }
 
+    override fun setSubtitleDelay(delayMs: Int) {
+        val boundedDelayMs = delayMs.coerceIn(-10_000, 10_000)
+        if (subtitleDelayMs == boundedDelayMs) return
+        subtitleDelayMs = boundedDelayMs
+        subtitleDelayState.delayMs = boundedDelayMs
+
+        // Reposition only the current seekable timeline so Media3 rebuilds its
+        // active cue window immediately. This does not replace the MediaItem,
+        // re-prepare the source, or restart playback.
+        exoPlayer?.let { player ->
+            if (
+                player.currentMediaItem != null &&
+                (!player.isCurrentMediaItemLive || player.isCurrentMediaItemSeekable)
+            ) {
+                player.seekTo(player.currentPosition.coerceAtLeast(0L))
+            }
+        }
+    }
+
+    override fun getSubtitleDelay(): Int = subtitleDelayMs
+
     override fun setAudioDelay(delayMs: Int) {
         delayProcessor.setDelayMs(delayMs)
     }
@@ -1856,12 +1984,38 @@ class ExoPlayerEngine(
             fallbackFromHardwareDefault = liveAudioRecoveryAttempts > 0 ||
                 inferDecoderKind(videoDecoderName) == DecoderKind.SOFTWARE ||
                 inferDecoderKind(audioDecoderName) == DecoderKind.SOFTWARE,
+            audioSinkErrorCount = audioSinkErrorCount,
+            lastAudioSinkErrorElapsedMs = lastAudioSinkErrorElapsedMs,
+            lastAudioSinkErrorSummary = lastAudioSinkErrorSummary,
         )
     }
 
     fun updatePosition() {
         val player = exoPlayer ?: return
-        _state = _state.copy(positionMs = player.currentPosition)
+        refreshPlaybackWindowState(player)
+        _state = _state.copy(positionMs = player.currentPosition.coerceAtLeast(0L))
+        notifyStateChanged()
+    }
+
+    /**
+     * Copies Media3's active-window facts into the platform-neutral state. A
+     * seekable live window is the capability gate for provider-backed
+     * timeshift; a normal IPTV stream must never advertise controls that its
+     * manifest cannot support.
+     */
+    private fun refreshPlaybackWindowState(player: Player) {
+        val safeDuration = player.duration
+            .takeUnless { it == C.TIME_UNSET || it < 0L }
+            ?: 0L
+        val safeLiveOffset = player.currentLiveOffset
+            .takeUnless { it == C.TIME_UNSET || it < 0L }
+            ?: 0L
+        _state = _state.copy(
+            durationMs = safeDuration,
+            isLive = player.isCurrentMediaItemLive,
+            isSeekable = player.isCurrentMediaItemSeekable,
+            liveOffsetMs = safeLiveOffset,
+        )
     }
 
     private fun applyTuneSnapshot(snapshot: LiveTuneSnapshot) {
@@ -1872,6 +2026,24 @@ class ExoPlayerEngine(
             isAudioReady = snapshot.audioReady,
             isVideoReady = snapshot.videoReady,
             isEngineFallbackAllowed = snapshot.fallbackAllowed,
+        )
+    }
+
+    private fun resetAudioSinkErrorTelemetry() {
+        audioSinkErrorCount = 0
+        lastAudioSinkErrorElapsedMs = 0L
+        lastAudioSinkErrorSummary = null
+    }
+
+    private fun recordAudioSinkError(error: Exception) {
+        audioSinkErrorCount += 1
+        lastAudioSinkErrorElapsedMs = SystemClock.elapsedRealtime()
+        lastAudioSinkErrorSummary = error.buildCauseChainSummary().take(240)
+        Log.w(
+            "LiveTune",
+            "Audio sink error count=$audioSinkErrorCount " +
+                "channel=${currentPlaybackContext?.displayName.orEmpty()} " +
+                "summary=$lastAudioSinkErrorSummary",
         )
     }
 

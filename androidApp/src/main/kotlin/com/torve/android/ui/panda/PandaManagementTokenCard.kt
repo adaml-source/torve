@@ -97,29 +97,25 @@ fun PandaManagementTokenCard(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            OutlinedButton(
+            PandaButton(
                 onClick = { revealed = !revealed },
-                shape = RoundedCornerShape(10.dp),
                 modifier = Modifier.weight(1f),
             ) {
-                Text(if (revealed) stringResource(R.string.common_hide) else stringResource(R.string.panda_show_token), color = Silver)
+                Text(if (revealed) stringResource(R.string.common_hide) else stringResource(R.string.panda_show_token))
             }
-            OutlinedButton(
+            PandaButton(
                 onClick = { copyToClipboard(context, token) },
-                shape = RoundedCornerShape(10.dp),
                 modifier = Modifier.weight(1f),
             ) {
-                Text(stringResource(R.string.common_copy), color = Silver)
+                Text(stringResource(R.string.common_copy))
             }
         }
         Spacer(Modifier.height(8.dp))
-        Button(
+        PandaButton(
             onClick = onAcknowledge,
             modifier = Modifier.fillMaxWidth(),
-            colors = ButtonDefaults.buttonColors(containerColor = Amber),
-            shape = RoundedCornerShape(10.dp),
         ) {
-            Text(stringResource(R.string.panda_management_token_saved), color = Gunmetal, fontWeight = FontWeight.SemiBold)
+            Text(stringResource(R.string.panda_management_token_saved), fontWeight = FontWeight.SemiBold)
         }
     }
 }

@@ -1,12 +1,24 @@
 package com.torve.android.ui.navigation
 
+import com.torve.android.ui.community.parityLabel as localizedUiText
+import com.torve.android.ui.components.mobileGlassSurface
+
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.role
+import androidx.compose.runtime.key
+import com.torve.domain.model.MediaItem
 import android.net.Uri
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -19,6 +31,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.navigationBars
@@ -30,14 +43,21 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Bookmark
+import androidx.compose.material.icons.filled.CalendarMonth
+import androidx.compose.material.icons.outlined.CalendarMonth
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.LiveTv
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Tv
 import androidx.compose.material.icons.outlined.BookmarkBorder
 import androidx.compose.material.icons.outlined.Home
 import androidx.compose.material.icons.outlined.LiveTv
+import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.Movie
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.Tv
@@ -53,15 +73,25 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.zIndex
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusProperties
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
@@ -71,6 +101,7 @@ import com.torve.android.R
 import com.torve.android.background.BackgroundWork
 import com.torve.android.deeplink.TorveAppLink
 import com.torve.android.deeplink.TorveAppLinkTarget
+import com.torve.android.ui.replays.webReplayRoutes
 import androidx.navigation.NavHostController
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
@@ -79,7 +110,6 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.torve.android.ui.auth.LoginScreen
-import com.torve.android.ui.beta.BetaProgramScreen
 import com.torve.android.ui.calendar.CalendarScreen
 import com.torve.android.ui.catalog.CatalogScreen
 import com.torve.android.ui.detail.DetailScreen
@@ -95,14 +125,13 @@ import com.torve.android.ui.legal.LegalScreen
 import com.torve.android.ui.legal.PrivacyPolicyScreen
 import com.torve.android.ui.mood.MoodMatcherScreen
 import com.torve.android.ui.player.PlayerScreen
+import com.torve.android.ui.player.ActivePlaybackSession
+import com.torve.android.ui.player.ActivePlaybackState
 import com.torve.android.ui.profile.ProfileScreen
 
 import com.torve.android.ui.search.SearchScreen
 import com.torve.android.ui.seeall.SeeAllScreen
-import com.torve.android.ui.settings.AddonCatalogScreen
-import com.torve.android.ui.panda.PandaSetupScreen
 import com.torve.android.ui.onboarding.VerifyEmailGateScreen
-import com.torve.android.ui.settings.ManagePandaScreen
 import com.torve.android.ui.settings.RegexPatternsScreen
 import com.torve.android.ui.settings.SettingsScreen
 import com.torve.android.ui.sync.AccountScreen
@@ -111,6 +140,7 @@ import com.torve.android.ui.settings.StreamGroupsScreen
 import com.torve.android.ui.settings.CustomSectionEditorScreen
 import com.torve.android.ui.settings.DiagnosticsScreen
 import com.torve.android.ui.settings.IntegrationsScreen
+import com.torve.android.ui.settings.AutomationAdministrationScreen
 import com.torve.android.ui.settings.HomeLayoutScreen
 import com.torve.android.ui.settings.MdbListSettingsScreen
 import com.torve.android.ui.settings.CardStyleSettingsScreen
@@ -122,9 +152,6 @@ import com.torve.android.ui.support.BugReportScreen
 import com.torve.android.ui.transfer.providerSettingsRouteFor
 import com.torve.android.ui.stats.StatsScreen
 import com.torve.android.ui.watchlist.WatchlistScreen
-import com.torve.android.ui.setup.SetupIntentHubScreen
-import com.torve.android.ui.setup.SetupChoiceScreen
-import com.torve.android.ui.setup.SetupWizardScreen
 import com.torve.android.ui.device.DeviceLimitReachedScreen
 import com.torve.android.ui.device.ManageDevicesScreen
 import com.torve.android.premium.PremiumAccess
@@ -137,6 +164,8 @@ import com.torve.android.ui.theme.Amber
 import com.torve.android.ui.theme.Obsidian
 import com.torve.android.ui.theme.Torve
 import com.torve.domain.model.MediaType
+import com.torve.android.ui.community.openExtensionDetailIfNeeded
+import com.torve.android.ui.community.extensionDetailSeed
 import com.torve.domain.model.extractTmdbIdOrNull
 import com.torve.domain.model.extractImdbIdOrNull
 import com.torve.data.ai.KeywordSearchService
@@ -149,6 +178,9 @@ import com.torve.domain.repository.MediaFavoritesRepository
 import com.torve.domain.repository.MetadataRepository
 import com.torve.presentation.catalog.CatalogViewModel
 import com.torve.presentation.contentpolicy.ContentPolicyFilter
+import com.torve.android.ui.setup.SourceSetupScreen
+import com.torve.android.ui.setup.UsenetSetupScreen
+import com.torve.android.ui.setup.SourceSetupRoutes
 import com.torve.presentation.setup.SetupWizardViewModel
 import com.torve.presentation.search.SearchViewModel
 import com.torve.presentation.subscription.SubscriptionViewModel
@@ -159,6 +191,7 @@ import androidx.work.WorkInfo
 import androidx.work.WorkManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -166,7 +199,10 @@ import kotlinx.coroutines.withContext
 // Safe detail navigation — guards against null tmdbId
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-private fun NavHostController.navigateToDetail(item: com.torve.domain.model.MediaItem) {
+private fun NavHostController.navigateToDetail(item: com.torve.domain.model.MediaItem, season: Int? = null, episode: Int? = null) {
+    if (com.torve.android.ui.community.CommunityNotices.handle(item)) return
+    com.torve.android.ui.components.ContentLaunchArtworkStore.show(item)
+    if (openExtensionDetailIfNeeded(item, season = season, episode = episode)) return
     val type = if (item.type == MediaType.SERIES) "tv" else "movie"
     // Addon items arrive with namespaced ids like "tmdb:1523145" or "tt0111161"
     // but leave `tmdbId`/`imdbId` unset. Parse them out of `id` so those
@@ -175,8 +211,8 @@ private fun NavHostController.navigateToDetail(item: com.torve.domain.model.Medi
     val tmdbId = item.tmdbId ?: item.id.extractTmdbIdOrNull()
     val imdbId = item.imdbId?.takeIf { it.isNotBlank() } ?: item.id.extractImdbIdOrNull()
     when {
-        tmdbId != null -> navigate("detail/$type/$tmdbId")
-        imdbId != null -> navigate("detail_imdb/$type/${Uri.encode(imdbId)}")
+        tmdbId != null -> navigate("detail/$type/$tmdbId?season=${season ?: -1}&episode=${episode ?: -1}")
+        imdbId != null -> navigate("detail_imdb/$type/${Uri.encode(imdbId)}?season=${season ?: -1}&episode=${episode ?: -1}")
         else -> return
     }
 }
@@ -184,6 +220,20 @@ private fun NavHostController.navigateToDetail(item: com.torve.domain.model.Medi
 private fun NavHostController.navigateToLifetimeUnlock(feature: PremiumFeature) {
     navigate("paywall?feature=${Uri.encode(feature.name)}")
 }
+
+private fun ActivePlaybackSession.playerRoute(): String =
+    "player?url=${Uri.encode(url)}" +
+        "&title=${Uri.encode(title)}" +
+        "&mediaId=${Uri.encode(mediaId)}" +
+        "&mediaType=${Uri.encode(mediaType)}" +
+        "&posterUrl=${Uri.encode(posterUrl)}" +
+        "&backdropUrl=${Uri.encode(backdropUrl)}" +
+        "&seasonNumber=${seasonNumber ?: -1}" +
+        "&episodeNumber=${episodeNumber ?: -1}" +
+        "&showTmdbId=${showTmdbId ?: -1}" +
+        "&showImdbId=${Uri.encode(showImdbId.orEmpty())}" +
+        "&fallbackUrl=${Uri.encode(fallbackUrl)}" +
+        "&autoSourceSelection=$autoSourceSelection"
 
 @Composable
 private fun ResolveExternalDetailRoute(
@@ -232,9 +282,7 @@ private fun ResolveExternalDetailRoute(
                     style = MaterialTheme.typography.bodyLarge,
                     color = MaterialTheme.colorScheme.onBackground,
                 )
-                androidx.compose.material3.Button(onClick = onBack) {
-                    Text(text = stringResource(R.string.common_back))
-                }
+                com.torve.android.ui.components.BackButton(onClick = onBack)
             }
         }
     }
@@ -261,31 +309,17 @@ private fun PersistentMobileTabPane(
     visible: Boolean,
     content: @Composable () -> Unit,
 ) {
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .zIndex(if (visible) 1f else 0f)
-            .layout { measurable, constraints ->
-                val placeable = measurable.measure(constraints)
-                if (visible) {
-                    layout(placeable.width, placeable.height) {
-                        placeable.place(0, 0)
-                    }
-                } else {
-                    // Keep the subtree alive, but remove it from layout and hit-testing.
-                    layout(0, 0) {}
-                }
-            },
-    ) {
-        content()
+    val savedState = rememberSaveableStateHolder()
+    if (visible) savedState.SaveableStateProvider("content") {
+        Box(Modifier.fillMaxSize()) { content() }
     }
 }
 
 private val navTabDefs = listOf(
     NavTab("home", R.string.nav_home, Icons.Filled.Home, Icons.Outlined.Home),
-    NavTab("movies", R.string.nav_movies, Icons.Filled.Movie, Icons.Outlined.Movie),
-    NavTab("tv_shows", R.string.nav_tv_shows, Icons.Filled.Tv, Icons.Outlined.Tv),
     NavTab("live_tv", R.string.nav_channels, Icons.Filled.LiveTv, Icons.Outlined.LiveTv),
+    NavTab("search", R.string.nav_search, Icons.Filled.Search, Icons.Outlined.Search),
+    NavTab("calendar_tab", R.string.nav_calendar, Icons.Filled.CalendarMonth, Icons.Outlined.CalendarMonth),
     NavTab("watchlist_tab", R.string.nav_library, Icons.Filled.Bookmark, Icons.Outlined.BookmarkBorder),
     NavTab("profile_tab", R.string.nav_settings, Icons.Filled.Settings, Icons.Outlined.Settings),
 )
@@ -348,17 +382,50 @@ private val tvNavTabDefs = listOf(
 
 @Composable
 fun TorveNavGraph(
-    navController: NavHostController = rememberNavController(),
+    externalNavController: NavHostController = rememberNavController(),
     isTvMode: Boolean = false,
     appLink: TorveAppLink? = null,
     onAppLinkConsumed: () -> Unit = {},
+    resetMobileHomeScrollOnLaunch: Boolean = false,
+    episodeAlert: com.torve.android.notification.EpisodeAlertTarget? = null,
+    onEpisodeAlertConsumed: () -> Unit = {},
+    storeUpdates: com.torve.android.update.StoreUpdateController? = null,
 ) {
+    val mobileSettingsViewModel: com.torve.presentation.settings.SettingsViewModel = koinInject()
+    val mobileSettings by mobileSettingsViewModel.state.collectAsState()
+    val navigationOwner = mobileSettings.personalDataUserId
+    var mobileSelectedTab by rememberSaveable(navigationOwner) { mutableStateOf(MOBILE_HOME_ROUTE) }
+    // Each destination owns its complete stack, including detail routes and saved UI state.
+    val phoneControllers: Map<String, NavHostController> = if (isTvMode) emptyMap() else
+        listOf(MOBILE_HOME_ROUTE, "movies", "tv_shows", "live_tv", "search", "calendar_tab", "watchlist_tab", "profile_tab")
+            .associateWith { tab -> key(navigationOwner, tab) { rememberNavController() } }
+    val navController = if (isTvMode) externalNavController else phoneControllers.getValue(mobileSelectedTab)
+    val tabState = key(navigationOwner) { androidx.compose.runtime.saveable.rememberSaveableStateHolder() }
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = navBackStackEntry?.destination?.route
-    var mobileSelectedTab by rememberSaveable { mutableStateOf(MOBILE_HOME_ROUTE) }
+    var pendingMobileHomeScrollReset by remember(resetMobileHomeScrollOnLaunch) {
+        mutableStateOf(resetMobileHomeScrollOnLaunch)
+    }
+    LaunchedEffect(resetMobileHomeScrollOnLaunch, isTvMode) {
+        if (resetMobileHomeScrollOnLaunch && !isTvMode) {
+            mobileSelectedTab = MOBILE_HOME_ROUTE
+        }
+    }
 
-    val showBottomBar = !isTvMode && currentRoute == MOBILE_ROOT_ROUTE
+    val persistentNavigationRoutes = setOf(MOBILE_ROOT_ROUTE, MOBILE_HOME_ROUTE,
+        "movies", "tv_shows", "search", "detail", "detail_imdb", "person", "settings",
+        "collections", "your_shows", "library_tools", "files", "watch_stats", "watching_hub",
+        "home_layout", "custom_sections", "custom_section_editor", "card_style_settings",
+        "rating_settings", "appearance_refinements", "streaming_services", "stream_groups",
+        "addon_catalog", "manage_panda", "panda_setup", "regex_patterns", "mdblist", "integrations",
+        "diagnostics", "downloads", "download_show", "download_catalog", "backup", "trakt_lists",
+        "connection_center", "catalog_groups", "catalog_group", "library_collection", "jellyfin_library", "seeall", "provider", "genre", "profiles", "calendar", "sports")
+    val showBottomBar = !isTvMode && currentRoute?.substringBefore('/')?.substringBefore('?') in persistentNavigationRoutes
     val showTvNavRail = isTvMode && currentRoute in tvNavTabDefs.map { it.route }
+    androidx.activity.compose.BackHandler(enabled = !isTvMode && currentRoute == MOBILE_ROOT_ROUTE && mobileSelectedTab != MOBILE_HOME_ROUTE) {
+        mobileSelectedTab = MOBILE_HOME_ROUTE
+    }
+
 
     val setupViewModel: SetupWizardViewModel = koinInject()
     val setupCoordinator: com.torve.presentation.setup.SetupWizardCoordinator = koinInject()
@@ -370,6 +437,72 @@ fun TorveNavGraph(
     val watchlistViewModel: WatchlistViewModel = koinInject()
     val mediaFavoritesRepository: MediaFavoritesRepository = koinInject()
     val homeViewModel: HomeViewModel = koinInject()
+    val mobileLifecycle = androidx.lifecycle.compose.LocalLifecycleOwner.current
+    val mobileLifecycleState by mobileLifecycle.lifecycle.currentStateFlow.collectAsState()
+    val requestMonitor: com.torve.presentation.library.LibraryRequestMonitor = koinInject()
+    val requestSnackbar = remember { androidx.compose.material3.SnackbarHostState() }
+    fun openContinueWatching(progress: com.torve.domain.model.WatchProgress) {
+        if (progress.mediaId.startsWith("jf_")) {
+            navScope.launch {
+                try {
+                    val jellyfin: com.torve.data.integrations.JellyfinLibraryOverlayService = org.koin.mp.KoinPlatform.getKoin().get()
+                    val nativeId = progress.mediaId.removePrefix("jf_")
+                    val playableId = if (progress.mediaType == MediaType.SERIES) {
+                        val episode = jellyfin.getSeriesEpisodes(nativeId).firstOrNull {
+                            it.parentIndexNumber == progress.seasonNumber && it.indexNumber == progress.episodeNumber
+                        }
+                        if (episode == null) { requestSnackbar.showSnackbar("This library episode is unavailable"); return@launch }
+                        episode.id
+                    } else nativeId
+                    val route = jellyfin.buildAuthenticatedStream(playableId)
+                    if (route == null) { requestSnackbar.showSnackbar("Jellyfin is disabled or disconnected"); return@launch }
+                    com.torve.presentation.lanlibrary.PendingLanPlaybackHandoff.stage(route)
+                    navController.navigate(
+                        "player?url=${Uri.encode(route.url)}&title=${Uri.encode(progress.title)}" +
+                            "&mediaId=${Uri.encode(progress.mediaId)}&mediaType=${if (progress.mediaType == MediaType.SERIES) "series" else "movie"}" +
+                            "&posterUrl=${Uri.encode(progress.posterUrl.orEmpty())}&backdropUrl=${Uri.encode(progress.backdropUrl.orEmpty())}" +
+                            "&seasonNumber=${progress.seasonNumber ?: -1}&episodeNumber=${progress.episodeNumber ?: -1}" +
+                            "&startPositionMs=${progress.positionMs}")
+                } catch (e: kotlinx.coroutines.CancellationException) { throw e }
+                catch (e: Exception) { requestSnackbar.showSnackbar("Unable to open library copy") }
+            }
+        } else {
+            val type = if (progress.mediaType == MediaType.SERIES) "tv" else "movie"
+            val id = progress.mediaId.extractTmdbIdOrNull()
+            if (id == null) {
+                if (progress.mediaId.matches(Regex("tt[0-9]+"))) navController.navigate("detail_imdb/$type/${Uri.encode(progress.mediaId)}?season=${progress.seasonNumber ?: -1}&episode=${progress.episodeNumber ?: -1}")
+                return
+            }
+            val episode = if (type == "tv" && progress.seasonNumber != null && progress.episodeNumber != null)
+                "?season=${progress.seasonNumber}&episode=${progress.episodeNumber}" else ""
+            navController.navigate("detail/$type/$id$episode")
+        }
+    }
+
+    LaunchedEffect(authUser?.id, mobileSettings.personalDataUserId, mobileLifecycleState,
+        mobileSettings.optionalAppFeaturesLoaded, mobileSettings.optionalAppFeatures.arrStack, isTvMode) {
+        if (isTvMode || authUser == null || !mobileSettings.optionalAppFeaturesLoaded ||
+            !mobileSettings.optionalAppFeatures.arrStack ||
+            !mobileLifecycleState.isAtLeast(androidx.lifecycle.Lifecycle.State.RESUMED)) return@LaunchedEffect
+        while (kotlinx.coroutines.currentCoroutineContext().isActive) {
+            for (notice in requestMonitor.poll()) {
+                requestSnackbar.showSnackbar(notice.message, duration = androidx.compose.material3.SnackbarDuration.Long)
+                requestMonitor.acknowledge(notice.key)
+            }
+            delay(30_000L)
+        }
+    }
+    LaunchedEffect(mobileSettings.personalDataUserId, mobileSettings.optionalAppFeaturesLoaded, mobileSettings.optionalAppFeatures.channels) {
+        if (!mobileSettings.optionalAppFeaturesLoaded) return@LaunchedEffect
+        val channels: com.torve.presentation.channels.ChannelsViewModel = org.koin.mp.KoinPlatform.getKoin().get()
+        if (mobileSettings.optionalAppFeatures.channels) {
+            com.torve.android.epg.EpgWarmupWorker.schedule(appContext)
+        } else {
+            com.torve.android.epg.EpgWarmupWorker.cancel(appContext)
+            channels.stopBackgroundUpdates()
+            // The Channels tab remains reachable for setup even before it is enabled.
+        }
+    }
     val searchViewModel: SearchViewModel = koinInject()
     val subscriptionViewModel: SubscriptionViewModel = koinInject()
     val syncCoordinator: SyncCoordinator = koinInject()
@@ -509,6 +642,7 @@ fun TorveNavGraph(
     val metadataRepo: MetadataRepository = koinInject()
     val keywordSearchService: KeywordSearchService = koinInject()
     val prefsRepo: com.torve.domain.repository.PreferencesRepository = koinInject()
+    val watchProgressRepo: com.torve.domain.repository.WatchProgressRepository = koinInject()
     val ratingsEnricher: RatingsEnricher = koinInject()
     val integrationSecretStore: IntegrationSecretStore = koinInject()
     val contentPolicyRepository: ContentPolicyRepository = koinInject()
@@ -645,6 +779,7 @@ fun TorveNavGraph(
     }
     val movieCatalogViewModel = remember(
         metadataRepo,
+        watchProgressRepo,
         keywordSearchService,
         prefsRepo,
         ratingsEnricher,
@@ -656,6 +791,7 @@ fun TorveNavGraph(
         CatalogViewModel(
             metadataRepo,
             "movie",
+            watchProgressRepo = watchProgressRepo,
             keywordSearchService = keywordSearchService,
             prefsRepo = prefsRepo,
             ratingsEnricher = ratingsEnricher,
@@ -667,6 +803,7 @@ fun TorveNavGraph(
     }
     val tvCatalogViewModel = remember(
         metadataRepo,
+        watchProgressRepo,
         keywordSearchService,
         prefsRepo,
         ratingsEnricher,
@@ -678,6 +815,7 @@ fun TorveNavGraph(
         CatalogViewModel(
             metadataRepo,
             "tv",
+            watchProgressRepo = watchProgressRepo,
             keywordSearchService = keywordSearchService,
             prefsRepo = prefsRepo,
             ratingsEnricher = ratingsEnricher,
@@ -713,6 +851,12 @@ fun TorveNavGraph(
             return@LaunchedEffect
         }
         when (link.target) {
+            TorveAppLinkTarget.DETAIL -> {
+                val ids = org.koin.java.KoinJavaComponent.getKoin().get<com.torve.data.auth.UserIdProvider>()
+                val target = com.torve.android.launcher.readPlayNextTarget(link.uri.toString(), ids.currentDataUserId())
+                if (target != null) navController.navigate("detail/${target.type}/${target.id}" +
+                    if (target.type == "tv") "?season=${target.season}&episode=${target.episode}" else "") { launchSingleTop = true }
+            }
             TorveAppLinkTarget.HOME -> {
                 mobileSelectedTab = MOBILE_HOME_ROUTE
                 navController.navigate(MOBILE_ROOT_ROUTE) {
@@ -743,13 +887,27 @@ fun TorveNavGraph(
         onAppLinkConsumed()
     }
 
+    LaunchedEffect(episodeAlert, authUser?.id) {
+        val target = episodeAlert ?: return@LaunchedEffect
+        if (authUser == null || isTvMode) return@LaunchedEffect
+        val ids: com.torve.data.auth.UserIdProvider = org.koin.java.KoinJavaComponent.getKoin().get()
+        if (ids.currentDataUserIdOrNull() == target.person) {
+            navController.navigate("detail/tv/${target.showId}?season=${target.season}&episode=${target.episode}") { launchSingleTop = true }
+        } else {
+            // Opening an alert never bypasses another profile's PIN or age policy.
+            navController.navigate("profiles") { launchSingleTop = true }
+        }
+        onEpisodeAlertConsumed()
+    }
+
     // Content padding: the nav bar Row applies navigationBarsPadding() internally,
     // so its total rendered height = row content + system nav inset.
     // Content must clear: 56dp (row) + nav inset. The 12dp scrim overlaps content intentionally.
     val navBarInsetBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
-    val contentBottomPadding = if (showBottomBar) 56.dp + navBarInsetBottom else navBarInsetBottom
+    val contentBottomPadding = if (showBottomBar) 84.dp + navBarInsetBottom else navBarInsetBottom
 
     Box(modifier = Modifier.fillMaxSize()) {
+        com.torve.android.ui.community.CatalogueNoticeHost { navController.navigate("addon_catalog") }
         // ── Restore progress ──
         val restoreProgress by accountSessionCoordinator.restoreProgress.collectAsState()
 
@@ -776,7 +934,7 @@ fun TorveNavGraph(
                         strokeWidth = 2.dp,
                     )
                     Text(
-                        text = "Syncing account…",
+                        text = localizedUiText("Syncing account…"),
                         style = androidx.compose.material3.MaterialTheme.typography.bodyMedium,
                         color = com.torve.android.ui.theme.Snow,
                     )
@@ -801,14 +959,14 @@ fun TorveNavGraph(
                     )
                     Spacer(Modifier.height(16.dp))
                     Text(
-                        text = restoreProgress.message.ifBlank { "Restoring your account data…" },
+                        text = localizedUiText(restoreProgress.message.ifBlank { "Restoring your account data…" }),
                         style = androidx.compose.material3.MaterialTheme.typography.titleMedium,
                         color = com.torve.android.ui.theme.Snow,
                     )
                     if (restoreProgress.totalPlaylists > 0) {
                         Spacer(Modifier.height(6.dp))
                         Text(
-                            text = "${restoreProgress.restoredPlaylists}/${restoreProgress.totalPlaylists} playlists",
+                            text = localizedUiText("${restoreProgress.restoredPlaylists}/${restoreProgress.totalPlaylists} playlists"),
                             style = androidx.compose.material3.MaterialTheme.typography.bodySmall,
                             color = com.torve.android.ui.theme.Silver,
                         )
@@ -835,22 +993,46 @@ fun TorveNavGraph(
                     ),
                     shape = RoundedCornerShape(10.dp),
                 ) {
-                    Row(
+                    Column(
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(horizontal = 12.dp, vertical = 10.dp),
-                        verticalAlignment = Alignment.CenterVertically,
+                        verticalArrangement = Arrangement.spacedBy(6.dp),
                     ) {
                         Text(
-                            text = restoreProgress.message,
+                            text = localizedUiText(restoreProgress.message),
                             style = androidx.compose.material3.MaterialTheme.typography.bodySmall,
                             color = com.torve.android.ui.theme.Snow,
-                            modifier = Modifier.weight(1f),
                         )
+                        restoreProgress.issues.forEach { issue ->
+                            Text(
+                                text = "• $issue",
+                                style = androidx.compose.material3.MaterialTheme.typography.bodySmall,
+                                color = com.torve.android.ui.theme.Silver,
+                            )
+                        }
+                        if (restoreProgress.phase == com.torve.presentation.session.RestorePhase.COMPLETED_WITH_ERRORS) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.End,
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                androidx.compose.material3.TextButton(
+                                    onClick = accountSessionCoordinator::dismissRestoreProgress,
+                                ) {
+                                    Text(localizedUiText("Dismiss"))
+                                }
+                                androidx.compose.material3.TextButton(
+                                    onClick = accountSessionCoordinator::retryAccountRestore,
+                                ) {
+                                    Text(localizedUiText("Retry restore"))
+                                }
+                            }
+                        }
                     }
                 }
                 LaunchedEffect(restoreProgress.phase) {
-                    if (restoreProgress.phase != com.torve.presentation.session.RestorePhase.RUNNING) {
+                    if (restoreProgress.phase == com.torve.presentation.session.RestorePhase.COMPLETED) {
                         kotlinx.coroutines.delay(3000)
                         accountSessionCoordinator.dismissRestoreProgress()
                     }
@@ -882,7 +1064,7 @@ fun TorveNavGraph(
                         verticalArrangement = Arrangement.spacedBy(6.dp),
                     ) {
                         Text(
-                            text = status.label,
+                            text = localizedUiText(status.label),
                             style = androidx.compose.material3.MaterialTheme.typography.bodySmall,
                             color = com.torve.android.ui.theme.Snow,
                         )
@@ -899,7 +1081,9 @@ fun TorveNavGraph(
             }
         }
 
-        // Main content
+        // Save destination-local scroll, filters and forms along with each tab stack.
+        key(navigationOwner, if (isTvMode) "tv" else mobileSelectedTab) {
+        tabState.SaveableStateProvider(if (isTvMode) "tv" else mobileSelectedTab) {
         NavHost(
             navController = navController,
             startDestination = dest,
@@ -910,117 +1094,38 @@ fun TorveNavGraph(
                     bottom = contentBottomPadding,
                 ),
         ) {
-            composable(SETUP_CHOICE_ROUTE) {
-                SetupChoiceScreen(
-                    onGuidedSetup = {
-                        navController.navigate(SETUP_ROUTE) {
-                            launchSingleTop = true
-                        }
-                    },
-                    onManualSetup = {
+            // Old links remain valid, but every entry renders the current source directory.
+            SourceSetupRoutes.directoryAliases.forEach { route ->
+                composable(route) {
+                    fun closeSources() {
                         markMobileOnboardingComplete()
-                        navController.navigate("settings") {
-                            popUpTo(SETUP_CHOICE_ROUTE) { inclusive = true }
-                            launchSingleTop = true
+                        if (!navController.popBackStack()) {
+                            navController.navigate(if (isTvMode) TV_HOME_ROUTE else MOBILE_ROOT_ROUTE) {
+                                popUpTo(route) { inclusive = true }
+                                launchSingleTop = true
+                            }
                         }
-                    },
-                    onExit = {
-                        markMobileOnboardingComplete()
-                        val target = if (isTvMode) TV_HOME_ROUTE else MOBILE_ROOT_ROUTE
-                        navController.navigate(target) {
-                            popUpTo(SETUP_CHOICE_ROUTE) { inclusive = true }
-                            launchSingleTop = true
-                        }
-                    },
-                )
-            }
-
-            // Setup hub — credential-first picker. Each card "Set up"
-            // routes into the relevant detail surface (legacy wizard step
-            // for Debrid/IPTV, settings for Plex/Jellyfin, Panda setup
-            // for Usenet) so we don't duplicate per-feature credential
-            // forms. The legacy linear wizard is reachable via "Use
-            // guided wizard instead".
-            composable(SETUP_ROUTE) {
-                // Force the disclaimer/terms before any path that
-                // ultimately exits to the app or jumps deep into the
-                // wizard. SetupWizardViewModel.jumpToStep already gates
-                // wizard targets, but the hub also has "exit to app"
-                // shortcuts ("Continue", "Explore without sources",
-                // window-X) that must not bypass terms either. Wrap each
-                // exit so it routes through the wizard at TERMS first.
-                fun runWithTermsGate(intendedExit: () -> Unit) {
-                    if (setupViewModel.needsTermsAcceptance()) {
-                        // Land on TERMS; honoring the intended exit
-                        // after acceptance is handled by the wizard's
-                        // own "Next" → DONE → onComplete callback below.
-                        setupViewModel.jumpToStep(com.torve.presentation.setup.SetupStep.TERMS)
-                        navController.navigate("setup_guided")
-                    } else {
-                        intendedExit()
                     }
+                    SourceSetupScreen(onBack = ::closeSources,
+                        termsAccepted = setupViewModel.state.collectAsState().value.termsAccepted,
+                        onAcceptTerms = { setupViewModel.setTermsAccepted(true) }, onOpen = { action ->
+                        val target = SourceSetupRoutes.destination(action)
+                        navController.navigate(target) { launchSingleTop = true }
+                    })
                 }
-                val exitToHome: () -> Unit = {
-                    markMobileOnboardingComplete()
-                    val target = if (isTvMode) TV_HOME_ROUTE else MOBILE_ROOT_ROUTE
-                    navController.navigate(target) {
-                        popUpTo(SETUP_CHOICE_ROUTE) { inclusive = true }
-                        launchSingleTop = true
-                    }
-                }
-                SetupIntentHubScreen(
-                    coordinator = setupCoordinator,
-                    onOpenDebridSetup = {
-                        setupViewModel.jumpToStep(com.torve.presentation.setup.SetupStep.DEBRID)
-                        navController.navigate("setup_guided")
-                    },
-                    onOpenIptvSetup = {
-                        setupViewModel.jumpToStep(com.torve.presentation.setup.SetupStep.CHANNELS)
-                        navController.navigate("setup_guided")
-                    },
-                    onOpenPlexJellyfinSetup = {
-                        runWithTermsGate {
-                            setupCoordinator.beginIntent(com.torve.presentation.setup.SetupIntent.PLEX_JELLYFIN)
-                            navController.navigate("settings")
-                        }
-                    },
-                    onOpenUsenetSetup = {
-                        runWithTermsGate {
-                            setupCoordinator.beginIntent(com.torve.presentation.setup.SetupIntent.USENET)
-                            navController.navigate("panda_setup")
-                        }
-                    },
-                    onUseGuidedWizard = { navController.navigate("setup_guided") },
-                    onContinueToApp = { runWithTermsGate(exitToHome) },
-                    onExit = { runWithTermsGate(exitToHome) },
-                    onSkipToApp = { runWithTermsGate(exitToHome) },
-                )
             }
-
-            // Legacy linear setup wizard. Still reachable from the hub
-            // for users who want a guided walkthrough. Onboarding-flag
-            // persistence (`setup_completed`) lives here.
-            composable("setup_guided") {
-                SetupWizardScreen(
-                    viewModel = setupViewModel,
-                    onComplete = {
-                        markMobileOnboardingComplete()
-                        val target = if (isTvMode) TV_HOME_ROUTE else MOBILE_ROOT_ROUTE
-                        navController.navigate(target) {
-                            popUpTo(SETUP_CHOICE_ROUTE) { inclusive = true }
-                            launchSingleTop = true
-                        }
-                    },
-                    onExit = {
-                        markMobileOnboardingComplete()
-                        val target = if (isTvMode) TV_HOME_ROUTE else MOBILE_ROOT_ROUTE
-                        navController.navigate(target) {
-                            popUpTo(SETUP_CHOICE_ROUTE) { inclusive = true }
-                            launchSingleTop = true
-                        }
-                    },
-                    onPandaSetupClick = { navController.navigate("panda_setup") },
-                )
+            composable("usenet_setup") {
+                val setupState by setupViewModel.state.collectAsState()
+                if (setupState.termsAccepted) {
+                    UsenetSetupScreen(onBack = { navController.popBackStack() })
+                } else {
+                    SourceSetupScreen(onBack = { navController.popBackStack() },
+                        termsAccepted = setupState.termsAccepted,
+                        onAcceptTerms = { setupViewModel.setTermsAccepted(true) },
+                        onOpen = { action ->
+                            navController.navigate(SourceSetupRoutes.destination(action)) { launchSingleTop = true }
+                        })
+                }
             }
 
             // Android TV home
@@ -1031,15 +1136,24 @@ fun TorveNavGraph(
             }
 
             composable(MOBILE_ROOT_ROUTE) {
-                Box(modifier = Modifier.fillMaxSize()) {
+                // Root tabs share one safe top inset. Child screens consume it instead
+                // of reserving a second status-bar-sized gap below the tab controls.
+                Column(modifier = Modifier.fillMaxSize().statusBarsPadding()) {
+                    com.torve.android.ui.community.PhoneHomeSelector(mobileSelectedTab,
+                        onSelect = { mobileSelectedTab = it })
+                    Box(Modifier.weight(1f)) {
                     PersistentMobileTabPane(visible = mobileSelectedTab == MOBILE_HOME_ROUTE) {
                         HomeScreen(
+                            onWebReplaysClick = { navController.navigate("web_replays") },
+                            onWebReplaySettingsClick = { navController.navigate("web_replay_settings") },
+                            onWebReplayClick = { navController.navigate("web_replay/${Uri.encode(it)}") },
+                            showHeader = false,
+                            onYourShowsClick = { navController.navigate("your_shows") },
+                            onEpisodeClick = { episode -> episode.show.tmdbId?.let { id ->
+                                navController.navigate("detail/tv/$id?season=${episode.season}&episode=${episode.episode.episodeNumber}")
+                            } },
                             onMediaClick = { item -> navController.navigateToDetail(item) },
-                            onContinueWatchingClick = { progress ->
-                                val id = progress.mediaId.extractTmdbIdOrNull() ?: return@HomeScreen
-                                val type = if (progress.mediaType == MediaType.SERIES) "tv" else "movie"
-                                navController.navigate("detail/$type/$id")
-                            },
+                            onContinueWatchingClick = ::openContinueWatching,
                             onSeeAllClick = { sectionId ->
                                 navController.navigate("seeall/${Uri.encode(sectionId)}")
                             },
@@ -1049,22 +1163,46 @@ fun TorveNavGraph(
                             onPersonClick = { personId ->
                                 navController.navigate("person/$personId")
                             },
+                            onChannelsClick = { navController.navigate("channels") },
+                            onSettingsClick = { navController.navigate("settings") },
+                            onExtensionsClick = { navController.navigate("addon_catalog") },
+                            onProfilesClick = { navController.navigate("profiles") },
+                            onRepairClick = { navController.navigate("status_repair") },
+                            isActive = mobileSelectedTab == MOBILE_HOME_ROUTE,
                             accessTier = accessTier,
                             onLockedFeatureClick = requestLifetimeUnlock,
+                            resetScrollToTop = pendingMobileHomeScrollReset,
+                            onScrollReset = { pendingMobileHomeScrollReset = false },
                         )
                     }
                     PersistentMobileTabPane(visible = mobileSelectedTab == "movies") {
-                        CatalogScreen(
+                        com.torve.android.ui.community.PhoneDiscoveryScreen(
                             viewModel = movieCatalogViewModel,
                             mediaType = "movie",
+                            isActive = mobileSelectedTab == "movies",
                             onMediaClick = { item -> navController.navigateToDetail(item) },
                         )
                     }
                     PersistentMobileTabPane(visible = mobileSelectedTab == "tv_shows") {
-                        CatalogScreen(
+                        com.torve.android.ui.community.PhoneDiscoveryScreen(
                             viewModel = tvCatalogViewModel,
                             mediaType = "tv",
+                            isActive = mobileSelectedTab == "tv_shows",
                             onMediaClick = { item -> navController.navigateToDetail(item) },
+                        )
+                    }
+                    PersistentMobileTabPane(visible = mobileSelectedTab == "calendar_tab") {
+                        CalendarScreen(onEpisodeClick = { navController.navigate("detail/tv/$it") },
+                            onCalendarEpisode = { episode -> episode.showTmdbId?.let { id ->
+                                navController.navigate("detail/tv/$id?season=${episode.season}&episode=${episode.episode}")
+                            } })
+                    }
+                    PersistentMobileTabPane(visible = mobileSelectedTab == "search") {
+                        SearchScreen(
+                            viewModel = searchViewModel,
+                            isActive = mobileSelectedTab == "search",
+                            onMediaClick = { item -> navController.navigateToDetail(item) },
+                            onPersonClick = { personId -> navController.navigate("person/$personId") },
                         )
                     }
                     PersistentMobileTabPane(visible = mobileSelectedTab == "live_tv") {
@@ -1095,15 +1233,32 @@ fun TorveNavGraph(
                             )
                         } else {
                             WatchlistScreen(
-                                onMediaClick = { item -> navController.navigateToDetail(item) },
-                                onContinueWatchingClick = { progress ->
-                                    val id = progress.mediaId.extractTmdbIdOrNull() ?: return@WatchlistScreen
-                                    val type = if (progress.mediaType == MediaType.SERIES) "tv" else "movie"
-                                    navController.navigate("detail/$type/$id")
+                                onJellyfinSetup = { navController.navigate("integrations?service=jellyfin") },
+                                onLibraryCollection = { navController.navigate("library_collection/$it") },
+                                onOpenEpisode = { item, season, episode -> navController.navigateToDetail(item, season, episode) },
+                                onEpisode = { value ->
+                                    val id = value.show.tmdbId ?: value.show.id.extractTmdbIdOrNull()
+                                    if (id != null) navController.navigate("detail/tv/$id?season=${value.season}&episode=${value.episode.episodeNumber}")
+                                    else navController.navigateToDetail(value.show)
                                 },
+                                downloadsContent = { downloadBack ->
+                                    DownloadCatalogueScreen(onBack = downloadBack,
+                                        onPlayOffline = { item ->
+                                            navController.navigate("player?url=${Uri.encode("file://${item.filePath}")}&title=${Uri.encode(item.title)}&mediaId=${Uri.encode(item.mediaId)}&mediaType=${if (item.type == com.torve.domain.model.DownloadMediaType.MOVIE) "movie" else "series"}&posterUrl=${Uri.encode(item.posterUrl.orEmpty())}&backdropUrl=&seasonNumber=${item.seasonNumber ?: -1}&episodeNumber=${item.episodeNumber ?: -1}")
+                                        }, onShowDetail = { navController.navigate("download_show/${Uri.encode(it)}") })
+                                },
+                                onToolsClick = { navController.navigate("library_tools") },
+                                onCollectionsClick = { navController.navigate("collections") },
+                                onYourShowsClick = { navController.navigate("your_shows") },
+                                onFilesClick = { navController.navigate("files") },
+                                onMediaClick = { item -> navController.navigateToDetail(item) },
+                                onContinueWatchingClick = ::openContinueWatching,
                                 onHistoryItemClick = { entry ->
                                     val id = entry.mediaId.extractTmdbIdOrNull() ?: return@WatchlistScreen
-                                    navController.navigate("detail/${entry.mediaType}/$id")
+                                    val type = if (entry.mediaType.lowercase() in setOf("series", "tv", "show")) "tv" else "movie"
+                                    val episode = if (type == "tv" && entry.seasonNumber != null && entry.episodeNumber != null)
+                                        "?season=${entry.seasonNumber}&episode=${entry.episodeNumber}" else ""
+                                    navController.navigate("detail/$type/$id$episode")
                                 },
                                 onDownloadsClick = {
                                     if (isLocked(PremiumFeature.DOWNLOADS)) {
@@ -1112,14 +1267,18 @@ fun TorveNavGraph(
                                         navController.navigate("downloads")
                                     }
                                 },
-                                onJellyfinItemPlay = { streamUrl, title ->
+                                onJellyfinItemPlay = { route, item, season, episode ->
+                                    com.torve.presentation.lanlibrary.PendingLanPlaybackHandoff.stage(route)
                                     navController.navigate(
-                                        "player?url=${Uri.encode(streamUrl)}" +
-                                            "&title=${Uri.encode(title)}" +
-                                            "&mediaId=" +
-                                            "&mediaType=movie" +
-                                            "&posterUrl=" +
-                                            "&backdropUrl=",
+                                        "player?url=${Uri.encode(route.url)}" +
+                                            "&title=${Uri.encode(item.title)}" +
+                                            "&mediaId=${Uri.encode(item.id)}" +
+                                            "&mediaType=${if (item.type == MediaType.SERIES) "series" else "movie"}" +
+                                            "&posterUrl=${Uri.encode(item.posterUrl ?: "")}" +
+                                            "&backdropUrl=${Uri.encode(item.backdropUrl ?: "")}" +
+                                            "&seasonNumber=${season ?: -1}&episodeNumber=${episode ?: -1}" +
+                                            "&showTmdbId=${item.tmdbId ?: -1}" +
+                                            "&showImdbId=${Uri.encode(item.imdbId ?: "")}",
                                     )
                                 },
                             )
@@ -1127,6 +1286,9 @@ fun TorveNavGraph(
                     }
                     PersistentMobileTabPane(visible = mobileSelectedTab == "profile_tab") {
                         SettingsScreen(
+                            storeUpdates = storeUpdates,
+                            onConnectionCenterClick = { navController.navigate("status_repair") },
+                            onCloudBackupClick = { navController.navigate("cloud_backup") },
                             accessTier = accessTier,
                             onLockedFeatureClick = requestLifetimeUnlock,
                             onDownloadsClick = {
@@ -1142,7 +1304,7 @@ fun TorveNavGraph(
                             onAccountClick = { navController.navigate("sync_account") },
                             onDevicesClick = { navController.navigate("sync_devices") },
                             onSignInTvClick = { navController.navigate("sign_in_tv") },
-                            onSetupPandaClick = { navController.navigate("panda_setup") },
+                            onSetupPandaClick = { navController.navigate("usenet_setup") },
                             onManageDevicesClick = { navController.navigate("manage_devices") },
                             onLoginClick = { navController.navigate("login") },
                             onPrivacyPolicyClick = { navController.navigate("legal/privacy") },
@@ -1156,6 +1318,7 @@ fun TorveNavGraph(
                                     navController.navigate("streaming_services_settings")
                                 }
                             },
+                            onWebReplaySettingsClick = { navController.navigate("web_replay_settings") },
                             onAddonCatalogClick = {
                                 if (isLocked(PremiumFeature.ADDON_INSTALL_AND_MANAGEMENT)) {
                                     requestLifetimeUnlock(PremiumFeature.ADDON_INSTALL_AND_MANAGEMENT)
@@ -1194,6 +1357,10 @@ fun TorveNavGraph(
                             onSensitiveMaterialClick = { navController.navigate("sensitive_material_settings") },
                             onRatingSettingsClick = { navController.navigate("rating_settings") },
                             onCardStyleClick = { navController.navigate("card_style_settings") },
+                            onAppearanceClick = { navController.navigate("appearance_refinements") },
+                            onCollectionsClick = { navController.navigate("collections") },
+                            onCustomSectionsClick = { navController.navigate("custom_sections") },
+                            onIntegrationServiceClick = { service -> navController.navigate("integrations?service=${Uri.encode(service)}") },
                             onIntegrationsClick = {
                                 if (isLocked(PremiumFeature.TRAKT_CONNECT)) {
                                     requestLifetimeUnlock(PremiumFeature.TRAKT_CONNECT)
@@ -1211,14 +1378,14 @@ fun TorveNavGraph(
                             onSendCredentialsClick = { navController.navigate("transfer_send") },
                             onReceiveCredentialsClick = { navController.navigate("transfer_receive") },
                             onTransferDiagnosticsClick = { navController.navigate("transfer_diagnostics") },
-                            onStartSetupClick = { navController.navigate(SETUP_CHOICE_ROUTE) },
+                            onStartSetupClick = { navController.navigate("source_setup") },
                             onStatusRepairClick = { navController.navigate("status_repair") },
-                            onBetaProgramClick = { navController.navigate("beta_program") },
                         )
                     }
                 }
             }
 
+                }
             composable(MOBILE_HOME_ROUTE) {
                 LaunchedEffect(Unit) {
                     mobileSelectedTab = MOBILE_HOME_ROUTE
@@ -1261,7 +1428,11 @@ fun TorveNavGraph(
 
             // Channels (also accessible via non-tab navigation)
             composable("channels") {
-                ChannelsScreen(
+                if (!mobileSettings.optionalAppFeaturesLoaded || !mobileSettings.optionalAppFeatures.channels) {
+                    LaunchedEffect(mobileSettings.optionalAppFeaturesLoaded) {
+                        if (mobileSettings.optionalAppFeaturesLoaded) navController.popBackStack()
+                    }
+                } else ChannelsScreen(
                     onChannelPlay = { channel ->
                         if (isLocked(PremiumFeature.STREAM_PLAYBACK)) {
                             requestLifetimeUnlock(PremiumFeature.STREAM_PLAYBACK)
@@ -1291,10 +1462,13 @@ fun TorveNavGraph(
 
             // Search tab — Global search
             composable("search") {
-                SearchScreen(
-                    viewModel = searchViewModel,
-                    onMediaClick = { item -> navController.navigateToDetail(item) },
-                )
+                LaunchedEffect(Unit) {
+                    mobileSelectedTab = "search"
+                    navController.navigate(MOBILE_ROOT_ROUTE) {
+                        popUpTo("search") { inclusive = true }
+                        launchSingleTop = true
+                    }
+                }
             }
 
             // Catalog screen — Genre-filtered browsing (opened from Discover)
@@ -1348,6 +1522,7 @@ fun TorveNavGraph(
                         ratingsEnricher = ratingsEnricher,
                         integrationSecretStore = integrationSecretStore,
                         initialProviderId = providerId,
+                        initialProviderName = providerName,
                     )
                 }
                 CatalogScreen(
@@ -1360,12 +1535,12 @@ fun TorveNavGraph(
                 )
             }
 
-            // Calendar (accessible via navigation, no longer in bottom nav)
+            // Calendar shares its source and episode destinations with the root Calendar tab.
             composable("calendar") {
-                CalendarScreen(
-                    onEpisodeClick = { tmdbId ->
-                        navController.navigate("detail/tv/$tmdbId")
-                    },
+                CalendarScreen(onEpisodeClick = { navController.navigate("detail/tv/$it") },
+                    onCalendarEpisode = { episode -> episode.showTmdbId?.let { id ->
+                        navController.navigate("detail/tv/$id?season=${episode.season}&episode=${episode.episode}")
+                    } },
                     onBack = { navController.popBackStack() },
                 )
             }
@@ -1405,9 +1580,26 @@ fun TorveNavGraph(
                 }
             }
 
+            composable("more") {
+                LaunchedEffect(Unit) {
+                    mobileSelectedTab = "profile_tab"
+                    navController.navigate(MOBILE_ROOT_ROUTE) {
+                        popUpTo("more") { inclusive = true }
+                        launchSingleTop = true
+                    }
+                }
+            }
+
             // Settings (accessible from Profile, not in bottom nav)
-            composable("settings") {
-                SettingsScreen(
+            composable("cloud_backup") {
+                com.torve.android.ui.community.CloudBackupScreen(
+                    onBack = { navController.popBackStack() }, onSignIn = { navController.navigate("login") })
+            }
+            composable("settings?group={group}", arguments = listOf(navArgument("group") { type = NavType.StringType; defaultValue = "" })) { entry ->
+                SettingsScreen(initialGroup = entry.arguments?.getString("group")?.takeIf { it.isNotBlank() },
+                    storeUpdates = storeUpdates,
+                    onConnectionCenterClick = { navController.navigate("status_repair") },
+                            onCloudBackupClick = { navController.navigate("cloud_backup") },
                     accessTier = accessTier,
                     onLockedFeatureClick = requestLifetimeUnlock,
                     onDownloadsClick = {
@@ -1423,7 +1615,7 @@ fun TorveNavGraph(
                     onAccountClick = { navController.navigate("sync_account") },
                     onDevicesClick = { navController.navigate("sync_devices") },
                     onSignInTvClick = { navController.navigate("sign_in_tv") },
-                    onSetupPandaClick = { navController.navigate("panda_setup") },
+                    onSetupPandaClick = { navController.navigate("usenet_setup") },
                     onManageDevicesClick = { navController.navigate("manage_devices") },
                     onLoginClick = { navController.navigate("login") },
                     onPrivacyPolicyClick = { navController.navigate("legal/privacy") },
@@ -1437,7 +1629,8 @@ fun TorveNavGraph(
                             navController.navigate("streaming_services_settings")
                         }
                     },
-                    onAddonCatalogClick = {
+                    onWebReplaySettingsClick = { navController.navigate("web_replay_settings") },
+                            onAddonCatalogClick = {
                         if (isLocked(PremiumFeature.ADDON_INSTALL_AND_MANAGEMENT)) {
                             requestLifetimeUnlock(PremiumFeature.ADDON_INSTALL_AND_MANAGEMENT)
                         } else {
@@ -1475,7 +1668,12 @@ fun TorveNavGraph(
                     onSensitiveMaterialClick = { navController.navigate("sensitive_material_settings") },
                     onRatingSettingsClick = { navController.navigate("rating_settings") },
                     onCardStyleClick = { navController.navigate("card_style_settings") },
-                    onIntegrationsClick = {
+                    onAppearanceClick = { navController.navigate("appearance_refinements") },
+                    onCollectionsClick = { navController.navigate("collections") },
+                    onCustomSectionsClick = { navController.navigate("custom_sections") },
+
+                    onIntegrationServiceClick = { service -> navController.navigate("integrations?service=${Uri.encode(service)}") },
+                            onIntegrationsClick = {
                         if (isLocked(PremiumFeature.TRAKT_CONNECT)) {
                             requestLifetimeUnlock(PremiumFeature.TRAKT_CONNECT)
                         } else {
@@ -1492,25 +1690,19 @@ fun TorveNavGraph(
                     onSendCredentialsClick = { navController.navigate("transfer_send") },
                     onReceiveCredentialsClick = { navController.navigate("transfer_receive") },
                     onTransferDiagnosticsClick = { navController.navigate("transfer_diagnostics") },
-                    onStartSetupClick = { navController.navigate(SETUP_CHOICE_ROUTE) },
+                    onStartSetupClick = { navController.navigate("source_setup") },
                     onStatusRepairClick = { navController.navigate("status_repair") },
-                    onBetaProgramClick = { navController.navigate("beta_program") },
-                )
-            }
-
-            composable("beta_program") {
-                BetaProgramScreen(
-                    onBack = { navController.popBackStack() },
-                    onSignIn = { navController.navigate("login") },
                 )
             }
 
             // Detail screen
             composable(
-                route = "detail_imdb/{type}/{imdbId}",
+                route = "detail_imdb/{type}/{imdbId}?season={season}&episode={episode}",
                 arguments = listOf(
                     navArgument("type") { type = NavType.StringType },
                     navArgument("imdbId") { type = NavType.StringType },
+                    navArgument("season") { type = NavType.IntType; defaultValue = -1 },
+                    navArgument("episode") { type = NavType.IntType; defaultValue = -1 },
                 ),
             ) { backStackEntry ->
                 val detailType = backStackEntry.arguments?.getString("type") ?: "movie"
@@ -1520,7 +1712,7 @@ fun TorveNavGraph(
                     imdbId = imdbId,
                     metadataRepo = metadataRepo,
                     onResolved = { resolvedType, resolvedId ->
-                        navController.navigate("detail/$resolvedType/$resolvedId") {
+                        navController.navigate("detail/$resolvedType/$resolvedId?season=${backStackEntry.arguments?.getInt("season") ?: -1}&episode=${backStackEntry.arguments?.getInt("episode") ?: -1}") {
                             popUpTo(backStackEntry.destination.route ?: "detail_imdb/{type}/{imdbId}") {
                                 inclusive = true
                             }
@@ -1531,30 +1723,43 @@ fun TorveNavGraph(
             }
 
             composable(
-                route = "detail/{type}/{id}",
+                route = "detail/{type}/{id}?season={season}&episode={episode}&extension={extension}",
                 arguments = listOf(
                     navArgument("type") { type = NavType.StringType },
                     navArgument("id") { type = NavType.IntType },
+                    navArgument("season") { type = NavType.IntType; defaultValue = -1 },
+                    navArgument("episode") { type = NavType.IntType; defaultValue = -1 },
+                    navArgument("extension") { type = NavType.StringType; defaultValue = "" },
                 ),
             ) { backStackEntry ->
                 val detailType = backStackEntry.arguments?.getString("type") ?: "movie"
                 val detailId = backStackEntry.arguments?.getInt("id") ?: 0
+                val detailSession = rememberMobileDetailSession(backStackEntry,
+                    mobileSettings.personalDataUserId ?: com.torve.data.auth.UserIdProvider.SIGNED_OUT_USER_ID)
                 DetailScreen(
+                    onDevicesClick = { navController.navigate("sync_devices") },
+                    onCollectionsClick = { item -> navController.navigate("collections?movie=${item.tmdbId ?: 0}&franchise=${item.collectionId ?: 0}&name=${Uri.encode(item.collectionName.orEmpty())}") },
+                    viewModel = detailSession,
                     type = detailType,
                     id = detailId,
+                    extensionSeedJson = navController.extensionDetailSeed(backStackEntry),
+                    initialSeason = backStackEntry.arguments?.getInt("season")?.takeIf { it > 0 },
+                    initialEpisode = backStackEntry.arguments?.getInt("episode")?.takeIf { it > 0 },
+                    onOpenTraktLists = { navController.navigate("trakt_lists?type=$detailType&titleId=$detailId") },
                     accessTier = accessTier,
                     onLockedFeatureClick = requestLifetimeUnlock,
                     onPlayClick = { url, fallbackUrl, season, episode, imdbId, autoSourceSelection ->
+                        val artwork = detailSession.state.value.mediaItem
                         navController.navigate(
                             "player?url=${Uri.encode(url)}" +
-                                "&title=${Uri.encode("")}" +
-                                "&mediaId=$detailId" +
+                                "&title=${Uri.encode(artwork?.title.orEmpty())}" +
+                                "&mediaId=${Uri.encode(artwork?.id ?: detailId.toString())}" +
                                 "&mediaType=$detailType" +
-                                "&posterUrl=${Uri.encode("")}" +
-                                "&backdropUrl=${Uri.encode("")}" +
+                                "&posterUrl=${Uri.encode(artwork?.posterUrl.orEmpty())}" +
+                                "&backdropUrl=${Uri.encode(artwork?.backdropUrl.orEmpty())}" +
                                 "&seasonNumber=${season ?: -1}" +
                                 "&episodeNumber=${episode ?: -1}" +
-                                "&showTmdbId=${if (detailType == "tv") detailId else -1}" +
+                                "&showTmdbId=${if (detailType == "tv") artwork?.tmdbId ?: -1 else -1}" +
                                 "&showImdbId=${Uri.encode(imdbId ?: "")}" +
                                 "&fallbackUrl=${Uri.encode(fallbackUrl)}" +
                                 "&autoSourceSelection=$autoSourceSelection",
@@ -1582,6 +1787,36 @@ fun TorveNavGraph(
                 )
             }
 
+            composable("custom_sections") {
+                val homeModel: com.torve.presentation.home.HomeViewModel = koinInject()
+                val sections by homeModel.customSections.collectAsState()
+                Column(Modifier.fillMaxSize().statusBarsPadding().padding(20.dp)) {
+                    com.torve.android.ui.community.CommunityAction(localizedUiText("Back"), { navController.popBackStack() })
+                    Text(localizedUiText("Custom sections"), style = MaterialTheme.typography.headlineSmall)
+                    com.torve.android.ui.community.CommunityAction(localizedUiText("Add section"), { navController.navigate("custom_section_editor") })
+                    androidx.compose.foundation.lazy.LazyColumn {
+                        items(sections.size) { index ->
+                            val section = sections[index]
+                            com.torve.android.ui.community.CommunityAction(section.title, { navController.navigate("custom_section_editor?sectionId=${section.id}") })
+                        }
+                    }
+                }
+            }
+            composable("appearance_refinements") {
+                com.torve.android.ui.community.AppearanceControls(onBack = { navController.popBackStack() })
+            }
+            composable("collections?movie={movie}&franchise={franchise}&name={name}", arguments = listOf(
+                navArgument("movie") { type = NavType.IntType; defaultValue = 0 },
+                navArgument("franchise") { type = NavType.IntType; defaultValue = 0 },
+                navArgument("name") { type = NavType.StringType; defaultValue = "" },
+            )) { entry ->
+                com.torve.android.ui.community.CollectionsScreen(
+                    movieId = entry.arguments?.getInt("movie")?.takeIf { it > 0 },
+                    collectionId = entry.arguments?.getInt("franchise")?.takeIf { it > 0 },
+                    collectionName = entry.arguments?.getString("name"),
+                    onBack = { navController.popBackStack() }, onMediaClick = { navController.navigateToDetail(it) })
+            }
+
             // Person screen
             composable(
                 route = "person/{personId}",
@@ -1597,13 +1832,23 @@ fun TorveNavGraph(
                 )
             }
 
+            composable("files") {
+                com.torve.android.ui.files.FilesBrowserScreen(onBack = { navController.popBackStack() }, onPlay = { entry ->
+                    navController.navigate("player?url=${Uri.encode(entry.url)}&title=${Uri.encode(entry.name)}&mediaId=${Uri.encode(entry.mediaId)}&mediaType=movie")
+                })
+            }
+
+            webReplayRoutes(navController, isTv = false) { event, stream, start ->
+                navController.navigate("player?url=${Uri.encode(stream.url)}&title=${Uri.encode(event.title)}&mediaId=${Uri.encode(event.id)}&mediaType=movie&posterUrl=${Uri.encode(event.artwork.orEmpty())}&startPositionMs=$start")
+            }
+
             // Player screen
             composable(
                 route = "player?url={url}&title={title}&mediaId={mediaId}&mediaType={mediaType}" +
                     "&posterUrl={posterUrl}&backdropUrl={backdropUrl}" +
                     "&seasonNumber={seasonNumber}&episodeNumber={episodeNumber}" +
                     "&showTmdbId={showTmdbId}&showImdbId={showImdbId}" +
-                    "&fallbackUrl={fallbackUrl}&autoSourceSelection={autoSourceSelection}",
+                    "&fallbackUrl={fallbackUrl}&autoSourceSelection={autoSourceSelection}&startPositionMs={startPositionMs}",
                 arguments = listOf(
                     navArgument("url") { type = NavType.StringType; defaultValue = "" },
                     navArgument("title") { type = NavType.StringType; defaultValue = "" },
@@ -1617,7 +1862,17 @@ fun TorveNavGraph(
                     navArgument("showImdbId") { type = NavType.StringType; defaultValue = "" },
                     navArgument("fallbackUrl") { type = NavType.StringType; defaultValue = "" },
                     navArgument("autoSourceSelection") { type = NavType.BoolType; defaultValue = false },
+                    navArgument("startPositionMs") { type = NavType.LongType; defaultValue = 0L },
                 ),
+                // Player startup is already CPU-, codec-, and allocation-heavy on
+                // older Fire TV hardware. Avoid composing the details screen and
+                // the full player simultaneously during Navigation's default
+                // AnimatedContent transition; that overlap can starve input long
+                // enough for Fire OS to raise an ANR.
+                enterTransition = { EnterTransition.None },
+                exitTransition = { ExitTransition.None },
+                popEnterTransition = { EnterTransition.None },
+                popExitTransition = { ExitTransition.None },
             ) { backStackEntry ->
                 if (isLocked(PremiumFeature.STREAM_PLAYBACK)) {
                     PaywallScreen(
@@ -1628,10 +1883,11 @@ fun TorveNavGraph(
                     )
                 } else {
                     PlayerScreen(
+                        startPositionMs = backStackEntry.arguments?.getLong("startPositionMs") ?: 0L,
                         url = backStackEntry.arguments?.getString("url") ?: "",
                         fallbackUrl = backStackEntry.arguments?.getString("fallbackUrl") ?: "",
                         autoSourceSelection = backStackEntry.arguments?.getBoolean("autoSourceSelection") ?: false,
-                        title = backStackEntry.arguments?.getString("title") ?: "",
+                        title = localizedUiText(backStackEntry.arguments?.getString("title") ?: ""),
                         mediaId = backStackEntry.arguments?.getString("mediaId") ?: "",
                         mediaType = backStackEntry.arguments?.getString("mediaType") ?: "movie",
                         posterUrl = backStackEntry.arguments?.getString("posterUrl") ?: "",
@@ -1724,7 +1980,63 @@ fun TorveNavGraph(
 
             // Profiles
             composable("profiles") {
-                ProfileScreen(onBack = { navController.popBackStack() })
+                com.torve.android.ui.product.MobileProfilesScreen(onBack = { navController.popBackStack() })
+            }
+
+            composable("library_collection/{kind}?folder={folder}&provider={provider}", arguments = listOf(
+                navArgument("kind") { type = NavType.StringType },
+                navArgument("folder") { type = NavType.StringType; defaultValue = "" },
+                navArgument("provider") { type = NavType.StringType; defaultValue = "REAL_DEBRID" })) { entry ->
+                com.torve.android.ui.community.LibraryCollectionScreen(entry.arguments?.getString("kind").orEmpty(),
+                    entry.arguments?.getString("folder").orEmpty(), entry.arguments?.getString("provider") ?: "REAL_DEBRID",
+                    onBack = { navController.popBackStack() }, onSetup = { navController.navigate("settings?group=connections") },
+                    onOpen = { row, provider ->
+                        if (row.kind == "folder") navController.navigate("library_collection/cloud?folder=${Uri.encode(row.id)}&provider=${Uri.encode(provider)}")
+                        else {
+                            val id = row.mediaId.extractTmdbIdOrNull()
+                            if (id != null) navController.navigate("detail/${row.mediaType}/$id" + if (row.season > 0 && row.episode > 0) "?season=${row.season}&episode=${row.episode}" else "")
+                            else navController.navigateToDetail(MediaItem(id = row.mediaId, type = if (row.mediaType == "tv") MediaType.SERIES else MediaType.MOVIE, title = row.title, posterUrl = row.artwork))
+                        }
+                    }, onPlay = { url, row ->
+                        navController.navigate("player?url=${Uri.encode(url)}&title=${Uri.encode(row.title)}&mediaId=${Uri.encode(row.mediaId)}&mediaType=${row.mediaType}&posterUrl=${Uri.encode(row.artwork.orEmpty())}&backdropUrl=${Uri.encode(row.backdrop.orEmpty())}")
+                    })
+            }
+            composable("jellyfin_library") {
+                com.torve.android.ui.watchlist.PhoneJellyfinLibraryScreen(onBack = { navController.popBackStack() },
+                    onSetup = { navController.navigate("integrations?service=jellyfin") }, onMediaClick = { navController.navigateToDetail(it) },
+                    onPlay = { route, item, season, episode ->
+                        com.torve.presentation.lanlibrary.PendingLanPlaybackHandoff.stage(route)
+                        navController.navigate("player?url=${Uri.encode(route.url)}&title=${Uri.encode(item.title)}&mediaId=${Uri.encode(item.id)}&mediaType=${if (item.type == MediaType.SERIES) "series" else "movie"}&posterUrl=${Uri.encode(item.posterUrl.orEmpty())}&backdropUrl=${Uri.encode(item.backdropUrl.orEmpty())}&seasonNumber=${season ?: -1}&episodeNumber=${episode ?: -1}&showTmdbId=${item.tmdbId ?: -1}&showImdbId=${Uri.encode(item.imdbId.orEmpty())}")
+                    })
+            }
+
+            composable("library_tools") {
+                com.torve.android.ui.product.MobileLibraryToolsScreen(
+                    onBack = { navController.popBackStack() }, onOpen = { navController.navigate(it) })
+            }
+            composable("your_shows?calendar={calendar}", arguments = listOf(navArgument("calendar") { type = NavType.BoolType; defaultValue = false })) { entry ->
+                com.torve.android.ui.product.MobileWatchingHubScreen(
+                    onBack = { navController.popBackStack() }, initialCalendar = entry.arguments?.getBoolean("calendar") == true,
+                    onEpisode = { episode ->
+                        val tmdb = episode.show.tmdbId ?: episode.show.id.extractTmdbIdOrNull()
+                        if (tmdb != null) navController.navigate("detail/tv/$tmdb?season=${episode.season}&episode=${episode.episode.episodeNumber}")
+                        else navController.navigateToDetail(episode.show)
+                    })
+            }
+            composable("catalog_groups") {
+                com.torve.android.ui.product.MobileCatalogGroupsScreen(
+                    onBack = { navController.popBackStack() }, onOpen = { navController.navigate("catalog_groups/${Uri.encode(it)}") })
+            }
+            composable("catalog_groups/{groupId}", arguments = listOf(navArgument("groupId") { type = NavType.StringType })) { entry ->
+                com.torve.android.ui.product.MobileCatalogGroupContentScreen(entry.arguments?.getString("groupId").orEmpty(),
+                    onBack = { navController.popBackStack() }, onMedia = { navController.navigateToDetail(it) })
+            }
+            composable("trakt_lists?type={type}&titleId={titleId}", arguments = listOf(
+                navArgument("type") { type = NavType.StringType; defaultValue = "movie" },
+                navArgument("titleId") { type = NavType.IntType; defaultValue = -1 })) { entry ->
+                com.torve.android.ui.product.MobileTraktListsScreen(onBack = { navController.popBackStack() },
+                    onMedia = { navController.navigateToDetail(it) }, onConnect = { navController.navigate("connection_center") },
+                    titleType = entry.arguments?.getString("type") ?: "movie", titleId = entry.arguments?.getInt("titleId") ?: -1)
             }
 
             composable("sync_account") {
@@ -1739,6 +2051,7 @@ fun TorveNavGraph(
             // pair-creation actions may still check premium at runtime).
             composable("sync_devices") {
                 DevicesScreen(
+                    onOpenRemote = { navController.navigate("companion_remote") },
                     onBack = { navController.popBackStack() },
                     onDeviceLimitReached = { navController.navigate("device_limit_reached") },
                 )
@@ -1854,7 +2167,10 @@ fun TorveNavGraph(
                 arguments = listOf(navArgument("sectionId") { type = NavType.StringType }),
             ) { backStackEntry ->
                 val sectionId = Uri.decode(backStackEntry.arguments?.getString("sectionId") ?: return@composable)
-                SeeAllScreen(
+                if (sectionId.startsWith("shelf:")) com.torve.android.ui.community.ExtensionBrowserScreen(
+                    initialShelfId = sectionId.removePrefix("shelf:"), onBack = { navController.popBackStack() },
+                    onMedia = { navController.navigateToDetail(it) }, onManage = { navController.navigate("addon_catalog") })
+                else SeeAllScreen(
                     sectionId = sectionId,
                     onBack = { navController.popBackStack() },
                     onMediaClick = { item -> navController.navigateToDetail(item) },
@@ -1887,36 +2203,8 @@ fun TorveNavGraph(
                         lockedFeature = PremiumFeature.ADDON_INSTALL_AND_MANAGEMENT,
                     )
                 } else {
-                    AddonCatalogScreen(
-                        onBack = { navController.popBackStack() },
-                        onManagePandaClick = { navController.navigate("manage_panda") },
-                    )
+                    com.torve.android.ui.community.ExtensionsScreen(onBack = { navController.popBackStack() })
                 }
-            }
-
-            // Manage Panda
-            composable("manage_panda") {
-                if (isLocked(PremiumFeature.ADDON_INSTALL_AND_MANAGEMENT)) {
-                    PaywallScreen(
-                        onBack = { navController.popBackStack() },
-                        onDeviceLimitReached = { navController.navigate("device_limit_reached") },
-                        onLogin = { navController.navigate("login") },
-                        lockedFeature = PremiumFeature.ADDON_INSTALL_AND_MANAGEMENT,
-                    )
-                } else {
-                    ManagePandaScreen(
-                        onBack = { navController.popBackStack() },
-                        onSetupClick = { navController.navigate("panda_setup") },
-                    )
-                }
-            }
-
-            // Panda Native Setup
-            composable("panda_setup") {
-                PandaSetupScreen(
-                    onBack = { navController.popBackStack() },
-                    onComplete = { navController.popBackStack() },
-                )
             }
 
             // Regex Patterns
@@ -2017,7 +2305,7 @@ fun TorveNavGraph(
             }
 
             // Integrations
-            composable("integrations") {
+            composable("integrations?service={service}", arguments = listOf(navArgument("service") { type = NavType.StringType; defaultValue = "" })) { entry ->
                 if (isLocked(PremiumFeature.TRAKT_CONNECT)) {
                     PaywallScreen(
                         onBack = { navController.popBackStack() },
@@ -2027,9 +2315,31 @@ fun TorveNavGraph(
                     )
                 } else {
                     IntegrationsScreen(
+                        initialService = entry.arguments?.getString("service").orEmpty(),
                         onBack = { navController.popBackStack() },
+                        onAutomationAdminClick = { navController.navigate("automation_admin") },
                     )
                 }
+            }
+
+            composable("companion_remote") {
+                com.torve.android.ui.sync.CompanionRemoteScreen(onBack = { navController.popBackStack() }, onDevices = { navController.navigate("sync_devices") })
+            }
+
+            composable("connection_center") {
+                LaunchedEffect(Unit) {
+                    navController.popBackStack()
+                    navController.navigate("settings?group=connections")
+                }
+            }
+
+            composable("automation_admin") {
+                AutomationAdministrationScreen(
+                    onBack = { navController.popBackStack() },
+                    onManageConnections = {
+                        navController.popBackStack("integrations?service={service}", inclusive = false)
+                    },
+                )
             }
 
             composable("diagnostics") {
@@ -2125,9 +2435,41 @@ fun TorveNavGraph(
             }
         }
 
+        }
+        }
+
         // ── Custom Bottom Navigation Bar ──
+        androidx.compose.material3.SnackbarHost(requestSnackbar,
+            modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = if (showBottomBar) 92.dp + navBarInsetBottom else 16.dp).zIndex(90f))
         // Floating above content with a subtle top gradient scrim.
         // Not using stock NavigationBar — custom design for the cinematic feel.
+        val activePlaybackSession = ActivePlaybackState.session
+        AnimatedVisibility(
+            visible = currentRoute?.startsWith("player") != true && activePlaybackSession != null,
+            modifier = Modifier
+                .align(if (isTvMode) Alignment.BottomEnd else Alignment.BottomCenter)
+                .padding(
+                    start = if (isTvMode) 144.dp else 8.dp,
+                    end = if (isTvMode) 24.dp else 8.dp,
+                    bottom = if (showBottomBar) 92.dp + navBarInsetBottom else 18.dp,
+                )
+                .zIndex(4f),
+            enter = slideInVertically { it },
+            exit = slideOutVertically { it },
+        ) {
+            activePlaybackSession?.let { session ->
+                PersistentPlaybackBar(
+                    session = session,
+                    isTv = isTvMode,
+                    onResume = {
+                        navController.navigate(session.playerRoute()) { launchSingleTop = true }
+                    },
+                    onTogglePlayback = ActivePlaybackState::togglePlayback,
+                    onStop = ActivePlaybackState::stopAndClear,
+                )
+            }
+        }
+
         AnimatedVisibility(
             visible = showTvNavRail,
             modifier = Modifier.align(Alignment.CenterStart),
@@ -2152,47 +2494,320 @@ fun TorveNavGraph(
             enter = slideInVertically { it },
             exit = slideOutVertically { it },
         ) {
-            Column {
-                // Top gradient scrim — fades content into nav bar
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(12.dp)
-                        .background(
-                            Brush.verticalGradient(
-                                listOf(Color.Transparent, Obsidian),
-                            ),
-                        ),
-                )
-
-                // Nav bar
+            Column(Modifier.navigationBarsPadding().padding(horizontal = 12.dp, vertical = 8.dp)) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .background(Obsidian)
-                        .navigationBarsPadding()
-                        .padding(horizontal = 4.dp, vertical = 2.dp),
+                        .mobileGlassSurface(RoundedCornerShape(34.dp))
+                        .padding(6.dp),
                     horizontalArrangement = Arrangement.SpaceEvenly,
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     navTabDefs.forEach { tab ->
-                        val selected = mobileSelectedTab == tab.route
+                        val selected = mobileSelectedTab == tab.route || (tab.route == MOBILE_HOME_ROUTE && mobileSelectedTab in setOf("movies", "tv_shows"))
                         NavBarItem(
+                            modifier = Modifier.weight(1f),
                             tab = tab,
                             selected = selected,
                             onClick = {
-                                mobileSelectedTab = tab.route
-                                if (currentRoute != MOBILE_ROOT_ROUTE) {
-                                    navController.navigate(MOBILE_ROOT_ROUTE) {
-                                        launchSingleTop = true
-                                    }
-                                }
+                                if (mobileSelectedTab == tab.route) {
+                                    navController.popBackStack(MOBILE_ROOT_ROUTE, inclusive = false)
+                                } else mobileSelectedTab = tab.route
                             },
                         )
                     }
                 }
             }
         }
+        if (!isTvMode && storeUpdates != null && currentRoute?.startsWith("player") != true &&
+            activePlaybackSession == null && !ActivePlaybackState.isInPipMode) {
+            com.torve.android.update.StoreUpdatePrompt(storeUpdates,
+                Modifier.align(Alignment.BottomCenter).navigationBarsPadding()
+                    .padding(horizontal = 16.dp, vertical = if (showBottomBar) 84.dp else 16.dp).zIndex(20f))
+        }
+    }
+}
+
+@Composable
+internal fun PersistentPlaybackBar(
+    session: ActivePlaybackSession,
+    isTv: Boolean,
+    onResume: () -> Unit,
+    onTogglePlayback: () -> Unit,
+    onStop: () -> Unit,
+    requestInitialFocus: Boolean = false,
+    focusRequestId: Long = 0L,
+    onNavigateAway: () -> Unit = {},
+) {
+    if (isTv) {
+        TvPersistentPlaybackBar(
+            session = session,
+            onResume = onResume,
+            onTogglePlayback = onTogglePlayback,
+            onStop = onStop,
+            requestInitialFocus = requestInitialFocus,
+            focusRequestId = focusRequestId,
+            onNavigateAway = onNavigateAway,
+        )
+        return
+    }
+
+    var focused by remember { mutableStateOf(false) }
+    val resumeFocusRequester = remember { FocusRequester() }
+    val progress = if (session.durationMs > 0L) {
+        (session.positionMs.toFloat() / session.durationMs).coerceIn(0f, 1f)
+    } else {
+        0f
+    }
+    val widthModifier = if (isTv) Modifier.width(440.dp) else Modifier.fillMaxWidth()
+
+    LaunchedEffect(requestInitialFocus, session.url) {
+        if (!isTv || !requestInitialFocus) return@LaunchedEffect
+        repeat(5) { attempt ->
+            withFrameNanos { }
+            if (attempt > 0) delay(120L)
+            runCatching { resumeFocusRequester.requestFocus() }
+            // The destination screen also restores its previous focus after
+            // player disposal. Keep claiming the new playback card through
+            // that brief restoration window before considering focus stable.
+            if (attempt >= 2 && focused) return@LaunchedEffect
+        }
+    }
+
+    Column(
+        modifier = widthModifier
+            .clip(RoundedCornerShape(14.dp))
+            .background(Color(0xF2181C25))
+            .then(if (focused) Modifier.background(Amber.copy(alpha = 0.16f)) else Modifier),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .focusRequester(resumeFocusRequester)
+                .onFocusChanged { focused = it.isFocused }
+                .focusable()
+                .clickable(onClick = onResume)
+                .border(
+                    width = if (focused) 2.dp else 1.dp,
+                    color = if (focused) Amber else Color.White.copy(alpha = 0.18f),
+                    shape = RoundedCornerShape(14.dp),
+                )
+                .padding(horizontal = 14.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = localizedUiText(session.title.ifBlank { "Now playing" }),
+                    color = Color.White,
+                    style = MaterialTheme.typography.titleSmall,
+                    maxLines = 1,
+                )
+                Text(
+                    text = if (isTv) stringResource(
+                        if (session.isPlaying) R.string.player_background_playing else R.string.player_background_paused,
+                    ) else stringResource(if (session.isPlaying) R.string.tv_iptv_now_playing else R.string.download_paused),
+                    color = Color.White.copy(alpha = 0.68f),
+                    style = MaterialTheme.typography.labelSmall,
+                    maxLines = 1,
+                )
+                if (isTv) {
+                    Text(
+                        text = stringResource(R.string.player_background_hold_back_hint),
+                        color = Amber,
+                        style = MaterialTheme.typography.labelSmall,
+                        maxLines = 1,
+                    )
+                }
+            }
+            Icon(
+                imageVector = if (session.isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
+                contentDescription = localizedUiText(if (session.isPlaying) "Pause" else "Play"),
+                tint = Color.White,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(50))
+                    .clickable(onClick = onTogglePlayback)
+                    .padding(8.dp)
+                    .size(22.dp),
+            )
+            Icon(
+                imageVector = Icons.Filled.Close,
+                contentDescription = localizedUiText("Stop playback"),
+                tint = Color.White.copy(alpha = 0.82f),
+                modifier = Modifier
+                    .clip(RoundedCornerShape(50))
+                    .clickable(onClick = onStop)
+                    .padding(8.dp)
+                    .size(20.dp),
+            )
+        }
+        LinearProgressIndicator(
+            progress = { progress },
+            modifier = Modifier.fillMaxWidth().height(3.dp),
+            color = Amber,
+            trackColor = Color.White.copy(alpha = 0.12f),
+        )
+    }
+}
+
+@Composable
+private fun TvPersistentPlaybackBar(
+    session: ActivePlaybackSession,
+    onResume: () -> Unit,
+    onTogglePlayback: () -> Unit,
+    onStop: () -> Unit,
+    requestInitialFocus: Boolean,
+    focusRequestId: Long,
+    onNavigateAway: () -> Unit,
+) {
+    val returnFocusRequester = remember { FocusRequester() }
+    val toggleFocusRequester = remember { FocusRequester() }
+    val stopFocusRequester = remember { FocusRequester() }
+    var focusedAction by remember { mutableStateOf<String?>(null) }
+    val progress = if (session.durationMs > 0L) {
+        (session.positionMs.toFloat() / session.durationMs).coerceIn(0f, 1f)
+    } else {
+        0f
+    }
+
+    LaunchedEffect(requestInitialFocus, session.url, focusRequestId) {
+        if (!requestInitialFocus) return@LaunchedEffect
+        repeat(5) { attempt ->
+            withFrameNanos { }
+            if (attempt > 0) delay(120L)
+            runCatching { returnFocusRequester.requestFocus() }
+            // Stop claiming focus as soon as the playback card owns it. The
+            // old minimum-three-attempt loop could pull focus back after the
+            // user had already pressed Up to return to the content surface.
+            withFrameNanos { }
+            if (focusedAction == "return") return@LaunchedEffect
+        }
+    }
+
+    Column(
+        modifier = Modifier
+            .width(480.dp)
+            .onPreviewKeyEvent { event ->
+                if (event.type == KeyEventType.KeyDown && event.key == Key.DirectionUp) {
+                    onNavigateAway()
+                    true
+                } else {
+                    false
+                }
+            }
+            .clip(RoundedCornerShape(14.dp))
+            .background(Color(0xF2181C25))
+            .border(
+                width = if (focusedAction != null) 2.dp else 1.dp,
+                color = if (focusedAction != null) Amber else Color.White.copy(alpha = 0.18f),
+                shape = RoundedCornerShape(14.dp),
+            ),
+    ) {
+        Column(
+            modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 12.dp),
+        ) {
+            Text(
+                text = localizedUiText(session.title.ifBlank { "Now playing" }),
+                color = Color.White,
+                style = MaterialTheme.typography.titleSmall,
+                maxLines = 1,
+            )
+            Text(
+                text = stringResource(
+                    if (session.isPlaying) R.string.player_background_playing
+                    else R.string.player_background_paused,
+                ),
+                color = Color.White.copy(alpha = 0.68f),
+                style = MaterialTheme.typography.labelSmall,
+                maxLines = 1,
+            )
+            Text(
+                text = stringResource(R.string.player_background_hold_back_hint),
+                color = Amber,
+                style = MaterialTheme.typography.labelSmall,
+                maxLines = 1,
+            )
+        }
+
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 10.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            TvPlaybackBarButton(
+                label = stringResource(R.string.player_background_return),
+                icon = Icons.Filled.PlayArrow,
+                focused = focusedAction == "return",
+                onFocused = { focusedAction = if (it) "return" else focusedAction.takeUnless { value -> value == "return" } },
+                onClick = onResume,
+                modifier = Modifier
+                    .weight(1.2f)
+                    .focusRequester(returnFocusRequester)
+                    .focusProperties { right = toggleFocusRequester },
+            )
+            TvPlaybackBarButton(
+                label = stringResource(
+                    if (session.isPlaying) R.string.common_pause else R.string.common_play,
+                ),
+                icon = if (session.isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
+                focused = focusedAction == "toggle",
+                onFocused = { focusedAction = if (it) "toggle" else focusedAction.takeUnless { value -> value == "toggle" } },
+                onClick = onTogglePlayback,
+                modifier = Modifier
+                    .weight(1f)
+                    .focusRequester(toggleFocusRequester)
+                    .focusProperties {
+                        left = returnFocusRequester
+                        right = stopFocusRequester
+                    },
+            )
+            TvPlaybackBarButton(
+                label = stringResource(R.string.player_background_stop),
+                icon = Icons.Filled.Close,
+                focused = focusedAction == "stop",
+                onFocused = { focusedAction = if (it) "stop" else focusedAction.takeUnless { value -> value == "stop" } },
+                onClick = onStop,
+                modifier = Modifier
+                    .weight(0.9f)
+                    .focusRequester(stopFocusRequester)
+                    .focusProperties { left = toggleFocusRequester },
+            )
+        }
+
+        LinearProgressIndicator(
+            progress = { progress },
+            modifier = Modifier.fillMaxWidth().height(3.dp),
+            color = Amber,
+            trackColor = Color.White.copy(alpha = 0.12f),
+        )
+    }
+}
+
+@Composable
+private fun TvPlaybackBarButton(
+    label: String,
+    icon: ImageVector,
+    focused: Boolean,
+    onFocused: (Boolean) -> Unit,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    androidx.compose.material3.Button(
+        onClick = onClick,
+        modifier = modifier.onFocusChanged { onFocused(it.isFocused) },
+        colors = androidx.compose.material3.ButtonDefaults.buttonColors(
+            containerColor = if (focused) Amber else Color.White.copy(alpha = 0.10f),
+            contentColor = if (focused) Color.Black else Color.White,
+        ),
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(
+            horizontal = 10.dp,
+            vertical = 8.dp,
+        ),
+    ) {
+        Icon(imageVector = icon, contentDescription = null, modifier = Modifier.size(18.dp))
+        Spacer(modifier = Modifier.width(6.dp))
+        Text(text = localizedUiText(label), maxLines = 1)
     }
 }
 
@@ -2210,7 +2825,7 @@ private fun TvNavRail(
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         Text(
-            text = "Torve",
+            text = localizedUiText("Torve"),
             style = MaterialTheme.typography.titleMedium,
             color = Color.White,
             modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
@@ -2269,7 +2884,7 @@ private fun TvNavRailItem(
             modifier = Modifier.size(18.dp),
         )
         Text(
-            text = label,
+            text = localizedUiText(label),
             style = MaterialTheme.typography.labelMedium,
             color = textColor,
         )
@@ -2277,37 +2892,9 @@ private fun TvNavRailItem(
 }
 
 @Composable
-private fun NavBarItem(
-    tab: NavTab,
-    selected: Boolean,
-    onClick: () -> Unit,
-) {
-    val icon = if (selected) tab.iconSelected else tab.iconUnselected
-    val color = if (selected) Amber else Torve.colors.textTertiary
-    val label = stringResource(tab.labelResId)
-
-    Column(
-        modifier = Modifier
-            .clickable(
-                onClick = onClick,
-                indication = null,
-                interactionSource = remember { MutableInteractionSource() },
-            )
-            .padding(horizontal = 10.dp, vertical = 2.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        Icon(
-            imageVector = icon,
-            contentDescription = label,
-            tint = color,
-            modifier = Modifier.size(20.dp),
-        )
-        Spacer(Modifier.height(1.dp))
-        Text(
-            text = label,
-            style = MaterialTheme.typography.labelSmall,
-            color = color,
-            fontSize = 10.sp,
-        )
-    }
+private fun NavBarItem(tab: NavTab, selected: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier) {
+    com.torve.android.ui.components.MobileBottomDestination(
+        label = stringResource(com.torve.android.ui.components.mobileBottomLabelRes(tab.labelResId)), accessibilityLabel = stringResource(tab.labelResId), icon = if (selected) tab.iconSelected else tab.iconUnselected,
+        selected = selected, onClick = onClick, modifier = modifier,
+        showLabel = androidx.compose.ui.platform.LocalConfiguration.current.fontScale < 1.5f)
 }

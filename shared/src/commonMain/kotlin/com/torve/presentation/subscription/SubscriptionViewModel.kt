@@ -1115,7 +1115,7 @@ class SubscriptionViewModel(
             _state.update {
                 it.copy(
                     isPurchasing = false,
-                    showPaywall = !activeOnDevice,
+                    showPaywall = false,
                     purchaseVerificationState = if (verifiedOnAccount) {
                         PurchaseVerificationState.VERIFIED
                     } else {
@@ -1192,7 +1192,7 @@ class SubscriptionViewModel(
                 _state.update {
                     it.copy(
                         isPurchasing = false,
-                        showPaywall = !backendDeviceAccess,
+                        showPaywall = false,
                         hasEntitlement = backendHasEntitlement,
                         isDeviceActivated = backendDeviceAccess,
                         deviceBlockReason = null,
@@ -1354,7 +1354,7 @@ class SubscriptionViewModel(
                 _state.update {
                     it.copy(
                         isPurchasing = false,
-                        showPaywall = !backendDeviceAccess,
+                        showPaywall = false,
                         error = null,
                         hasEntitlement = backendHasEntitlement,
                         isDeviceActivated = backendDeviceAccess,
@@ -1498,7 +1498,7 @@ class SubscriptionViewModel(
                         it.copy(
                             isLoading = false,
                             error = null,
-                            showPaywall = !backendDeviceAccess,
+                            showPaywall = false,
                             hasEntitlement = backendHasEntitlement,
                             isDeviceActivated = backendDeviceAccess,
                             deviceBlockReason = backendDecision?.deviceBlockReason,
@@ -1635,7 +1635,7 @@ class SubscriptionViewModel(
                         it.copy(
                             isLoading = false,
                             error = null,
-                            showPaywall = !backendDeviceAccess,
+                            showPaywall = false,
                             hasEntitlement = backendHasEntitlement,
                             isDeviceActivated = backendDeviceAccess,
                             deviceBlockReason = backendDecision?.deviceBlockReason,
@@ -1782,7 +1782,7 @@ class SubscriptionViewModel(
                 it.copy(
                     isLoading = false,
                     error = null,
-                    showPaywall = !activeOnDevice,
+                    showPaywall = false,
                     purchaseVerificationState = if (anythingRestored) {
                         PurchaseVerificationState.RESTORED
                     } else {

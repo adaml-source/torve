@@ -1,53 +1,44 @@
 package com.torve.presentation.providerhealth
 
+import com.torve.domain.integrations.ConnectionProbeResult
 import com.torve.domain.providerhealth.ProviderHealthCategory
 import com.torve.domain.providerhealth.ProviderHealthEntry
 import com.torve.domain.providerhealth.ProviderHealthStatus
+import kotlinx.coroutines.CancellationException
 
-/**
- * Token-presence check for Trakt. Connecting through TraktClient is a
- * bigger lift (refresh tokens, rate limits); for now we surface "have we
- * got a token at all?" — UNCONFIGURED when blank, GREEN when present.
- *
- * If the token is later revoked server-side, the SettingsViewModel's
- * `verifyTraktConnection` flow will already update its own state; this
- * row is meant to give the user a single place to *find* the answer
- * rather than to be the sole source of truth.
- */
 class TraktProviderHealthChecker(
     private val tokenSource: suspend () -> String?,
+    private val probe: (suspend (String) -> ConnectionProbeResult)? = null,
 ) : ProviderHealthChecker {
-
-    override val providerKey: String = "trakt:account"
-
-    override suspend fun check(): ProviderHealthEntry {
-        val token = tokenSource()?.takeIf { it.isNotBlank() }
-        return ProviderHealthEntry(
-            category = ProviderHealthCategory.TRAKT,
-            providerKey = providerKey,
-            label = "Trakt",
-            status = if (token != null) ProviderHealthStatus.GREEN else ProviderHealthStatus.UNCONFIGURED,
-            message = if (token != null) "Connected." else "Not connected.",
-            nextAction = if (token != null) null else "Connect Trakt",
-        )
-    }
+    override val providerKey = "trakt:account"
+    override suspend fun check(): ProviderHealthEntry = trackingHealth(
+        ProviderHealthCategory.TRAKT, providerKey, "Trakt", tokenSource(), probe)
 }
 
 class SimklProviderHealthChecker(
     private val tokenSource: suspend () -> String?,
+    private val probe: (suspend (String) -> ConnectionProbeResult)? = null,
 ) : ProviderHealthChecker {
+    override val providerKey = "simkl:account"
+    override suspend fun check(): ProviderHealthEntry = trackingHealth(
+        ProviderHealthCategory.SIMKL, providerKey, "SIMKL", tokenSource(), probe)
+}
 
-    override val providerKey: String = "simkl:account"
-
-    override suspend fun check(): ProviderHealthEntry {
-        val token = tokenSource()?.takeIf { it.isNotBlank() }
-        return ProviderHealthEntry(
-            category = ProviderHealthCategory.SIMKL,
-            providerKey = providerKey,
-            label = "SIMKL",
-            status = if (token != null) ProviderHealthStatus.GREEN else ProviderHealthStatus.UNCONFIGURED,
-            message = if (token != null) "Connected." else "Not connected.",
-            nextAction = if (token != null) null else "Connect SIMKL",
-        )
+private suspend fun trackingHealth(category: ProviderHealthCategory, key: String, label: String,
+    token: String?, probe: (suspend (String) -> ConnectionProbeResult)?): ProviderHealthEntry {
+    val credential = token?.takeIf { it.isNotBlank() }
+    if (credential == null) return ProviderHealthEntry(category, key, label, ProviderHealthStatus.UNCONFIGURED,
+        message = "Not connected.", nextAction = "Connect $label")
+    if (probe == null) return ProviderHealthEntry(category, key, label, ProviderHealthStatus.YELLOW,
+        message = "Credentials saved. Connection not verified yet.", nextAction = "Check connection")
+    val result = try { probe(credential) } catch (error: Exception) {
+        if (error is CancellationException) throw error
+        ConnectionProbeResult.UNKNOWN_FAILURE
     }
+    return ProviderHealthEntry(category, key, label,
+        status = if (result == ConnectionProbeResult.CONNECTED) ProviderHealthStatus.GREEN else ProviderHealthStatus.RED,
+        message = if (result == ConnectionProbeResult.CONNECTED) "Connected." else result.failureMessage(label),
+        nextAction = if (result == ConnectionProbeResult.CONNECTED) null
+            else if (result == ConnectionProbeResult.AUTH_REJECTED) "Reconnect $label" else "Retry connection",
+        failure = result.healthFailure)
 }

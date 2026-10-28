@@ -1,5 +1,7 @@
 package com.torve.android.tv.components
 
+import com.torve.android.tv.components.tvSettingsLabel as localizedUiText
+
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
@@ -42,7 +44,7 @@ import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.window.Popup
+import com.torve.android.remote.TorveRemotePopup as Popup
 import androidx.compose.ui.window.PopupProperties
 import androidx.compose.ui.res.stringResource
 import com.torve.android.BuildConfig
@@ -492,7 +494,7 @@ private fun TvUnlockPlanRow(
             verticalArrangement = Arrangement.spacedBy(2.dp),
         ) {
             Text(
-                text = label,
+                text = localizedUiText(label),
                 style = MaterialTheme.typography.titleSmall,
                 color = Snow,
                 fontWeight = FontWeight.Medium,

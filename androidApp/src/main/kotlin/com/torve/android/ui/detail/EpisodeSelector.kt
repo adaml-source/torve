@@ -1,5 +1,7 @@
 package com.torve.android.ui.detail
 
+import com.torve.android.ui.community.parityLabel as localizedUiText
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
@@ -31,7 +33,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
+import com.torve.android.ui.components.MobileGlassTextField as OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -55,6 +57,7 @@ import com.torve.domain.model.Episode
 import com.torve.domain.model.MediaRatings
 import com.torve.domain.model.Season
 import com.torve.domain.model.withFallbackTmdbScore
+import com.torve.presentation.watching.forPresentation
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -64,6 +67,7 @@ fun EpisodeSelector(
     seasonDetail: Season?,
     isLoadingSeasonDetail: Boolean,
     watchedEpisodes: Set<String> = emptySet(),
+    availableInJellyfinEpisodes: Set<Pair<Int, Int>> = emptySet(),
     seriesRatings: MediaRatings? = null,
     onSeasonSelected: (Int) -> Unit,
     onEpisodePlay: (season: Int, episode: Int) -> Unit,
@@ -73,6 +77,7 @@ fun EpisodeSelector(
     onMarkSeasonWatched: (season: Int) -> Unit = {},
     onToggleEpisodeWatched: (season: Int, episode: Int) -> Unit = { _, _ -> },
     modifier: Modifier = Modifier,
+    hideUnwatchedSpoilers: Boolean = false,
 ) {
     if (seasons.isEmpty()) return
 
@@ -80,12 +85,8 @@ fun EpisodeSelector(
     val filteredSeasons = seasons.filter { it.seasonNumber > 0 }
 
     Column(modifier = modifier.fillMaxWidth()) {
-        Text(
-            text = stringResource(R.string.settings_episodes),
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.SemiBold,
-            color = MaterialTheme.colorScheme.onBackground,
-        )
+        com.torve.android.ui.components.SectionHeader(stringResource(R.string.settings_episodes),
+            contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp))
         Spacer(Modifier.height(8.dp))
 
         // Season dropdown
@@ -227,9 +228,11 @@ fun EpisodeSelector(
                     episodes.forEach { episode ->
                         val key = "s${selectedSeason}e${episode.episodeNumber}"
                         EpisodeCard(
-                            episode = episode,
+                            episode = episode.forPresentation(hideUnwatchedSpoilers, watchedEpisodes.contains(key)),
                             season = selectedSeason,
                             isWatched = watchedEpisodes.contains(key),
+                            isAvailableInJellyfin =
+                                (selectedSeason to episode.episodeNumber) in availableInJellyfinEpisodes,
                             seriesRatings = seriesRatings,
                             onPlay = { onEpisodePlay(selectedSeason, episode.episodeNumber) },
                             onDownload = { onEpisodeDownload(selectedSeason, episode.episodeNumber) },
@@ -248,6 +251,7 @@ private fun EpisodeCard(
     episode: Episode,
     season: Int,
     isWatched: Boolean = false,
+    isAvailableInJellyfin: Boolean = false,
     seriesRatings: MediaRatings? = null,
     onPlay: () -> Unit,
     onDownload: () -> Unit,
@@ -314,6 +318,15 @@ private fun EpisodeCard(
                     color = if (isWatched) Torve.colors.textSecondary else Torve.colors.textPrimary,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
+                )
+            }
+            if (isAvailableInJellyfin) {
+                Spacer(Modifier.height(3.dp))
+                Text(
+                    text = localizedUiText("Available in Jellyfin"),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = Amber,
+                    fontWeight = FontWeight.SemiBold,
                 )
             }
             if (episode.overview.isNotBlank()) {

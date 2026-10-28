@@ -2,12 +2,15 @@ package com.torve.presentation.providerhealth
 
 import com.torve.domain.providerhealth.ProviderHealthCategory
 import com.torve.domain.providerhealth.ProviderHealthEntry
+import com.torve.domain.providerhealth.ProviderHealthFailure
 import com.torve.domain.providerhealth.ProviderHealthStatus
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.encodeToString
 
 /**
  * Locks in the four user-facing status kinds Prompt 16 names plus the
@@ -21,6 +24,7 @@ class ProviderStatusMapperTest {
         status: ProviderHealthStatus,
         message: String? = null,
         lastCheckedAt: Long? = null,
+        failure: ProviderHealthFailure? = null,
     ) = ProviderHealthEntry(
         category = ProviderHealthCategory.DEBRID,
         providerKey = "real-debrid",
@@ -28,6 +32,7 @@ class ProviderStatusMapperTest {
         status = status,
         lastCheckedAt = lastCheckedAt,
         message = message,
+        failure = failure,
     )
 
     @Test
@@ -70,12 +75,13 @@ class ProviderStatusMapperTest {
                 ProviderHealthStatus.RED,
                 message = "401 unauthorized — re-enter API key",
                 lastCheckedAt = 1_725_000_000_000L,
+                failure = ProviderHealthFailure.AUTH_REJECTED,
             ),
         )
         assertEquals(ProviderStatusKind.LAST_CHECK_FAILED, view.kind)
         assertEquals("Last check failed", view.headline)
         assertEquals("401 unauthorized — re-enter API key", view.detail)
-        assertEquals("Re-enter credentials", view.primaryActionLabel)
+        assertEquals("Update credentials", view.primaryActionLabel)
         assertEquals(ProviderActionKind.REENTER, view.primaryActionKind)
     }
 
@@ -147,5 +153,51 @@ class ProviderStatusMapperTest {
             ),
         )
         assertEquals("Premium until 2026-12-31", view.detail)
+    }
+
+    @Test
+    fun `unreachable server offers retry rather than changing credentials`() {
+        val view = ProviderStatusMapper.map(entry(ProviderHealthStatus.RED, lastCheckedAt = 1,
+            failure = ProviderHealthFailure.UNREACHABLE))
+        assertEquals(ProviderActionKind.REFRESH, view.primaryActionKind)
+        assertEquals("Try again", view.primaryActionLabel)
+    }
+
+    @Test
+    fun `legacy failure messages do not imply rejected credentials`() {
+        val view = ProviderStatusMapper.map(entry(ProviderHealthStatus.RED, "Unauthorized or offline", 1))
+        assertEquals(ProviderActionKind.REFRESH, view.primaryActionKind)
+    }
+
+    @Test
+    fun `incomplete setup offers configure even when some services are connected`() {
+        val view = ProviderStatusMapper.map(entry(ProviderHealthStatus.YELLOW, lastCheckedAt = 1,
+            failure = ProviderHealthFailure.SETUP_INCOMPLETE))
+        assertEquals(ProviderActionKind.CONFIGURE, view.primaryActionKind)
+        assertEquals("Finish setup", view.primaryActionLabel)
+    }
+
+    @Test
+    fun `mixed failure offers review of each connection`() {
+        val view = ProviderStatusMapper.map(entry(ProviderHealthStatus.RED, lastCheckedAt = 1,
+            failure = ProviderHealthFailure.MIXED))
+        assertEquals(ProviderActionKind.CONFIGURE, view.primaryActionKind)
+        assertEquals("Review connections", view.primaryActionLabel)
+    }
+
+    @Test
+    fun `cached entries from earlier releases remain readable`() {
+        val cached = """{"category":"DEBRID","providerKey":"real-debrid","label":"Real-Debrid","status":"RED","lastCheckedAt":1,"message":"Could not connect"}"""
+        val restored = Json.decodeFromString<ProviderHealthEntry>(cached)
+        assertNull(restored.failure)
+        assertEquals(ProviderActionKind.REFRESH, ProviderStatusMapper.map(restored).primaryActionKind)
+    }
+
+    @Test
+    fun `verified failure reason survives persisted health state`() {
+        val original = entry(ProviderHealthStatus.RED, lastCheckedAt = 1, failure = ProviderHealthFailure.UNREACHABLE)
+        val restored = Json.decodeFromString<ProviderHealthEntry>(Json.encodeToString(original))
+        assertEquals(original, restored)
+        assertEquals(ProviderActionKind.REFRESH, ProviderStatusMapper.map(restored).primaryActionKind)
     }
 }

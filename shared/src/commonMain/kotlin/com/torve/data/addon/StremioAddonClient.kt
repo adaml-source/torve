@@ -2,10 +2,13 @@ package com.torve.data.addon
 
 import com.torve.domain.model.MediaType
 import io.ktor.client.HttpClient
+import io.ktor.client.request.prepareGet
 import io.ktor.client.request.get
 import io.ktor.client.request.header
 import io.ktor.http.encodeURLPathPart
 import kotlinx.serialization.json.Json
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 private const val ADDON_MANIFEST_MAX_BYTES = 256 * 1024
 private const val ADDON_STREAM_MAX_BYTES = 2 * 1024 * 1024
@@ -20,7 +23,9 @@ private const val ADDON_SUBTITLE_MAX_BYTES = 512 * 1024
 class StremioAddonClient(
     private val httpClient: HttpClient,
     private val json: Json,
+    private val family: com.torve.data.profile.FamilyControls? = null,
 ) {
+    private val manifestNames = mutableMapOf<String, String>()
     /**
      * Fetch the addon manifest from a base URL.
      */
@@ -39,7 +44,16 @@ class StremioAddonClient(
                     "Got HTML or non-JSON response. Check the addon URL or try again later."
             )
         }
-        return json.decodeFromString(body)
+        val manifest = json.decodeFromString<StremioManifest>(body)
+        val report = StremioManifestCompatibility.validate(manifest)
+        if (!report.isCompatible) {
+            val reason = report.issues
+                .filter { it.severity == ManifestCompatibilitySeverity.ERROR }
+                .joinToString("; ") { "${it.field}: ${it.message}" }
+            throw IllegalArgumentException("Addon manifest is incompatible: $reason")
+        }
+        manifestNames[baseUrl.trimEnd('/')] = manifest.name
+        return manifest
     }
 
     /**
@@ -51,6 +65,7 @@ class StremioAddonClient(
         imdbId: String,
         season: Int? = null,
         episode: Int? = null,
+        onStreams: suspend (List<ParsedStream>) -> Unit = {},
     ): List<ParsedStream> {
         val stremioType = when (type) {
             MediaType.MOVIE -> "movie"
@@ -62,33 +77,31 @@ class StremioAddonClient(
             imdbId
         }
 
-        return try {
-            val url = "${baseUrl.trimEnd('/')}/stream/$stremioType/$stremioId.json"
-            // CRITICAL: send the same browser-shaped headers we use for
-            // /manifest.json. Some addon backends (Panda observed
-            // 2026-05-04) silently return `streams: []` for /stream/
-            // requests that arrive with Ktor's default Java-engine
-            // User-Agent. The manifest fetch worked, the stream fetch
-            // didn't, and the desktop got zero results while the
-            // Android build (different Ktor engine -> different default
-            // UA) worked with the same Panda config.
-            val response = httpClient.get(url) {
-                header("User-Agent", "Mozilla/5.0 (Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36")
-                header("Accept", "application/json,text/plain;q=0.9,*/*;q=0.8")
-                header("Accept-Language", "en-US,en;q=0.9")
+        val url = "${baseUrl.trimEnd('/')}/stream/$stremioType/$stremioId.json"
+        // CRITICAL: send the same browser-shaped headers we use for
+        // /manifest.json. Some addon backends (Panda observed
+        // 2026-05-04) silently return `streams: []` for /stream/
+        // requests that arrive with Ktor's default Java-engine
+        // User-Agent. The manifest fetch worked, the stream fetch
+        // didn't, and the desktop got zero results while the
+        // Android build (different Ktor engine -> different default
+        // UA) worked with the same Panda config.
+        return httpClient.prepareGet(url) {
+            header("User-Agent", "Mozilla/5.0 (Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36")
+            header("Accept", "application/x-ndjson,application/json;q=0.9")
+            header("Accept-Language", "en-US,en;q=0.9")
+        }
+        .execute { response ->
+            if (response.status.value !in 200..299) error("Provider returned HTTP ${response.status.value}")
+            val addonName = manifestNames[baseUrl.trimEnd('/')]
+                ?: baseUrl.substringAfter("://").substringBefore("/")
+            val origin = addonOriginForStream(baseUrl)
+            fun parse(rows: List<StremioStream>) = rows.mapNotNull { row ->
+                val parsed = StreamParser.parse(row, addonName, addonBaseUrl = origin)
+                parsed.takeIf { it.resolvableKind() != ResolvableStreamKind.INVALID &&
+                    it.directUrl?.let(::isProviderMessageVideo) != true }
             }
-            val streamResponse = json.decodeFromString<StremioStreamResponse>(
-                response.safeAddonBodyAsText(maxBytes = ADDON_STREAM_MAX_BYTES),
-            )
-            val addonName = try {
-                getManifest(baseUrl).name
-            } catch (_: Exception) {
-                baseUrl.substringAfter("://").substringBefore("/")
-            }
-            val addonOrigin = addonOriginForStream(baseUrl)
-            streamResponse.streams.map { StreamParser.parse(it, addonName, addonBaseUrl = addonOrigin) }
-        } catch (e: Exception) {
-            emptyList()
+            parse(response.readAddonStreams(json, ADDON_STREAM_MAX_BYTES) { onStreams(parse(it)) })
         }
     }
 
@@ -122,7 +135,11 @@ class StremioAddonClient(
         skip: Int? = null,
         genre: String? = null,
         search: String? = null,
-    ): StremioCatalogResponse {
+        failOnError: Boolean = false,
+    ): StremioCatalogResponse = withContext(Dispatchers.Default) {
+        family?.initialize()
+        val familySource = family?.extensionSource(baseUrl)
+        if (family?.state?.value?.configuration?.enabled == true && family.state.value.isKids && (familySource == null || !family.allowsSource(familySource))) return@withContext StremioCatalogResponse()
         val base = baseUrl.trimEnd('/')
         val extras = buildList {
             genre?.let { add("genre=${it.encodeURLPathPart()}") }
@@ -134,10 +151,19 @@ class StremioAddonClient(
         } else {
             "$base/catalog/$type/$catalogId.json"
         }
-        return try {
+        try {
             val response = httpClient.get(url)
-            json.decodeFromString(response.safeAddonBodyAsText(maxBytes = ADDON_CATALOG_MAX_BYTES))
-        } catch (_: Exception) {
+            check(response.status.value in 200..299) { "Catalogue returned HTTP ${response.status.value}" }
+            val parsed = json.decodeFromString<StremioCatalogResponse>(response.safeAddonBodyAsText(maxBytes = ADDON_CATALOG_MAX_BYTES))
+            if (family?.state?.value?.configuration?.enabled == true && family.state.value.isKids) {
+                val visible = family.prepare(parsed.metas.map { it.toMediaItem() }, familySource ?: "unknown")
+                val keys = visible.map { "${it.type.name}:${it.id}" }.toSet()
+                parsed.copy(metas = parsed.metas.filter { "${com.torve.domain.model.MediaType.fromString(it.type).name}:${it.id}" in keys })
+            } else parsed
+        } catch (cancelled: kotlinx.coroutines.CancellationException) {
+            throw cancelled
+        } catch (error: Exception) {
+            if (failOnError) throw error
             StremioCatalogResponse()
         }
     }
@@ -151,13 +177,19 @@ class StremioAddonClient(
         type: String,
         id: String,
     ): StremioMetaResponse {
+        family?.initialize()
+        val source = family?.extensionSource(baseUrl)
+        if (family?.state?.value?.configuration?.enabled == true && family.state.value.isKids && (source == null || !family.allowsSource(source))) return StremioMetaResponse()
+        val stamp = family?.sessionKey()
         val url = "${baseUrl.trimEnd('/')}/meta/$type/$id.json"
         return try {
             val response = httpClient.get(url)
-            json.decodeFromString(response.safeAddonBodyAsText(maxBytes = ADDON_META_MAX_BYTES))
-        } catch (_: Exception) {
-            StremioMetaResponse()
-        }
+            val parsed = json.decodeFromString<StremioMetaResponse>(response.safeAddonBodyAsText(maxBytes = ADDON_META_MAX_BYTES))
+            if (family?.state?.value?.configuration?.enabled == true && family.state.value.isKids) {
+                val meta = parsed.meta ?: return StremioMetaResponse()
+                if (stamp != family.sessionKey() || family.prepare(listOf(meta.toMediaItem()), source ?: "unknown").isEmpty()) StremioMetaResponse() else parsed
+            } else parsed
+        } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (_: Exception) { StremioMetaResponse() }
     }
 
     /**

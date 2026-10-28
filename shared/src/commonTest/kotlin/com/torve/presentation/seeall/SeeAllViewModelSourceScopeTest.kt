@@ -19,6 +19,10 @@ import com.torve.domain.repository.WatchProgressRepository
 import com.torve.domain.repository.WatchlistMutationResult
 import com.torve.domain.repository.WatchlistRepository
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.resetMain
@@ -165,6 +169,53 @@ class SeeAllViewModelSourceScopeTest {
     }
 
     @Test
+    fun recentlyWatchedExcludesRawSportsAndFilesBeforeLimitingOrResolvingIds() = runTest(dispatcher) {
+        val metadata = ScopedMetadataRepository()
+        val movie = WatchHistoryEntry(
+            id = "movie-history", mediaId = "tmdb:401", mediaType = "movie", title = "Recent Movie",
+            posterUrl = null, backdropUrl = null, watchedAt = 20L, durationWatchedMs = 100L,
+            seasonNumber = null, episodeNumber = null, showTitle = null,
+        )
+        val rawFiles = (1..90).map { index -> movie.copy(
+            id = "sports-history-$index", mediaId = "sports:$index",
+            title = "upload/Fussball.Premier.League.2026.mkv",
+        ) } + listOf(
+            movie.copy(id = "nzb-history", mediaId = "direct:401", title = "upload/Faultierland.20170809.NF.mkv"),
+            movie.copy(id = "webdav-history", mediaId = "webdav:401", title = "upload/File.mkv"),
+        )
+        val history = FakeWatchHistoryRepository(rawFiles + movie)
+        val viewModel = viewModel(metadata = metadata, history = history)
+
+        viewModel.loadSection("recently_watched")
+        advanceUntilIdle()
+
+        assertEquals(listOf("tmdb:401"), viewModel.state.value.displayedItems.map { it.id })
+        assertEquals(rawFiles.size + 1, history.getAll().size)
+        assertEquals(0, metadata.discoverCalls)
+        assertEquals(0, metadata.searchCalls)
+        viewModel.close()
+    }
+
+    @Test
+    fun continueWatchingSeeAllAlsoExcludesFileAndSportsBookmarks() = runTest(dispatcher) {
+        val movie = WatchProgress(mediaId = "tmdb:301", mediaType = MediaType.MOVIE,
+            title = "Progress Movie", updatedAt = 20L)
+        val progress = FakeWatchProgressRepository(listOf(
+            movie.copy(mediaId = "sports:301", title = "upload/Fussball.mkv"),
+            movie.copy(mediaId = "webdav:301", title = "upload/File.mkv"),
+            movie.copy(mediaId = "direct:301", title = "upload/Direct.mkv"),
+            movie,
+        ))
+        val viewModel = viewModel(metadata = ScopedMetadataRepository(), watchProgress = progress)
+        viewModel.loadSection("continue_watching")
+        advanceUntilIdle()
+
+        assertEquals(listOf("tmdb:301"), viewModel.state.value.displayedItems.map { it.id })
+        assertEquals(4, progress.getAllProgress().size)
+        viewModel.close()
+    }
+
+    @Test
     fun upcomingSeeAllUsesPendingScheduleSnapshotOnly() = runTest(dispatcher) {
         val metadata = ScopedMetadataRepository()
         SeeAllViewModel.pendingItems["upcoming_schedule"] = "Upcoming Schedule" to listOf(
@@ -205,6 +256,64 @@ class SeeAllViewModelSourceScopeTest {
         assertEquals(listOf("movie:1", "movie:2"), metadata.trendingPagedCalls)
         assertEquals(0, metadata.discoverCalls)
         assertEquals(0, metadata.searchCalls)
+    }
+
+    @Test
+    fun pagingRetainsVisibleCardsAndCoalescesRepeatedBoundaryRequests() = runTest(dispatcher) {
+        val first = (1..20).map { media("first-$it", "First $it") }
+        val gate = CompletableDeferred<Unit>()
+        val metadata = ScopedMetadataRepository(trendingMoviePages = mapOf(
+            1 to PagedResult(first, 1, 2, 22),
+            2 to PagedResult(listOf(first.last(), media("next", "Next"), media("next", "Duplicate")), 2, 2, 22),
+        ), pageGate = gate)
+        val vm = viewModel(metadata)
+        vm.loadSection("TRENDING_MOVIES"); runCurrent()
+        repeat(10) { vm.loadMore() }; runCurrent()
+        assertEquals(first, vm.state.value.items)
+        assertTrue(vm.state.value.isLoading)
+        assertEquals(listOf("movie:1", "movie:2"), metadata.trendingPagedCalls)
+        gate.complete(Unit); advanceUntilIdle()
+        assertEquals(first.map { it.id } + "next", vm.state.value.items.map { it.id })
+        assertEquals(false, vm.state.value.isLoading)
+        assertEquals(false, vm.state.value.hasMore)
+        vm.close()
+    }
+
+    @Test
+    fun aLatePageFromPreviousSectionCannotAppendToTheNewGrid() = runTest(dispatcher) {
+        val gate = CompletableDeferred<Unit>()
+        val metadata = ScopedMetadataRepository(trendingMoviePages = mapOf(
+            1 to PagedResult((1..20).map { media("old-$it", "Old $it") }, 1, 2, 21),
+            2 to PagedResult(listOf(media("late", "Late old page")), 2, 2, 21),
+        ), popularMoviePages = mapOf(1 to PagedResult(listOf(media("new", "New section")), 1, 1, 1)), pageGate = gate)
+        val vm = viewModel(metadata)
+        vm.loadSection("TRENDING_MOVIES"); runCurrent()
+        vm.loadMore(); runCurrent()
+        vm.loadSection("POPULAR_MOVIES"); runCurrent()
+        gate.complete(Unit); advanceUntilIdle()
+        assertEquals("POPULAR_MOVIES", vm.state.value.sectionId)
+        assertEquals(listOf("new"), vm.state.value.items.map { it.id })
+        assertEquals(false, vm.state.value.isLoading)
+        vm.close()
+    }
+
+    @Test
+    fun aFailedAppendKeepsThePageAvailableForExplicitRetry() = runTest(dispatcher) {
+        val metadata = ScopedMetadataRepository(trendingMoviePages = mapOf(
+            1 to PagedResult((1..20).map { media("item-$it", "Item $it") }, 1, 2, 21),
+            2 to PagedResult(listOf(media("next", "Next")), 2, 2, 21),
+        ), failNextPage = true)
+        val vm = viewModel(metadata)
+        vm.loadSection("TRENDING_MOVIES"); runCurrent()
+        vm.loadMore(); runCurrent()
+        assertEquals(20, vm.state.value.items.size)
+        assertEquals(2, vm.state.value.page)
+        assertEquals(false, vm.state.value.isLoading)
+        assertTrue(vm.state.value.hasMore)
+        vm.loadMore(); advanceUntilIdle()
+        assertEquals(21, vm.state.value.items.size)
+        assertEquals(3, vm.state.value.page)
+        vm.close()
     }
 
     @Test
@@ -250,6 +359,48 @@ class SeeAllViewModelSourceScopeTest {
     }
 
     @Test
+    fun moreLikeSeeAllLoadsSuggestionsForTheSelectedWatchedPoster() = runTest(dispatcher) {
+        val seed = 391312
+        val duplicate = media("duplicate", "Duplicate", tmdbId = 501)
+        val metadata = ScopedMetadataRepository(
+            recommendationPages = mapOf(
+                "movie:$seed:1" to listOf(
+                    media("seed", "Seed", tmdbId = seed),
+                    media("recommendation", "Recommendation", tmdbId = 500),
+                    duplicate,
+                ),
+            ),
+            similarPages = mapOf(
+                "movie:$seed:1" to listOf(
+                    duplicate.copy(id = "duplicate-from-similar"),
+                    media("similar", "Similar", tmdbId = 502),
+                ),
+            ),
+        )
+        val sectionId = "more_like_movie_$seed"
+        SeeAllViewModel.pendingItems[sectionId] = "Because You Watched Eddington" to emptyList()
+        val viewModel = viewModel(metadata = metadata)
+
+        viewModel.loadSection(sectionId)
+        advanceUntilIdle()
+
+        assertEquals("Because You Watched Eddington", viewModel.state.value.title)
+        assertEquals(listOf(500, 501, 502), viewModel.state.value.items.map { it.tmdbId })
+        assertEquals(listOf("movie:$seed:1"), metadata.recommendationCalls)
+        assertEquals(listOf("movie:$seed:1"), metadata.similarCalls)
+        assertEquals(0, metadata.discoverCalls)
+        assertEquals(0, metadata.searchCalls)
+    }
+
+    @Test
+    fun moreLikeRouteRequiresARealTmdbSourceIdentity() {
+        assertEquals(MoreLikeSource("movie", 101), parseMoreLikeSectionId("more_like_movie_101"))
+        assertEquals(MoreLikeSource("tv", 202), parseMoreLikeSectionId("more_like_tv_202"))
+        assertEquals(null, parseMoreLikeSectionId("more_like_movie_0"))
+        assertEquals(null, parseMoreLikeSectionId("more_like_person_101"))
+    }
+
+    @Test
     fun missingImdbRatingsSortLastWithoutChangingSourceSet() {
         val rated = media("rated", "Rated", ratings = MediaRatings(imdbScore = 8.4f))
         val missing = media("missing", "Missing")
@@ -278,16 +429,115 @@ class SeeAllViewModelSourceScopeTest {
         watchProgressRepo = watchProgress,
     )
 
+    @Test fun applyingUnchangedDefaultsKeepsTheOriginalTrendingSource() = runTest(dispatcher) {
+        val repo=ScopedMetadataRepository();val vm=viewModel(metadata=repo)
+        try {
+            vm.loadSection("TRENDING_MOVIES");advanceUntilIdle()
+            vm.applyCatalogFilters(com.torve.presentation.catalog.CatalogFilter(),null);advanceUntilIdle()
+            assertEquals(0,repo.discoverCalls)
+            assertEquals(2,repo.trendingPagedCalls.size)
+        } finally { vm.close() }
+    }
+    @Test fun fullCatalogFilterQueriesTheWholeHomeCollectionAndKeepsTheQueryWhilePaging() = runTest(dispatcher) {
+        fun page(start: Int, rawPage: Int) = PagedResult((start until start+20).map {
+            media("$it", "Title $it", ratings=MediaRatings(imdbScore=8.5f),genreIds=listOf(35))
+                .copy(year=2023,voteCount=it)
+        },rawPage,8,160)
+        val repo=ScopedMetadataRepository(discoverPages=mapOf("movie:35:1" to page(1,3),"movie:35:4" to page(21,4)))
+        val vm=viewModel(metadata=repo)
+        try {
+            vm.loadSection("TRENDING_MOVIES"); advanceUntilIdle()
+            val filter=com.torve.presentation.catalog.CatalogFilter(minRating=8f,year=2020,yearTo=2025,
+                runtimeFilter=com.torve.presentation.catalog.RuntimeFilter.STANDARD,sortBy=com.torve.presentation.catalog.SortOption.VOTE_COUNT_DESC)
+            vm.applyCatalogFilters(filter,35); advanceUntilIdle()
+            assertEquals(filter,vm.state.value.catalogFilter)
+            assertEquals(20,vm.state.value.displayedItems.size)
+            assertEquals(5,vm.state.value.activeFilterCount)
+            vm.loadMore(); advanceUntilIdle()
+            assertEquals(40,vm.state.value.displayedItems.size)
+            assertEquals(listOf("movie:35:1","movie:35:4"),repo.discoverPageCalls)
+            assertTrue(repo.filterQueries.all { it == listOf("vote_count.desc","2020","2025","90","150","null") })
+            vm.clearFilters(); advanceUntilIdle()
+            assertEquals(com.torve.presentation.catalog.CatalogFilter(),vm.state.value.catalogFilter)
+            assertEquals(0,vm.state.value.activeFilterCount)
+            assertEquals(2,repo.trendingPagedCalls.size)
+        } finally { vm.close() }
+    }
+
+    @Test fun savedHomeCollectionsUseTheSameFiltersWithoutBorrowingGlobalTitles() = runTest(dispatcher) {
+        val repo=ScopedMetadataRepository()
+        val items=listOf(media("keep","Keep",ratings=MediaRatings(imdbScore=8.6f),genreIds=listOf(35)).copy(year=2022,runtime=100),
+            media("long","Long",ratings=MediaRatings(imdbScore=9f),genreIds=listOf(35)).copy(year=2022,runtime=190),
+            media("old","Old",ratings=MediaRatings(imdbScore=9f),genreIds=listOf(35)).copy(year=1990,runtime=100),
+            media("genre","Other genre",ratings=MediaRatings(imdbScore=9f),genreIds=listOf(28)).copy(year=2022,runtime=100),
+            media("score","Low score",ratings=MediaRatings(imdbScore=5f),genreIds=listOf(35)).copy(year=2022,runtime=100))
+        SeeAllViewModel.pendingItems["saved"]="Saved" to items
+        val vm=viewModel(metadata=repo)
+        try {
+            vm.loadSection("shelf:saved");advanceUntilIdle()
+            vm.applyCatalogFilters(com.torve.presentation.catalog.CatalogFilter(minRating=8f,year=2020,yearTo=2025,
+                runtimeFilter=com.torve.presentation.catalog.RuntimeFilter.STANDARD),35)
+            advanceUntilIdle()
+            assertEquals(listOf("keep"),vm.state.value.displayedItems.map { it.id })
+            assertEquals(0,repo.discoverCalls)
+            vm.clearFilters();advanceUntilIdle()
+            assertEquals(items.size,vm.state.value.displayedItems.size)
+        } finally { vm.close() }
+    }
+
+    @Test fun fullFiltersAlsoApplyToTvDiscoveryAndOfferAllGenresBeforeResultsArrive() = runTest(dispatcher) {
+        val repo=ScopedMetadataRepository(); val vm=viewModel(metadata=repo)
+        try {
+            assertTrue(vm.catalogGenres("tv").any { it.id==10762 })
+            assertTrue(vm.catalogGenres("movie").any { it.id==28 })
+            vm.loadSection("POPULAR_TV");advanceUntilIdle()
+            vm.applyCatalogFilters(com.torve.presentation.catalog.CatalogFilter(year=2020,yearTo=2024,
+                sortBy=com.torve.presentation.catalog.SortOption.RELEASE_DATE_ASC),16)
+            advanceUntilIdle()
+            assertEquals("tv:16:1",repo.discoverPageCalls.first())
+            assertEquals("primary_release_date.asc",repo.filterQueries.first().first())
+        } finally { vm.close() }
+    }
+
+    @Test fun savedCollectionFiltersResolveMissingGenreYearAndRuntimeFromItsOwnTitles() = runTest(dispatcher) {
+        val source=media("saved-id","Saved",tmdbId=123)
+        val detail=source.copy(year=2022,runtime=100,genreIds=listOf(35))
+        val repo=ScopedMetadataRepository(detailItems=mapOf(123 to detail))
+        SeeAllViewModel.pendingItems["missing-metadata"]="Saved" to listOf(source)
+        val vm=viewModel(metadata=repo)
+        try {
+            vm.loadSection("shelf:missing-metadata");advanceUntilIdle()
+            vm.applyCatalogFilters(com.torve.presentation.catalog.CatalogFilter(year=2020,yearTo=2025,
+                runtimeFilter=com.torve.presentation.catalog.RuntimeFilter.STANDARD),35)
+            repeat(200) {
+                runCurrent()
+                if(vm.state.value.displayedItems.isEmpty()) withContext(Dispatchers.Default) { kotlinx.coroutines.delay(1) }
+            }
+            assertEquals(listOf("saved-id"),vm.state.value.displayedItems.map { it.id })
+            assertEquals(100,vm.state.value.displayedItems.single().runtime)
+            assertEquals(0,repo.discoverCalls)
+            assertEquals(0,repo.searchCalls)
+        } finally { vm.close() }
+    }
+
     private class ScopedMetadataRepository(
         private val trendingMoviePages: Map<Int, PagedResult> = emptyMap(),
         private val popularMoviePages: Map<Int, PagedResult> = emptyMap(),
         private val discoverPages: Map<String, PagedResult> = emptyMap(),
+        private val recommendationPages: Map<String, List<MediaItem>> = emptyMap(),
+        private val similarPages: Map<String, List<MediaItem>> = emptyMap(),
+        private val pageGate: CompletableDeferred<Unit>? = null,
+        private var failNextPage: Boolean = false,
+        private val detailItems: Map<Int, MediaItem> = emptyMap(),
     ) : MetadataRepository {
+        val filterQueries = mutableListOf<List<String>>()
         var discoverCalls = 0
         var searchCalls = 0
         val trendingPagedCalls = mutableListOf<String>()
         val popularPagedCalls = mutableListOf<String>()
         val discoverPageCalls = mutableListOf<String>()
+        val recommendationCalls = mutableListOf<String>()
+        val similarCalls = mutableListOf<String>()
 
         override suspend fun getTrending(type: String, page: Int): List<MediaItem> = emptyList()
         override suspend fun getPopular(type: String, page: Int): List<MediaItem> = emptyList()
@@ -301,15 +551,27 @@ class SeeAllViewModelSourceScopeTest {
         }
         override suspend fun findByImdbId(imdbId: String, preferredType: String?): MediaItem? = null
         override suspend fun getDetail(type: String, id: Int): MediaItem =
-            media("tmdb:$id", "Detail $id", tmdbId = id, rating = 7.0)
-        override suspend fun getSimilar(type: String, id: Int, page: Int): List<MediaItem> = emptyList()
-        override suspend fun getRecommendations(type: String, id: Int, page: Int): List<MediaItem> = emptyList()
+            detailItems[id] ?: media("tmdb:$id", "Detail $id", tmdbId = id, rating = 7.0)
+        override suspend fun getSimilar(type: String, id: Int, page: Int): List<MediaItem> {
+            val key = "$type:$id:$page"
+            similarCalls += key
+            return similarPages[key].orEmpty()
+        }
+        override suspend fun getRecommendations(type: String, id: Int, page: Int): List<MediaItem> {
+            val key = "$type:$id:$page"
+            recommendationCalls += key
+            return recommendationPages[key].orEmpty()
+        }
         override suspend fun getHomeShelves(): List<CatalogShelf> = emptyList()
         override suspend fun getPersonCredits(personId: Int): List<MediaItem> = emptyList()
         override suspend fun getPersonDetail(personId: Int): TmdbPerson = error("unused")
         override suspend fun getSeasonDetail(tvId: Int, seasonNumber: Int): Season = error("unused")
         override suspend fun getTrendingPaged(type: String, page: Int): PagedResult {
             trendingPagedCalls += "$type:$page"
+            if (page > 1) {
+                if (failNextPage) { failNextPage = false; error("Temporary provider error") }
+                withContext(NonCancellable) { pageGate?.await() }
+            }
             return if (type == "movie") {
                 trendingMoviePages[page] ?: PagedResult(emptyList(), page, page, 0)
             } else {
@@ -346,8 +608,10 @@ class SeeAllViewModelSourceScopeTest {
             withWatchProviders: String?,
             watchRegion: String?,
             withKeywords: String?,
+            withCompanies: String?,
         ): PagedResult {
             discoverCalls++
+            filterQueries += listOf(sortBy,year.toString(),yearTo.toString(),runtimeGte.toString(),runtimeLte.toString(),minRating.toString())
             val genreKey = "$type:${withGenres.orEmpty()}:$page"
             discoverPageCalls += genreKey
             return discoverPages[genreKey] ?: PagedResult(listOf(media("global", "Global Result")), page, page, 1)
@@ -399,7 +663,7 @@ class SeeAllViewModelSourceScopeTest {
     ) : WatchHistoryRepository {
         override suspend fun getRecent(limit: Int): List<WatchHistoryEntry> = items.take(limit)
         override suspend fun getByDateRange(startMs: Long, endMs: Long): List<WatchHistoryEntry> = emptyList()
-        override suspend fun getAll(): List<WatchHistoryEntry> = emptyList()
+        override suspend fun getAll(): List<WatchHistoryEntry> = items
         override suspend fun getForMedia(mediaId: String): List<WatchHistoryEntry> = emptyList()
         override suspend fun record(entry: WatchHistoryEntry) = Unit
         override suspend fun delete(id: String) = Unit

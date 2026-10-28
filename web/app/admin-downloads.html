@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Release Files - Torve Admin</title>
+  <link rel="icon" type="image/png" href="/assets/favicon.png" />
+  <link rel="stylesheet" href="/assets/site-base.css?v=20260701-storecopy" />
+  <style>
+    body { margin: 0; background: var(--t-bg); color: var(--t-text); font-family: Inter, system-ui, sans-serif; }
+    .wrap { max-width: 1220px; margin: 0 auto; padding: 28px 18px 64px; }
+    .head { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 22px; }
+    h1 { color: #fff; font-size: 22px; margin: 0; }
+    h2 { color: #fff; font-size: 13px; letter-spacing: .05em; text-transform: uppercase; margin: 0 0 12px; }
+    a { color: var(--t-accent); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    .links { display: flex; gap: 12px; flex-wrap: wrap; font-size: 13px; }
+    .auth { max-width: 400px; margin: 80px auto; text-align: center; }
+    .auth h2 { font-size: 18px; text-transform: none; letter-spacing: 0; }
+    .auth p { color: #888; font-size: 13px; margin: 0 0 18px; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 14px; }
+    .card { border: 1px solid rgba(255,255,255,.08); border-radius: 8px; background: rgba(255,255,255,.035); padding: 16px; margin-bottom: 14px; }
+    .field { margin-bottom: 10px; }
+    label { display: block; color: #aaa; font-size: 11px; font-weight: 700; margin-bottom: 5px; }
+    input, textarea, select { width: 100%; box-sizing: border-box; padding: 9px 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,.12); background: rgba(255,255,255,.04); color: #fff; font: inherit; font-size: 13px; }
+    textarea { min-height: 74px; resize: vertical; }
+    input[type="checkbox"] { width: auto; margin: 0 7px 0 0; }
+    input[type="file"] { padding: 8px; }
+    .check { display: flex; align-items: center; color: #ccc; font-size: 12px; margin: 8px 0; }
+    button, .btn { display: inline-flex; align-items: center; justify-content: center; min-height: 34px; padding: 7px 12px; border-radius: 8px; border: 1px solid rgba(255,255,255,.12); background: rgba(255,255,255,.06); color: #ddd; cursor: pointer; font-size: 12px; font-weight: 700; text-decoration: none; }
+    button:hover, .btn:hover { background: rgba(255,255,255,.1); text-decoration: none; }
+    button:disabled { opacity: .45; cursor: default; }
+    .primary { background: linear-gradient(135deg, var(--t-accent), #dbb95c); color: #08080e; border: 0; }
+    .danger { color: #f87171; border-color: rgba(248,113,113,.25); background: rgba(248,113,113,.08); }
+    .muted { color: #888; }
+    .msg { min-height: 18px; font-size: 12px; margin-top: 8px; color: #999; }
+    .msg.ok { color: #4ade80; }
+    .msg.err { color: #f87171; }
+    .progress { height: 6px; border-radius: 999px; background: rgba(255,255,255,.08); overflow: hidden; margin-top: 10px; }
+    .progress span { display: block; width: 0%; height: 100%; background: var(--t-accent); transition: width .15s; }
+    .status-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 8px; font-size: 12px; }
+    .kv { padding: 8px 10px; border-radius: 8px; background: rgba(0,0,0,.18); }
+    .kv b { display: block; color: #777; font-size: 10px; text-transform: uppercase; letter-spacing: .05em; margin-bottom: 4px; }
+    .kv span, .kv code { color: #eee; word-break: break-word; }
+    table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    th { text-align: left; color: #777; font-size: 10px; text-transform: uppercase; letter-spacing: .05em; padding: 8px; border-bottom: 1px solid rgba(255,255,255,.08); }
+    td { padding: 9px 8px; border-bottom: 1px solid rgba(255,255,255,.045); vertical-align: top; color: #ccc; }
+    code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; color: #ddd; }
+    .actions { display: flex; gap: 6px; flex-wrap: wrap; }
+    .badge { display: inline-block; padding: 2px 6px; border-radius: 5px; font-size: 10px; font-weight: 700; background: rgba(255,255,255,.07); color: #aaa; margin: 0 4px 4px 0; }
+    .badge.current { background: rgba(34,197,94,.12); color: #4ade80; }
+    .table-wrap { overflow-x: auto; }
+    @media (max-width: 760px) {
+      .wrap { padding: 22px 12px 48px; }
+      th:nth-child(3), td:nth-child(3), th:nth-child(4), td:nth-child(4) { display: none; }
+    }
+  </style>
+  <link rel="stylesheet" href="/assets/modern-site.css?v=20261012-7" />
+  <meta name="robots" content="noindex, nofollow" />
+</head>
+<body class="modern-page admin-page">
+<header class="site-header" data-site-header>
+    <div class="site-header-inner">
+      <a class="site-brand" href="/" aria-label="Torve home"><img src="/assets/torve-logo-transparent.png" alt="Torve" class="site-header-logo" /></a>
+      <nav id="site-navigation" class="site-header-nav" aria-label="Main navigation"><a href="/#explore">Explore</a><a href="/download.html">Downloads</a><a href="/app/help.html">Guide</a><a href="/support.html">Support</a></nav>
+      <div class="site-header-actions"><a class="site-account-link t-btn t-btn-secondary" href="/signin.html">Sign in</a><a class="t-btn t-btn-primary" href="/download.html"><span class="install-label-full">Install Torve</span><span class="install-label-short">Install</span><svg class="button-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M12 3v12m-4-4 4 4 4-4M5 16v4h14v-4"/></svg></a></div>
+      <button class="site-menu-toggle" type="button" aria-label="Open menu" aria-controls="site-navigation" aria-expanded="false"><span></span><span></span></button>
+    </div>
+  </header>
+  <main class="wrap">
+    <div class="head">
+      <h1>Release Files</h1>
+      <div class="links">
+        <a href="/app/admin.html">Admin home</a>
+        <a href="/download.html">Download page</a>
+        <a href="/downloads/releases.json">Manifest</a>
+        <a href="https://api.torve.app/releases/appcast.xml">Appcast</a>
+      </div>
+    </div>
+
+    <section id="authGate" class="auth">
+      <h2>Admin Access</h2>
+      <p>Enter the admin secret.</p>
+      <input type="password" id="secretInput" placeholder="Admin secret" autocomplete="off" />
+      <div style="margin-top:12px"><button class="primary" id="authBtn">Sign in</button></div>
+      <div id="authMsg" class="msg err"></div>
+    </section>
+
+    <section id="adminPanel" style="display:none">
+      <div class="card">
+        <h2>Status</h2>
+        <div id="statusGrid" class="status-grid"></div>
+        <div id="globalMsg" class="msg"></div>
+      </div>
+
+      <div class="grid">
+        <form class="card upload-form" data-artifact="windows">
+          <h2>Windows Desktop</h2>
+          <div class="field"><label>Version</label><input name="version" placeholder="1.1.0" required /></div>
+          <div class="field"><label>Build label</label><input name="build_label" data-build-label required /></div>
+          <div class="field"><label>MSI file</label><input name="file" type="file" accept=".msi" required /></div>
+          <label class="check"><input type="checkbox" name="update_manifest" checked /> Set as current public download</label>
+          <label class="check"><input type="checkbox" name="register_desktop" checked /> Register desktop updater appcast</label>
+          <div class="field"><label>Release notes HTML</label><textarea name="release_notes_html"></textarea></div>
+          <button class="primary" type="submit">Upload MSI</button>
+          <div class="progress"><span></span></div>
+          <div class="msg"></div>
+        </form>
+
+        <form class="card upload-form" data-artifact="fire_tv">
+          <h2>Amazon Fire TV</h2>
+          <div class="field"><label>Version</label><input name="version" placeholder="1.1.0" required /></div>
+          <div class="field"><label>Build label</label><input name="build_label" data-build-label required /></div>
+          <div class="field"><label>APK file</label><input name="file" type="file" accept=".apk" required /></div>
+          <label class="check"><input type="checkbox" name="update_manifest" checked /> Set as current Fire TV download</label>
+          <button class="primary" type="submit">Upload APK</button>
+          <div class="progress"><span></span></div>
+          <div class="msg"></div>
+        </form>
+
+        <form class="card upload-form" data-artifact="android_mobile">
+          <h2>Android Mobile Direct</h2>
+          <div class="field"><label>Version</label><input name="version" placeholder="1.1.0" required /></div>
+          <div class="field"><label>Build label</label><input name="build_label" data-build-label required /></div>
+          <div class="field"><label>APK file</label><input name="file" type="file" accept=".apk" required /></div>
+          <label class="check"><input type="checkbox" name="update_manifest" checked /> Set as current direct mobile download</label>
+          <button class="primary" type="submit">Upload APK</button>
+          <div class="progress"><span></span></div>
+          <div class="msg"></div>
+        </form>
+      </div>
+
+      <div class="card">
+        <h2>Current Manifest</h2>
+        <div id="manifestTable" class="table-wrap"></div>
+      </div>
+
+      <div class="card">
+        <h2>Stored Files</h2>
+        <div id="filesTable" class="table-wrap"></div>
+      </div>
+
+      <div class="card">
+        <h2>Desktop Updater Releases</h2>
+        <div id="desktopReleases" class="table-wrap"></div>
+      </div>
+    </section>
+  </main>
+  <script src="/assets/app/page-admin-downloads.js?v=20260706"></script>
+  <script src="/assets/modern-site.js?v=20261012-7" defer></script>
+</body>
+</html>

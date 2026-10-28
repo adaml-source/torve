@@ -1,0 +1,273 @@
+{
+  "name": "torve",
+  "description": "Torve support, public FAQs and private human help",
+  "type": 1,
+  "default_member_permissions": null,
+  "options": [
+    {
+      "type": 1,
+      "name": "help",
+      "description": "How to get help from Torve",
+      "options": []
+    },
+    {
+      "type": 1,
+      "name": "ask",
+      "description": "Search public Torve FAQs; never enter private data",
+      "options": [
+        {
+          "type": 3,
+          "name": "question",
+          "description": "Question without account details, keys or URLs",
+          "required": true,
+          "max_length": 1000
+        },
+        {
+          "type": 5,
+          "name": "ai",
+          "description": "Opt in to sending a redacted question to OpenAI; default false",
+          "required": false
+        }
+      ]
+    },
+    {
+      "type": 1,
+      "name": "troubleshoot",
+      "description": "Guided checks for a Torve problem",
+      "options": [
+        {
+          "type": 3,
+          "name": "topic",
+          "description": "Choose a troubleshooting flow",
+          "required": true,
+          "choices": [
+            {
+              "name": "playback",
+              "value": "playback"
+            },
+            {
+              "name": "sources",
+              "value": "sources"
+            },
+            {
+              "name": "account",
+              "value": "account"
+            },
+            {
+              "name": "firetv",
+              "value": "firetv"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": 1,
+      "name": "issue",
+      "description": "Save a private request for staff; no credentials or logs",
+      "options": [
+        {
+          "type": 3,
+          "name": "summary",
+          "description": "What happened, expected result, steps to reproduce; exclude private data",
+          "required": true,
+          "max_length": 1200
+        },
+        {
+          "type": 3,
+          "name": "platform",
+          "description": "Platform, device model and OS; no device identifiers",
+          "required": true,
+          "max_length": 80
+        },
+        {
+          "type": 3,
+          "name": "version",
+          "description": "Torve version and distribution channel",
+          "required": true,
+          "max_length": 80
+        },
+        {
+          "type": 5,
+          "name": "consent",
+          "description": "Allow authorised Torve staff to read this report, stored up to 30 days",
+          "required": true
+        }
+      ]
+    },
+    {
+      "type": 1,
+      "name": "ticket",
+      "description": "Read the status and staff reply to your request",
+      "options": [
+        {
+          "type": 3,
+          "name": "id",
+          "description": "Your request ID",
+          "required": true,
+          "min_length": 16,
+          "max_length": 16
+        }
+      ]
+    },
+    {
+      "type": 1,
+      "name": "forget",
+      "description": "Delete your stored requests and replies",
+      "options": []
+    },
+    {
+      "type": 1,
+      "name": "privacy",
+      "description": "How the bot handles your data",
+      "options": []
+    },
+    {
+      "type": 1,
+      "name": "conversation",
+      "description": "Consent to AI support, stop it, check status or request a human",
+      "options": [
+        {
+          "type": 3,
+          "name": "action",
+          "description": "Choose an action; start agrees to the privacy notice",
+          "required": true,
+          "choices": [
+            {
+              "name": "start",
+              "value": "start"
+            },
+            {
+              "name": "stop",
+              "value": "stop"
+            },
+            {
+              "name": "human",
+              "value": "human"
+            },
+            {
+              "name": "status",
+              "value": "status"
+            },
+            {
+              "name": "resolve",
+              "value": "resolve"
+            },
+            {
+              "name": "reopen",
+              "value": "reopen"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": 1,
+      "name": "build",
+      "description": "Check Torve's live published stable release",
+      "options": [
+        {
+          "type": 3,
+          "name": "platform",
+          "description": "Platform",
+          "required": true,
+          "choices": [
+            {
+              "name": "windows",
+              "value": "windows"
+            },
+            {
+              "name": "android_tv",
+              "value": "android_tv"
+            },
+            {
+              "name": "fire_tv",
+              "value": "fire_tv"
+            },
+            {
+              "name": "android_mobile",
+              "value": "android_mobile"
+            },
+            {
+              "name": "ios",
+              "value": "ios"
+            },
+            {
+              "name": "tvos",
+              "value": "tvos"
+            }
+          ]
+        },
+        {
+          "type": 3,
+          "name": "version",
+          "description": "Your installed semantic version; never an account identifier",
+          "required": false,
+          "max_length": 60
+        }
+      ]
+    },
+    {
+      "type": 1,
+      "name": "staff",
+      "description": "Staff only: inspect or answer a request in the private queue",
+      "options": [
+        {
+          "type": 3,
+          "name": "id",
+          "description": "Request ID",
+          "required": true,
+          "min_length": 16,
+          "max_length": 16
+        },
+        {
+          "type": 3,
+          "name": "reply",
+          "description": "Answer the member; public for conversation cases",
+          "required": false,
+          "max_length": 1000
+        },
+        {
+          "type": 3,
+          "name": "status",
+          "description": "Case status; requires actual staff review",
+          "required": false,
+          "choices": [
+            {
+              "name": "human",
+              "value": "human"
+            },
+            {
+              "name": "investigating",
+              "value": "investigating"
+            },
+            {
+              "name": "needs_info",
+              "value": "needs_info"
+            },
+            {
+              "name": "resolved",
+              "value": "resolved"
+            },
+            {
+              "name": "duplicate",
+              "value": "duplicate"
+            },
+            {
+              "name": "resume",
+              "value": "resume"
+            }
+          ]
+        },
+        {
+          "type": 3,
+          "name": "duplicate_of",
+          "description": "Existing conversation case ID, only for duplicate status",
+          "required": false,
+          "min_length": 16,
+          "max_length": 16
+        }
+      ]
+    }
+  ]
+}

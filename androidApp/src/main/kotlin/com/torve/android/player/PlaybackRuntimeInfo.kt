@@ -30,4 +30,7 @@ internal data class PlaybackRuntimeInfo(
     val audioRecoveryMode: LiveAudioRecoveryMode = LiveAudioRecoveryMode.NONE,
     val engineFallbackAllowed: Boolean = false,
     val fallbackFromHardwareDefault: Boolean = false,
+    val audioSinkErrorCount: Int = 0,
+    val lastAudioSinkErrorElapsedMs: Long = 0L,
+    val lastAudioSinkErrorSummary: String? = null,
 )

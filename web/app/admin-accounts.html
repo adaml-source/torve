@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Accounts Admin - Torve</title>
+  <link rel="icon" type="image/png" href="/assets/favicon.png" />
+  <link rel="stylesheet" href="/assets/site-base.css?v=20260517-mobile" />
+  <style>
+    body { background: var(--t-bg); color: var(--t-text); font-family: Inter, system-ui, sans-serif; margin: 0; padding: 0; }
+    .admin-wrap { max-width: 1180px; margin: 0 auto; padding: 32px 20px 64px; }
+    .admin-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 24px; flex-wrap: wrap; gap: 12px; }
+    .admin-header h1 { font-size: 22px; font-weight: 800; color: #fff; margin: 0; }
+    .admin-header-links { display: flex; gap: 14px; font-size: 13px; }
+    .admin-header-links a { color: var(--t-accent); text-decoration: none; }
+    .admin-header-links a:hover { text-decoration: underline; }
+
+    .auth-gate { max-width: 400px; margin: 80px auto; text-align: center; }
+    .auth-gate h2 { font-size: 18px; color: #fff; margin-bottom: 12px; }
+    .auth-gate p { font-size: 13px; color: #888; margin-bottom: 20px; }
+
+    .admin-card { background: rgba(255,255,255,.03); border: 1px solid rgba(255,255,255,.08); border-radius: 12px; padding: 18px; margin-bottom: 18px; }
+    .admin-card h2 { font-size: 14px; font-weight: 700; color: #fff; margin: 0 0 14px; text-transform: uppercase; letter-spacing: .04em; }
+
+    .field input, .field select { width: 100%; padding: 9px 12px; font-size: 13px; background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.1); border-radius: 8px; color: #fff; outline: none; box-sizing: border-box; }
+    .field input:focus { border-color: var(--t-accent); }
+
+    .filters { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-bottom: 12px; }
+    .filters input { flex: 1; min-width: 220px; padding: 9px 12px; font-size: 13px; background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.1); border-radius: 8px; color: #fff; outline: none; }
+    .filters select { padding: 9px 12px; font-size: 12px; background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.1); border-radius: 8px; color: #ccc; outline: none; }
+
+    .btn { display: inline-flex; align-items: center; padding: 7px 14px; border-radius: 8px; font-size: 12px; font-weight: 600; border: none; cursor: pointer; transition: opacity .2s; }
+    .btn-primary { background: linear-gradient(135deg, var(--t-accent), #dbb95c); color: #08080e; }
+    .btn-primary:hover { opacity: .9; }
+    .btn-secondary { background: rgba(255,255,255,.06); color: #ccc; border: 1px solid rgba(255,255,255,.1); }
+    .btn-secondary:hover { background: rgba(255,255,255,.1); }
+    .btn-danger { background: rgba(239,68,68,.12); color: #f87171; border: 1px solid rgba(239,68,68,.2); }
+    .btn-danger:hover { background: rgba(239,68,68,.18); }
+    .btn-sm { padding: 4px 10px; font-size: 11px; }
+    .btn:disabled { opacity: .4; cursor: default; }
+
+    /* User list */
+    .user-list { width: 100%; border-collapse: collapse; font-size: 13px; }
+    .user-list th { text-align: left; padding: 8px 10px; color: #888; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; border-bottom: 1px solid rgba(255,255,255,.08); font-size: 10px; }
+    .user-list td { padding: 10px 10px; border-bottom: 1px solid rgba(255,255,255,.04); color: #ccc; vertical-align: middle; }
+    .user-list tr.row-clickable { cursor: pointer; }
+    .user-list tr.row-clickable:hover td { background: rgba(255,255,255,.03); }
+    .user-list tr.row-expanded td { background: rgba(255,255,255,.04); }
+    .user-list .email { color: #fff; font-weight: 500; }
+
+    .badge { display: inline-block; padding: 2px 7px; border-radius: 4px; font-size: 10px; font-weight: 600; margin-right: 4px; }
+    .badge-ok { background: rgba(34,197,94,.12); color: #4ade80; }
+    .badge-gold { background: rgba(200,164,78,.14); color: var(--t-accent); }
+    .badge-muted { background: rgba(255,255,255,.06); color: #888; }
+    .badge-warn { background: rgba(251,191,36,.12); color: #fbbf24; }
+    .badge-revoked { background: rgba(239,68,68,.12); color: #f87171; }
+
+    /* Detail panel inline */
+    .detail-panel { padding: 20px; background: rgba(0,0,0,.25); border-top: 2px solid var(--t-accent); border-bottom: 1px solid rgba(255,255,255,.08); }
+    .detail-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 8px 18px; margin-bottom: 14px; font-size: 12px; }
+    .detail-grid .k { color: #888; }
+    .detail-grid .v { color: #fff; font-weight: 500; }
+    .detail-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 18px; padding-bottom: 14px; border-bottom: 1px solid rgba(255,255,255,.06); }
+
+    .sub-section { margin-top: 16px; }
+    .sub-section h4 { font-size: 11px; font-weight: 700; color: #888; text-transform: uppercase; letter-spacing: .06em; margin: 0 0 8px; }
+    .sub-table { width: 100%; border-collapse: collapse; font-size: 11px; }
+    .sub-table th { text-align: left; padding: 5px 8px; color: #666; font-weight: 600; text-transform: uppercase; font-size: 9px; border-bottom: 1px solid rgba(255,255,255,.06); }
+    .sub-table td { padding: 6px 8px; border-bottom: 1px solid rgba(255,255,255,.03); color: #ccc; vertical-align: middle; }
+    .sub-table code { font-family: ui-monospace, SFMono-Regular, monospace; font-size: 10px; color: #ddd; }
+    .empty-msg { font-size: 12px; color: #666; padding: 8px 0; font-style: italic; }
+
+    .msg { font-size: 12px; padding: 6px 10px; border-radius: 6px; }
+    .msg-ok { background: rgba(34,197,94,.08); color: #4ade80; }
+    .msg-error { background: rgba(239,68,68,.08); color: #f87171; }
+
+    .pagination { display: flex; justify-content: space-between; align-items: center; margin-top: 14px; font-size: 12px; color: #888; }
+    .pagination button { background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.1); color: #ccc; padding: 5px 12px; border-radius: 6px; cursor: pointer; font-size: 12px; }
+    .pagination button:disabled { opacity: .3; cursor: default; }
+
+    @media (max-width: 720px) {
+      .user-list .col-secondary { display: none; }
+      .detail-grid { grid-template-columns: 1fr; }
+      .activity-event { grid-template-columns: 1fr; gap: 4px; }
+    }
+
+    /* Modal */
+    .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.7); z-index: 100; display: flex; align-items: center; justify-content: center; padding: 20px; }
+    .modal-box { background: #14141a; border: 1px solid rgba(255,255,255,.1); border-radius: 14px; padding: 24px; max-width: 460px; width: 100%; max-height: 82vh; overflow-y: auto; }
+    .modal-box.modal-wide { max-width: 860px; }
+    .modal-box h3 { font-size: 16px; color: #fff; margin: 0 0 14px; }
+    .modal-box p, #modalBody { font-size: 13px; color: #ccc; margin: 0 0 14px; }
+    .modal-box textarea { width: 100%; min-height: 80px; padding: 9px 12px; font-size: 13px; background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.1); border-radius: 8px; color: #fff; outline: none; box-sizing: border-box; resize: vertical; }
+    .modal-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 14px; }
+    .activity-device-title { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; padding-bottom: 10px; border-bottom: 1px solid rgba(255,255,255,.08); }
+    .activity-device-title strong { color: #fff; font-size: 13px; }
+    .activity-category-bar { display: flex; gap: 6px; flex-wrap: wrap; margin: 12px 0 6px; }
+    .activity-chip { display: inline-flex; align-items: center; gap: 5px; padding: 3px 7px; border-radius: 6px; background: rgba(255,255,255,.05); color: #aaa; font-size: 10px; }
+    .activity-section { margin-top: 16px; }
+    .activity-section h4 { font-size: 10px; font-weight: 700; color: #888; text-transform: uppercase; letter-spacing: .06em; margin: 0 0 6px; }
+    .activity-event { display: grid; grid-template-columns: 150px 1fr; gap: 12px; padding: 8px 0; border-bottom: 1px solid rgba(255,255,255,.04); }
+    .activity-time { color: #777; font-size: 11px; line-height: 1.35; }
+    .activity-summary { color: #eee; font-size: 12px; font-weight: 600; }
+    .activity-action { color: #777; font-size: 10px; margin-top: 2px; }
+    .activity-meta { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
+    .activity-meta span { display: inline-flex; gap: 4px; align-items: baseline; padding: 3px 6px; border-radius: 5px; background: rgba(255,255,255,.035); color: #aaa; font-size: 10px; }
+    .activity-meta b { color: #777; font-weight: 600; }
+    .activity-meta code, .activity-device-title code { font-family: ui-monospace, SFMono-Regular, monospace; font-size: 10px; color: #ddd; }
+    @media (max-width: 720px) {
+      .activity-event { grid-template-columns: 1fr; gap: 4px; }
+    }
+
+    .admin-wrap { max-width: 1440px; }
+    .insights-note { color:#a5a6b1; font-size:13px; line-height:1.6; margin:0 0 18px; }
+    .filters select { color:#dadbe3; min-height:38px; background:#191a21; }
+    .filters input { min-height:38px; box-sizing:border-box; }
+    button:focus-visible, input:focus-visible, select:focus-visible, summary:focus-visible, tr:focus-visible { outline:2px solid var(--t-accent); outline-offset:3px; }
+    #userList { overflow-x:auto; }
+    .user-list { min-width:960px; }
+    .user-list td { padding:14px 10px; font-size:13px; }
+    .user-list .email { max-width:300px; overflow-wrap:anywhere; }
+    .badge { border-radius:6px; font-size:11px; padding:4px 8px; margin-top:3px; }
+    .detail-panel { padding:24px; }
+    .detail-grid { gap:14px 24px; font-size:13px; }
+    .detail-grid .k { font-size:12px; color:#a5a6b1; }
+    .device-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,380px),1fr)); gap:14px; }
+    .device-card { border:1px solid #ffffff15; background:#ffffff04; border-radius:14px; padding:18px; }
+    .device-card h5 { font-size:15px; font-weight:650; margin:0 0 4px; color:#f4f4f7; }
+    .device-card .device-meta { color:#9fa0ac; font-size:12px; margin:6px 0 14px; }
+    .device-metrics, .account-metrics { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:16px; margin:16px 0; }
+    .device-metrics small,.account-metrics small { display:block; font-size:11px; color:#9fa0ac; line-height:1.5; }
+    .device-metrics strong,.account-metrics strong { display:block; margin-top:4px; font-size:16px; color:#eeeef3; }
+    .account-metrics { padding:16px 20px; border:1px solid #ffffff12; border-radius:12px; background:#ffffff03; }
+    .device-card summary { cursor:pointer; font-size:12px; color:#aeb0ba; margin-bottom:12px; }
+    .device-card code { overflow-wrap:anywhere; font-size:11px; }
+    .device-card dl { display:grid; grid-template-columns:120px 1fr; gap:8px 12px; font-size:12px; }
+    .device-card dt { color:#9fa0ac; } .device-card dd { margin:0; color:#dfdfe5; overflow-wrap:anywhere; }
+    .device-actions { display:flex; gap:8px; flex-wrap:wrap; margin-top:16px; }
+    .usage-chart { display:flex; align-items:flex-end; gap:5px; height:48px; padding:12px 0; }
+    .usage-chart span { flex:1; min-width:6px; border-radius:4px 4px 0 0; background:var(--t-accent); opacity:.7; }
+    .sub-section h4 { font-size:12px; color:#a6a7b3; margin:24px 0 12px; }
+    .sub-table { font-size:12px; } .sub-table td { padding:9px 8px; }
+    .sub-table th { color:#9596a2; font-size:10px; }
+    .empty-msg { color:#a0a1ad; font-style:normal; line-height:1.6; }
+    @media(max-width:720px) { .admin-wrap { padding:20px 12px; } .detail-panel { padding:16px; } .user-list .col-secondary { display:table-cell; } .device-metrics strong,.account-metrics strong { font-size:14px; } }
+  </style>
+  <link rel="stylesheet" href="/assets/modern-site.css?v=20261012-7" />
+  <meta name="robots" content="noindex, nofollow" />
+</head>
+<body class="modern-page admin-page">
+<header class="site-header" data-site-header>
+    <div class="site-header-inner">
+      <a class="site-brand" href="/" aria-label="Torve home"><img src="/assets/torve-logo-transparent.png" alt="Torve" class="site-header-logo" /></a>
+      <nav id="site-navigation" class="site-header-nav" aria-label="Main navigation"><a href="/#explore">Explore</a><a href="/download.html">Downloads</a><a href="/app/help.html">Guide</a><a href="/support.html">Support</a></nav>
+      <div class="site-header-actions"><a class="site-account-link t-btn t-btn-secondary" href="/signin.html">Sign in</a><a class="t-btn t-btn-primary" href="/download.html"><span class="install-label-full">Install Torve</span><span class="install-label-short">Install</span><svg class="button-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M12 3v12m-4-4 4 4 4-4M5 16v4h14v-4"/></svg></a></div>
+      <button class="site-menu-toggle" type="button" aria-label="Open menu" aria-controls="site-navigation" aria-expanded="false"><span></span><span></span></button>
+    </div>
+  </header>
+  <div class="admin-wrap">
+    <div class="admin-header">
+      <h1>Accounts</h1>
+      <div class="admin-header-links">
+        <a href="/app/admin.html">&larr; Admin home</a>
+      </div>
+    </div>
+
+    <!-- Auth gate -->
+    <div id="authGate" class="auth-gate">
+      <h2>Admin Access</h2>
+      <p>Enter the admin secret.</p>
+      <div class="field">
+        <input type="password" id="secretInput" placeholder="Admin secret" autocomplete="off" />
+      </div>
+      <div style="display:flex;justify-content:center;margin-top:10px">
+        <button class="btn btn-primary" id="authBtn">Sign in</button>
+      </div>
+      <div id="authMsg" class="msg" style="text-align:center;background:none"></div>
+    </div>
+
+    <!-- Main panel -->
+    <div id="adminPanel" style="display:none">
+      <div class="admin-card">
+        <h2>Accounts &amp; devices</h2><p class="insights-note">One Torve account across platforms. Apple subscriptions are independent of Android access and legacy grants.</p>
+        <div class="filters">
+          <input type="text" aria-label="Search accounts" id="searchInput" placeholder="Email or display name (partial match)" autocomplete="off" />
+          <select id="filterPlatform" aria-label="Platform">
+<option value="">All platforms</option><option value="android">Android phone/tablet</option><option value="android-tv">Android TV</option><option value="firetv">Fire TV</option><option value="apple">All Apple</option><option value="ios">iPhone</option><option value="ipados">iPad</option><option value="tvos">Apple TV</option><option value="desktop">Desktop</option><option value="unknown">Not reported</option></select>
+<select id="filterApple" aria-label="Apple subscription"><option value="">Any Apple access</option><option value="production">Active paid Apple</option><option value="sandbox">Active TestFlight</option><option value="none">No active Apple subscription</option></select>
+<select id="filterVerified" aria-label="Email verification">
+            <option value="">Any verification</option>
+            <option value="true">Verified</option>
+            <option value="false">Unverified</option>
+          </select>
+          <select id="filterPremium">
+            <option value="">Any legacy grant</option>
+            <option value="true">Has legacy grant</option>
+            <option value="false">No legacy grant</option>
+          </select>
+          <select id="filterActive">
+            <option value="">Any status</option>
+            <option value="true">Active</option>
+            <option value="false">Locked</option>
+          </select>
+        </div>
+        <div id="userList" aria-live="polite">Loading...</div>
+        <div class="pagination" id="paginationBar" style="display:none">
+          <span id="paginationInfo"></span>
+          <div>
+            <button id="prevBtn">&larr; Prev</button>
+            <button id="nextBtn">Next &rarr;</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Confirm/prompt modal -->
+  <div id="modal" class="modal-overlay" style="display:none">
+    <div class="modal-box">
+      <h3 id="modalTitle"></h3>
+      <div id="modalBody"></div>
+      <textarea id="modalInput" style="display:none"></textarea>
+      <div class="modal-actions">
+        <button class="btn btn-secondary" id="modalCancel">Cancel</button>
+        <button class="btn btn-danger" id="modalConfirm">Confirm</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="/assets/app/page-admin-accounts.js?v=20261009-account-insights"></script>
+  <script src="/assets/modern-site.js?v=20261012-7" defer></script>
+</body>
+</html>

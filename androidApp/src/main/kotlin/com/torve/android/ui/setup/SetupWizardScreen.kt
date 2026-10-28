@@ -1,5 +1,7 @@
 package com.torve.android.ui.setup
 
+import com.torve.android.ui.community.parityLabel as localizedUiText
+
 import android.content.Intent
 import android.net.Uri
 import androidx.compose.animation.AnimatedContent
@@ -108,7 +110,7 @@ fun SetupWizardScreen(
             horizontalArrangement = Arrangement.End,
         ) {
             TextButton(onClick = onExit) {
-                Text("Close setup")
+                Text(localizedUiText("Close setup"))
             }
         }
 
@@ -162,11 +164,7 @@ fun SetupWizardScreen(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             if (state.currentStep != SetupStep.WELCOME && state.currentStep != SetupStep.DONE) {
-                OutlinedButton(onClick = { viewModel.previousStep() }) {
-                    Icon(Icons.AutoMirrored.Filled.ArrowBack, null, Modifier.size(18.dp))
-                    Spacer(Modifier.width(4.dp))
-                    Text(stringResource(R.string.common_back))
-                }
+                com.torve.android.ui.components.BackButton(onClick = { viewModel.previousStep() })
             } else {
                 Spacer(Modifier.width(1.dp))
             }
@@ -364,14 +362,14 @@ private fun DebridStep(state: SetupUiState, viewModel: SetupWizardViewModel, onP
         ) {
             Column(modifier = Modifier.padding(16.dp)) {
                 Text(
-                    stringResource(R.string.setup_panda_title),
+                    localizedUiText("Extensions"),
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.onPrimaryContainer,
                 )
                 Spacer(Modifier.height(6.dp))
                 Text(
-                    stringResource(R.string.setup_panda_desc),
+                    localizedUiText("Choose a provider and paste its configured manifest URL. You can preview the extension before installing."),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onPrimaryContainer,
                 )
@@ -380,7 +378,7 @@ private fun DebridStep(state: SetupUiState, viewModel: SetupWizardViewModel, onP
                     onClick = onPandaSetupClick,
                     modifier = Modifier.fillMaxWidth(),
                 ) {
-                    Text(stringResource(R.string.setup_panda_open_setup))
+                    Text(localizedUiText("Manage extensions"))
                 }
             }
         }
@@ -521,7 +519,7 @@ private fun TraktStep(state: SetupUiState, viewModel: SetupWizardViewModel) {
 
         state.traktError?.let { error ->
             Spacer(Modifier.height(8.dp))
-            Text(error, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+            Text(localizedUiText(error), color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
         }
     }
 }
@@ -558,7 +556,7 @@ private fun QualityStep(state: SetupUiState, viewModel: SetupWizardViewModel) {
             ) {
                 StreamQuality.selectable.forEach { quality ->
                     DropdownMenuItem(
-                        text = { Text(quality.label) },
+                        text = { Text(localizedUiText(quality.label)) },
                         onClick = {
                             viewModel.setMaxQuality(quality)
                             expanded = false

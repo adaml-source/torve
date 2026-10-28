@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="flow_shows_schedule_unavailable">Episode schedules unavailable</string>
+    <string name="flow_shows_schedule_unavailable_sub">Your saved shows are still in Library. Refresh, or check your metadata extensions.</string>
+</resources>

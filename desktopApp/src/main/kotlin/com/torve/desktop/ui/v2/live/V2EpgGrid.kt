@@ -103,6 +103,7 @@ fun V2EpgGrid(
     recordingStatusFor: (Channel, EpgProgramme) -> com.torve.presentation.recording.RecordingSlotStatus =
         { _, _ -> com.torve.presentation.recording.RecordingSlotStatus.NONE },
     onToggleRecord: (Channel, EpgProgramme) -> Unit = { _, _ -> },
+    onRecordSeries: (Channel, EpgProgramme) -> Unit = { _, _ -> },
     searchQuery: String = "",
     onSearchQueryChange: (String) -> Unit = {},
     sortMode: GuideSortMode = GuideSortMode.NUMBER,
@@ -309,6 +310,7 @@ fun V2EpgGrid(
                         onToggleReminder = { p -> onToggleReminder(enriched.channel, p) },
                         recordingStatusFor = { p -> recordingStatusFor(enriched.channel, p) },
                         onToggleRecord = { p -> onToggleRecord(enriched.channel, p) },
+                        onRecordSeries = { p -> onRecordSeries(enriched.channel, p) },
                         onFindOtherAirings = { p -> otherAiringsTitle = p.title },
                         onCopyInfo = { p ->
                             val text = buildString {
@@ -513,6 +515,7 @@ private fun GuideRow(
     onToggleReminder: (EpgProgramme) -> Unit,
     recordingStatusFor: (EpgProgramme) -> com.torve.presentation.recording.RecordingSlotStatus,
     onToggleRecord: (EpgProgramme) -> Unit,
+    onRecordSeries: (EpgProgramme) -> Unit,
     onFindOtherAirings: (EpgProgramme) -> Unit,
     onCopyInfo: (EpgProgramme) -> Unit,
     onClickChannel: () -> Unit,
@@ -550,6 +553,7 @@ private fun GuideRow(
                 onToggleReminder = onToggleReminder,
                 recordingStatusFor = recordingStatusFor,
                 onToggleRecord = onToggleRecord,
+                onRecordSeries = onRecordSeries,
                 onFindOtherAirings = onFindOtherAirings,
                 onCopyInfo = onCopyInfo,
             )
@@ -634,16 +638,18 @@ private fun ProgrammeTrack(
     onToggleReminder: (EpgProgramme) -> Unit,
     recordingStatusFor: (EpgProgramme) -> com.torve.presentation.recording.RecordingSlotStatus,
     onToggleRecord: (EpgProgramme) -> Unit,
+    onRecordSeries: (EpgProgramme) -> Unit,
     onFindOtherAirings: (EpgProgramme) -> Unit,
     onCopyInfo: (EpgProgramme) -> Unit,
 ) {
     val colors = TorveDesktopThemeTokens.colors
     Box(Modifier.width(totalWidth).fillMaxHeight()) {
-        programmes.forEach { programme ->
+        com.torve.presentation.channels.guideProgrammeSlots(programmes).forEach { slot ->
+            val programme = slot.programme
             // Clip the programme block to the grid window so very-long shows
             // don't push a 20-hour cell out of frame.
-            val clippedStart = programme.startTime.coerceAtLeast(gridStartMs)
-            val clippedEnd = programme.endTime.coerceAtMost(gridEndMs)
+            val clippedStart = slot.startTime.coerceAtLeast(gridStartMs)
+            val clippedEnd = slot.endTime.coerceAtMost(gridEndMs)
             if (clippedEnd <= clippedStart) return@forEach
 
             val startMinutes = ((clippedStart - gridStartMs) / 60_000L).toInt()
@@ -651,11 +657,11 @@ private fun ProgrammeTrack(
             val xDp = (startMinutes * PIXELS_PER_MINUTE).dp
             val widthDp = (durationMinutes * PIXELS_PER_MINUTE).dp
 
-            val isLive = programme.startTime <= nowMs && programme.endTime > nowMs
-            val isPast = programme.endTime <= nowMs
-            val isFuture = programme.startTime > nowMs
+            val isLive = slot.startTime <= nowMs && slot.endTime > nowMs
+            val isPast = slot.endTime <= nowMs
+            val isFuture = slot.startTime > nowMs
             val container = when {
-                isLive -> colors.accentContainer
+                isLive -> colors.accent.copy(alpha = 0.20f)
                 isPast -> colors.fieldSurface
                 else -> colors.cardSurface
             }
@@ -665,6 +671,8 @@ private fun ProgrammeTrack(
             ProgrammeCell(
                 programme = programme,
                 xDp = xDp,
+                displayStart = slot.startTime,
+                displayEnd = slot.endTime,
                 widthDp = widthDp,
                 container = container,
                 contentColor = content,
@@ -681,6 +689,7 @@ private fun ProgrammeTrack(
                 onToggleFavorite = onToggleFavorite,
                 onToggleReminder = { onToggleReminder(programme) },
                 onToggleRecord = { onToggleRecord(programme) },
+                onRecordSeries = { onRecordSeries(programme) },
                 onFindOtherAirings = { onFindOtherAirings(programme) },
                 onCopyInfo = { onCopyInfo(programme) },
             )
@@ -691,6 +700,8 @@ private fun ProgrammeTrack(
 @Composable
 private fun ProgrammeCell(
     programme: EpgProgramme,
+    displayStart: Long = programme.startTime,
+    displayEnd: Long = programme.endTime,
     xDp: Dp,
     widthDp: Dp,
     container: Color,
@@ -708,6 +719,7 @@ private fun ProgrammeCell(
     onToggleFavorite: () -> Unit,
     onToggleReminder: () -> Unit,
     onToggleRecord: () -> Unit,
+    onRecordSeries: () -> Unit,
     onFindOtherAirings: () -> Unit,
     onCopyInfo: () -> Unit,
 ) {
@@ -741,7 +753,7 @@ private fun ProgrammeCell(
                     overflow = TextOverflow.Ellipsis,
                 )
                 Text(
-                    text = formatTimeRange(programme.startTime, programme.endTime),
+                    text = formatTimeRange(displayStart, displayEnd),
                     style = MaterialTheme.typography.labelSmall,
                     fontSize = 10.sp,
                     color = contentColor.copy(alpha = 0.75f),
@@ -821,6 +833,10 @@ private fun ProgrammeCell(
                     text = { Text(recordLabel) },
                     onClick = { menuOpen = false; onToggleRecord() },
                     enabled = recordingStatus != com.torve.presentation.recording.RecordingSlotStatus.COMPLETED,
+                )
+                DropdownMenuItem(
+                    text = { Text("Record every future episode") },
+                    onClick = { menuOpen = false; onRecordSeries() },
                 )
             }
             HorizontalDivider()

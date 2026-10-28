@@ -1,5 +1,7 @@
 package com.torve.android.ui.download
 
+import com.torve.android.ui.community.parityLabel as localizedUiText
+
 import android.os.Environment
 import android.os.StatFs
 import androidx.compose.animation.animateColorAsState
@@ -51,6 +53,7 @@ import androidx.compose.material.icons.filled.ViewAgenda
 import androidx.compose.material.icons.filled.ViewCarousel
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -62,7 +65,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
+import com.torve.android.ui.system.TorveModalBottomSheet as ModalBottomSheet
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Switch
@@ -71,6 +74,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.collectAsState
@@ -154,6 +158,7 @@ fun DownloadCatalogueScreen(
     settingsViewModel: SettingsViewModel = koinInject(),
     ratingsEnricher: RatingsEnricher = koinInject(),
 ) {
+    DisposableEffect(catalogueVM) { onDispose { catalogueVM.clear() } }
     val catalogueState by catalogueVM.state.collectAsState()
     val downloadState by downloadVM.state.collectAsState()
     val settingsState by settingsViewModel.state.collectAsState()
@@ -205,7 +210,7 @@ fun DownloadCatalogueScreen(
             while (true) {
                 delay(2000)
                 downloadVM.loadDownloads()
-                catalogueVM.loadCatalogue()
+                if (!catalogueState.isLoading && catalogueState.error == null) catalogueVM.loadCatalogue()
             }
         }
     }
@@ -240,8 +245,16 @@ fun DownloadCatalogueScreen(
             onSettingsClick = { showSettingsSheet = true },
         )
 
-        if (state.isEmpty && catalogueState.activeDownloads.isEmpty()) {
-            EmptyDownloadsState()
+        catalogueState.error?.let { error ->
+            Column(Modifier.fillMaxWidth().padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                Text(localizedUiText(error), color = MaterialTheme.colorScheme.error)
+                TextButton(onClick = { catalogueVM.loadCatalogue() }) { Text(localizedUiText("Retry")) }
+            }
+        }
+        if (catalogueState.isLoading && state.isEmpty && catalogueState.activeDownloads.isEmpty()) {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
+        } else if (state.isEmpty && catalogueState.activeDownloads.isEmpty()) {
+            if (catalogueState.error == null) EmptyDownloadsState()
         } else {
             // Active downloads strip
             if (catalogueState.activeDownloads.isNotEmpty()) {
@@ -322,25 +335,23 @@ private fun CatalogueTopBar(
         Row(
             Modifier
                 .fillMaxWidth()
-                .background(Brush.verticalGradient(listOf(Graphite, Obsidian)))
+                .background(Brush.verticalGradient(listOf(MaterialTheme.colorScheme.surface, MaterialTheme.colorScheme.background)))
                 .statusBarsPadding()
                 .padding(horizontal = 8.dp, vertical = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            IconButton(onClick = onBack) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, stringResource(R.string.common_back), tint = Snow)
-            }
+            com.torve.android.ui.components.BackButton(onClick = onBack)
             Text(
                 stringResource(R.string.download_title),
                 style = MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.Bold,
-                color = Snow,
+                color = MaterialTheme.colorScheme.onSurface,
                 modifier = Modifier.weight(1f),
             )
             if (!state.isEmpty) {
                 Text(
                     stringResource(R.string.download_items_count, state.totalItemCount),
-                    color = Silver,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                     fontSize = 12.sp,
                     modifier = Modifier.padding(end = 8.dp),
                 )
@@ -351,7 +362,7 @@ private fun CatalogueTopBar(
             Row(
                 Modifier
                     .fillMaxWidth()
-                    .background(Obsidian)
+                    .background(MaterialTheme.colorScheme.background)
                     .padding(horizontal = 16.dp, vertical = 4.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically,
@@ -390,7 +401,7 @@ private fun CatalogueTopBar(
                 CompactActionChip(Icons.Default.FolderOpen, prefs.groupingMode.label.take(10), onGroupClick)
 
                 IconButton(onClick = onSettingsClick, modifier = Modifier.size(32.dp)) {
-                    Icon(Icons.Default.Tune, stringResource(R.string.settings_title), tint = Silver, modifier = Modifier.size(18.dp))
+                    Icon(Icons.Default.Tune, stringResource(R.string.settings_title), tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(18.dp))
                 }
             }
         }
@@ -422,7 +433,7 @@ private fun StorageSummaryBar(state: CatalogueState) {
             ) {
                 Text(
                     stringResource(R.string.download_storage_counts, state.movieCount, state.showCount, state.episodeCount),
-                    color = Silver, fontSize = 11.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp,
                 )
                 Text(totalSize, color = Amber, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
             }
@@ -480,7 +491,7 @@ private fun ActiveDownloadsStrip(
                     Column(Modifier.padding(8.dp)) {
                         Text(
                             download.title,
-                            color = Snow,
+                            color = MaterialTheme.colorScheme.onSurface,
                             fontSize = 11.sp,
                             fontWeight = FontWeight.SemiBold,
                             maxLines = 1,
@@ -516,7 +527,7 @@ private fun ActiveDownloadsStrip(
                         Row(horizontalArrangement = Arrangement.End, modifier = Modifier.fillMaxWidth()) {
                             if (download.status == DownloadStatus.DOWNLOADING) {
                                 IconButton(onClick = { downloadVM.pauseDownload(download.id) }, Modifier.size(24.dp)) {
-                                    Icon(Icons.Default.Close, stringResource(R.string.common_pause), tint = Silver, modifier = Modifier.size(14.dp))
+                                    Icon(Icons.Default.Close, stringResource(R.string.common_pause), tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(14.dp))
                                 }
                             } else if (download.status == DownloadStatus.PAUSED || download.status == DownloadStatus.PENDING) {
                                 IconButton(onClick = { downloadVM.resumeDownload(download.id) }, Modifier.size(24.dp)) {
@@ -557,7 +568,7 @@ private fun FilterChipsRow(
                     FilterChip(
                         selected = prefs.filterType == type,
                         onClick = { onUpdate(prefs.copy(filterType = type)) },
-                        label = { Text(type.label, fontSize = 11.sp) },
+                        label = { Text(localizedUiText(type.label), fontSize = 11.sp) },
                         colors = FilterChipDefaults.filterChipColors(
                             selectedContainerColor = AmberSubtle,
                             selectedLabelColor = Amber,
@@ -574,7 +585,7 @@ private fun FilterChipsRow(
                     FilterChip(
                         selected = prefs.filterWatchState == filter,
                         onClick = { onUpdate(prefs.copy(filterWatchState = filter)) },
-                        label = { Text(filter.label, fontSize = 11.sp) },
+                        label = { Text(localizedUiText(filter.label), fontSize = 11.sp) },
                         colors = FilterChipDefaults.filterChipColors(
                             selectedContainerColor = AmberSubtle,
                             selectedLabelColor = Amber,
@@ -694,7 +705,7 @@ private fun GridCatalogue(
         state.sections.forEach { section ->
             item(span = { GridItemSpan(maxLineSpan) }) {
                 Text(
-                    section.title, color = Snow, fontWeight = FontWeight.Bold,
+                    section.title, color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.Bold,
                     style = MaterialTheme.typography.titleMedium,
                     modifier = Modifier.padding(top = 16.dp, bottom = 8.dp),
                 )
@@ -773,14 +784,14 @@ private fun DownloadGroupListRow(
             )
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
-                Text(group.title, color = Snow, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(group.title, color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    group.year?.let { Text("$it", color = Silver, fontSize = 11.sp) }
+                    group.year?.let { Text("$it", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp) }
                     if (group.type == DownloadGroupType.SHOW) {
-                        Text(stringResource(R.string.download_episodes_short, group.itemCount), color = Silver, fontSize = 11.sp)
+                        Text(stringResource(R.string.download_episodes_short, group.itemCount), color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp)
                     }
                     if (prefs.showFileSize) {
-                        Text(formatFileSize(group.totalSizeBytes), color = Silver, fontSize = 11.sp)
+                        Text(formatFileSize(group.totalSizeBytes), color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp)
                     }
                 }
                 if (prefs.showQualityBadges) {
@@ -804,7 +815,7 @@ private fun DownloadGroupListRow(
             }
             Icon(
                 if (group.type == DownloadGroupType.MOVIE) Icons.Default.Movie else Icons.Default.Tv,
-                null, tint = Silver, modifier = Modifier.size(16.dp),
+                null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(16.dp),
             )
         }
     }
@@ -849,8 +860,8 @@ private fun ShelfSection(
                 .padding(horizontal = 16.dp, vertical = 8.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
         ) {
-            Text(section.title, color = Snow, fontWeight = FontWeight.Bold)
-            Text("${section.items.size}", color = Silver, fontSize = 12.sp)
+            Text(section.title, color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.Bold)
+            Text("${section.items.size}", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
         }
         LazyRow(
             contentPadding = PaddingValues(horizontal = 16.dp),
@@ -884,7 +895,7 @@ private fun CoverCatalogue(
         state.sections.forEach { section ->
             item {
                 Text(
-                    section.title, color = Snow, fontWeight = FontWeight.Bold,
+                    section.title, color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.Bold,
                     style = MaterialTheme.typography.titleMedium,
                 )
             }
@@ -943,15 +954,15 @@ private fun CoverCard(
                     .fillMaxWidth(0.6f),
             ) {
                 Text(
-                    group.title, color = Snow, fontWeight = FontWeight.Bold,
+                    group.title, color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.Bold,
                     style = MaterialTheme.typography.titleLarge, maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                 )
                 Spacer(Modifier.height(4.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    group.year?.let { Text("$it", color = Silver, fontSize = 13.sp) }
+                    group.year?.let { Text("$it", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp) }
                     if (group.type == DownloadGroupType.SHOW) {
-                        Text(stringResource(R.string.download_episodes_count, group.itemCount), color = Silver, fontSize = 13.sp)
+                        Text(stringResource(R.string.download_episodes_count, group.itemCount), color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp)
                     }
                     Text(formatFileSize(group.totalSizeBytes), color = Amber, fontSize = 13.sp)
                 }
@@ -1060,7 +1071,7 @@ private fun DownloadGroupCard(
                         .background(Color(0xFF0D0D1A).copy(alpha = 0.85f), RoundedCornerShape(4.dp))
                         .padding(horizontal = 6.dp, vertical = 2.dp),
                 ) {
-                    Text(formatFileSize(group.totalSizeBytes), color = Silver, fontSize = 9.sp)
+                    Text(formatFileSize(group.totalSizeBytes), color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 9.sp)
                 }
             }
 
@@ -1141,11 +1152,11 @@ private fun DownloadGroupCard(
         // Title and info below
         Spacer(Modifier.height(6.dp))
         Text(
-            group.title, color = Snow, fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
+            group.title, color = MaterialTheme.colorScheme.onSurface, fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
             maxLines = 2, overflow = TextOverflow.Ellipsis,
         )
         if (group.year != null) {
-            Text("${group.year}", color = Silver, fontSize = 10.sp)
+            Text("${group.year}", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 10.sp)
         }
         if (group.type == DownloadGroupType.SHOW) {
             Text(
@@ -1184,10 +1195,10 @@ private fun DownloadContextMenu(
                 )
                 Spacer(Modifier.width(12.dp))
                 Column {
-                    Text(group.title, color = Snow, fontWeight = FontWeight.Bold)
+                    Text(group.title, color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.Bold)
                     Text(
                         "${if (group.type == DownloadGroupType.MOVIE) stringResource(R.string.download_movie) else stringResource(R.string.download_episodes_count, group.itemCount)} \u2022 ${formatFileSize(group.totalSizeBytes)}",
-                        color = Silver, fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp,
                     )
                 }
             }
@@ -1242,7 +1253,7 @@ private fun SortBottomSheet(
 ) {
     ModalBottomSheet(onDismissRequest = onDismiss) {
         Column(Modifier.padding(16.dp)) {
-            Text(stringResource(R.string.common_sort_by), color = Snow, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
+            Text(stringResource(R.string.common_sort_by), color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
             Spacer(Modifier.height(12.dp))
             CatalogueSortBy.entries.forEach { sort ->
                 val selected = prefs.sortBy == sort
@@ -1257,7 +1268,7 @@ private fun SortBottomSheet(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Text(
-                        sort.label, color = if (selected) Amber else Snow,
+                        localizedUiText(sort.label), color = if (selected) Amber else Snow,
                         fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
                         modifier = Modifier.weight(1f),
                     )
@@ -1280,7 +1291,7 @@ private fun GroupBottomSheet(
 ) {
     ModalBottomSheet(onDismissRequest = onDismiss) {
         Column(Modifier.padding(16.dp)) {
-            Text(stringResource(R.string.download_group_by), color = Snow, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
+            Text(stringResource(R.string.download_group_by), color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
             Spacer(Modifier.height(12.dp))
             CatalogueGrouping.entries.forEach { grouping ->
                 val selected = prefs.groupingMode == grouping
@@ -1323,7 +1334,7 @@ private fun CatalogueSettingsSheet(
         LazyColumn(Modifier.padding(16.dp)) {
             item {
                 Text(
-                    stringResource(R.string.download_catalogue_settings), color = Snow, fontWeight = FontWeight.Bold,
+                    stringResource(R.string.download_catalogue_settings), color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.Bold,
                     style = MaterialTheme.typography.titleMedium,
                 )
                 Spacer(Modifier.height(16.dp))
@@ -1331,7 +1342,7 @@ private fun CatalogueSettingsSheet(
 
             // Grid columns
             item {
-                Text(stringResource(R.string.download_grid_columns), color = Silver, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                Text(stringResource(R.string.download_grid_columns), color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
                 Spacer(Modifier.height(4.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     FilterChip(
@@ -1360,7 +1371,7 @@ private fun CatalogueSettingsSheet(
 
             // Card info toggles
             item {
-                Text(stringResource(R.string.download_card_info), color = Silver, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                Text(stringResource(R.string.download_card_info), color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
                 Spacer(Modifier.height(8.dp))
             }
             item { ToggleRow(stringResource(R.string.download_storage_info_bar), prefs.showStorageInfo) { onUpdate(prefs.copy(showStorageInfo = it)) } }
@@ -1373,7 +1384,7 @@ private fun CatalogueSettingsSheet(
             // Special sections
             item {
                 Spacer(Modifier.height(16.dp))
-                Text(stringResource(R.string.download_special_sections), color = Silver, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                Text(stringResource(R.string.download_special_sections), color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
                 Spacer(Modifier.height(8.dp))
             }
             item { ToggleRow(stringResource(R.string.download_continue_watching), prefs.showContinueWatchingSection) { onUpdate(prefs.copy(showContinueWatchingSection = it)) } }
@@ -1382,13 +1393,13 @@ private fun CatalogueSettingsSheet(
             // Auto-cleanup
             item {
                 Spacer(Modifier.height(16.dp))
-                Text(stringResource(R.string.download_auto_cleanup), color = Silver, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                Text(stringResource(R.string.download_auto_cleanup), color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
                 Spacer(Modifier.height(8.dp))
             }
             item { ToggleRow(stringResource(R.string.download_auto_delete_watched), prefs.autoDeleteWatched) { onUpdate(prefs.copy(autoDeleteWatched = it)) } }
             if (prefs.autoDeleteWatched) {
                 item {
-                    Text(stringResource(R.string.download_delete_after, prefs.autoDeleteAfterDays), color = Silver, fontSize = 12.sp)
+                    Text(stringResource(R.string.download_delete_after, prefs.autoDeleteAfterDays), color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
                     Slider(
                         value = prefs.autoDeleteAfterDays.toFloat(),
                         onValueChange = { onUpdate(prefs.copy(autoDeleteAfterDays = it.toInt())) },
@@ -1401,7 +1412,7 @@ private fun CatalogueSettingsSheet(
             // Bulk actions
             item {
                 Spacer(Modifier.height(16.dp))
-                Text(stringResource(R.string.download_bulk_actions), color = Silver, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                Text(stringResource(R.string.download_bulk_actions), color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
                 Spacer(Modifier.height(8.dp))
                 Row(
                     Modifier
@@ -1455,11 +1466,11 @@ private fun EmptyDownloadsState() {
                 modifier = Modifier.size(64.dp), tint = Smoke,
             )
             Spacer(Modifier.height(16.dp))
-            Text(stringResource(R.string.download_no_downloads), style = MaterialTheme.typography.titleMedium, color = Snow)
+            Text(stringResource(R.string.download_no_downloads), style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurface)
             Spacer(Modifier.height(8.dp))
             Text(
                 stringResource(R.string.download_empty_desc),
-                style = MaterialTheme.typography.bodyMedium, color = Silver, textAlign = TextAlign.Center,
+                style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center,
             )
         }
     }
@@ -1479,8 +1490,8 @@ private fun CompactActionChip(icon: ImageVector, label: String, onClick: () -> U
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(4.dp),
     ) {
-        Icon(icon, null, tint = Silver, modifier = Modifier.size(14.dp))
-        Text(label, color = Silver, fontSize = 11.sp)
+        Icon(icon, null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(14.dp))
+        Text(localizedUiText(label), color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp)
     }
 }
 
@@ -1495,7 +1506,7 @@ private fun ContextMenuItem(icon: ImageVector, label: String, tint: Color, onCli
     ) {
         Icon(icon, null, tint = tint, modifier = Modifier.size(20.dp))
         Spacer(Modifier.width(12.dp))
-        Text(label, color = Snow, fontSize = 15.sp)
+        Text(localizedUiText(label), color = MaterialTheme.colorScheme.onSurface, fontSize = 15.sp)
     }
 }
 
@@ -1507,7 +1518,7 @@ private fun ToggleRow(label: String, checked: Boolean, onCheckedChange: (Boolean
             .padding(vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(label, color = Snow, modifier = Modifier.weight(1f), fontSize = 14.sp)
+        Text(localizedUiText(label), color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.weight(1f), fontSize = 14.sp)
         Switch(
             checked = checked,
             onCheckedChange = onCheckedChange,

@@ -1,5 +1,7 @@
 package com.torve.android.ui.settings
 
+import com.torve.android.ui.community.parityLabel as localizedUiText
+
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
@@ -142,7 +144,7 @@ fun CardStyleSettingsScreen(
             Text(
                 stringResource(R.string.card_style_title),
                 style = MaterialTheme.typography.titleLarge,
-                color = Snow,
+                color = MaterialTheme.colorScheme.onSurface,
                 fontWeight = FontWeight.Bold,
                 modifier = Modifier.padding(start = 8.dp),
             )
@@ -160,7 +162,7 @@ fun CardStyleSettingsScreen(
                     colors = CardDefaults.cardColors(containerColor = Charcoal),
                 ) {
                     Column(Modifier.padding(16.dp)) {
-                        Text(stringResource(R.string.card_style_preset), style = MaterialTheme.typography.titleMedium, color = Snow)
+                        Text(stringResource(R.string.card_style_preset), style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurface)
                         Spacer(Modifier.height(8.dp))
                         Row(
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -171,11 +173,11 @@ fun CardStyleSettingsScreen(
                                 FilterChip(
                                     selected = preset.presetId == selectedPresetId,
                                     onClick = { selectedPresetId = preset.presetId },
-                                    label = { Text(label, fontSize = 12.sp) },
+                                    label = { Text(localizedUiText(label), fontSize = 12.sp) },
                                     colors = FilterChipDefaults.filterChipColors(
                                         selectedContainerColor = AmberSubtle,
                                         selectedLabelColor = Amber,
-                                        containerColor = Gunmetal,
+                                        containerColor = MaterialTheme.colorScheme.surface,
                                         labelColor = Ash,
                                     ),
                                 )
@@ -242,9 +244,9 @@ fun CardStyleSettingsScreen(
                     colors = CardDefaults.cardColors(containerColor = Charcoal),
                 ) {
                     Column(Modifier.padding(16.dp)) {
-                        Text(stringResource(R.string.card_style_quick_presets), style = MaterialTheme.typography.titleMedium, color = Snow)
+                        Text(stringResource(R.string.card_style_quick_presets), style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurface)
                         Spacer(Modifier.height(4.dp))
-                        Text(stringResource(R.string.card_style_quick_desc), style = MaterialTheme.typography.bodySmall, color = Silver)
+                        Text(stringResource(R.string.card_style_quick_desc), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         Spacer(Modifier.height(12.dp))
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             QuickPresetButton(stringResource(R.string.card_style_cinema)) {
@@ -294,7 +296,7 @@ fun CardStyleSettingsScreen(
                         modifier = Modifier.padding(16.dp),
                         horizontalAlignment = Alignment.CenterHorizontally,
                     ) {
-                        Text(stringResource(R.string.card_style_live_preview), color = Snow, fontWeight = FontWeight.SemiBold)
+                        Text(stringResource(R.string.card_style_live_preview), color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.SemiBold)
                         Spacer(Modifier.height(8.dp))
                         CardStyleLivePreview(style = currentStyle)
                     }
@@ -345,7 +347,7 @@ fun CardStyleSettingsScreen(
     if (showRenameDialog && currentPreset != null) {
         AlertDialog(
             onDismissRequest = { showRenameDialog = false },
-            title = { Text(stringResource(R.string.card_style_rename_title), color = Snow) },
+            title = { Text(stringResource(R.string.card_style_rename_title), color = MaterialTheme.colorScheme.onSurface) },
             text = {
                 OutlinedTextField(
                     value = nameDraft,
@@ -372,7 +374,7 @@ fun CardStyleSettingsScreen(
                 ) { Text(stringResource(R.string.common_save), color = Amber) }
             },
             dismissButton = {
-                TextButton(onClick = { showRenameDialog = false }) { Text(stringResource(R.string.common_cancel), color = Silver) }
+                TextButton(onClick = { showRenameDialog = false }) { Text(stringResource(R.string.common_cancel), color = MaterialTheme.colorScheme.onSurfaceVariant) }
             },
             containerColor = Charcoal,
         )
@@ -381,7 +383,7 @@ fun CardStyleSettingsScreen(
     if (showCreateDialog && currentPreset != null) {
         AlertDialog(
             onDismissRequest = { showCreateDialog = false },
-            title = { Text(stringResource(R.string.card_style_save_title), color = Snow) },
+            title = { Text(stringResource(R.string.card_style_save_title), color = MaterialTheme.colorScheme.onSurface) },
             text = {
                 OutlinedTextField(
                     value = nameDraft,
@@ -409,7 +411,7 @@ fun CardStyleSettingsScreen(
                 ) { Text(stringResource(R.string.common_save), color = Amber) }
             },
             dismissButton = {
-                TextButton(onClick = { showCreateDialog = false }) { Text(stringResource(R.string.common_cancel), color = Silver) }
+                TextButton(onClick = { showCreateDialog = false }) { Text(stringResource(R.string.common_cancel), color = MaterialTheme.colorScheme.onSurfaceVariant) }
             },
             containerColor = Charcoal,
         )
@@ -418,11 +420,11 @@ fun CardStyleSettingsScreen(
     if (showDeleteDialog && currentPreset != null) {
         AlertDialog(
             onDismissRequest = { showDeleteDialog = false },
-            title = { Text(stringResource(R.string.card_style_delete_title), color = Snow) },
+            title = { Text(stringResource(R.string.card_style_delete_title), color = MaterialTheme.colorScheme.onSurface) },
             text = {
                 Text(
                     stringResource(R.string.card_style_delete_desc, currentPreset.name),
-                    color = Silver,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             },
             confirmButton = {
@@ -434,7 +436,7 @@ fun CardStyleSettingsScreen(
                 ) { Text(stringResource(R.string.common_delete), color = Amber) }
             },
             dismissButton = {
-                TextButton(onClick = { showDeleteDialog = false }) { Text(stringResource(R.string.common_cancel), color = Silver) }
+                TextButton(onClick = { showDeleteDialog = false }) { Text(stringResource(R.string.common_cancel), color = MaterialTheme.colorScheme.onSurfaceVariant) }
             },
             containerColor = Charcoal,
         )
@@ -477,11 +479,11 @@ private fun CardSizeSection(
         colors = CardDefaults.cardColors(containerColor = Charcoal),
     ) {
         Column(Modifier.padding(16.dp)) {
-            Text(stringResource(R.string.card_style_card_size), style = MaterialTheme.typography.titleMedium, color = Snow)
+            Text(stringResource(R.string.card_style_card_size), style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurface)
             Spacer(Modifier.height(12.dp))
 
             // Orientation picker
-            Text(stringResource(R.string.card_style_orientation), color = Silver, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+            Text(stringResource(R.string.card_style_orientation), color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
             Spacer(Modifier.height(8.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 CardOrientation.entries.forEach { orientation ->
@@ -517,7 +519,7 @@ private fun CardSizeSection(
                         colors = FilterChipDefaults.filterChipColors(
                             selectedContainerColor = AmberSubtle,
                             selectedLabelColor = Amber,
-                            containerColor = Gunmetal,
+                            containerColor = MaterialTheme.colorScheme.surface,
                             labelColor = Ash,
                         ),
                     )
@@ -527,7 +529,7 @@ private fun CardSizeSection(
             Spacer(Modifier.height(16.dp))
 
             // Size preset picker
-            Text(stringResource(R.string.card_style_size), color = Silver, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+            Text(stringResource(R.string.card_style_size), color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
             Spacer(Modifier.height(8.dp))
             Row(
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -537,11 +539,11 @@ private fun CardSizeSection(
                     FilterChip(
                         selected = prefs.preset == preset,
                         onClick = { onUpdate(prefs.copy(preset = preset)) },
-                        label = { Text(preset.label, fontSize = 12.sp) },
+                        label = { Text(localizedUiText(preset.label), fontSize = 12.sp) },
                         colors = FilterChipDefaults.filterChipColors(
                             selectedContainerColor = AmberSubtle,
                             selectedLabelColor = Amber,
-                            containerColor = Gunmetal,
+                            containerColor = MaterialTheme.colorScheme.surface,
                             labelColor = Ash,
                         ),
                     )
@@ -552,7 +554,7 @@ private fun CardSizeSection(
             AnimatedVisibility(visible = prefs.preset == CardSizePreset.CUSTOM) {
                 Column {
                     Spacer(Modifier.height(12.dp))
-                    Text(stringResource(R.string.card_style_card_width, prefs.customWidthDp), color = Silver, fontSize = 12.sp)
+                    Text(stringResource(R.string.card_style_card_width, prefs.customWidthDp), color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
                     Slider(
                         value = prefs.customWidthDp.toFloat(),
                         onValueChange = { onUpdate(prefs.copy(customWidthDp = it.roundToInt())) },
@@ -574,7 +576,7 @@ private fun CardSizeSection(
             Spacer(Modifier.height(16.dp))
 
             // Live preview
-            Text(stringResource(R.string.card_style_live_preview), color = Silver, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+            Text(stringResource(R.string.card_style_live_preview), color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
             Spacer(Modifier.height(8.dp))
             Box(
                 Modifier
@@ -603,7 +605,7 @@ private fun CardSizeSection(
                         )
                         Text(
                             prefs.orientation.name.lowercase(),
-                            color = Silver,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                             fontSize = 9.sp,
                         )
                     }
@@ -627,8 +629,8 @@ private fun CardHoverSection(
         Column(Modifier.padding(16.dp)) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
-                    Text(stringResource(R.string.card_style_hover_zoom), color = Snow, fontWeight = FontWeight.SemiBold)
-                    Text(stringResource(R.string.card_style_hover_zoom_desc), color = Silver, fontSize = 12.sp)
+                    Text(stringResource(R.string.card_style_hover_zoom), color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.SemiBold)
+                    Text(stringResource(R.string.card_style_hover_zoom_desc), color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
                 }
                 Switch(
                     checked = prefs.enabled,
@@ -651,7 +653,7 @@ private fun CardHoverSection(
                         Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
                     ) {
-                        Text(stringResource(R.string.card_style_zoom_amount), color = Silver, fontSize = 13.sp)
+                        Text(stringResource(R.string.card_style_zoom_amount), color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp)
                         Text("${prefs.scalePercent}%", color = Amber, fontWeight = FontWeight.Bold)
                     }
                     Slider(
@@ -673,7 +675,7 @@ private fun CardHoverSection(
                         Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
                     ) {
-                        Text(stringResource(R.string.card_style_animation_speed), color = Silver, fontSize = 13.sp)
+                        Text(stringResource(R.string.card_style_animation_speed), color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp)
                         Text("${prefs.animationDurationMs}ms", color = Amber, fontWeight = FontWeight.Bold)
                     }
                     Slider(
@@ -701,7 +703,7 @@ private fun CardHoverSection(
 
                     // Live hover preview
                     Spacer(Modifier.height(16.dp))
-                    Text(stringResource(R.string.card_style_preview_tap), color = Silver, fontSize = 13.sp)
+                    Text(stringResource(R.string.card_style_preview_tap), color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp)
                     Spacer(Modifier.height(8.dp))
                     HoverPreview(prefs)
                 }
@@ -794,8 +796,8 @@ private fun WatchedIndicatorSection(
         Column(Modifier.padding(16.dp)) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
-                    Text(stringResource(R.string.card_style_watched_indicator), color = Snow, fontWeight = FontWeight.SemiBold)
-                    Text(stringResource(R.string.card_style_watched_desc), color = Silver, fontSize = 12.sp)
+                    Text(stringResource(R.string.card_style_watched_indicator), color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.SemiBold)
+                    Text(stringResource(R.string.card_style_watched_desc), color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
                 }
                 Switch(
                     checked = prefs.enabled,
@@ -813,7 +815,7 @@ private fun WatchedIndicatorSection(
                 Column {
                     Spacer(Modifier.height(16.dp))
 
-                    Text(stringResource(R.string.card_style_indicator_style), color = Silver, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                    Text(stringResource(R.string.card_style_indicator_style), color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
                     Spacer(Modifier.height(8.dp))
 
                     // Style picker — scrollable row with mini previews
@@ -855,7 +857,7 @@ private fun WatchedIndicatorSection(
                                 }
                                 Spacer(Modifier.height(4.dp))
                                 Text(
-                                    style.label,
+                                    localizedUiText(style.label),
                                     color = if (selected) Amber else Silver,
                                     fontSize = 9.sp,
                                     textAlign = TextAlign.Center,
@@ -876,7 +878,7 @@ private fun WatchedIndicatorSection(
                                 Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.SpaceBetween,
                             ) {
-                                Text(stringResource(R.string.card_style_dim_amount), color = Silver, fontSize = 12.sp)
+                                Text(stringResource(R.string.card_style_dim_amount), color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
                                 Text("${(prefs.dimAmount * 100).roundToInt()}%", color = Amber, fontWeight = FontWeight.Bold)
                             }
                             Slider(
@@ -916,7 +918,7 @@ private fun AppearanceSection(
         colors = CardDefaults.cardColors(containerColor = Charcoal),
     ) {
         Column(Modifier.padding(16.dp)) {
-            Text(stringResource(R.string.card_style_appearance), style = MaterialTheme.typography.titleMedium, color = Snow)
+            Text(stringResource(R.string.card_style_appearance), style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurface)
             Spacer(Modifier.height(12.dp))
 
             // Corner radius
@@ -924,7 +926,7 @@ private fun AppearanceSection(
                 Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
             ) {
-                Text(stringResource(R.string.card_style_corner_radius), color = Silver, fontSize = 13.sp)
+                Text(stringResource(R.string.card_style_corner_radius), color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp)
                 Text("${prefs.cornerRadiusDp}dp", color = Amber, fontWeight = FontWeight.Bold)
             }
             Slider(
@@ -946,7 +948,7 @@ private fun AppearanceSection(
                 Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
             ) {
-                Text(stringResource(R.string.card_style_card_spacing), color = Silver, fontSize = 13.sp)
+                Text(stringResource(R.string.card_style_card_spacing), color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp)
                 Text("${prefs.cardSpacingDp}dp", color = Amber, fontWeight = FontWeight.Bold)
             }
             Slider(
@@ -964,7 +966,7 @@ private fun AppearanceSection(
             Spacer(Modifier.height(8.dp))
 
             // Title position
-            Text(stringResource(R.string.card_style_title_position), color = Silver, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+            Text(stringResource(R.string.card_style_title_position), color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
             Spacer(Modifier.height(8.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 CardTitlePosition.entries.forEach { pos ->
@@ -984,7 +986,7 @@ private fun AppearanceSection(
                         colors = FilterChipDefaults.filterChipColors(
                             selectedContainerColor = AmberSubtle,
                             selectedLabelColor = Amber,
-                            containerColor = Gunmetal,
+                            containerColor = MaterialTheme.colorScheme.surface,
                             labelColor = Ash,
                         ),
                     )
@@ -994,7 +996,7 @@ private fun AppearanceSection(
             Spacer(Modifier.height(8.dp))
 
             // Scroll animation
-            Text(stringResource(R.string.card_style_scroll_animation), color = Silver, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+            Text(stringResource(R.string.card_style_scroll_animation), color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
             Spacer(Modifier.height(8.dp))
             Row(
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -1018,7 +1020,7 @@ private fun AppearanceSection(
                         colors = FilterChipDefaults.filterChipColors(
                             selectedContainerColor = AmberSubtle,
                             selectedLabelColor = Amber,
-                            containerColor = Gunmetal,
+                            containerColor = MaterialTheme.colorScheme.surface,
                             labelColor = Ash,
                         ),
                     )
@@ -1047,7 +1049,7 @@ private fun QuickPresetButton(label: String, onClick: () -> Unit) {
         modifier = Modifier
             .background(Gunmetal, RoundedCornerShape(8.dp)),
     ) {
-        Text(label, color = Amber, fontSize = 12.sp)
+        Text(localizedUiText(label), color = Amber, fontSize = 12.sp)
     }
 }
 
@@ -1063,7 +1065,7 @@ private fun ToggleRow(
             .padding(vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(label, color = Snow, modifier = Modifier.weight(1f), fontSize = 14.sp)
+        Text(localizedUiText(label), color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.weight(1f), fontSize = 14.sp)
         Switch(
             checked = checked,
             onCheckedChange = onCheckedChange,

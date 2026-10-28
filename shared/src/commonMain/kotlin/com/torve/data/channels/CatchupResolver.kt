@@ -2,6 +2,7 @@ package com.torve.data.channels
 
 import com.torve.domain.model.EpgProgramme
 import com.torve.domain.model.Channel
+import com.torve.domain.model.supportsCatchupArchive
 import kotlinx.datetime.Clock
 import kotlinx.datetime.Instant
 import kotlinx.datetime.TimeZone
@@ -23,11 +24,10 @@ import kotlinx.datetime.toLocalDateTime
  * - {Y}, {m}, {d}, {H}, {M}, {S} — date/time components (UTC)
  * - {timestamp} — UTC epoch seconds
  */
-class CatchupResolver {
+class CatchupResolver(private val onResolved: (String, String) -> Unit = { _, _ -> }) {
 
     fun canCatchup(channel: Channel): Boolean {
-        return !channel.catchupType.isNullOrBlank() &&
-            (channel.catchupDays ?: 0) > 0
+        return channel.supportsCatchupArchive
     }
 
     fun resolve(
@@ -36,7 +36,10 @@ class CatchupResolver {
     ): String? {
         val type = channel.catchupType?.lowercase() ?: return null
         val startSec = programme.startTime / 1000
-        val endSec = programme.endTime / 1000
+        // A current programme's scheduled end may be in the future, but the
+        // archive only exists up to the live edge.
+        val endSec = minOf(programme.endTime / 1000, Clock.System.now().epochSeconds)
+        if (endSec <= startSec) return null
         val durationSec = endSec - startSec
 
         return when (type) {
@@ -71,7 +74,7 @@ class CatchupResolver {
                 val template = channel.catchupSource ?: return null
                 replacePlaceholders(template, startSec, endSec, durationSec)
             }
-        }
+        }.also { onResolved(channel.url, it) }
     }
 
     private fun replacePlaceholders(

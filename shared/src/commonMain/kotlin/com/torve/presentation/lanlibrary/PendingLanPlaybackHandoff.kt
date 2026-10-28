@@ -28,11 +28,18 @@ import com.torve.domain.lanlibrary.PlaybackRoute
  */
 object PendingLanPlaybackHandoff {
 
-    private var staged: PlaybackRoute.LanDesktopStream? = null
+    private data class StagedHeaders(val url: String, val headers: Map<String, String>)
+
+    private var staged: StagedHeaders? = null
 
     /** Stage [route]'s headers for the next [consumeFor] whose URL matches. */
     fun stage(route: PlaybackRoute.LanDesktopStream) {
-        staged = route
+        staged = StagedHeaders(route.url, route.headers)
+    }
+
+    /** Stage authenticated Jellyfin headers without exposing the API key in the URL. */
+    fun stage(route: PlaybackRoute.JellyfinStream) {
+        staged = StagedHeaders(route.url, route.headers)
     }
 
     /**
@@ -47,11 +54,14 @@ object PendingLanPlaybackHandoff {
         return pending.headers
     }
 
+    /** Metadata inspection must leave the player's one-shot credentials intact. */
+    fun peekFor(playbackUrl: String): Map<String, String>? = staged?.takeIf { it.url == playbackUrl }?.headers
+
     /** Test-only: clear any staged route. */
     internal fun clearForTest() {
         staged = null
     }
 
     /** Test-only: peek without consuming. */
-    internal fun peekForTest(): PlaybackRoute.LanDesktopStream? = staged
+    internal fun peekForTest(): Pair<String, Map<String, String>>? = staged?.let { it.url to it.headers }
 }

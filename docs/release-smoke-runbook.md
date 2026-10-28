@@ -353,3 +353,25 @@ When a case fails, append a row in the result file:
 The next fix prompt should be small enough to drop into a single
 follow-up task. Avoid "investigate X"; prefer "check that Y is set
 when Z happens".
+# Two-hour TV playback soak
+
+Install the signed release build, start playback on the target TV, then run the
+soak collector from the repository root. The collector refuses debug/test
+packages. It samples process/activity/memory state and captures Torve-scoped
+crash or ANR evidence without sending remote-control input that could disturb
+playback.
+
+    powershell -ExecutionPolicy Bypass -File tools/tv-playback-soak.ps1 -Serial FIRE_TV_SERIAL -RequireForeground
+
+Use PackageName com.torve.app for Google TV. The default duration is 7200
+seconds. Omit `-RequireForeground` only when an intentionally external player
+owns the foreground. Reports are written under build/reports/tv-soak.
+
+For repeatable process-launch timing on the same release-only device, capture
+three cold and warm activity launches. This is an activity-launch metric, not a
+claim that remote Home data is fully interactive:
+
+    powershell -ExecutionPolicy Bypass -File tools/tv-release-startup-probe.ps1 -Serial FIRE_TV_SERIAL -Iterations 3 -Label 1.1.6
+
+Reports are written under `build/reports/tv-startup` and record the installed
+version plus cold/warm medians.

@@ -10,6 +10,7 @@ data class CustomSection(
     val filters: CustomSectionFilters = CustomSectionFilters(),
     val order: Int = 0,
     val enabled: Boolean = true,
+    val presetId: String? = null,
 )
 
 @Serializable
@@ -33,6 +34,8 @@ data class CustomSectionFilters(
     val watchRegion: String? = null,
     val withKeywords: List<Int> = emptyList(),
     val specificTmdbIds: List<SpecificTmdbItem> = emptyList(),
+    val traktListId: Int? = null,
+    val traktListOwned: Boolean = false,
 )
 
 @Serializable

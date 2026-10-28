@@ -24,7 +24,7 @@ data class FilteredItemsResult(
 
 /**
  * Result of a classification split: [resolved] items whose sensitivity
- * verdict is known (SAFE or SENSITIVE — both can still be policy-gated
+ * verdict is known (SAFE or SENSITIVE â€” both can still be policy-gated
  * downstream), and [unresolvedCount] = number of items whose sensitivity
  * could not be positively confirmed from current metadata (UNKNOWN).
  *
@@ -44,17 +44,40 @@ data class FilteredWatchProgressResult(
     val hiddenCount: Int = 0,
 )
 
-class ContentPolicyFilter {
+class ContentPolicyFilter(private val family: com.torve.data.profile.FamilyControls? = null,
+    private val watched: com.torve.presentation.catalog.WatchedDiscoveryFilter? = null) {
+    fun discoveryChanges(): kotlinx.coroutines.flow.Flow<Unit> = watched?.changes ?: kotlinx.coroutines.flow.emptyFlow()
+    fun discoveryAllows(item: MediaItem, context: ContentAccessContext): Boolean = watched?.allows(item, context) != false
+    suspend fun awaitProfileBoundary() { family?.initialize(); family?.updateSession(); watched?.refresh() }
+    fun profileOwners(): kotlinx.coroutines.flow.Flow<String> = family?.let { gate ->
+        kotlinx.coroutines.flow.flow { gate.state.collect { if (it.loaded) emit(gate.contentSessionKey()) } }
+    } ?: kotlinx.coroutines.flow.flowOf("")
+    fun profileOwnerKey(): String = family?.contentSessionKey().orEmpty()
+    val familyEnabled: Boolean get() = family?.state?.value?.contentRestricted == true
+    val familyKidsProfile: Boolean get() = family?.state?.value?.isKids == true
+    val hasFamilyBoundary: Boolean get() = family != null
+    fun <T> profileState(initial: T): kotlinx.coroutines.flow.MutableStateFlow<T> =
+        family?.let { com.torve.data.profile.ProfilePolicyStateFlow(it, initial) } ?: kotlinx.coroutines.flow.MutableStateFlow(initial)
+    /** The Family verifier holds certification proofs even when a catalogue card has no embedded rating. */
+    fun filterProfileLimit(items: List<MediaItem>, maxRating: com.torve.domain.model.ContentRating?): List<MediaItem> {
+        val verifiedByFamily = family != null && (maxRating == null || family.state.value.effectiveKidsRules != null)
+        val candidates = if (verifiedByFamily) items else com.torve.domain.model.ParentalFilter.filter(items, maxRating)
+        return candidates.filter(::familyAllows)
+    }
+    suspend fun certifiedDetail(item: MediaItem): MediaItem = family?.certify(item) ?: item
+
+    fun familyAllows(item: MediaItem): Boolean = family?.allows(item) != false
+    internal fun familyAllowsSource(source: String): Boolean = family?.allowsSource(source) != false
     /**
      * Filter a list of media items for the current policy.
      *
      * @param strictUnknown When true, any item whose sensitivity cannot be
      *   positively confirmed from the current metadata is treated as
-     *   UNKNOWN → HIDE. In practice this means items with `adult == null`
+     *   UNKNOWN â†’ HIDE. In practice this means items with `adult == null`
      *   and no matching sensitive keyword/genre signal are dropped rather
      *   than passed through as SAFE. The intended use is the search
      *   commit pipeline, where a later enrichment call would otherwise
-     *   produce the "poster appears → data arrives → item removed" flicker:
+     *   produce the "poster appears â†’ data arrives â†’ item removed" flicker:
      *   if we can't verify safety at commit time, we never render the card
      *   in the first place. Non-search contexts (home shelves, catalog)
      *   default to `strictUnknown = false` to avoid over-blocking shelves
@@ -69,7 +92,7 @@ class ContentPolicyFilter {
         allowSensitiveBecauseUserReachedSensitiveParent: Boolean = false,
         strictUnknown: Boolean = false,
     ): FilteredItemsResult {
-        if (!policy.enforcementEnabled) return FilteredItemsResult(items = items)
+        if (!policy.enforcementEnabled && family == null && watched == null) return FilteredItemsResult(items = items)
 
         var hiddenCount = 0
         val filtered = buildList {
@@ -88,11 +111,11 @@ class ContentPolicyFilter {
     /**
      * Partition [items] by classification without applying any policy gate.
      *
-     * Items classifying as SAFE or SENSITIVE end up in [ClassificationSplit.resolved] —
+     * Items classifying as SAFE or SENSITIVE end up in [ClassificationSplit.resolved] â€”
      * they have a known verdict, so later policy gating (in the combine stage
      * of the caller's render pipeline) can decide visibility. Items
      * classifying as UNKNOWN are counted in [ClassificationSplit.unresolvedCount]
-     * and intentionally dropped from the output — they must never be
+     * and intentionally dropped from the output â€” they must never be
      * rendered provisionally, because a later enrichment step could flip
      * them to SENSITIVE and create the "poster appears, then vanishes"
      * flicker this primitive is designed to prevent.
@@ -128,7 +151,7 @@ class ContentPolicyFilter {
         context: ContentAccessContext,
         items: List<WatchProgress>,
     ): FilteredWatchProgressResult {
-        if (!policy.enforcementEnabled) return FilteredWatchProgressResult(items = items)
+        if (!policy.enforcementEnabled && family == null) return FilteredWatchProgressResult(items = items)
 
         var hiddenCount = 0
         val filtered = buildList {
@@ -161,6 +184,8 @@ class ContentPolicyFilter {
         allowSensitiveBecauseUserReachedSensitiveParent: Boolean,
         strictUnknown: Boolean = false,
     ): ContentFilterDecision {
+        if (!discoveryAllows(item, context)) return ContentFilterDecision(ContentFilterAction.HIDE, SensitiveClassification.SAFE, "watched_hidden")
+        if (!familyAllows(item)) return ContentFilterDecision(ContentFilterAction.HIDE, SensitiveClassification.UNKNOWN, "family_restricted")
         if (!policy.enforcementEnabled) {
             return ContentFilterDecision(ContentFilterAction.ALLOW_FULL, SensitiveClassification.SAFE)
         }
@@ -255,7 +280,7 @@ class ContentPolicyFilter {
         // cases), so `adult == null` leaves us without confirmation that
         // the item is SFW. Commit pipelines that can't tolerate a later
         // "poster appears, then vanishes" flicker pass strictUnknown=true
-        // so those null-adult items stay UNKNOWN → HIDE until a stronger
+        // so those null-adult items stay UNKNOWN â†’ HIDE until a stronger
         // signal resolves them. Non-strict callers (home shelves, etc.)
         // keep the existing permissive SAFE default, matching the rest of
         // the product's historical behavior.
@@ -337,14 +362,14 @@ class ContentPolicyFilter {
         isContentPlaceholder = true,
     )
 
-    // ── Watch History ──
+    // â”€â”€ Watch History â”€â”€
 
     fun filterWatchHistory(
         policy: ContentPolicyState,
         context: ContentAccessContext,
         items: List<WatchHistoryEntry>,
     ): List<WatchHistoryEntry> {
-        if (!policy.enforcementEnabled) return items
+        if (!policy.enforcementEnabled && family == null) return items
 
         return buildList {
             items.forEach { entry ->
@@ -375,16 +400,16 @@ class ContentPolicyFilter {
         isContentPlaceholder = true,
     )
 
-    // ── Downloads ──
+    // â”€â”€ Downloads â”€â”€
 
     fun filterDownloads(
         policy: ContentPolicyState,
         context: ContentAccessContext,
         items: List<Download>,
     ): List<Download> {
-        if (!policy.enforcementEnabled) return items
+        if (!policy.enforcementEnabled && family == null) return items
 
-        return items.map { download ->
+        return items.filter { familyAllows(MediaItem(id = it.mediaId, title = it.title, type = it.mediaType, familySourceKey = "downloads")) }.map { download ->
             val synthetic = MediaItem(
                 id = download.mediaId,
                 title = download.title,

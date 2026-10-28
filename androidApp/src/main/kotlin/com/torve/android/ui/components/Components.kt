@@ -1,5 +1,7 @@
 package com.torve.android.ui.components
 
+import com.torve.android.ui.community.parityLabel as localizedUiText
+
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
@@ -17,6 +19,7 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsHoveredAsState
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -25,6 +28,7 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -97,6 +101,8 @@ import com.torve.android.ui.theme.Obsidian
 import com.torve.android.ui.theme.Snow
 import com.torve.android.ui.theme.Steel
 import com.torve.android.ui.theme.Torve
+import com.torve.domain.model.forAvailableCardRatings
+import com.torve.domain.model.CardOverlayPosition
 import com.torve.domain.model.CardOrientation
 import com.torve.domain.model.CardStyle
 import com.torve.domain.model.CardTitlePosition
@@ -111,6 +117,9 @@ import com.torve.domain.model.WatchState
 import com.torve.domain.model.withFallbackTmdbScore
 
 val LocalCardStyle = compositionLocalOf { CardStyle() }
+
+private fun String?.usableImageUrl(): String? =
+    this?.trim()?.takeIf { it.startsWith("https://") || it.startsWith("http://") }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // Poster Card — The primary content card used everywhere.
@@ -181,17 +190,26 @@ fun PosterCard(
     isDownloaded: Boolean = false,
     watchState: WatchState = WatchState(),
     cardStyle: CardStyle = LocalCardStyle.current,
+    fillCell: Boolean = false,
 ) {
     val hoverPrefs = cardStyle.hover
     val appearance = cardStyle.appearance
     val cornerRadius = appearance.cornerRadiusDp.dp
-    val ratingPrefs = LocalRatingPrefs.current
+    val rawRatingPrefs = cardStyle.ratingPrefs
+    val ratingPrefs = rawRatingPrefs.forAvailableCardRatings(item.ratings.withFallbackTmdbScore(item.rating) ?: MediaRatings())
+    val posterRatingsEnabled = com.torve.android.tv.settings.rememberTvPosterRatingsPreference()
     val layoutSpec = resolveCardLayoutSpec(sizeOverride, cardStyle)
+    if (item.catalogueNotice != null) {
+        com.torve.android.ui.community.CatalogueNoticeCard(item,
+            (if (fillCell) Modifier.fillMaxWidth() else Modifier.width(layoutSpec.width)).then(modifier))
+        return
+    }
     val isLandscapeCard = layoutSpec.useBackdrop
 
     // Hover / Focus zoom
     var isFocused by remember { mutableStateOf(false) }
-    var isPressed by remember { mutableStateOf(false) }
+    val cardInteraction = remember { MutableInteractionSource() }
+    val isPressed by cardInteraction.collectIsPressedAsState()
     val isActive = (isFocused || isPressed) && hoverPrefs.enabled
 
     val scale by animateFloatAsState(
@@ -201,8 +219,7 @@ fun PosterCard(
     )
 
     Column(
-        modifier = Modifier
-            .width(layoutSpec.width)
+        modifier = (if (fillCell) Modifier.fillMaxWidth() else Modifier.width(layoutSpec.width))
             .then(modifier)
             .then(
                 if (scale != 1f) Modifier.graphicsLayer {
@@ -211,15 +228,17 @@ fun PosterCard(
                 } else Modifier,
             )
             .zIndex(if (isActive) 10f else 0f)
-            .onFocusChanged { isFocused = it.isFocused },
+            .onFocusChanged { isFocused = it.isFocused }
+            .clickable(interactionSource = cardInteraction, indication = null, role = Role.Button,
+                onClickLabel = "Open ${item.title}", onClick = { if (!com.torve.android.ui.community.CommunityNotices.handle(item)) onClick() }),
     ) {
-        val showCardRatings = showRating &&
+        val showCardRatings = posterRatingsEnabled && showRating &&
             (!isLandscapeCard || ratingPrefs.allowRatingsOnLandscapeCards) &&
             ratingPrefs.maxRatingsOnCard > 0
         val effectiveRatings = item.ratings.withFallbackTmdbScore(item.rating)
         // Let MultiRatingPills handle empty-pill gracefully; avoid extra gating
         val showInsideRatings = showCardRatings && effectiveRatings != null && !ratingPrefs.pillPosition.isOutside()
-        val showOutsideRatings = showCardRatings && effectiveRatings != null && ratingPrefs.pillPosition.isOutside()
+        val showOutsideRatings = showCardRatings && ratingPrefs.pillPosition.isOutside()
         // Poster image
         Box(
             modifier = Modifier
@@ -232,32 +251,16 @@ fun PosterCard(
                     } else if (appearance.showBorder) {
                         Modifier.border(1.dp, Steel, RoundedCornerShape(cornerRadius))
                     } else Modifier,
-                )
-                .pointerInput(Unit) {
-                    detectTapGestures(
-                        onPress = {
-                            isPressed = true
-                            tryAwaitRelease()
-                            isPressed = false
-                        },
-                        onTap = { onClick() },
-                    )
-                },
+                ),
         ) {
             // Content-policy hardening: locked/placeholder items get neutral art immediately.
             // This prevents any real poster/backdrop request and avoids brief leakage from
             // recycled rows, cache hits, or recomposition lag.
-            val imageModel = if (item.isContentPlaceholder || item.isStubDetail) {
-                null
-            } else if (isLandscapeCard) {
-                item.backdropUrl ?: item.posterUrl
-            } else {
-                item.posterUrl
-            }
+            val (imageModel, artworkFailed) = com.torve.android.ui.community.stableArtwork(item, isLandscapeCard)
 
             SubcomposeAsyncImage(
                 model = imageModel,
-                contentDescription = if (item.isContentPlaceholder || item.isStubDetail) null else item.title,
+                contentDescription = if (item.isContentPlaceholder || item.isStubDetail || (showTitle && appearance.titlePosition != CardTitlePosition.HIDDEN)) null else item.title,
                 modifier = Modifier.fillMaxSize(),
                 contentScale = ContentScale.Crop,
                 loading = { ShimmerBox(modifier = Modifier.fillMaxSize()) },
@@ -275,7 +278,18 @@ fun PosterCard(
                         )
                     }
                 },
+                onError = { artworkFailed() },
             )
+
+            if (appearance.showYear && item.year != null && !item.isContentPlaceholder && !item.isStubDetail) {
+                Text(item.year.toString(), color = Color.White, style = MaterialTheme.typography.labelSmall,
+                    modifier = Modifier.align(when (appearance.yearPosition) {
+                        CardOverlayPosition.TOP_RIGHT -> Alignment.TopEnd
+                        CardOverlayPosition.BOTTOM_LEFT -> Alignment.BottomStart
+                        CardOverlayPosition.BOTTOM_RIGHT -> Alignment.BottomEnd
+                        else -> Alignment.TopStart
+                    }).padding(6.dp).background(Color.Black.copy(alpha = .7f), RoundedCornerShape(6.dp)).padding(horizontal = 5.dp, vertical = 2.dp))
+            }
 
             // Watched overlay
             val watchedPrefs = cardStyle.watched
@@ -295,8 +309,12 @@ fun PosterCard(
                     prefs = ratingPrefs,
                     modifier = Modifier
                         .testTag("poster_ratings_inside")
-                        .align(Alignment.TopEnd)
-                        .padding(6.dp),
+                        .align(when (appearance.ratingPosition) {
+                            CardOverlayPosition.TOP_LEFT -> Alignment.TopStart
+                            CardOverlayPosition.TOP_RIGHT -> Alignment.TopEnd
+                            CardOverlayPosition.BOTTOM_RIGHT -> Alignment.BottomEnd
+                            else -> Alignment.BottomStart
+                        }).padding(8.dp),
                 )
             }
 
@@ -322,19 +340,8 @@ fun PosterCard(
 
             // Type badge (Movie / TV)
             if (appearance.showTypeBadge) {
-                val typeLabel = when (item.type) {
-                    MediaType.MOVIE -> "MOVIE"
-                    MediaType.SERIES -> "TV"
-                }
-                Box(
-                    modifier = Modifier
-                        .align(Alignment.TopStart)
-                        .padding(start = if (isDownloaded) 32.dp else 6.dp, top = 6.dp)
-                        .background(Obsidian.copy(alpha = 0.75f), RoundedCornerShape(3.dp))
-                        .padding(horizontal = 4.dp, vertical = 1.dp),
-                ) {
-                    Text(typeLabel, color = Snow, fontSize = 8.sp, fontWeight = FontWeight.Bold)
-                }
+                com.torve.android.ui.product.MediaTypeSymbol(item.type,
+                    Modifier.align(Alignment.TopStart).padding(start = if (isDownloaded) 34.dp else 6.dp, top = 6.dp))
             }
 
             // Runtime badge
@@ -396,7 +403,7 @@ fun PosterCard(
             }
 
             // For landscape cards, show title overlaid at bottom
-            if (isLandscapeCard) {
+            if (isLandscapeCard && showTitle && appearance.titlePosition == CardTitlePosition.OVERLAY_BOTTOM) {
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -429,20 +436,21 @@ fun PosterCard(
         }
 
         // Ratings outside poster image
-        if (showOutsideRatings && effectiveRatings != null) {
+        if (showOutsideRatings) {
             Spacer(Modifier.height(6.dp))
-            MultiRatingPills(
+            Box(Modifier.fillMaxWidth().heightIn(min = (26 + 29 * ((ratingPrefs.maxRatingsOnCard + 1) / 2 - 1).coerceAtLeast(0)).dp)) {
+            if (effectiveRatings != null) MultiRatingPills(
                 ratings = effectiveRatings,
                 prefs = ratingPrefs,
                 modifier = Modifier
                     .testTag("poster_ratings_outside")
                     .fillMaxWidth(),
             )
+            }
         }
 
         // Title below poster (not inside card) — only when BELOW
         val showBelowTitle = showTitle &&
-            !isLandscapeCard &&
             appearance.titlePosition == CardTitlePosition.BELOW
         if (showBelowTitle) {
             Spacer(Modifier.height(6.dp))
@@ -450,20 +458,19 @@ fun PosterCard(
                 text = item.title,
                 style = MaterialTheme.typography.titleSmall,
                 color = Torve.colors.textPrimary,
-                maxLines = 2,
+                minLines = if (isLandscapeCard) 1 else 2,
+                maxLines = if (isLandscapeCard) 1 else 2,
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.padding(horizontal = 2.dp),
             )
-            if (appearance.showYear) {
+            if (item.upcomingScheduleMetadata() != null) {
                 val metadata = item.upcomingScheduleMetadata() ?: item.year?.toString().orEmpty()
-                if (metadata.isNotBlank()) {
                     Text(
-                        text = metadata,
+                        text = metadata.ifBlank { " " },
                         style = MaterialTheme.typography.bodySmall,
                         color = Torve.colors.textTertiary,
                         modifier = Modifier.padding(horizontal = 2.dp),
                     )
-                }
             }
         }
     }
@@ -609,35 +616,28 @@ fun CastAvatar(
     onClick: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
+    val usableProfileUrl = profileUrl.usableImageUrl()
     Column(
         modifier = modifier
             .width(72.dp)
             .clickable(onClick = onClick),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        if (profileUrl != null) {
-            AsyncImage(
-                model = profileUrl,
+        if (usableProfileUrl != null) {
+            SubcomposeAsyncImage(
+                model = usableProfileUrl,
                 contentDescription = name,
                 modifier = Modifier
                     .size(60.dp)
                     .clip(CircleShape),
                 contentScale = ContentScale.Crop,
+                loading = { ShimmerBox(modifier = Modifier.fillMaxSize()) },
+                error = {
+                    PersonInitialsFallback(name = name, modifier = Modifier.fillMaxSize())
+                },
             )
         } else {
-            Box(
-                modifier = Modifier
-                    .size(60.dp)
-                    .clip(CircleShape)
-                    .background(Gunmetal),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text(
-                    text = name.split(" ").map { it.firstOrNull() ?: "" }.take(2).joinToString(""),
-                    style = MaterialTheme.typography.titleSmall,
-                    color = Torve.colors.textTertiary,
-                )
-            }
+            PersonInitialsFallback(name = name, modifier = Modifier.size(60.dp))
         }
         Spacer(Modifier.height(4.dp))
         Text(
@@ -659,6 +659,22 @@ fun CastAvatar(
     }
 }
 
+@Composable
+private fun PersonInitialsFallback(name: String, modifier: Modifier = Modifier) {
+    Box(
+        modifier = modifier
+            .clip(CircleShape)
+            .background(Gunmetal),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text = name.split(" ").mapNotNull { it.firstOrNull()?.toString() }.take(2).joinToString(""),
+            style = MaterialTheme.typography.titleSmall,
+            color = Torve.colors.textTertiary,
+        )
+    }
+}
+
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // Section Header — Consistent shelf title style
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -671,16 +687,20 @@ fun SectionHeader(
     onActionClick: (() -> Unit)? = null,
     showCustomize: Boolean = false,
     onCustomizeClick: (() -> Unit)? = null,
+    contentPadding: PaddingValues = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
 ) {
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 8.dp),
+            .padding(contentPadding),
         verticalAlignment = Alignment.CenterVertically,
     ) {
+        Box(Modifier.width(3.dp).height(24.dp).background(MaterialTheme.colorScheme.primary, RoundedCornerShape(2.dp)))
+        Spacer(Modifier.width(10.dp))
         Text(
             text = title,
-            style = MaterialTheme.typography.headlineSmall,
+            style = MaterialTheme.typography.titleLarge,
+            fontWeight = FontWeight.SemiBold,
             color = Torve.colors.textPrimary,
             modifier = Modifier.weight(1f),
         )
@@ -759,6 +779,7 @@ fun FloatingBackButton(
     modifier: Modifier = Modifier,
     label: String = "Back",
     compact: Boolean = false,
+    enabled: Boolean = true,
 ) {
     val interactionSource = remember { MutableInteractionSource() }
     val hovered by interactionSource.collectIsHoveredAsState()
@@ -786,11 +807,11 @@ fun FloatingBackButton(
         label = "floatingBackBorder",
     )
     val glowColor = if (active) Amber.copy(alpha = 0.26f) else Color.Black.copy(alpha = 0.40f)
-    val shape = RoundedCornerShape(999.dp)
+    val shape = CircleShape
 
     Box(
         modifier = modifier
-            .then(if (compact) Modifier.size(48.dp) else Modifier.height(48.dp).widthIn(min = 104.dp))
+            .size(48.dp)
             .graphicsLayer {
                 scaleX = scale
                 scaleY = scale
@@ -821,20 +842,24 @@ fun FloatingBackButton(
             .clickable(
                 interactionSource = interactionSource,
                 indication = null,
+                enabled = enabled,
                 onClick = onBack,
             ),
         contentAlignment = Alignment.Center,
     ) {
-        Box(
-            modifier = Modifier
-                .align(Alignment.TopCenter)
-                .fillMaxWidth()
-                .height(1.dp)
-                .padding(horizontal = if (compact) 14.dp else 18.dp)
-                .background(Color.White.copy(alpha = if (active) 0.26f else 0.16f)),
-        )
+        // Decoration follows the measured button instead of making it fill the page.
+        Box(Modifier.matchParentSize()) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .fillMaxWidth()
+                    .height(1.dp)
+                    .padding(horizontal = if (compact) 14.dp else 18.dp)
+                    .background(Color.White.copy(alpha = if (active) 0.26f else 0.16f)),
+            )
+        }
         Row(
-            modifier = Modifier.padding(horizontal = if (compact) 0.dp else 16.dp),
+            modifier = Modifier,
             horizontalArrangement = Arrangement.Center,
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -842,18 +867,8 @@ fun FloatingBackButton(
                 imageVector = Icons.AutoMirrored.Rounded.ArrowBack,
                 contentDescription = null,
                 tint = Color.White.copy(alpha = 0.92f),
-                modifier = Modifier.size(20.dp),
+                modifier = Modifier.size(24.dp),
             )
-            if (!compact) {
-                Spacer(Modifier.width(8.dp))
-                Text(
-                    text = label,
-                    style = MaterialTheme.typography.labelLarge,
-                    color = Color.White.copy(alpha = 0.92f),
-                    fontWeight = FontWeight.SemiBold,
-                    maxLines = 1,
-                )
-            }
         }
     }
 }
@@ -861,31 +876,31 @@ fun FloatingBackButton(
 @Preview(name = "FloatingBackButtonDefaultPreview", backgroundColor = 0xFF05070D, showBackground = true)
 @Composable
 private fun FloatingBackButtonDefaultPreview() {
-    FloatingBackButton(onBack = {}, label = "Back", modifier = Modifier.padding(16.dp))
+    FloatingBackButton(onBack = {}, label = localizedUiText("Back"), modifier = Modifier.padding(16.dp))
 }
 
 @Preview(name = "FloatingBackButtonFocusedPreview", backgroundColor = 0xFF101827, showBackground = true)
 @Composable
 private fun FloatingBackButtonFocusedPreview() {
-    FloatingBackButton(onBack = {}, label = "Back", modifier = Modifier.padding(16.dp))
+    FloatingBackButton(onBack = {}, label = localizedUiText("Back"), modifier = Modifier.padding(16.dp))
 }
 
 @Preview(name = "FloatingBackButtonCompactPreview", backgroundColor = 0xFF05070D, showBackground = true)
 @Composable
 private fun FloatingBackButtonCompactPreview() {
-    FloatingBackButton(onBack = {}, compact = true, label = "Back", modifier = Modifier.padding(16.dp))
+    FloatingBackButton(onBack = {}, compact = true, label = localizedUiText("Back"), modifier = Modifier.padding(16.dp))
 }
 
 @Preview(name = "BrightBackdropFloatingBackPreview", backgroundColor = 0xFFE6EEF7, showBackground = true)
 @Composable
 private fun BrightBackdropFloatingBackPreview() {
-    FloatingBackButton(onBack = {}, label = "Back", modifier = Modifier.padding(16.dp))
+    FloatingBackButton(onBack = {}, label = localizedUiText("Back"), modifier = Modifier.padding(16.dp))
 }
 
 @Preview(name = "ScrolledFloatingBackPreview", backgroundColor = 0xFF05070D, showBackground = true)
 @Composable
 private fun ScrolledFloatingBackPreview() {
-    FloatingBackButton(onBack = {}, compact = true, label = "Back", modifier = Modifier.padding(16.dp))
+    FloatingBackButton(onBack = {}, compact = true, label = localizedUiText("Back"), modifier = Modifier.padding(16.dp))
 }
 
 @Preview(name = "MovieDetailsWithFloatingBackPreview", backgroundColor = 0xFF05070D, showBackground = true)
@@ -902,9 +917,9 @@ private fun MovieDetailsWithFloatingBackPreview() {
             )
             .padding(16.dp),
     ) {
-        FloatingBackButton(onBack = {}, label = "Back", modifier = Modifier.align(Alignment.TopStart))
+        FloatingBackButton(onBack = {}, label = localizedUiText("Back"), modifier = Modifier.align(Alignment.TopStart))
         Text(
-            text = "Movie Title",
+            text = localizedUiText("Movie Title"),
             color = Snow,
             style = MaterialTheme.typography.headlineMedium,
             modifier = Modifier.align(Alignment.BottomStart),
@@ -926,9 +941,9 @@ private fun TvShowDetailsWithFloatingBackPreview() {
             )
             .padding(16.dp),
     ) {
-        FloatingBackButton(onBack = {}, label = "Back", modifier = Modifier.align(Alignment.TopStart))
+        FloatingBackButton(onBack = {}, label = localizedUiText("Back"), modifier = Modifier.align(Alignment.TopStart))
         Text(
-            text = "TV Show Title",
+            text = localizedUiText("TV Show Title"),
             color = Snow,
             style = MaterialTheme.typography.headlineMedium,
             modifier = Modifier.align(Alignment.BottomStart),
@@ -940,22 +955,11 @@ private fun TvShowDetailsWithFloatingBackPreview() {
 fun BackButton(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    onFocused: (() -> Unit)? = null,
 ) {
-    Box(
-        modifier = modifier
-            .size(36.dp)
-            .clip(CircleShape)
-            .background(Gunmetal.copy(alpha = 0.65f))
-            .clickable(onClick = onClick),
-        contentAlignment = Alignment.Center,
-    ) {
-        Icon(
-            imageVector = Icons.AutoMirrored.Rounded.ArrowBack,
-            contentDescription = stringResource(R.string.common_back_cd),
-            tint = Snow,
-            modifier = Modifier.size(20.dp),
-        )
-    }
+    FloatingBackButton(onBack = onClick, modifier = modifier.onFocusChanged { if (it.isFocused) onFocused?.invoke() },
+        label = stringResource(R.string.common_back_cd), compact = true, enabled = enabled)
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

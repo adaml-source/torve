@@ -318,21 +318,21 @@ fun V2NzbMoviesPage(
                 ) {
                     Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         Text(
-                            text = if (indexerSecretsRedacted) "Panda credentials are masked"
-                                else "No NZB indexer configured in Panda",
+                            text = if (indexerSecretsRedacted) "Indexer credentials need attention"
+                                else "No NZB indexer connected",
                             style = MaterialTheme.typography.titleSmall,
                             fontWeight = FontWeight.SemiBold,
                             color = colors.textPrimary,
                         )
                         Text(
                             text = if (indexerSecretsRedacted)
-                                "Open Panda → Usenet step → re-paste your indexer key, then your library here lights up."
+                                "Open streaming setup → Usenet, re-enter the indexer key, then save the connections."
                             else
-                                "Settings → Add-ons → Panda → Configure → Usenet step.",
+                                "Settings → Connections → Streaming sources → Usenet.",
                             style = MaterialTheme.typography.bodySmall,
                             color = colors.textSecondary,
                         )
-                        TorvePrimaryButton(text = ds("Open Panda setup"), onClick = onOpenPandaSetup)
+                        TorvePrimaryButton(text = ds("Open streaming setup"), onClick = onOpenPandaSetup)
                     }
                 }
                 loading -> Box(
@@ -555,7 +555,7 @@ private fun NzbMoviePosterCard(
                 Spacer(Modifier.height(4.dp))
                 if (showReconfigure) {
                     TorvePrimaryButton(
-                        text = ds("Reconfigure Panda"),
+                        text = ds("Reconfigure streaming sources"),
                         onClick = onReconfigure,
                     )
                 } else {

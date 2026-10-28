@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="tv_source_all">Todas las fuentes</string>
+    <string name="tv_source_best">Recomendadas</string>
+    <string name="tv_source_largest">Mayor tamaño</string>
+    <string name="tv_source_smallest">Menor tamaño</string>
+    <string name="tv_source_quality">Calidad</string>
+    <string name="tv_source_all_qualities">Todas las calidades</string>
+    <string name="tv_source_cached">En caché</string>
+    <string name="tv_source_count">%1$d de %2$d fuentes</string>
+    <string name="tv_source_sort">Orden</string>
+    <string name="tv_source_hints">Las pistas de idioma no están verificadas. El audio comprobado tiene prioridad.</string>
+    <string name="tv_source_clear">Borrar filtros</string>
+    <string name="tv_source_override">Esta fuente no cumple tus reglas de reproducción</string>
+    <string name="tv_source_status_ready">Disponible</string>
+    <string name="tv_source_status_preparing">Preparando</string>
+    <string name="tv_source_status_unavailable">No disponible</string>
+    <string name="tv_source_status_check">Comprobar al reproducir</string>
+    <string name="tv_source_status_unconfirmed">Disponibilidad sin confirmar</string>
+    <string name="tv_source_status_direct">Fuente directa</string>
+    <string name="source_tracks_verified">Pistas comprobadas</string>
+    <string name="source_tracks_hint">Indicación de la fuente · pistas sin comprobar</string>
+</resources>

@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="replay_highlight_tv_playback">Os destaques abrem em tela cheia no YouTube ou SmartTube. Pressione Voltar para retornar aqui.</string>
+    <string name="replay_highlight_tv_missing_player">Instale o YouTube ou SmartTube para reproduzir os destaques em tela cheia.</string>
+</resources>

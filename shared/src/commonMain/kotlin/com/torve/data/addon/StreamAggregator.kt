@@ -3,6 +3,7 @@ package com.torve.data.addon
 import com.torve.data.debrid.DebridClient
 import com.torve.domain.model.DebridServiceType
 import com.torve.domain.model.InstalledAddon
+import com.torve.domain.model.canResolveStreams
 import com.torve.domain.model.MediaType
 import com.torve.domain.model.StreamFetchPolicy
 import com.torve.domain.model.StreamPreferences
@@ -10,10 +11,18 @@ import com.torve.domain.model.StreamQuality
 import com.torve.domain.diagnostics.DiagnosticsRedactor
 import com.torve.platform.TorveRuntimeDebug
 import io.ktor.http.encodeURLPathPart
+import io.ktor.http.Url
+import kotlin.coroutines.coroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withTimeout
@@ -29,7 +38,7 @@ class StreamAggregator(
     private val debridClient: DebridClient,
     private val scorer: StreamScorer,
 ) {
-    /** Track addon failures for diagnostics (addon URL → last error message). */
+    /** Track addon failures for diagnostics (addon URL Ã¢â€ â€™ last error message). */
     private val addonFailures = mutableMapOf<String, String>()
 
     private inline fun streamDebugLog(message: () -> String) {
@@ -58,39 +67,87 @@ class StreamAggregator(
         debridAccounts: Map<DebridServiceType, String> = emptyMap(),
         preferences: StreamPreferences = StreamPreferences(),
         fetchPolicy: StreamFetchPolicy = StreamFetchPolicy.FULL,
+        onStatistics: (List<com.torve.domain.model.ProviderSourceStat>) -> Unit = {},
+        onPartialStreams: (suspend (List<ParsedStream>) -> Unit)? = null,
     ): List<ParsedStream> = coroutineScope {
         val addonUrls = resolveStreamAddonBaseUrls(addons, debridAccounts)
+        val verificationCache = mutableMapOf<String, ParsedStream>()
+        val partialLock = Mutex()
+        val partialByProvider = linkedMapOf<String, List<ParsedStream>>()
+        suspend fun publish(url: String, streams: List<ParsedStream>, providerVerification: MutableMap<String, ParsedStream>) {
+            if (onPartialStreams == null) return
+            // A slow cache service for one provider must not hold the publication
+            // lock and hide ready video URLs returned by another provider.
+            val prepared = prepareStreams(streams, debridAccounts, preferences, season, episode, fetchPolicy, providerVerification)
+            partialLock.withLock {
+                verificationCache.putAll(providerVerification)
+                partialByProvider[url] = prepared
+                onPartialStreams.invoke(scorer.scoreAll(deduplicateStreams(partialByProvider.values.flatten()), preferences))
+            }
+        }
 
         // 1. Fan out to all addons in parallel using the selected startup policy
-        val rawStreams = addonUrls.map { url ->
+        val batches = addonUrls.map { url ->
             async {
-                fetchFromAddon(
+                val started = kotlin.time.TimeSource.Monotonic.markNow()
+                var successful = false
+                // Provider deadlines cover receiving its response. Filtering,
+                // debrid verification and UI publication run separately; they
+                // must not make a responsive provider appear to have timed out.
+                // Batches are cumulative, so only the newest pending one is needed.
+                val updates = Channel<List<ParsedStream>>(Channel.CONFLATED)
+                val providerVerification = mutableMapOf<String, ParsedStream>()
+                val publisher = if (onPartialStreams != null) launch {
+                    for (rows in updates) publish(url, rows, providerVerification)
+                } else null
+                val streams = try { fetchFromAddon(
                     url = url,
                     type = type,
                     imdbId = imdbId,
                     season = season,
                     episode = episode,
                     fetchPolicy = fetchPolicy,
-                )
+                    onOutcome = { if (it) successful = true },
+                    onStreams = { if (publisher != null) updates.trySend(it) },
+                ).also {
+                    updates.close()
+                    publisher?.join()
+                } } finally {
+                    updates.cancel()
+                    publisher?.cancelAndJoin()
+                }
+                val provider = addons.firstOrNull { url.startsWith(it.manifestUrl.removeSuffix("/manifest.json").trimEnd('/')) }?.manifest?.name
+                    ?: runCatching { Url(url).host }.getOrDefault("Provider")
+                streams to com.torve.domain.model.ProviderSourceStat(provider, streams.size,
+                    streams.count { it.isCached }, started.elapsedNow().inWholeMilliseconds, failed = !successful)
             }
-        }.awaitAll().flatten()
+        }.awaitAll()
+        onStatistics(batches.map { it.second })
+        val rawStreams = batches.flatMap { it.first }
 
+        prepareStreams(rawStreams, debridAccounts, preferences, season, episode, fetchPolicy, verificationCache)
+    }
+
+    private suspend fun prepareStreams(rawStreams: List<ParsedStream>,
+        debridAccounts: Map<DebridServiceType, String>, preferences: StreamPreferences,
+        season: Int?, episode: Int?, fetchPolicy: StreamFetchPolicy, verificationCache: MutableMap<String, ParsedStream>): List<ParsedStream> {
         // 2. Deduplicate by infoHash (or full title for non-torrent streams)
-        val unique = rawStreams.distinctBy {
-            it.directUrl ?: it.magnetUrl ?: it.infoHash ?: it.title
-        }
+        val unique = deduplicateStreams(rawStreams)
 
         // 3. Batch check debrid cache
-        val torrentHashes = unique.mapNotNull { it.infoHash }.distinct()
+        val torrentHashes = unique.filter { it.requiresDebridVerification() && !it.isCached && it.duplicateKey() !in verificationCache }.mapNotNull { it.infoHash }.distinct()
         val cacheStatus: MutableMap<String, Boolean> = mutableMapOf()
         if (torrentHashes.isNotEmpty()) {
             debridAccounts.forEach { (provider, apiKey) ->
                 try {
-                    val cached = debridClient.checkCache(provider, apiKey, torrentHashes)
+                    val cached = withTimeoutOrNull(5_000L) {
+                        debridClient.checkCache(provider, apiKey, torrentHashes)
+                    }.orEmpty()
                     cached.forEach { (hash, isCached) ->
                         if (isCached) cacheStatus[hash] = true
                     }
                 } catch (e: Exception) {
+                    coroutineContext.ensureActive()
                     streamDebugLog {
                         "StreamAggregator: debrid cache check failed provider=$provider error=${e::class.simpleName} ${DiagnosticsRedactor.redact(e.message)}"
                     }
@@ -103,7 +160,7 @@ class StreamAggregator(
             if (stream.infoHash != null && cacheStatus[stream.infoHash] == true) {
                 stream.copy(
                     isCached = true,
-                    source = "${stream.source ?: ""} ⚡".trim(),
+                    source = "${stream.source ?: ""} Ã¢Å¡Â¡".trim(),
                 )
             } else {
                 stream
@@ -112,6 +169,7 @@ class StreamAggregator(
 
         // 5. Filter by preferences
         val staticFiltered = enriched.filter { stream ->
+            if (preferences.excludeSeasonPacks && stream.isSeasonPack()) return@filter false
             // Quality range filter
             val quality = StreamQuality.fromString(stream.quality)
             if (quality != StreamQuality.UNKNOWN) {
@@ -128,14 +186,23 @@ class StreamAggregator(
             true
         }
 
-        val verified = preflightDebridCandidates(
-            streams = staticFiltered,
+        // Searching user-installed extensions must never create cloud downloads
+        // or resolve every torrent. The read-only batch cache response is enough;
+        // resolve only the source the user selects (or the autoplay candidate).
+        val freshVerified = if (ExtensionRuntimePolicy.userManagedOnly) {
+            staticFiltered.filter { it.duplicateKey() !in verificationCache }
+        } else preflightDebridCandidates(
+            streams = staticFiltered.filter { it.duplicateKey() !in verificationCache },
             debridAccounts = debridAccounts,
             season = season,
             episode = episode,
             fetchPolicy = fetchPolicy,
         )
 
+        freshVerified.forEach { verificationCache[it.duplicateKey()] = it }
+        val verified = staticFiltered.map { stream ->
+            stream.copy(isCached = stream.isCached || verificationCache[stream.duplicateKey()]?.isCached == true)
+        }
         val filtered = verified.filter { stream ->
             // Cached-only filter
             if (preferences.cachedOnly && stream.requiresDebridVerification() && !stream.isCached) {
@@ -150,7 +217,7 @@ class StreamAggregator(
             "TORVE_STREAMS: pipeline raw=${rawStreams.size} unique=${unique.size} " +
                 "filtered=${filtered.size} scored=${scored.size} addons=${scored.addonCounts()}"
         }
-        scored
+        return scored
     }
 
     private suspend fun fetchFromAddon(
@@ -160,6 +227,8 @@ class StreamAggregator(
         season: Int?,
         episode: Int?,
         fetchPolicy: StreamFetchPolicy,
+        onOutcome: (Boolean) -> Unit,
+        onStreams: suspend (List<ParsedStream>) -> Unit = {},
     ): List<ParsedStream> {
         val primary = fetchFromAddonUrl(
             url = url,
@@ -167,8 +236,9 @@ class StreamAggregator(
             imdbId = imdbId,
             season = season,
             episode = episode,
-            fetchPolicy = fetchPolicy,
+            fetchPolicy = fetchPolicy, onOutcome = onOutcome, onStreams = onStreams,
         )
+        if (ExtensionRuntimePolicy.userManagedOnly) return primary
         val fallbackUrl = url.torrentioFullDebridFallbackUrl() ?: return primary
         val fallback = fetchFromAddonUrl(
             url = fallbackUrl,
@@ -177,13 +247,12 @@ class StreamAggregator(
             season = season,
             episode = episode,
             fetchPolicy = fetchPolicy,
+            onOutcome = onOutcome, onStreams = onStreams,
         )
         if (fallback.isNotEmpty()) {
             streamDebugLog { "TORVE_STREAMS: addon=torrentio.strem.fun(debrid-fallback) streams=${fallback.size}" }
         }
-        return (primary + fallback).distinctBy {
-            it.directUrl ?: it.magnetUrl ?: it.infoHash ?: it.title
-        }
+        return deduplicateStreams(primary + fallback)
     }
 
     private suspend fun preflightDebridCandidates(
@@ -198,10 +267,10 @@ class StreamAggregator(
         val passthrough = streams.filterNot { it.requiresDebridVerification() }
         val allCandidates = streams
             .filter { it.requiresDebridVerification() }
-            .distinctBy { it.magnetUrl ?: it.infoHash ?: it.title }
+            .distinctBy(ParsedStream::duplicateKey)
         val candidates = streams
             .filter { it.requiresDebridVerification() }
-            .distinctBy { it.magnetUrl ?: it.infoHash ?: it.title }
+            .distinctBy(ParsedStream::duplicateKey)
             .take(
                 when (fetchPolicy) {
                     StreamFetchPolicy.PLAYBACK_STARTUP -> TORRENT_PREFLIGHT_STARTUP_LIMIT
@@ -213,7 +282,7 @@ class StreamAggregator(
             "TORVE_STREAMS: torrentPreflight start raw=${streams.size} passthrough=${passthrough.size} " +
                 "candidates=${allCandidates.size} checking=${candidates.size} policy=${fetchPolicy.label}"
         }
-        if (candidates.isEmpty()) return@coroutineScope passthrough
+        if (candidates.isEmpty()) return@coroutineScope passthrough + allCandidates
 
         val semaphore = Semaphore(TORRENT_PREFLIGHT_CONCURRENCY)
         val resolved = candidates.map { stream ->
@@ -228,7 +297,11 @@ class StreamAggregator(
             "TORVE_STREAMS: torrentPreflight candidates=${candidates.size} verified=${resolved.size} " +
                 "passthrough=${passthrough.size}"
         }
-        passthrough + resolved
+        // Preflight is an availability hint, not an authoritative source
+        // filter. A timeout or temporary debrid error must not erase a stream
+        // that an addon just returned, and candidates beyond the bounded
+        // preflight window must remain selectable as well.
+        passthrough + mergeDebridPreflightResults(allCandidates, resolved)
     }
 
     private suspend fun preflightDebridCandidate(
@@ -271,25 +344,37 @@ class StreamAggregator(
         season: Int?,
         episode: Int?,
         fetchPolicy: StreamFetchPolicy,
+        onOutcome: (Boolean) -> Unit,
+        onStreams: suspend (List<ParsedStream>) -> Unit = {},
     ): List<ParsedStream> {
         var lastError: Exception? = null
-        repeat(fetchPolicy.retryCount + 1) { attempt ->
+        var partial = emptyList<ParsedStream>()
+        val userManaged = ExtensionRuntimePolicy.userManagedOnly
+        val attempts = if (userManaged) 1 else fetchPolicy.retryCount + 1
+        repeat(attempts) { attempt ->
             try {
-                val streams = withTimeout(fetchPolicy.addonTimeoutMs) {
-                    addonClient.getStreams(url, type, imdbId, season, episode)
+                val streams = withTimeout(if (userManaged) 20_000L else addonSearchTimeoutMs(url, fetchPolicy)) {
+                    addonClient.getStreams(url, type, imdbId, season, episode) { rows ->
+                        partial = rows; onStreams(rows)
+                    }
                 }
                 streamDebugLog { "TORVE_STREAMS: addon=${safeAddonHealthKey(url)} streams=${streams.size}" }
+                addonFailures.remove(safeAddonHealthKey(url))
+                onOutcome(true)
                 return streams
             } catch (e: Exception) {
+                coroutineContext.ensureActive()
                 lastError = e
-                if (attempt < fetchPolicy.retryCount && fetchPolicy.retryDelayMs > 0) {
+                if (attempt + 1 < attempts && fetchPolicy.retryDelayMs > 0) {
                     delay(fetchPolicy.retryDelayMs)
                 }
             }
         }
 
+        streamDebugLog { "TORVE_STREAMS: provider_failed=${safeAddonHealthKey(url)} type=${lastError?.let { it::class.simpleName }} reason=${DiagnosticsRedactor.redact(lastError?.message.orEmpty())}" }
+        onOutcome(false)
         addonFailures[safeAddonHealthKey(url)] = DiagnosticsRedactor.redact(lastError?.message ?: "Unknown error")
-        return emptyList()
+        return partial
     }
 
     companion object {
@@ -315,18 +400,37 @@ class StreamAggregator(
     }
 }
 
+internal fun addonSearchTimeoutMs(url: String, policy: StreamFetchPolicy): Long {
+    // Panda waits up to 14 seconds for its Usenet providers. The full request
+    // needs to outlive that budget; keep the short startup pass unchanged.
+    val host = runCatching { Url(url).host }.getOrNull()
+    return if (policy == StreamFetchPolicy.FULL && host.equals("panda.torve.app", ignoreCase = true)) {
+        20_000L
+    } else policy.addonTimeoutMs
+}
+
+internal fun mergeDebridPreflightResults(
+    candidates: List<ParsedStream>,
+    verified: List<ParsedStream>,
+): List<ParsedStream> {
+    val verifiedByKey = verified.associateBy(ParsedStream::debridPreflightKey)
+    return candidates.map { candidate ->
+        verifiedByKey[candidate.debridPreflightKey()] ?: candidate
+    }
+}
+
+private fun ParsedStream.debridPreflightKey(): String = duplicateKey()
+
 internal fun resolveStreamAddonBaseUrls(
     addons: List<InstalledAddon>,
     debridAccounts: Map<DebridServiceType, String> = emptyMap(),
+    configureProviders: Boolean = !ExtensionRuntimePolicy.userManagedOnly,
 ): List<String> {
     return addons
-        .filter { addon ->
-            addon.isEnabled &&
-                addon.supportsStreamResolution()
-        }
+        .filter { addon -> addon.canResolveStreams() }
         .flatMap { addon ->
             val baseUrl = addon.manifestUrl.removeSuffix("/manifest.json").removeSuffix("/")
-            if (addon.isPlainTorrentio()) {
+            if (configureProviders && addon.isPlainTorrentio()) {
                 val debridUrls = torrentioDebridBaseUrls(debridAccounts)
                 debridUrls.ifEmpty { listOf(baseUrl) }
             } else {
@@ -336,14 +440,7 @@ internal fun resolveStreamAddonBaseUrls(
         .distinct()
 }
 
-private fun InstalledAddon.supportsStreamResolution(): Boolean {
-    val resources = manifest.resources
-    return resources.isEmpty() || resources.any { resource ->
-        resource.equals("stream", ignoreCase = true)
-    }
-}
-
-private fun ParsedStream.requiresDebridVerification(): Boolean =
+internal fun ParsedStream.requiresDebridVerification(): Boolean =
     directUrl == null && (infoHash != null || magnetUrl != null)
 
 private fun List<ParsedStream>.addonCounts(): String {

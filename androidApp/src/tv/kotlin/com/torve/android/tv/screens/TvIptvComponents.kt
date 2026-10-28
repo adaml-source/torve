@@ -1,5 +1,10 @@
 package com.torve.android.tv.screens
 
+import com.torve.android.tv.components.tvSettingsLabel as localizedUiText
+
+import com.torve.android.tv.components.tvLiquidGlass
+
+import com.torve.android.tv.components.tvGlassControl
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -21,6 +26,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.History
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -69,6 +75,9 @@ import com.torve.domain.model.Channel
 import com.torve.domain.model.ChannelCategory
 import com.torve.presentation.channels.ChannelsFilterType
 import com.torve.presentation.channels.ChannelsSortType
+import com.torve.util.DisplayTextDecoder
+import com.torve.android.ui.channels.channelCategoryLabel
+import java.text.NumberFormat
 import java.util.Calendar
 import java.util.Locale
 
@@ -79,13 +88,8 @@ internal fun TvIptvControlChip(
     modifier: Modifier = Modifier,
 ) {
     var focused by remember { mutableStateOf(false) }
-    val bg = if (focused) Amber.copy(alpha = 0.22f) else Charcoal.copy(alpha = 0.5f)
-    val borderColor by animateColorAsState(
-        targetValue = if (focused) Amber else Color.Transparent,
-        label = "controlChipBorder",
-    )
     Text(
-        text = label,
+        text = localizedUiText(label),
         color = if (focused) Snow else Silver,
         fontSize = 11.sp,
         fontWeight = FontWeight.Medium,
@@ -98,9 +102,7 @@ internal fun TvIptvControlChip(
                 indication = null,
                 onClick = onClick,
             )
-            .border(2.dp, borderColor, RoundedCornerShape(16.dp))
-            .clip(RoundedCornerShape(16.dp))
-            .background(bg)
+            .tvGlassControl(focused, cornerRadius = 16.dp)
             .padding(horizontal = 12.dp, vertical = 6.dp),
     )
 }
@@ -469,18 +471,19 @@ internal fun TvCountryFilterOverlay(
 }
 
 @Composable
-internal fun CountryBadge(code: String, size: Int = 24) {
+internal fun CountryBadge(code: String, size: Int = 24, color: Color = Silver) {
     Box(
         modifier = Modifier
             .size(size.dp)
-            .background(Amber.copy(alpha = 0.2f), CircleShape)
-            .border(1.dp, Amber.copy(alpha = 0.5f), CircleShape),
+            .background(color.copy(alpha = 0.12f), CircleShape)
+            .border(1.dp, color.copy(alpha = 0.35f), CircleShape),
         contentAlignment = Alignment.Center,
     ) {
         Text(
             text = code,
-            color = Amber,
+            color = color,
             fontSize = (size / 2.5).sp,
+            lineHeight = (size / 2f).sp,
             fontWeight = FontWeight.Bold,
             textAlign = TextAlign.Center,
         )
@@ -497,26 +500,11 @@ internal fun IptvCategoryItem(
     modifier: Modifier = Modifier,
 ) {
     var focused by remember { mutableStateOf(false) }
-    val bgColor = when {
-        focused -> Amber.copy(alpha = 0.20f)
-        isSelected && guideOwnsFocus -> Amber.copy(alpha = 0.07f)
-        isSelected -> AmberSubtle
-        else -> Graphite.copy(alpha = 0.18f)
-    }
-    val catBorderColor by animateColorAsState(
-        targetValue = when {
-            focused -> Amber
-            isSelected && guideOwnsFocus -> Amber.copy(alpha = 0.20f)
-            isSelected -> Amber.copy(alpha = 0.42f)
-            else -> Steel.copy(alpha = 0.12f)
-        },
-        label = "catBorder",
-    )
 
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .height(44.dp)
+            .height(42.dp)
             .onFocusChanged {
                 focused = it.isFocused
                 if (it.isFocused) onFocused()
@@ -528,9 +516,7 @@ internal fun IptvCategoryItem(
             )
             .zIndex(if (focused) 1f else 0f)
             .padding(horizontal = 6.dp, vertical = 2.dp)
-            .border(if (focused) 2.dp else 1.dp, catBorderColor, RoundedCornerShape(18.dp))
-            .clip(RoundedCornerShape(18.dp))
-            .background(bgColor)
+            .tvLiquidGlass(focused, selected = isSelected, cornerRadius = 12.dp, focusScale = 1f, quiet = true)
             .padding(horizontal = 12.dp, vertical = 0.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -547,15 +533,17 @@ internal fun IptvCategoryItem(
             }
 
             "\u23F2" -> {
-                Text(
-                    text = "\u23F2",
-                    fontSize = 14.sp,
+                Icon(
+                    imageVector = Icons.Filled.History,
+                    contentDescription = null,
+                    tint = Silver,
+                    modifier = Modifier.size(20.dp),
                 )
                 Spacer(Modifier.size(10.dp))
             }
 
             else -> if (countryCode != null && countryCode.length in 2..3 && countryCode.all { it.isLetter() }) {
-                CountryBadge(code = countryCode, size = 24)
+                CountryBadge(code = countryCode, size = 22, color = if (focused) Amber else Silver)
                 Spacer(Modifier.size(10.dp))
             }
         }
@@ -566,11 +554,14 @@ internal fun IptvCategoryItem(
             horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {
             Text(
-                text = category.name,
+                text = remember(category.name, countryCode) {
+                    channelCategoryLabel(DisplayTextDecoder.decode(category.name), countryCode)
+                },
                 color = if (focused || isSelected) Snow else Silver,
                 fontSize = 12.sp,
                 fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
-                maxLines = 1,
+                maxLines = 2,
+                lineHeight = 14.sp,
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f),
             )
@@ -579,7 +570,7 @@ internal fun IptvCategoryItem(
                     horizontalArrangement = Arrangement.spacedBy(4.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    category.qualityTags.take(2).forEach { tag ->
+                    category.qualityTags.take(1).forEach { tag ->
                         QualityBadge(tag = tag)
                     }
                 }
@@ -587,9 +578,10 @@ internal fun IptvCategoryItem(
         }
 
         Text(
-            text = "${category.channelCount}",
-            color = if (focused) Amber else Ash,
-            fontSize = 11.sp,
+            text = remember(category.channelCount) { NumberFormat.getIntegerInstance().format(category.channelCount) },
+            color = if (focused) Snow else Silver,
+            fontSize = 10.sp,
+            lineHeight = 12.sp,
             fontWeight = FontWeight.Medium,
             modifier = Modifier.padding(start = 8.dp),
         )
@@ -599,7 +591,7 @@ internal fun IptvCategoryItem(
 @Composable
 internal fun QualityBadge(tag: String) {
     val badgeColor = when (tag) {
-        "4K" -> Badge4K
+        "4K", "8K" -> Badge4K
         "FHD" -> Badge1080p
         "HD" -> Badge720p
         else -> BadgeSD
@@ -608,6 +600,8 @@ internal fun QualityBadge(tag: String) {
         text = tag,
         color = badgeColor,
         fontSize = 9.sp,
+        lineHeight = 11.sp,
+        maxLines = 1,
         fontWeight = FontWeight.Bold,
         modifier = Modifier
             .background(badgeColor.copy(alpha = 0.15f), RoundedCornerShape(4.dp))

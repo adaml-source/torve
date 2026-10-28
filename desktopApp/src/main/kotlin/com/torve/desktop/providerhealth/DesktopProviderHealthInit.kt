@@ -2,9 +2,12 @@ package com.torve.desktop.providerhealth
 
 import com.torve.data.addon.StremioAddonClient
 import com.torve.data.debrid.DebridClient
+import com.torve.data.integrations.AutomationAdminClient
+import com.torve.domain.integrations.AutomationInstanceRepository
 import com.torve.domain.integrations.IntegrationSecretKey
 import com.torve.domain.integrations.IntegrationSecretStore
 import com.torve.domain.integrations.LibraryOverlayService
+import com.torve.domain.integrations.MediaLifecycleService
 import com.torve.domain.model.DebridServiceType
 import com.torve.domain.providerhealth.ProviderHealthRepository
 import com.torve.domain.repository.AddonRepository
@@ -21,6 +24,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import com.torve.presentation.providerhealth.AddonProbeTarget
 import com.torve.presentation.providerhealth.AddonProviderHealthChecker
+import com.torve.presentation.providerhealth.AutomationStackProviderHealthChecker
 import com.torve.presentation.providerhealth.DebridProviderHealthChecker
 import com.torve.presentation.providerhealth.IptvEpgProviderHealthChecker
 import com.torve.presentation.providerhealth.IptvProviderHealthChecker
@@ -30,6 +34,7 @@ import com.torve.presentation.providerhealth.PandaUsenetProviderProviderHealthCh
 import com.torve.presentation.providerhealth.PlexJellyfinProviderHealthChecker
 import com.torve.presentation.providerhealth.ProviderHealthCoordinator
 import com.torve.presentation.providerhealth.SimklProviderHealthChecker
+import com.torve.presentation.providerhealth.SeerrProviderHealthChecker
 import com.torve.presentation.providerhealth.TraktProviderHealthChecker
 
 /**
@@ -49,11 +54,16 @@ class DesktopProviderHealthInit(
     private val secretStore: IntegrationSecretStore,
     private val prefs: PreferencesRepository,
     private val libraryService: LibraryOverlayService,
+    private val mediaLifecycleService: MediaLifecycleService,
+    private val automationRepository: AutomationInstanceRepository,
+    private val automationAdminClient: AutomationAdminClient,
     private val addonRepository: AddonRepository,
     private val stremioAddonClient: StremioAddonClient,
     private val channelsViewModel: ChannelsViewModel,
     private val pandaConfigStateStore: PandaConfigStateStore,
     private val refreshOnSettings: ProviderHealthRefreshOnSettings,
+    private val traktClient: com.torve.data.trakt.TraktClient,
+    private val simklClient: com.torve.data.simkl.SimklClient,
 ) {
     @Volatile
     private var started: Boolean = false
@@ -112,6 +122,20 @@ class DesktopProviderHealthInit(
                     }.getOrNull()
                 },
                 service = libraryService,
+            ),
+        )
+
+        coordinator.register(
+            SeerrProviderHealthChecker(
+                serverUrlSource = { prefs.getString("seerr_server_url") },
+                apiKeySource = { secretStore.get(IntegrationSecretKey.SEERR_API_KEY) },
+                service = mediaLifecycleService,
+            ),
+        )
+        coordinator.register(
+            AutomationStackProviderHealthChecker(
+                repository = automationRepository,
+                adminClient = automationAdminClient,
             ),
         )
 
@@ -178,11 +202,13 @@ class DesktopProviderHealthInit(
         coordinator.register(
             TraktProviderHealthChecker(
                 tokenSource = { secretStore.get(IntegrationSecretKey.TRAKT_ACCESS_TOKEN) },
+                probe = traktClient::probeAccount,
             ),
         )
         coordinator.register(
             SimklProviderHealthChecker(
                 tokenSource = { secretStore.get(IntegrationSecretKey.SIMKL_ACCESS_TOKEN) },
+                probe = simklClient::probeAccount,
             ),
         )
 

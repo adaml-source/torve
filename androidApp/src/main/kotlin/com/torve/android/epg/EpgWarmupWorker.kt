@@ -17,6 +17,8 @@ import com.torve.domain.diagnostics.DiagnosticsRedactor
 import com.torve.domain.repository.ChannelRepository
 import org.koin.java.KoinJavaComponent.getKoin
 import java.util.concurrent.TimeUnit
+import com.torve.presentation.settings.OptionalAppFeature
+import com.torve.presentation.settings.isAppFeatureEnabled
 
 class EpgWarmupWorker(
     context: Context,
@@ -25,10 +27,13 @@ class EpgWarmupWorker(
 
     override suspend fun doWork(): Result {
         return try {
+            val featurePrefs: com.torve.domain.repository.PreferencesRepository = getKoin().get()
+            if (!featurePrefs.isAppFeatureEnabled(OptionalAppFeature.CHANNELS)) return Result.success()
             val authClient: AuthClient = getKoin().get()
             if (authClient.getAuthenticatedUser() == null) {
                 return Result.success()
             }
+            if (!featurePrefs.isAppFeatureEnabled(OptionalAppFeature.CHANNELS)) return Result.success()
             val blockNavigation = inputData.getBoolean(
                 BackgroundWork.KEY_BLOCK_NAVIGATION,
                 true,

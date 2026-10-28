@@ -1,5 +1,7 @@
 package com.torve.android.ui.transfer
 
+import com.torve.android.ui.community.parityLabel as localizedUiText
+
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.padding
@@ -36,7 +38,7 @@ internal fun TransferStatusBanner(title: String, body: String, tone: TransferBan
     }
     Surface(color = container, shape = RoundedCornerShape(10.dp)) {
         Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text(title, fontWeight = FontWeight.SemiBold, color = onContainer)
+            Text(localizedUiText(title), fontWeight = FontWeight.SemiBold, color = onContainer)
             Text(body, style = MaterialTheme.typography.bodySmall, color = onContainer)
         }
     }

@@ -86,6 +86,8 @@ fun V2MoviesPage(
     tmdb: (() -> TmdbApiClient)? = null,
 ) {
     val state by catalogViewModel.state.collectAsState()
+    val heroSettings = remember { org.koin.core.context.GlobalContext.get().get<com.torve.presentation.settings.SettingsViewModel>() }
+    val heroState by heroSettings.state.collectAsState()
     val colors = TorveDesktopThemeTokens.colors
     val nzbScope = rememberCoroutineScope()
     // Local in-page search filter. Stays UI-side: filters the visible
@@ -157,7 +159,7 @@ fun V2MoviesPage(
         }
     }
 
-    val heroItem = remember(state.trendingItems) { state.trendingItems.firstOrNull() }
+    val heroItem = remember(state.trendingItems, heroState.moviesHeroEnabled) { state.trendingItems.firstOrNull().takeIf { heroState.moviesHeroEnabled } }
     val backdrop = rememberCachedBitmap(heroItem?.backdropUrl)
     val logo = rememberCachedBitmap(heroItem?.logoUrl)
     val variant = (heroItem?.backdropUrl?.hashCode() ?: 0).absoluteValue % 4
@@ -262,7 +264,7 @@ fun V2MoviesPage(
 
             Column(Modifier.fillMaxSize().verticalScroll(scrollState)) {
                 // Hero area
-                Box(Modifier.fillMaxWidth().height(vpH * 0.75f)) {
+                if (heroState.moviesHeroEnabled) Box(Modifier.fillMaxWidth().height(vpH * 0.75f)) {
                     if (heroItem != null) {
                         Column(Modifier.align(Alignment.BottomStart).fillMaxWidth(0.5f).padding(start = 72.dp, bottom = 28.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                             Surface(color = colors.accent.copy(alpha = 0.2f), shape = RoundedCornerShape(4.dp)) {

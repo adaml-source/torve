@@ -12,9 +12,15 @@ class AccountSettingsSyncPolicyTest {
     @Test
     fun sharedKeys_include_account_level_preferences() {
         assertTrue(AccountSettingsSyncPolicy.isSharedKey(SettingsViewModel.KEY_APP_LANGUAGE))
+        assertTrue(AccountSettingsSyncPolicy.isSharedKey(SettingsViewModel.KEY_RAIL_SPACING_DP))
         assertTrue(AccountSettingsSyncPolicy.isSharedKey(SettingsViewModel.KEY_RATING_PREFS))
         assertTrue(AccountSettingsSyncPolicy.isSharedKey(AccountSettingsSyncPolicy.KEY_HOME_LAYOUT_ORDER))
         assertTrue(AccountSettingsSyncPolicy.isSharedKey(AccountSettingsSyncPolicy.KEY_ENABLED_STREAMING_SERVICES))
+        assertTrue(AccountSettingsSyncPolicy.isSharedKey(SettingsViewModel.KEY_MIN_SOURCE_SIZE_PER_HOUR_MB))
+        assertTrue(AccountSettingsSyncPolicy.isSharedKey(SettingsViewModel.KEY_NEXT_EPISODE_PREPARATION_MODE))
+        assertTrue(AccountSettingsSyncPolicy.isSharedKey(SettingsViewModel.KEY_PREFERRED_AUDIO_LANGUAGE))
+        assertTrue(AccountSettingsSyncPolicy.isSharedKey(SettingsViewModel.KEY_ALLOW_SUBTITLE_LANGUAGE_FALLBACK))
+        assertTrue(AccountSettingsSyncPolicy.isSharedKey(SettingsViewModel.KEY_RECORDING_PRE_ROLL_MIN))
     }
 
     @Test
@@ -22,6 +28,11 @@ class AccountSettingsSyncPolicyTest {
         assertFalse(AccountSettingsSyncPolicy.isSharedKey("preferred_decoder_mode"))
         assertFalse(AccountSettingsSyncPolicy.isSharedKey("audio_passthrough_enabled"))
         assertFalse(AccountSettingsSyncPolicy.isSharedKey("remote_input_quirks"))
+        assertFalse(AccountSettingsSyncPolicy.isSharedKey(SettingsViewModel.KEY_MOVIE_DOWNLOAD_PATH))
+        assertFalse(AccountSettingsSyncPolicy.isSharedKey(SettingsViewModel.KEY_RECORDING_DOWNLOAD_PATH))
+        assertFalse(AccountSettingsSyncPolicy.isSharedKey(SettingsViewModel.KEY_LAST_VOLUME))
+        assertFalse(AccountSettingsSyncPolicy.isSharedKey(SettingsViewModel.KEY_LAN_SERVING_BIND))
+        assertFalse(AccountSettingsSyncPolicy.isSharedKey(SettingsViewModel.KEY_DEBRID_API_KEY))
     }
 
     @Test

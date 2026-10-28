@@ -1,5 +1,7 @@
 package com.torve.android.ui.settings
 
+import com.torve.android.ui.community.parityLabel as localizedUiText
+
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -124,7 +126,7 @@ fun StreamGroupsScreen(
                 stringResource(R.string.stream_groups_title),
                 style = MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.Bold,
-                color = Snow,
+                color = MaterialTheme.colorScheme.onSurface,
                 modifier = Modifier.weight(1f),
             )
             IconButton(onClick = { viewModel.addStreamGroup() }) {
@@ -135,7 +137,7 @@ fun StreamGroupsScreen(
         Text(
             stringResource(R.string.stream_groups_desc),
             style = MaterialTheme.typography.bodySmall,
-            color = Silver,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
         )
 
@@ -211,7 +213,7 @@ private fun StreamGroupRow(
                 placeholder = { Text(stringResource(R.string.stream_groups_name_hint), style = MaterialTheme.typography.bodySmall) },
                 modifier = Modifier.weight(1f),
                 singleLine = true,
-                textStyle = MaterialTheme.typography.bodySmall.copy(color = Snow),
+                textStyle = MaterialTheme.typography.bodySmall.copy(color = MaterialTheme.colorScheme.onSurface),
                 shape = RoundedCornerShape(8.dp),
                 colors = OutlinedTextFieldDefaults.colors(
                     focusedBorderColor = Amber,
@@ -229,7 +231,7 @@ private fun StreamGroupRow(
                 placeholder = { Text("#", style = MaterialTheme.typography.bodySmall) },
                 modifier = Modifier.width(56.dp),
                 singleLine = true,
-                textStyle = MaterialTheme.typography.bodySmall.copy(color = Snow),
+                textStyle = MaterialTheme.typography.bodySmall.copy(color = MaterialTheme.colorScheme.onSurface),
                 shape = RoundedCornerShape(8.dp),
                 colors = OutlinedTextFieldDefaults.colors(
                     focusedBorderColor = Amber,
@@ -264,9 +266,9 @@ private fun StreamGroupRow(
             singleLine = true,
             isError = patternError != null,
             supportingText = patternError?.let { message ->
-                { Text(message, color = Ruby, style = MaterialTheme.typography.labelSmall) }
+                { Text(localizedUiText(message), color = Ruby, style = MaterialTheme.typography.labelSmall) }
             },
-            textStyle = MaterialTheme.typography.bodySmall.copy(color = Snow),
+            textStyle = MaterialTheme.typography.bodySmall.copy(color = MaterialTheme.colorScheme.onSurface),
             shape = RoundedCornerShape(8.dp),
             colors = OutlinedTextFieldDefaults.colors(
                 focusedBorderColor = Amber,

@@ -10,19 +10,23 @@ import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import com.torve.data.addon.StremioAddonClient
 import com.torve.data.debrid.DebridClient
+import com.torve.data.panda.readPandaDebridActivationSnapshot
 import com.torve.data.trakt.auth.TraktTokenStore
 import com.torve.domain.integrations.IntegrationSecretKey
 import com.torve.domain.integrations.IntegrationSecretStore
+import com.torve.domain.integrations.AutomationInstanceRepository
 import com.torve.domain.integrations.LibraryOverlayService
+import com.torve.domain.integrations.MediaLifecycleService
+import com.torve.data.integrations.AutomationAdminClient
 import com.torve.domain.model.DebridServiceType
 import com.torve.domain.providerhealth.ProviderHealthStatus
 import com.torve.domain.providerhealth.ProviderHealthRepository
 import com.torve.domain.repository.AddonRepository
 import com.torve.domain.repository.PreferencesRepository
-import com.torve.presentation.channels.ChannelsViewModel
 import com.torve.presentation.panda.PandaConfigStateStore
 import com.torve.presentation.providerhealth.AddonProbeTarget
 import com.torve.presentation.providerhealth.AddonProviderHealthChecker
+import com.torve.presentation.providerhealth.AutomationStackProviderHealthChecker
 import com.torve.presentation.providerhealth.DebridProviderHealthChecker
 import com.torve.presentation.providerhealth.IptvEpgProviderHealthChecker
 import com.torve.presentation.providerhealth.IptvProviderHealthChecker
@@ -33,11 +37,14 @@ import com.torve.presentation.providerhealth.PlexJellyfinProviderHealthChecker
 import com.torve.presentation.providerhealth.ProviderHealthCoordinator
 import com.torve.presentation.providerhealth.ProviderHealthRefreshOnSettings
 import com.torve.presentation.providerhealth.SimklProviderHealthChecker
+import com.torve.presentation.providerhealth.SeerrProviderHealthChecker
 import com.torve.presentation.providerhealth.TraktProviderHealthChecker
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
+import com.torve.presentation.settings.isHealthProviderEnabled
+import com.torve.presentation.settings.readOptionalAppFeatures
 
 /**
  * Hydrates [ProviderHealthRepository] and registers every shared
@@ -61,12 +68,18 @@ class AndroidProviderHealthInit(
     private val traktTokenStore: TraktTokenStore,
     private val prefs: PreferencesRepository,
     private val libraryService: LibraryOverlayService,
+    private val mediaLifecycleService: MediaLifecycleService,
+    private val automationRepository: AutomationInstanceRepository,
+    private val automationAdminClient: AutomationAdminClient,
     private val addonRepository: AddonRepository,
     private val stremioAddonClient: StremioAddonClient,
-    private val channelsViewModel: ChannelsViewModel,
+    private val channelsHealth: AndroidIptvHealthSource,
     private val pandaConfigStateStore: PandaConfigStateStore,
     private val refreshOnSettings: ProviderHealthRefreshOnSettings,
     private val context: android.content.Context,
+    private val traktClient: com.torve.data.trakt.TraktClient,
+    private val traktAuthorizedApi: com.torve.data.trakt.api.TraktAuthorizedApi,
+    private val simklClient: com.torve.data.simkl.SimklClient,
 ) {
     @Volatile
     private var started: Boolean = false
@@ -93,7 +106,7 @@ class AndroidProviderHealthInit(
         }
     }
 
-    private fun postHealthNotification(label: String, message: String) {
+    private fun postHealthNotification(label: String, message: String, providerKey: String) {
         ensureHealthChannel()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
             ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS)
@@ -103,6 +116,7 @@ class AndroidProviderHealthInit(
             .setSmallIcon(android.R.drawable.stat_notify_error)
             .setContentTitle("Connection problem")
             .setContentText("$label: $message")
+            .addExtras(android.os.Bundle().apply { putString("provider_key", providerKey) })
             .build()
         NotificationManagerCompat.from(context).notify(HEALTH_NOTIF_ID, notification)
     }
@@ -139,19 +153,17 @@ class AndroidProviderHealthInit(
             "torbox" to DebridServiceType.TORBOX,
         )
         DebridServiceType.entries.forEach { provider ->
-            coordinator.register(
-                DebridProviderHealthChecker(
+            val providerId = pandaDebridProviderMap.entries.first { it.value == provider }.key
+            val checker = DebridProviderHealthChecker(
                     provider = provider,
                     apiKeySource = {
-                        usableCredential(secretStore.get(secretKey(provider)))
+                        if (providerId in prefs.readPandaDebridActivationSnapshot().disconnectedProviderIds) null
+                        else usableCredential(secretStore.get(secretKey(provider)))
                             ?: run {
                                 val state = pandaConfigStateStore.current
-                                val providerId = pandaDebridProviderMap.entries
-                                    .firstOrNull { it.value == provider }
-                                    ?.key
-                                usableCredential(providerId?.let { state.debridApiKeys[it] })
+                                usableCredential(state.debridApiKeys[providerId])
                                     ?: usableCredential(
-                                        if (providerId != null && state.selectedProvider?.id == providerId) {
+                                        if (state.selectedProvider?.id == providerId) {
                                             state.debridApiKey
                                         } else {
                                             null
@@ -160,8 +172,10 @@ class AndroidProviderHealthInit(
                             }
                     },
                     debridClient = debridClient,
-                ),
-            )
+                )
+            coordinator.register(checker)
+            // Reconcile locally before rendering: an old green cache cannot verify current credentials.
+            repository.upsert(checker.configurationState())
         }
 
         // ── Plex / Jellyfin (composite probe) ─────────────────────────
@@ -173,15 +187,25 @@ class AndroidProviderHealthInit(
                     else runCatching { prefs.getString("jellyfin_server_url") }.getOrNull()
                 },
                 tokenSource = {
-                    val plexToken = runCatching {
+                    if (!prefs.getString("plex_server_url").isNullOrBlank())
                         secretStore.get(IntegrationSecretKey.PLEX_ACCESS_TOKEN)
-                    }.getOrNull()
-                    if (!plexToken.isNullOrBlank()) plexToken
-                    else runCatching {
-                        secretStore.get(IntegrationSecretKey.JELLYFIN_API_KEY)
-                    }.getOrNull()
+                    else secretStore.get(IntegrationSecretKey.JELLYFIN_API_KEY)
                 },
                 service = libraryService,
+            ),
+        )
+
+        coordinator.register(
+            SeerrProviderHealthChecker(
+                serverUrlSource = { prefs.getString("seerr_server_url") },
+                apiKeySource = { secretStore.get(IntegrationSecretKey.SEERR_API_KEY) },
+                service = mediaLifecycleService,
+            ),
+        )
+        coordinator.register(
+            AutomationStackProviderHealthChecker(
+                repository = automationRepository,
+                adminClient = automationAdminClient,
             ),
         )
 
@@ -205,27 +229,25 @@ class AndroidProviderHealthInit(
         )
 
         // ── IPTV (state projection — no extra fetches) ────────────────
-        // ChannelsViewModel is bound as a single in SharedModule, so the
-        // state we read here matches the user-facing one.
-        coordinator.register(
-            IptvProviderHealthChecker(stateSource = { channelsViewModel.state.value }),
-        )
-        coordinator.register(
-            IptvEpgProviderHealthChecker(stateSource = { channelsViewModel.state.value }),
-        )
+        // Project live state when opened; otherwise inspect saved playlist
+        // summaries without starting the entire Channels screen at Home startup.
+        coordinator.register(channelsHealth.checker(epg = false))
+        coordinator.register(channelsHealth.checker(epg = true))
 
-        // ── Trakt / SIMKL (token presence) ────────────────────────────
+        // Authenticated account checks are separate from history synchronization.
         coordinator.register(
             TraktProviderHealthChecker(
                 tokenSource = {
                     traktTokenStore.accessToken()
                         ?: secretStore.get(IntegrationSecretKey.TRAKT_ACCESS_TOKEN)
                 },
+                probe = { traktAuthorizedApi.probeAccount() },
             ),
         )
         coordinator.register(
             SimklProviderHealthChecker(
                 tokenSource = { secretStore.get(IntegrationSecretKey.SIMKL_ACCESS_TOKEN) },
+                probe = simklClient::probeAccount,
             ),
         )
 
@@ -324,6 +346,30 @@ class AndroidProviderHealthInit(
         // token rotation, integration changes). One long-running
         // collector; exits with the scope on process death.
         observerScope.launch { refreshOnSettings.observe() }
+        observerScope.launch {
+            var previousFeatures: com.torve.presentation.settings.OptionalAppFeatures? = null
+            val notifier: com.torve.presentation.settings.SettingsRefreshNotifier = org.koin.java.KoinJavaComponent.getKoin().get()
+            notifier.events.collect {
+                val features = prefs.readOptionalAppFeatures()
+                if (features != previousFeatures && (!features.jellyfin || !features.channels || !features.sports || !features.arrStack)) {
+                    val manager = context.getSystemService(android.content.Context.NOTIFICATION_SERVICE) as NotificationManager
+                    val active = manager.activeNotifications.firstOrNull { it.id == HEALTH_NOTIF_ID }?.notification
+                    val text = active?.extras?.getCharSequence(android.app.Notification.EXTRA_TEXT)?.toString().orEmpty()
+                    val key = active?.extras?.getString("provider_key") ?: when {
+                        text.startsWith("Seerr:") -> "seerr:request_manager"
+                        text.startsWith("ARR automation stack:") -> "automation:admin"
+                        text.startsWith("Plex / Jellyfin:") -> "library:plex_jellyfin"
+                        text.startsWith("IPTV playlist:") -> "iptv:active"
+                        text.startsWith("EPG:") -> "iptv:epg"
+                        else -> null
+                    }
+                    if (key != null && !prefs.isHealthProviderEnabled(key)) {
+                        NotificationManagerCompat.from(context).cancel(HEALTH_NOTIF_ID)
+                    }
+                }
+                previousFeatures = features
+            }
+        }
 
         // fresh keys and every checker — including debrid — gets accurate
         // results.
@@ -339,8 +385,8 @@ class AndroidProviderHealthInit(
                 entries.forEach { entry ->
                     val wasOk = prev[entry.providerKey] == ProviderHealthStatus.GREEN
                     val nowBad = entry.status == ProviderHealthStatus.RED
-                    if (wasOk && nowBad) {
-                        postHealthNotification(entry.label, entry.message ?: "Connection lost")
+                    if (wasOk && nowBad && prefs.isHealthProviderEnabled(entry.providerKey, entry.category)) {
+                        postHealthNotification(entry.label, entry.message ?: "Connection lost", entry.providerKey)
                     }
                 }
                 prev = entries.associate { it.providerKey to it.status }

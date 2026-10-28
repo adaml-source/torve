@@ -140,6 +140,15 @@ class AddonViewModel(
     }
 
     fun removeAddon(manifestUrl: String) {
+        removeAddon(manifestUrl, deleteProviderConfiguration = true)
+    }
+
+    /** Uninstall an extension without deleting its provider account/configuration. */
+    fun removeAddonOnly(manifestUrl: String) {
+        removeAddon(manifestUrl, deleteProviderConfiguration = false)
+    }
+
+    private fun removeAddon(manifestUrl: String, deleteProviderConfiguration: Boolean) {
         scope.launch {
             try {
                 val existingAddon = addonRepo.getAddon(manifestUrl)
@@ -157,7 +166,7 @@ class AddonViewModel(
                     // panda.torve.app and the cached PANDA_TOKEN. Otherwise the next
                     // Panda setup attempt would enter edit mode with a stale token
                     // and never actually install a new addon row.
-                    if (wasPanda) {
+                    if (wasPanda && deleteProviderConfiguration) {
                         val store = integrationSecretStore ?: return@launch
                         // Tear down server-side with the per-config management token
                         // if we still have it. The manifest-only path can't mutate
@@ -200,6 +209,7 @@ class AddonViewModel(
                 addonRepo.toggleAddon(manifestUrl, enabled)
                 val addons = addonRepo.getInstalledAddons()
                 _state.update { it.copy(addons = addons) }
+                pokeSettingsRefresh()
                 scope.launch(ioDispatcher) {
                     addonSyncService.onAddonStateChanged(manifestUrl)
                 }

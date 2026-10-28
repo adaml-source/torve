@@ -9,8 +9,9 @@ internal data class ChannelCatalogRecoveryPlan(
 internal fun planChannelCatalogRecovery(
     activeGeneration: Long?,
     stagedGeneration: Long?,
+    writeInProgress: Boolean = false,
 ): ChannelCatalogRecoveryPlan {
-    if (stagedGeneration == null) {
+    if (writeInProgress || stagedGeneration == null) {
         return ChannelCatalogRecoveryPlan(
             fallbackActiveGeneration = activeGeneration,
             staleGenerationToDelete = null,

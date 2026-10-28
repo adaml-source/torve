@@ -1,0 +1,29 @@
+{
+  "revision": "2026-10-25.1",
+  "scope": "Reviewed diagnostic questions and reversible checks; no authenticated guide content or private Discord history.",
+  "questions": {
+    "platform": "Which platform, device model and OS version are you using? Please leave out device identifiers.",
+    "version": "What is the full Torve version, and is it the public release or a beta build?",
+    "expected": "What did you expect to happen, and what actually happened?",
+    "scope": "Does this affect one item or every item you have tried?",
+    "error": "What exact error appears? Remove account details, stream URLs and credentials.",
+    "video_audio": "Does audio continue when the picture fails? Do subtitles or playback controls still work?",
+    "source_type": "Which connection type is affected, such as IPTV, a library connection or an add-on? Do not share its address or login.",
+    "sync_devices": "Which two devices are you comparing, and which watch state, list or preference differs?",
+    "sync_scope": "Does the difference affect one title or several, and when did you first notice it?",
+    "reproduce": "What short sequence of safe steps reproduces the problem?",
+    "checks_tried": "What have you already tried, and what happened after each check?",
+    "install_stage": "Which installation step fails, and what message does the device show?",
+    "feature": "What would you like Torve to do, and how would that help your workflow?"
+  },
+  "checks": {
+    "second_item": {"text": "Try a second item you are authorised to play and compare whether the same symptom occurs. This helps distinguish one source from a wider playback problem.", "article_id": "support"},
+    "restart_app": {"text": "Close and reopen Torve, then repeat the same safe steps once. Do not clear app data, uninstall or reset your device for this check.", "article_id": "support"},
+    "current_release": {"text": "Compare your full Torve version with the official download page. Record your installed version before making any change, and keep beta/public build differences clear.", "article_id": "install"},
+    "source_status": {"text": "Check the connected service's own status page or app. Report whether the same item works there; do not send its URL, credentials or media files.", "article_id": "sources"},
+    "same_account": {"text": "For account-backed sync, confirm that both devices are signed in to the same Torve account. Tell me only whether they match; never post the account email or password.", "article_id": "account"},
+    "compare_devices": {"text": "Repeat the same action with the same authorised item on the other device. Compare the app versions and the result without sharing account identifiers.", "article_id": "account"},
+    "firetv_guide": {"text": "Compare the failing step with the official Fire TV installation page, including whether the device uses compatible Android-based Fire OS or Vega OS. Do not bypass device security warnings.", "article_id": "firetv"}
+  },
+  "known_issues": []
+}

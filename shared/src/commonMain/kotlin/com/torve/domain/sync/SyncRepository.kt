@@ -4,8 +4,11 @@ interface SyncRepository {
     /** Export payload WITHOUT secrets. Safe for backup and backend transport. */
     suspend fun exportSyncPayload(): SyncPayload
 
-    /** Import payload. Secrets in the payload are imported only if present. */
+    /** Import a backup projection. Connections and credentials are never imported. */
     suspend fun importSyncPayload(payload: SyncPayload): SyncResult
+
+    /** Only the authenticated, encrypted, paired LAN receiver may call this. */
+    suspend fun importForLocalTransfer(payload: SyncPayload): SyncResult = importSyncPayload(payload)
 
     /** Export to JSON WITHOUT secrets. */
     suspend fun exportToJson(): String

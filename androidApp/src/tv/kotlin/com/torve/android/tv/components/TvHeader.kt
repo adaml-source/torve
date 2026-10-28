@@ -1,10 +1,10 @@
 package com.torve.android.tv.components
 
-import androidx.compose.animation.Crossfade
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
@@ -24,24 +24,23 @@ import com.torve.domain.model.MediaItem
 fun TvHeroBackground(
     featuredItem: MediaItem?,
     modifier: Modifier = Modifier,
+    extendedReadability: Boolean = false,
 ) {
     Box(modifier = modifier.fillMaxSize()) {
         val imageUrl = featuredItem?.backdropUrl ?: featuredItem?.posterUrl
         val scale = ContentScale.Crop
 
-        Crossfade(
-            targetState = imageUrl,
-            animationSpec = tween(500),
-            label = "heroBackdrop",
-        ) { url ->
-            if (url != null) {
-                AsyncImage(
-                    model = url,
-                    contentDescription = null,
-                    modifier = Modifier.fillMaxSize(),
-                    contentScale = scale,
-                )
-            }
+        if (imageUrl != null) {
+            // The root already waits for content readiness and coalesces rapid
+            // route changes before attaching this image. Avoid a Crossfade here:
+            // it keeps two full-screen bitmaps composed during the most
+            // performance-sensitive TV transition window.
+            AsyncImage(
+                model = imageUrl,
+                contentDescription = null,
+                modifier = Modifier.fillMaxSize(),
+                contentScale = scale,
+            )
         }
 
         // Cinematic gradient — same as mobile HeroGradient
@@ -79,5 +78,22 @@ fun TvHeroBackground(
                     ),
                 ),
         )
+
+        if (extendedReadability) {
+            Box(
+                modifier = Modifier
+                    .fillMaxHeight()
+                    .fillMaxWidth(0.78f)
+                    .background(
+                        Brush.horizontalGradient(
+                            colors = listOf(
+                                Obsidian.copy(alpha = 0.18f),
+                                Obsidian.copy(alpha = 0.08f),
+                                Obsidian.copy(alpha = 0f),
+                            ),
+                        ),
+                    ),
+            )
+        }
     }
 }

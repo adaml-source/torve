@@ -1,42 +1,55 @@
 package com.torve.android
 
+import android.annotation.SuppressLint
 import android.content.Intent
-import android.graphics.Typeface
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
-import android.util.TypedValue
-import android.view.Gravity
 import android.view.KeyEvent
-import android.widget.FrameLayout
-import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.compose.setContent
-import androidx.appcompat.app.AppCompatActivity
-import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Box
+import androidx.compose.runtime.collectAsState
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Button
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.runtime.getValue
+import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.mutableStateOf
+import androidx.appcompat.app.AppCompatActivity
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.sp
+import androidx.compose.ui.draw.scale
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import com.torve.android.remote.TorveRemoteDialog as Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import com.torve.android.deeplink.TorveAppLink
 import com.torve.android.deeplink.TorveAppLinkParser
 import com.torve.android.tv.TvRoot
+import com.torve.android.ui.player.ActivePlaybackState
 import com.torve.android.ui.system.configureTorveEdgeToEdge
+import com.torve.android.ui.theme.AmberLight
 import com.torve.android.ui.theme.Obsidian
+import com.torve.android.ui.theme.Snow
 import com.torve.android.ui.theme.TorveTheme
 import com.torve.data.auth.AuthEvent
 import com.torve.data.auth.AuthClient
@@ -45,30 +58,41 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import org.koin.java.KoinJavaComponent.getKoin
-import android.graphics.Color as AndroidColor
 
 /**
- * TV entry point.  Startup uses 2 stages:
- *
- * Stage 0 (onCreate): Plain Android View — "TORVE" logo. Zero Compose.
- * Stage 1 (Koin ready): Single setContent with a flag that starts as
- *   placeholder, then transitions to the full TvRoot UI.  Using ONE
- *   setContent avoids the composition-replacement gap that caused ANRs
- *   when two separate setContent calls were used.
+ * TV entry point. The native window background provides an immediate static
+ * shell while dependencies settle; Compose is installed once with the real
+ * TV root so startup does not pay for a redundant placeholder composition.
  */
 class TvMainActivity : AppCompatActivity() {
     companion object {
-        private const val FULL_UI_START_DELAY_MS = 5_000L
         private const val DIRECTIONAL_REPEAT_THROTTLE_MS = 90L
         private const val DIRECTIONAL_REPEAT_THROTTLE_AFTER_COUNT = 2
+        private const val APP_CONTROL_LONG_BACK_MS = 650L
     }
 
     private val handler = Handler(Looper.getMainLooper())
+    private val usageReporter = com.torve.android.usage.AppUsageReporter()
+    private var usageStartJob: kotlinx.coroutines.Job? = null
+    override fun onStart() {
+        super.onStart()
+        usageStartJob = activityScope.launch {
+            (application as TorveApp).tvUiReady.await()
+            usageReporter.start()
+        }
+    }
+    override fun onStop() { usageStartJob?.cancel(); usageReporter.stop(); super.onStop() }
+    override fun onLocalesChanged(locales: androidx.core.os.LocaleListCompat) {
+        super.onLocalesChanged(locales)
+        if (composeStarted) {
+            // AppCompat updates resources in place on older Fire OS versions.
+            // Forward the new configuration to Compose without leaving this page.
+            window.decorView.dispatchConfigurationChanged(android.content.res.Configuration(resources.configuration))
+        }
+    }
     private val activityScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var composeStarted = false
     private var authEventCollectionStarted = false
@@ -76,8 +100,24 @@ class TvMainActivity : AppCompatActivity() {
     private var pendingAppLink by mutableStateOf<TorveAppLink?>(null)
     private var lastDirectionalRepeatKeyCode = 0
     private var lastDirectionalRepeatAtMs = 0L
+    private var appControlBackHeld = false
+    private var appControlLongBackTriggered = false
+    private var showAppControlDialog by mutableStateOf(false)
+    private var inputFocusRecoveryNonce by mutableIntStateOf(0)
+    private val appControlLongBack = Runnable {
+        if (appControlBackHeld) {
+            appControlLongBackTriggered = true
+            showAppControlDialog = true
+        }
+    }
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        if ((BuildConfig.DEBUG || BuildConfig.STARTUP_METRICS) && event.action == KeyEvent.ACTION_DOWN) {
+            com.torve.android.debug.AnrDebugLogger.log("INPUT key=${event.keyCode} queuedMs=${android.os.SystemClock.uptimeMillis() - event.eventTime}")
+        }
+        if (handleFullScreenPlaybackMenu(event)) return true
+        if (handleBackgroundPlaybackMenu(event)) return true
+        if (handleAppControlBack(event)) return true
         if (shouldThrottleDirectionalRepeat(event)) return true
         return try {
             super.dispatchKeyEvent(event)
@@ -86,8 +126,96 @@ class TvMainActivity : AppCompatActivity() {
             // pinned row during rapid D-pad repeats. Consume the key so it cannot
             // continue through fallback dispatch and crash the process.
             android.util.Log.w("TvMainActivity", "Focus dispatch error swallowed", e)
+            if (event.action == KeyEvent.ACTION_DOWN) inputFocusRecoveryNonce += 1
             true
         }
+    }
+
+    private fun handleFullScreenPlaybackMenu(event: KeyEvent): Boolean {
+        if (
+            event.keyCode != KeyEvent.KEYCODE_MENU ||
+            !ActivePlaybackState.hasFullScreenPlaybackMenuOwner()
+        ) {
+            return false
+        }
+        if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) {
+            ActivePlaybackState.requestFullScreenPlaybackMenu()
+        }
+        // Activity-level ownership makes Menu reliable even when the Android video
+        // surface, rather than a Compose node, currently owns input focus.
+        return true
+    }
+
+    private fun handleBackgroundPlaybackMenu(event: KeyEvent): Boolean {
+        if (event.keyCode != KeyEvent.KEYCODE_MENU || !hasBackgroundPlayback()) return false
+        if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) {
+            ActivePlaybackState.requestPlaybackBarFocus()
+        }
+        // Own both DOWN and UP so Menu cannot also leak into the focused screen.
+        return true
+    }
+
+    @SuppressLint("GestureBackNavigation")
+    private fun handleAppControlBack(event: KeyEvent): Boolean {
+        // This TV-only shortcut needs the physical key's DOWN/repeat/UP
+        // sequence to distinguish long Back. Short Back is still delegated
+        // to onBackPressedDispatcher below.
+        if (event.keyCode != KeyEvent.KEYCODE_BACK) return false
+        return when (event.action) {
+            KeyEvent.ACTION_DOWN -> {
+                if (event.repeatCount == 0) {
+                    appControlBackHeld = true
+                    appControlLongBackTriggered = false
+                    handler.removeCallbacks(appControlLongBack)
+                    handler.postDelayed(appControlLongBack, APP_CONTROL_LONG_BACK_MS)
+                } else if (event.isLongPress && !appControlLongBackTriggered) {
+                    handler.removeCallbacks(appControlLongBack)
+                    appControlLongBack.run()
+                }
+                true
+            }
+
+            KeyEvent.ACTION_UP -> {
+                val dialogWasTriggered = appControlLongBackTriggered
+                cancelAppControlLongBack()
+                if (!dialogWasTriggered) {
+                    if (showAppControlDialog) {
+                        showAppControlDialog = false
+                    } else {
+                        // Preserve ordinary short-Back behavior while waiting long
+                        // enough to distinguish the explicit app-control shortcut.
+                        onBackPressedDispatcher.onBackPressed()
+                    }
+                }
+                true
+            }
+
+            else -> {
+                cancelAppControlLongBack()
+                true
+            }
+        }
+    }
+
+    private fun hasBackgroundPlayback(): Boolean =
+        ActivePlaybackState.session != null && !ActivePlaybackState.isFullScreenPlayerVisible
+
+    private fun cancelAppControlLongBack() {
+        handler.removeCallbacks(appControlLongBack)
+        appControlBackHeld = false
+        appControlLongBackTriggered = false
+    }
+
+    private fun exitTorve() {
+        ActivePlaybackState.stopAndClear()
+        showAppControlDialog = false
+        finishAndRemoveTask()
+    }
+
+    private fun restartTorve() {
+        ActivePlaybackState.stopAndClear()
+        showAppControlDialog = false
+        startActivity(Intent.makeRestartActivityTask(componentName))
     }
 
     private fun shouldThrottleDirectionalRepeat(event: KeyEvent): Boolean {
@@ -113,11 +241,14 @@ class TvMainActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
+        com.torve.android.debug.AnrDebugLogger.log("STARTUP Activity.onResume retained=$hasResumedBefore")
         if (hasResumedBefore && composeStarted) {
             activityScope.launch {
                 val authClient: AuthClient = getKoin().get()
                 val accountSessionCoordinator: AccountSessionCoordinator = getKoin().get()
-                accountSessionCoordinator.onAppForeground()
+                accountSessionCoordinator.onAppForeground(
+                    promoteLegacyTvJellyfin = true,
+                )
                 val user = authClient.getCurrentUser()
                 if (user != null && !user.isVerified) {
                     authClient.checkVerificationStatus()
@@ -130,27 +261,26 @@ class TvMainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         installSplashScreen()
         super.onCreate(savedInstanceState)
-        pendingAppLink = TorveAppLinkParser.parse(intent?.data)
+        if (BuildConfig.DEBUG && intent.getBooleanExtra("torveVerboseLogging", false)) {
+            com.torve.platform.TorveRuntimeDebug.verboseLoggingEnabled = true
+        }
+        if (BuildConfig.DEBUG && intent.getBooleanExtra("torveTraceStartup", false)) {
+            com.torve.android.debug.AnrDebugLogger.sampleStartup(filesDir)
+        }
+        pendingAppLink = parseSearchOrAppLink(intent)
         configureTorveEdgeToEdge()
-
-        val logo = TextView(this).apply {
-            text = "TORVE"
-            setTextColor(AndroidColor.WHITE)
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 42f)
-            typeface = Typeface.create("sans-serif-medium", Typeface.BOLD)
-            gravity = Gravity.CENTER
-            letterSpacing = 0.15f
-        }
-        val root = FrameLayout(this).apply {
-            setBackgroundColor(AndroidColor.parseColor("#0D0F14"))
-            addView(logo, FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.MATCH_PARENT,
-                FrameLayout.LayoutParams.MATCH_PARENT,
-            ))
-        }
-        setContentView(root)
-
+        requestNotificationPermission()
         pollForKoinReady()
+    }
+
+    private fun requestNotificationPermission() {
+        if (
+            android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU &&
+            checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) !=
+            android.content.pm.PackageManager.PERMISSION_GRANTED
+        ) {
+            requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 1001)
+        }
     }
 
     private fun pollForKoinReady() {
@@ -170,7 +300,7 @@ class TvMainActivity : AppCompatActivity() {
         if (authEventCollectionStarted) return
         authEventCollectionStarted = true
         activityScope.launch {
-            val authClient: AuthClient = getKoin().get()
+            val authClient = kotlinx.coroutines.withContext(Dispatchers.IO) { getKoin().get<AuthClient>() }
             authClient.authEvents.collectLatest { event ->
                 when (event) {
                     is AuthEvent.SessionExpired -> {
@@ -187,70 +317,65 @@ class TvMainActivity : AppCompatActivity() {
         }
     }
 
-    /**
-     * Single setContent — transitions from placeholder to TvRoot via state flag.
-     * The Compose input handler stays alive throughout, so key events arriving
-     * during TvRoot's first composition are processed normally instead of
-     * causing an ANR from a composition-replacement gap.
-     */
     private fun showComposeContent() {
         com.torve.android.debug.AnrDebugLogger.log("STARTUP setContent BEGIN")
         startAuthEventCollection()
         setContent {
-            var showFullUi by remember { mutableStateOf(false) }
-            var startupMessage by remember { mutableStateOf("Preparing Torve") }
-
-            LaunchedEffect(Unit) {
-                val startedAt = System.currentTimeMillis()
-                startupMessage = "Restoring local cache"
-                withContext(Dispatchers.IO) {
-                    runCatching {
-                        val koin = getKoin()
-                        koin.get<com.torve.db.TorveDatabase>()
-                        koin.get<com.torve.data.auth.AuthClient>().getAuthenticatedUser()
-                        koin.get<com.torve.domain.repository.ChannelRepository>().getPlaylistSummaries()
-                        koin.get<com.torve.presentation.channels.ChannelsViewModel>()
-                        koin.get<com.torve.domain.repository.MetadataRepository>()
-                        koin.get<com.torve.presentation.settings.SettingsViewModel>()
-                    }
+            val settings by androidx.compose.runtime.produceState<com.torve.presentation.settings.SettingsViewModel?>(null) {
+                value = kotlinx.coroutines.withContext(Dispatchers.IO) {
+                    // Load the local account before any profile-scoped screen reads
+                    // its cache. Network session refresh continues independently.
+                    // Otherwise Home first renders guest data and replaces it only
+                    // after the background account bootstrap has finished.
+                    val cachedAccount = getKoin().get<AuthClient>().restoreCachedSessionUser()
+                    android.util.Log.i("TvAuthRestore", "cached_account_restored=${cachedAccount != null}")
+                    com.torve.android.debug.AnrDebugLogger.log("STARTUP local account ready")
+                    getKoin().get()
                 }
-                val elapsed = System.currentTimeMillis() - startedAt
-                if (elapsed < FULL_UI_START_DELAY_MS) {
-                    startupMessage = "Preparing navigation"
-                    delay(FULL_UI_START_DELAY_MS - elapsed)
-                }
-                com.torve.android.debug.AnrDebugLogger.log("STARTUP showFullUi = true")
-                showFullUi = true
             }
-
-            TorveTheme {
-                if (!showFullUi) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .background(Obsidian),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Text(
-                                text = "TORVE",
-                                color = Color.White,
-                                fontSize = 42.sp,
-                                fontWeight = FontWeight.Bold,
-                                letterSpacing = 6.sp,
-                            )
-                            Spacer(Modifier.height(18.dp))
-                            Text(
-                                text = startupMessage,
-                                color = Color.White.copy(alpha = 0.72f),
-                                fontSize = 16.sp,
-                            )
+            val readySettings = settings
+            if (readySettings == null) {
+                androidx.compose.foundation.layout.Box(Modifier.fillMaxWidth())
+                return@setContent
+            }
+            val appearance by readySettings.state.collectAsState()
+            var appliedLanguage by remember { mutableStateOf<com.torve.presentation.settings.AppLanguage?>(null) }
+            LaunchedEffect(appearance.playbackSettingsLoaded, appearance.appLanguage) {
+                // Wait for saved preferences before applying a locale. The default
+                // state must not replace the user's persisted language at startup.
+                if (appearance.playbackSettingsLoaded) {
+                    val previous = appliedLanguage
+                    appliedLanguage = appearance.appLanguage
+                    androidx.appcompat.app.AppCompatDelegate.setApplicationLocales(
+                        androidx.core.os.LocaleListCompat.forLanguageTags(appearance.appLanguage.code),
+                    )
+                    if (previous != null && previous != appearance.appLanguage) {
+                        val preferences = getKoin().get<com.torve.domain.repository.PreferencesRepository>()
+                        kotlinx.coroutines.withTimeoutOrNull(3_000) {
+                            while (preferences.getString(com.torve.presentation.settings.SettingsViewModel.KEY_APP_LANGUAGE) != appearance.appLanguage.name) {
+                                kotlinx.coroutines.delay(25)
+                            }
                         }
+                        getKoin().get<com.torve.presentation.settings.SettingsRefreshNotifier>()
+                            .notifyRefresh(System.currentTimeMillis())
                     }
-                } else {
-                    TvRoot(
-                        appLink = pendingAppLink,
-                        onAppLinkConsumed = { pendingAppLink = null },
+                }
+            }
+            TorveTheme(themeMode = appearance.themeMode) {
+                com.torve.android.ui.community.PersonalAppearanceProvider {
+                com.torve.android.ui.profile.FamilyAppGate {
+                TvRoot(
+                    appLink = pendingAppLink,
+                    onAppLinkConsumed = { pendingAppLink = null },
+                    inputFocusRecoveryNonce = inputFocusRecoveryNonce,
+                )
+                }
+                }
+                if (showAppControlDialog) {
+                    TvAppControlDialog(
+                        onDismiss = { showAppControlDialog = false },
+                        onExit = ::exitTorve,
+                        onRestart = ::restartTorve,
                     )
                 }
             }
@@ -258,14 +383,107 @@ class TvMainActivity : AppCompatActivity() {
         com.torve.android.debug.AnrDebugLogger.log("STARTUP setContent END")
     }
 
+    private fun parseSearchOrAppLink(value: Intent?): TorveAppLink? {
+        if (value?.action == Intent.ACTION_SEARCH) {
+            val query = value.getStringExtra(android.app.SearchManager.QUERY)?.trim()?.take(160).orEmpty()
+            return TorveAppLinkParser.parse(android.net.Uri.parse("https://torve.app/?search=${android.net.Uri.encode(query)}"))
+        }
+        return TorveAppLinkParser.parse(value?.data)
+    }
+
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
-        pendingAppLink = TorveAppLinkParser.parse(intent.data)
+        pendingAppLink = parseSearchOrAppLink(intent)
     }
 
     override fun onDestroy() {
+        cancelAppControlLongBack()
         activityScope.cancel()
         super.onDestroy()
+    }
+}
+
+@Composable
+private fun TvAppControlDialog(
+    onDismiss: () -> Unit,
+    onExit: () -> Unit,
+    onRestart: () -> Unit,
+) {
+    val cancelFocusRequester = remember { FocusRequester() }
+    LaunchedEffect(Unit) {
+        kotlinx.coroutines.delay(80)
+        runCatching { cancelFocusRequester.requestFocus() }
+    }
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false),
+    ) {
+        Surface(
+            modifier = Modifier.widthIn(min = 520.dp, max = 720.dp),
+            shape = RoundedCornerShape(24.dp),
+            color = MaterialTheme.colorScheme.surface,
+            tonalElevation = 10.dp,
+        ) {
+            Column(modifier = Modifier.padding(32.dp)) {
+                Text(
+                    text = stringResource(R.string.tv_app_control_title),
+                    style = MaterialTheme.typography.headlineSmall,
+                )
+                Spacer(Modifier.height(12.dp))
+                Text(
+                    text = stringResource(R.string.tv_app_control_message),
+                    style = MaterialTheme.typography.bodyLarge,
+                )
+                Spacer(Modifier.height(28.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(14.dp, Alignment.End),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    TvAppControlButton(
+                        text = stringResource(R.string.tv_app_control_exit),
+                        onClick = onExit,
+                    )
+                    TvAppControlButton(
+                        text = stringResource(R.string.tv_app_control_restart),
+                        onClick = onRestart,
+                    )
+                    TvAppControlButton(
+                        text = stringResource(R.string.common_cancel),
+                        onClick = onDismiss,
+                        modifier = Modifier.focusRequester(cancelFocusRequester),
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun TvAppControlButton(
+    text: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    var focused by remember { mutableStateOf(false) }
+    val shape = RoundedCornerShape(14.dp)
+    Button(
+        onClick = onClick,
+        modifier = modifier
+            .onFocusChanged { focused = it.isFocused }
+            .scale(if (focused) 1.08f else 1f)
+            .border(
+                width = if (focused) 3.dp else 1.dp,
+                color = if (focused) Snow else MaterialTheme.colorScheme.outlineVariant,
+                shape = shape,
+            ),
+        shape = shape,
+        colors = androidx.compose.material3.ButtonDefaults.buttonColors(
+            containerColor = if (focused) AmberLight else MaterialTheme.colorScheme.surfaceVariant,
+            contentColor = if (focused) Obsidian else MaterialTheme.colorScheme.onSurfaceVariant,
+        ),
+    ) {
+        Text(text)
     }
 }

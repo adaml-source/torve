@@ -24,6 +24,8 @@ import io.ktor.http.isSuccess
 import io.ktor.utils.io.readUTF8Line
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -216,10 +218,19 @@ class AuthClient(
      * Refresh is serialized so only one refresh request can run at a time.
      */
     suspend fun getValidAccessToken(): String? {
-        return authStateMutex.withLock {
+        return authStateMutex.withLock { validAccessTokenLocked() }
+    }
+
+    /** A token and its owner are checked under the same lock as sign-in. */
+    suspend fun getValidAccessTokenForUser(expectedUserId: String): String? = authStateMutex.withLock {
+        if (_authUser.value?.id?.equals(expectedUserId, ignoreCase = true) != true) return@withLock null
+        validAccessTokenLocked().takeIf { _authUser.value?.id?.equals(expectedUserId, ignoreCase = true) == true }
+    }
+
+    private suspend fun validAccessTokenLocked(): String? {
             migrateTokensIfNeededLocked()
             val currentAccessToken = secureStorage.getString(KEY_AUTH_ACCESS_TOKEN)
-                ?: return@withLock if (!secureStorage.getString(KEY_AUTH_REFRESH_TOKEN).isNullOrBlank()) {
+                ?: return if (!secureStorage.getString(KEY_AUTH_REFRESH_TOKEN).isNullOrBlank()) {
                     val refreshResult = refreshTokensLocked()
                     if (refreshResult.success) secureStorage.getString(KEY_AUTH_ACCESS_TOKEN) else null
                 } else {
@@ -229,14 +240,13 @@ class AuthClient(
             val now = Clock.System.now().toEpochMilliseconds()
             if (expiresAt > 0 && now >= expiresAt - REFRESH_BUFFER_MS) {
                 val refreshResult = refreshTokensLocked()
-                return@withLock if (refreshResult.success) {
+                return if (refreshResult.success) {
                     secureStorage.getString(KEY_AUTH_ACCESS_TOKEN)
                 } else {
                     null
                 }
             }
-            currentAccessToken
-        }
+            return currentAccessToken
     }
 
     suspend fun getCurrentUser(): AuthUser? {
@@ -246,6 +256,15 @@ class AuthClient(
         val name = localSettingsRepository.getString(KEY_AUTH_DISPLAY_NAME)
         val verified = localSettingsRepository.getString(KEY_AUTH_IS_VERIFIED)?.toBoolean() ?: false
         return AuthUser(id = id, email = email, displayName = name, isVerified = verified)
+    }
+
+    /** Restore local identity before network refresh. This does not grant a subscription. */
+    @Throws(Exception::class)
+    suspend fun restoreCachedSessionUser(): AuthUser? = authStateMutex.withLock {
+        migrateTokensIfNeededLocked()
+        val user = if (hasStoredSessionLocked()) getCurrentUser()?.takeIf { it.id.isNotBlank() } else null
+        _authUser.value = user
+        user
     }
 
     /**
@@ -533,12 +552,22 @@ class AuthClient(
     /**
      * Attempt to restore a valid session on app startup.
      */
-    suspend fun restoreSession(): Boolean {
-        authStateMutex.withLock {
-            migrateTokensIfNeededLocked()
+    suspend fun restoreSession(): Boolean = authStateMutex.withLock {
+        // A cold start/update must not rotate a still-valid token. Keep the
+        // cached identity through transient network failures; an authoritative
+        // rejection clears the stored session inside validAccessTokenLocked.
+        migrateTokensIfNeededLocked()
+        // Legacy installs may not have persisted an expiry. Validate those
+        // once rather than assuming that an old access token is still valid.
+        val savedExpiry = secureStorage.getString(KEY_TOKEN_EXPIRES_AT)?.toLongOrNull() ?: 0L
+        if (savedExpiry <= 0L && !secureStorage.getString(KEY_AUTH_ACCESS_TOKEN).isNullOrBlank()) {
+            refreshTokensLocked()
+        } else {
+            validAccessTokenLocked()
         }
-        if (!isLoggedIn()) return false
-        return refreshTokens().success
+        val user = if (hasStoredSessionLocked()) getCurrentUser()?.takeIf { it.id.isNotBlank() } else null
+        _authUser.value = user
+        user != null
     }
 
     private suspend fun migrateTokensIfNeededLocked() {
@@ -603,12 +632,16 @@ class AuthClient(
         _authUser.value = null
     }
 
-    private suspend fun refreshTokensLocked(): AuthResult {
+    private suspend fun refreshTokensLocked(): AuthResult = withContext(NonCancellable) {
+        // Refresh tokens are single-use. Once a request can reach the server,
+        // complete its response/persistence even if the originating screen is
+        // cancelled. Otherwise the next launch reuses a revoked old token.
+        // The HTTP client's request/connect timeouts still bound this work.
         val refreshToken = secureStorage.getString(KEY_AUTH_REFRESH_TOKEN)
             ?.takeIf { it.isNotBlank() }
-            ?: return AuthResult(success = false, error = "No refresh token")
+            ?: return@withContext AuthResult(success = false, error = "No refresh token")
 
-        return try {
+        try {
             val device = deviceRegistrationProvider()
             val trustHeaders = clientTrustHeaders()
             val resp = httpClient.post("${baseUrl()}/auth/refresh") {
@@ -624,13 +657,13 @@ class AuthClient(
                 if (shouldInvalidateSession(resp.status)) {
                     invalidateSessionLocked(message)
                 }
-                return AuthResult(success = false, error = message)
+                return@withContext AuthResult(success = false, error = message)
             }
 
             val authResp: AuthResponseDto = resp.body()
             validateAuthResponse(authResp, requireRefreshToken = true)?.let { validationError ->
                 invalidateSessionLocked(validationError.error ?: "Session expired, please log in again")
-                return validationError
+                return@withContext validationError
             }
             persistAuthLocked(authResp)
             authResp.toAuthResult()

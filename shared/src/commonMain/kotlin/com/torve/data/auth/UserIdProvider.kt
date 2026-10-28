@@ -5,8 +5,8 @@ package com.torve.data.auth
  * that needs to filter SQLDelight queries by user id without pulling in the full
  * AuthClient dependency graph.
  *
- * Signed-out reads use an empty string so they don't bleed per-user rows across
- * accounts — rows are written with the actual user id only while authenticated.
+ * Signed-out reads use a sentinel id so they don't bleed per-user rows across
+ * accounts while still allowing local-only state before authentication.
  *
  * The AuthClient is supplied via a lazy provider to break a Koin cycle:
  * AuthClient depends on DeviceLocalSettingsRepository (= PreferencesRepositoryImpl),
@@ -15,6 +15,7 @@ package com.torve.data.auth
  * resolution happens.
  */
 class UserIdProvider(
+    private val activeProfileIdProvider: (String) -> String? = { null },
     private val authClientProvider: () -> AuthClient,
 ) {
     companion object {
@@ -28,6 +29,16 @@ class UserIdProvider(
     /** Current user id, or a non-user sentinel when signed out. */
     fun currentUserId(): String = currentUserIdOrNull() ?: SIGNED_OUT_USER_ID
 
+    fun currentProfileId(): String = activeProfileIdProvider(currentUserId()) ?: "default"
+
+    /** The primary profile retains the original data namespace for an in-place upgrade. */
+    fun currentDataUserId(): String = profileDataUserId(currentUserId(), currentProfileId())
+
+    fun currentDataUserIdOrNull(): String? = currentUserIdOrNull()?.let { profileDataUserId(it, currentProfileId()) }
+
     /** Whether a user is currently signed in. */
     fun isSignedIn(): Boolean = currentUserIdOrNull() != null
 }
+
+internal fun profileDataUserId(accountId: String, profileId: String): String =
+    if (profileId == "default") accountId else "$accountId::profile:$profileId"

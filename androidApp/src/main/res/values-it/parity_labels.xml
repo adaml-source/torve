@@ -1,0 +1,60 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="parity_988391b0226f" formatted="false">Account e profili</string>
+    <string name="parity_35d0f52965cf" formatted="false">Account, abbonamento e dispositivi</string>
+    <string name="parity_f2132dff6155" formatted="false">Avanzate e assistenza</string>
+    <string name="parity_a52ace420f21" formatted="false">Tutti</string>
+    <string name="parity_ed33d641558d" formatted="false">Aspetto e scoperta</string>
+    <string name="parity_427ce653aaf2" formatted="false">Riproduzione automatica, lingue e qualità</string>
+    <string name="parity_76900f1bfd16" formatted="false">Indietro</string>
+    <string name="parity_19766ed6ccb2" formatted="false">Annulla</string>
+    <string name="parity_7cd60470fa91" formatted="false">Raccolte e famiglia.</string>
+    <string name="parity_5a7f92ee336e" formatted="false">Sezioni personalizzate</string>
+    <string name="parity_600a1338102f" formatted="false">Download e spazio</string>
+    <string name="parity_fe3436af86b4" formatted="false">Estensioni</string>
+    <string name="parity_7a1f2a83aca9" formatted="false">Preferiti</string>
+    <string name="parity_8abf7cc95e99" formatted="false">Layout della home</string>
+    <string name="parity_0ce0a77c01e2" formatted="false">Profili famiglia</string>
+    <string name="parity_f8b32f4e92bd" formatted="false">Installati</string>
+    <string name="parity_8e03b3c29d2b" formatted="false">"Jellyfin"</string>
+    <string name="parity_c2d1a4fd7130" formatted="false">Strumenti libreria</string>
+    <string name="parity_dff924b69f96" formatted="false">Film</string>
+    <string name="parity_dcd1d5223f73" formatted="false">Nome</string>
+    <string name="parity_2a0f141811e6" formatted="false">Visione offline e cache</string>
+    <string name="parity_4660a983366f" formatted="false">Attendere…</string>
+    <string name="parity_0e9161011702" formatted="false">Aggiorna</string>
+    <string name="parity_c3812fc4acb8" formatted="false">Rimuovi</string>
+    <string name="parity_49c266baaaa7" formatted="false">Cerca</string>
+    <string name="parity_74a883a037bc" formatted="false">Impostazioni</string>
+    <string name="parity_eed55ce9131e" formatted="false">Sorgenti, tracciamento e server multimediali</string>
+    <string name="parity_9b1f5daf0a3d" formatted="false">Sport</string>
+    <string name="parity_6adcc6960b86" formatted="false">Serie TV</string>
+    <string name="parity_1ec1be5259bb" formatted="false">Tema, lingua, Home e schede</string>
+    <string name="parity_d8b8392e2c54" formatted="false">Riprova</string>
+    <string name="parity_2945457d8b31" formatted="false">Le tue serie</string>
+    <string name="parity_ui_calendar">Calendario</string>
+    <string name="parity_ui_theme">Tema</string>
+    <string name="parity_ui_light">Chiaro</string>
+    <string name="parity_ui_dark">Scuro</string>
+    <string name="parity_3907fa7f8072">Aspetto</string>
+    <string name="parity_58cfee3698e2">Backup e sincronizzazione</string>
+    <string name="parity_4c8906cf76f5">Canali</string>
+    <string name="parity_dc273117482b">Connessioni</string>
+    <string name="parity_0305ac2f7dc1">Fonti di contenuti</string>
+    <string name="parity_92c1cdfdf4cb">Attivato</string>
+    <string name="parity_49ddef66d9c0">"MDBList"</string>
+    <string name="parity_e520a082286b">Nuova chiave API</string>
+    <string name="parity_9349be57d8c8">"NzbDAV"</string>
+    <string name="parity_2db1db07062e">Riproduzione</string>
+    <string name="parity_f9624fd5f7aa">"Plex"</string>
+    <string name="parity_535e52e4a261">Profili</string>
+    <string name="parity_ff862693daa8">Valutazioni</string>
+    <string name="parity_69f8e1392c31">Ricevi credenziali</string>
+    <string name="parity_284580e8af00">"SIMKL"</string>
+    <string name="parity_1509f561f241">Salva</string>
+    <string name="parity_826590b6b7b2">Salva chiave API</string>
+    <string name="parity_22f5ebc3ad3f">URL del server</string>
+    <string name="parity_bfd402b2f6f3">Accedi</string>
+    <string name="parity_5bcf311b19d8">Prova connessione</string>
+    <string name="parity_a83ce4f49068">"Trakt"</string>
+</resources>

@@ -1,5 +1,7 @@
 package com.torve.android.tv.screens.stats
 
+import com.torve.android.tv.components.tvSettingsLabel as localizedUiText
+
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -47,9 +49,9 @@ internal fun TvWatchStatsDrilldownPanel(
     ) {
         item(key = "drilldown_header") {
             TvStatsFocusCard(
-                title = selectedKey?.let(::drilldownTitle) ?: "Drilldown",
-                subtitle = selectedKey?.let { "Focused insight details" }
-                    ?: "Focus a stat card to inspect source and runtime confidence.",
+                title = localizedUiText(selectedKey?.let(::drilldownTitle) ?: "Drilldown"),
+                subtitle = localizedUiText(selectedKey?.let { "Focused insight details" }
+                    ?: "Focus a stat card to inspect source and runtime confidence."),
                 focusRequester = drilldownRequester,
                 left = mainStageRequester,
                 onFocused = { onFocused(drilldownRequester) },
@@ -62,8 +64,8 @@ internal fun TvWatchStatsDrilldownPanel(
         if (selectedKey == null) {
             item(key = "drilldown_empty") {
                 TvStatsFocusCard(
-                    title = "Truthful by design",
-                    subtitle = "Unknown runtimes are labeled and excluded from total watch time.",
+                    title = localizedUiText("Truthful by design"),
+                    subtitle = localizedUiText("Unknown runtimes are labeled and excluded from total watch time."),
                     left = mainStageRequester,
                     onFocused = {},
                     onClick = {},
@@ -73,8 +75,8 @@ internal fun TvWatchStatsDrilldownPanel(
         } else if (selectedKey.startsWith("advanced") && !isPremium) {
             item(key = "drilldown_locked") {
                 TvStatsFocusCard(
-                    title = "Unlock deeper watch insights",
-                    subtitle = "See advanced trends by genre, rating, year, studio, and source.",
+                    title = localizedUiText("Unlock deeper watch insights"),
+                    subtitle = localizedUiText("See advanced trends by genre, rating, year, studio, and source."),
                     meta = "Go Premium",
                     locked = true,
                     left = mainStageRequester,
@@ -97,7 +99,7 @@ internal fun TvWatchStatsDrilldownPanel(
                         when (selectedKey) {
                             "advanced_genres" -> {
                                 if (summary.advanced.genreGroups.isEmpty()) {
-                                    TvStatsMetricLine("Unavailable", "No metadata")
+                                    TvStatsMetricLine(localizedUiText("Unavailable"), "No metadata")
                                 } else {
                                     summary.advanced.genreGroups.take(6).forEach {
                                         TvStatsMetricLine(
@@ -109,7 +111,7 @@ internal fun TvWatchStatsDrilldownPanel(
                             }
                             "advanced_ratings" -> {
                                 if (summary.advanced.ratingDistribution.isEmpty()) {
-                                    TvStatsMetricLine("Unavailable", "No rating data")
+                                    TvStatsMetricLine(localizedUiText("Unavailable"), "No rating data")
                                 } else {
                                     summary.advanced.ratingDistribution.take(4).forEach {
                                         TvStatsMetricLine(
@@ -126,24 +128,24 @@ internal fun TvWatchStatsDrilldownPanel(
 
             item(key = "drilldown_totals") {
                 TvStatsFocusCard(
-                    title = "Current totals",
+                    title = localizedUiText("Current totals"),
                     subtitle = WatchStatsUiText.formatDuration(summary.totalWatchMs),
                     left = mainStageRequester,
                     onFocused = {},
                     onClick = {},
                     modifier = Modifier.fillMaxWidth(),
                 ) {
-                    TvStatsMetricLine("Completed movies", summary.completedMovies.toString())
-                    TvStatsMetricLine("Completed episodes", summary.completedEpisodes.toString())
-                    TvStatsMetricLine("Partial sessions", summary.partialCount.toString())
-                    TvStatsMetricLine("Measured", WatchStatsUiText.formatDuration(summary.measuredWatchMs))
-                    TvStatsMetricLine("Estimated", WatchStatsUiText.formatDuration(summary.estimatedWatchMs))
+                    TvStatsMetricLine(localizedUiText("Completed movies"), summary.completedMovies.toString())
+                    TvStatsMetricLine(localizedUiText("Completed episodes"), summary.completedEpisodes.toString())
+                    TvStatsMetricLine(localizedUiText("Partial sessions"), summary.partialCount.toString())
+                    TvStatsMetricLine(localizedUiText("Measured"), WatchStatsUiText.formatDuration(summary.measuredWatchMs))
+                    TvStatsMetricLine(localizedUiText("Estimated"), WatchStatsUiText.formatDuration(summary.estimatedWatchMs))
                 }
             }
 
             item(key = "drilldown_source") {
                 TvStatsFocusCard(
-                    title = "Source split",
+                    title = localizedUiText("Source split"),
                     left = mainStageRequester,
                     onFocused = {},
                     onClick = {},
@@ -162,7 +164,7 @@ internal fun TvWatchStatsDrilldownPanel(
 
             item(key = "drilldown_confidence") {
                 TvStatsFocusCard(
-                    title = "Runtime confidence",
+                    title = localizedUiText("Runtime confidence"),
                     left = mainStageRequester,
                     onFocused = {},
                     onClick = {},
@@ -182,7 +184,7 @@ internal fun TvWatchStatsDrilldownPanel(
 
         item(key = "drilldown_recent_label") {
             Text(
-                text = "Recent activity",
+                text = localizedUiText("Recent activity"),
                 style = MaterialTheme.typography.labelLarge,
                 color = Ash,
                 fontWeight = FontWeight.SemiBold,

@@ -41,9 +41,12 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import com.torve.desktop.adult.AdultModePreferences
 import com.torve.desktop.adult.NewznabClient
+import com.torve.desktop.adult.NewznabCategory
 import com.torve.desktop.adult.NewznabItem
 import com.torve.desktop.adult.NzbBrowseStateHolder
 import com.torve.desktop.download.DesktopDownloadManager
+import com.torve.desktop.diagnostics.DiagnosticsRedactor
+import com.torve.desktop.launch.launchGuardLog
 import com.torve.domain.nzb.NzbResolver
 import com.torve.desktop.ui.components.TorveBanner
 import com.torve.desktop.ui.components.TorveBannerTone
@@ -75,7 +78,9 @@ import kotlinx.coroutines.withContext
  * separated `cat=` list, so combining them is a one-line concat.
  */
 private data class AdultCategoryPreset(val id: String, val label: String)
+private const val ADULT_PARENT_CATEGORY = "6000"
 private val ADULT_CATEGORY_PRESETS = listOf(
+    AdultCategoryPreset(ADULT_PARENT_CATEGORY, "All"),
     AdultCategoryPreset("6010", "Movies"),
     AdultCategoryPreset("6020", "DVD"),
     AdultCategoryPreset("6040", "x264"),
@@ -83,6 +88,9 @@ private val ADULT_CATEGORY_PRESETS = listOf(
     AdultCategoryPreset("6060", "Imageset"),
     AdultCategoryPreset("6070", "Other"),
 )
+private val ADULT_LEAF_CATEGORY_IDS = ADULT_CATEGORY_PRESETS
+    .map { it.id }
+    .filterNot { it == ADULT_PARENT_CATEGORY }
 
 @Composable
 fun V2AdultPage(
@@ -110,19 +118,21 @@ fun V2AdultPage(
     // → IndexerUrlResolver returns the canonical URL. If they pick
     // "custom" they typed the URL into Panda already.
     var selectedCategories by remember {
-        mutableStateOf(
-            saved.selectedCategories.takeIf { it.isNotEmpty() }
-                ?: AdultModePreferences.getCategory()
-                    .split(',')
-                    .map { it.trim() }
-                    .filter { it.isNotBlank() }
-                    .toSet(),
-        )
+        val knownCategoryIds = ADULT_CATEGORY_PRESETS.map { it.id }.toSet()
+        val restored = saved.selectedCategories.takeIf { it.isNotEmpty() }
+            ?: AdultModePreferences.getCategory()
+                .split(',')
+                .map { it.trim() }
+                .filter { it.isNotBlank() }
+                .toSet()
+        val cleaned = restored.filter { it in knownCategoryIds }.toSet()
+        mutableStateOf(if (ADULT_PARENT_CATEGORY in cleaned) setOf(ADULT_PARENT_CATEGORY) else cleaned)
     }
     var query by remember { mutableStateOf(saved.query) }
     var items by remember { mutableStateOf<List<NewznabItem>>(saved.items) }
     var loading by remember { mutableStateOf(false) }
     var errorText by remember { mutableStateOf<String?>(saved.errorText) }
+    var discoveredAdultCategories by remember { mutableStateOf<List<NewznabCategory>>(emptyList()) }
     val configured = indexerUrl.isNotBlank() && indexerApiKey.isNotBlank()
     // guid → status text for the row that's currently resolving via TorBox
     var resolveStatus by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
@@ -138,29 +148,85 @@ fun V2AdultPage(
      * otherwise a search like "blue" against an empty selection would
      * miss every release that lives outside Movies (6010).
      */
-    fun activeCategoryParam(): String =
-        selectedCategories.takeIf { it.isNotEmpty() }
-            ?.joinToString(",")
-            ?: ADULT_CATEGORY_PRESETS.joinToString(",") { it.id }
+    fun categoryParamFor(categories: Set<String>): String =
+        if (categories.isEmpty() || ADULT_PARENT_CATEGORY in categories) {
+            ADULT_LEAF_CATEGORY_IDS.joinToString(",")
+        } else {
+            categories.joinToString(",")
+        }
+
+    fun activeCategoryParam(): String = categoryParamFor(selectedCategories)
+    fun staticAllCategoryParam(): String = ADULT_LEAF_CATEGORY_IDS.joinToString(",")
+    fun discoveredCategoryParam(): String =
+        discoveredAdultCategories.map { it.id }.distinct().joinToString(",")
+    fun playableNzbUrl(raw: String): String {
+        val decoded = raw
+            .replace("&amp;", "&")
+            .replace("&lt;", "<")
+            .replace("&gt;", ">")
+            .replace("&quot;", "\"")
+            .replace("&#39;", "'")
+            .trim()
+        val absolute = when {
+            decoded.startsWith("http://", ignoreCase = true) ||
+                decoded.startsWith("https://", ignoreCase = true) -> decoded
+            decoded.startsWith("/") -> indexerUrl.trimEnd('/') + decoded
+            else -> indexerUrl.trimEnd('/') + "/" + decoded
+        }
+        return absolute
+            .replace("https://scenenzbs.com", "https://treasure-maps.com", ignoreCase = true)
+            .replace("http://scenenzbs.com", "https://treasure-maps.com", ignoreCase = true)
+    }
+
+    suspend fun loadItemsForCategoryParam(cat: String): List<NewznabItem> =
+        withContext(Dispatchers.IO) {
+            if (query.isBlank()) {
+                newznab.browseAllPages(indexerUrl, indexerApiKey, cat, maxItems = 1000)
+            } else {
+                newznab.searchAllPages(indexerUrl, indexerApiKey, cat, query.trim(), maxItems = 1000)
+            }
+        }
+
+    suspend fun refreshDiscoveredAdultCategories(): List<NewznabCategory> =
+        withContext(Dispatchers.IO) {
+            newznab.adultCategories(indexerUrl, indexerApiKey)
+        }.also { discoveredAdultCategories = it }
 
     suspend fun reload() {
         loading = true
         errorText = null
-        val cat = activeCategoryParam()
+        val requestedCat = activeCategoryParam()
+        val allSelected = selectedCategories.isEmpty() || ADULT_PARENT_CATEGORY in selectedCategories
         try {
+            val discovered = if (allSelected || discoveredAdultCategories.isEmpty()) {
+                refreshDiscoveredAdultCategories()
+            } else {
+                discoveredAdultCategories
+            }
+            val capsCat = discovered.map { it.id }.distinct().joinToString(",")
+            val primaryCat = if (allSelected && capsCat.isNotBlank()) capsCat else requestedCat
             // Pull up to 1,000 items by paginating the indexer 100-at-a-
             // time. Newznab caps individual responses at ~100, so without
             // explicit pagination the user only ever saw the freshest
             // page. Run on IO so the UI stays responsive during paging.
-            items = withContext(Dispatchers.IO) {
-                if (query.isBlank()) {
-                    newznab.browseAllPages(indexerUrl, indexerApiKey, cat, maxItems = 1000)
-                } else {
-                    newznab.searchAllPages(indexerUrl, indexerApiKey, cat, query.trim(), maxItems = 1000)
+            items = loadItemsForCategoryParam(primaryCat)
+                .ifEmpty {
+                    if (!allSelected && capsCat.isNotBlank() && capsCat != primaryCat) {
+                        loadItemsForCategoryParam(capsCat)
+                    } else {
+                        emptyList()
+                    }
                 }
-            }
+                .ifEmpty {
+                    val allLeafCategories = staticAllCategoryParam()
+                    if (primaryCat == allLeafCategories) emptyList()
+                    else loadItemsForCategoryParam(allLeafCategories)
+                }
             if (items.isEmpty() && configured) {
-                errorText = "Indexer returned 0 results. Check the selected categories."
+                val discoveredSummary = discovered.takeIf { it.isNotEmpty() }
+                    ?.joinToString { "${it.name} (${it.id})" }
+                    ?: "no adult/XXX categories in caps"
+                errorText = "Indexer returned 0 results. Tried categories $primaryCat. Caps: $discoveredSummary."
             }
         } catch (t: Throwable) {
             errorText = t.message ?: "Indexer call failed."
@@ -225,12 +291,12 @@ fun V2AdultPage(
                             color = colors.textPrimary,
                         )
                         Text(
-                            text = "Direct in-app playback needs a download client. In Panda, set Download client = TorBox (cloud) or enable Usenet with an NzbDAV integration.",
+                            text = "Direct in-app playback needs a download client. Open streaming-source setup and choose TorBox (cloud), or enable Usenet with an NzbDAV integration.",
                             style = MaterialTheme.typography.bodySmall,
                             color = colors.textSecondary,
                         )
                         TorvePrimaryButton(
-                            text = ds("Open Panda setup"),
+                            text = ds("Open streaming setup"),
                             onClick = onOpenPandaSetup,
                         )
                     }
@@ -251,12 +317,15 @@ fun V2AdultPage(
                         text = "${preset.label} · ${preset.id}",
                         selected = selected,
                         onClick = {
-                            selectedCategories = if (selected) {
+                            val nextCategories = if (selected) {
                                 selectedCategories - preset.id
+                            } else if (preset.id == ADULT_PARENT_CATEGORY) {
+                                setOf(ADULT_PARENT_CATEGORY)
                             } else {
-                                selectedCategories + preset.id
+                                (selectedCategories - ADULT_PARENT_CATEGORY) + preset.id
                             }
-                            AdultModePreferences.setCategory(activeCategoryParam())
+                            selectedCategories = nextCategories
+                            AdultModePreferences.setCategory(categoryParamFor(nextCategories))
                             if (configured) scope.launch { reload() }
                         },
                     )
@@ -373,31 +442,31 @@ fun V2AdultPage(
                     Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         if (indexerSecretsRedacted) {
                             Text(
-                                text = ds("Panda credentials are masked"),
+                                text = ds("Indexer credentials need attention"),
                                 style = MaterialTheme.typography.titleSmall,
                                 fontWeight = FontWeight.SemiBold,
                                 color = colors.textPrimary,
                             )
                             Text(
-                                text = "Panda has an indexer configured but won't share the API key with this device because the management token isn't cached locally. Open Panda setup → Usenet step → re-paste the indexer API key (and TorBox key if needed) → Update Panda. The Adult page picks them up automatically after that.",
+                                text = "This device cannot read the saved indexer key. Open streaming setup → Usenet, re-enter the indexer API key (and TorBox key if needed), then save the connections. Adult results will update automatically.",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = colors.textSecondary,
                             )
                         } else {
                             Text(
-                                text = ds("No NZB indexer configured in Panda"),
+                                text = ds("No NZB indexer connected"),
                                 style = MaterialTheme.typography.titleSmall,
                                 fontWeight = FontWeight.SemiBold,
                                 color = colors.textPrimary,
                             )
                             Text(
-                                text = "Add an indexer (scenenzbs, NZBgeek, etc.) under Settings → Add-ons → Panda → Configure → Usenet step. The Adult page reads its credentials directly from Panda's config.",
+                                text = "Add an indexer such as SceneNZBs or NZBgeek under Settings → Connections → Streaming sources → Usenet.",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = colors.textSecondary,
                             )
                         }
                         TorvePrimaryButton(
-                            text = ds("Open Panda setup"),
+                            text = ds("Open streaming setup"),
                             onClick = onOpenPandaSetup,
                         )
                     }
@@ -440,10 +509,9 @@ fun V2AdultPage(
                                 // ~30s while the NZB downloads from the indexer.
                                 if (resolveStatus[rowKey] != null) return@NewznabRow
                                 resolveStatus = resolveStatus + (rowKey to "Starting...")
-                                println("TORVE ADULT ┃ play clicked: ${item.title}")
                                 scope.launch {
                                     val res = withContext(Dispatchers.IO) {
-                                        resolver.resolve(item.nzbUrl) { msg ->
+                                        resolver.resolve(playableNzbUrl(item.nzbUrl)) { msg ->
                                             resolveStatus = resolveStatus + (rowKey to msg)
                                         }
                                     }
@@ -456,19 +524,22 @@ fun V2AdultPage(
                                 }
                             },
                             onDownload = downloadManager?.let { dm ->
-                                {
+                                download@{
                                     // Same resolve path as Play but instead of
                                     // streaming we hand the resolved URL to
                                     // DesktopDownloadManager. queueNzbDownload
                                     // gates on the per-surface folder being
                                     // configured; if not, surface a banner
                                     // that routes to Settings.
-                                    if (resolveStatus[rowKey] != null) return@let
+                                    if (resolveStatus[rowKey] != null) return@download
+                                    if (!dm.isDownloadFolderConfigured(DesktopDownloadManager.NzbDownloadSurface.ADULT)) {
+                                        needsFolderPrompt = "Set an Adult download folder before downloading."
+                                        return@download
+                                    }
                                     resolveStatus = resolveStatus + (rowKey to "Starting...")
-                                    println("TORVE ADULT ┃ download clicked: ${item.title}")
                                     scope.launch {
                                         val res = withContext(Dispatchers.IO) {
-                                            resolver.resolve(item.nzbUrl) { msg ->
+                                            resolver.resolve(playableNzbUrl(item.nzbUrl)) { msg ->
                                                 resolveStatus = resolveStatus + (rowKey to msg)
                                             }
                                         }
@@ -482,9 +553,17 @@ fun V2AdultPage(
                                             )
                                             if (outcome is DesktopDownloadManager.QueueResult.NeedsFolder) {
                                                 needsFolderPrompt = "Set an Adult download folder before downloading."
+                                            } else if (outcome is DesktopDownloadManager.QueueResult.Error) {
+                                                resolveStatus = resolveStatus + (rowKey to outcome.message)
                                             }
                                         }.onFailure { t ->
-                                            resolveStatus = resolveStatus + (rowKey to (t.message ?: "Unknown error"))
+                                            val message = t.message ?: "Unknown error"
+                                            resolveStatus = resolveStatus + (rowKey to message)
+                                            launchGuardLog(
+                                                "adult_download_resolve_failed",
+                                                "type" to t::class.simpleName,
+                                                "message" to DiagnosticsRedactor.redact(message).take(300),
+                                            )
                                         }
                                     }
                                 }
@@ -566,7 +645,7 @@ private fun NewznabRow(
             )
             if (showReconfigure) {
                 TorvePrimaryButton(
-                    text = ds("Reconfigure Panda"),
+                    text = ds("Reconfigure streaming sources"),
                     onClick = onReconfigure,
                 )
             } else {

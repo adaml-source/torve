@@ -20,14 +20,7 @@ import com.torve.domain.player.TrackDescription
  * language metadata are never treated as matching a preference.
  */
 internal fun subtitleLanguageMatches(trackLanguage: String?, preferredLowercased: String): Boolean {
-    val track = trackLanguage?.trim()?.lowercase()?.takeIf { it.isNotEmpty() } ?: return false
-    if (track == preferredLowercased) return true
-    val trackRoot = track.substringBefore('-').substringBefore('_')
-    val preferredRoot = preferredLowercased.substringBefore('-').substringBefore('_')
-    if (trackRoot == preferredRoot) return true
-    if (trackRoot.length == 2 && preferredRoot.startsWith(trackRoot)) return true
-    if (preferredRoot.length == 2 && trackRoot.startsWith(preferredRoot)) return true
-    return false
+    return com.torve.domain.player.PlaybackTrackSelection.languageMatches(trackLanguage, preferredLowercased)
 }
 
 /**
@@ -50,26 +43,11 @@ internal fun selectPreferredSubtitle(
     audioFallbackLanguage: String?,
     selectTrack: (Int) -> Unit,
 ): Boolean {
-    if (subtitleTracks.isEmpty()) return false
-    if (perContentTag != null) {
-        subtitleTracks.firstOrNull { subtitleTrackPreferenceTag(it) == perContentTag }?.let { track ->
-            if (!track.isSelected) selectTrack(track.id)
-            return true
-        }
-    }
-    if (preferredSubtitleLanguage != null) {
-        subtitleTracks.firstOrNull { subtitleLanguageMatches(it.language, preferredSubtitleLanguage) }?.let { track ->
-            if (!track.isSelected) selectTrack(track.id)
-            return true
-        }
-    }
-    if (audioFallbackLanguage != null) {
-        subtitleTracks.firstOrNull { subtitleLanguageMatches(it.language, audioFallbackLanguage) }?.let { track ->
-            if (!track.isSelected) selectTrack(track.id)
-            return true
-        }
-    }
-    return false
+    val id = com.torve.domain.player.PlaybackTrackSelection.subtitleId(
+        subtitleTracks, perContentTag, preferredSubtitleLanguage, audioFallbackLanguage,
+    ) ?: return false
+    if (subtitleTracks.none { it.id == id && it.isSelected }) selectTrack(id)
+    return true
 }
 
 /**
@@ -78,9 +56,5 @@ internal fun selectPreferredSubtitle(
  * sync so that stored tags from a prior session still match.
  */
 internal fun subtitleTrackPreferenceTag(track: TrackDescription): String {
-    return track.language
-        ?.trim()
-        ?.lowercase()
-        ?.takeIf { it.isNotEmpty() }
-        ?: track.label.trim().lowercase().take(48)
+    return com.torve.domain.player.PlaybackTrackSelection.preferenceTag(track.language, track.label)
 }

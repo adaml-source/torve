@@ -2,6 +2,7 @@ package com.torve.presentation.tvhome
 
 import com.torve.domain.model.EnrichedChannel
 import com.torve.domain.model.MediaItem
+import com.torve.domain.model.dedupeByStableKey
 import com.torve.domain.providerhealth.ProviderHealthEntry
 import com.torve.domain.providerhealth.ProviderHealthStatus
 import com.torve.domain.sourceavailability.SourceAvailabilityRecord
@@ -46,11 +47,20 @@ object TvHomeRailsBuilder {
         availability: Map<Int, SourceAvailabilityRecord>,
     ): List<MediaItem> {
         if (candidates.isEmpty() || availability.isEmpty()) return emptyList()
-        return candidates.filter { item ->
-            val tmdbId = item.tmdbId ?: return@filter false
-            val record = availability[tmdbId] ?: return@filter false
-            record.signals.any { it.isPlaybackPath() }
-        }
+        return candidates
+            .filter { item ->
+                val tmdbId = item.tmdbId ?: return@filter false
+                val record = availability[tmdbId] ?: return@filter false
+                record.signals.any { it.isPlaybackPath() }
+            }
+            // Home candidates are merged from Continue Watching, Watchlist,
+            // Recommendations, and Recently Watched. Those repositories can
+            // represent the same TMDB title with different local IDs, so an
+            // ID-only distinct operation still renders duplicate posters.
+            // MediaItem's stable key is type + TMDB ID (with local ID only as
+            // a fallback), which preserves caller order while merging any
+            // useful metadata carried by later copies.
+            .dedupeByStableKey()
     }
 
     /**
@@ -81,26 +91,62 @@ object TvHomeRailsBuilder {
      */
     fun providerBanner(rows: List<ProviderHealthEntry>): TvProviderBanner? {
         if (rows.isEmpty()) return null
-        val red = rows.count { it.status == ProviderHealthStatus.RED }
-        val yellow = rows.count { it.status == ProviderHealthStatus.YELLOW }
+        val redRows = rows.filter { it.status == ProviderHealthStatus.RED }
+        val yellowRows = rows.filter { it.status == ProviderHealthStatus.YELLOW }
         return when {
-            red > 0 -> TvProviderBanner(
+            redRows.isNotEmpty() -> TvProviderBanner(
                 tone = TvProviderBannerTone.ERROR,
-                title = if (red == 1) "1 provider needs attention" else "$red providers need attention",
-                description = "Browsing keeps working. Open Settings to fix or transfer credentials.",
-                redCount = red,
-                yellowCount = yellow,
+                title = buildProviderTitle(
+                    rows = redRows,
+                    singular = "1 provider needs attention",
+                    plural = "providers need attention",
+                ),
+                description = buildProviderDescription(redRows),
+                redCount = redRows.size,
+                yellowCount = yellowRows.size,
             )
-            yellow > 0 -> TvProviderBanner(
+            yellowRows.isNotEmpty() -> TvProviderBanner(
                 tone = TvProviderBannerTone.WARNING,
-                title = if (yellow == 1) "1 provider degraded" else "$yellow providers degraded",
-                description = "Some sources may be slower or partially configured.",
+                title = buildProviderTitle(
+                    rows = yellowRows,
+                    singular = "1 provider degraded",
+                    plural = "providers degraded",
+                ),
+                description = buildProviderDescription(yellowRows),
                 redCount = 0,
-                yellowCount = yellow,
+                yellowCount = yellowRows.size,
             )
             else -> null
         }
     }
+
+    private fun buildProviderTitle(
+        rows: List<ProviderHealthEntry>,
+        singular: String,
+        plural: String,
+    ): String {
+        val countLabel = if (rows.size == 1) singular else "${rows.size} $plural"
+        return "$countLabel: ${rows.joinToString(", ") { it.bannerLabel() }}"
+    }
+
+    private fun buildProviderDescription(rows: List<ProviderHealthEntry>): String {
+        val details = rows.joinToString(" • ") { row ->
+            val reason = row.message
+                ?.trim()
+                ?.trimEnd('.')
+                ?.takeIf { it.isNotEmpty() }
+                ?: "No current health details"
+            "${row.bannerLabel()}: $reason"
+        }
+        return "$details. Press OK to recheck in Settings > About > Provider health."
+    }
+
+    private fun ProviderHealthEntry.bannerLabel(): String =
+        if (providerKey == "automation:admin") {
+            "ARR stack (Sonarr/Radarr/etc.)"
+        } else {
+            label
+        }
 
     /**
      * On-Now / Live-TV rail: every [EnrichedChannel] that has a

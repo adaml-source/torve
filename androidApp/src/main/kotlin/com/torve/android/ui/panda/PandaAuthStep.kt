@@ -1,5 +1,7 @@
 package com.torve.android.ui.panda
 
+import com.torve.android.ui.community.parityLabel as localizedUiText
+
 import android.content.Intent
 import android.net.Uri
 import androidx.compose.foundation.background
@@ -15,6 +17,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -23,6 +26,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.VpnKey
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -39,6 +43,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -77,13 +84,8 @@ fun PandaAuthStep(
             .fillMaxSize()
             .verticalScroll(rememberScrollState()),
     ) {
-        Text(
-            provider?.let { stringResource(R.string.panda_setup_auth_title, it.name) }
-                ?: stringResource(R.string.panda_setup_auth_choose_title),
-            style = MaterialTheme.typography.headlineSmall,
-            fontWeight = FontWeight.Bold,
-            color = Snow,
-        )
+        Text(stringResource(R.string.panda_connections_title),
+            style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold, color = Snow)
         Spacer(Modifier.height(6.dp))
         Text(
             stringResource(R.string.panda_setup_auth_inline_hint),
@@ -92,43 +94,30 @@ fun PandaAuthStep(
         )
         Spacer(Modifier.height(16.dp))
 
+        PandaButton(
+            onClick = { viewModel.selectSetupMode(com.torve.presentation.panda.PandaSetupMode.USENET_ONLY) },
+            modifier = Modifier.fillMaxWidth().then(entryFocusRequester?.let { Modifier.focusRequester(it) } ?: Modifier),
+        ) { Text(stringResource(R.string.panda_setup_type_usenet_title)) }
+        Spacer(Modifier.height(12.dp))
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             state.providers.filter { it.id != "none" }.forEach { item ->
                 val selected = item.id == provider?.id
-                val connected = state.debridApiKeys[item.id]?.isNotBlank() == true
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(12.dp))
-                        .background(if (selected) Amber.copy(alpha = 0.15f) else Gunmetal)
-                        .clickable { viewModel.selectProvider(item) }
-                        .padding(14.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Column(Modifier.weight(1f)) {
-                        Text(item.name, color = Snow, fontWeight = FontWeight.SemiBold)
-                        Text(
-                            if (connected) "API key saved" else "Not connected",
-                            color = Silver,
-                            style = MaterialTheme.typography.bodySmall,
-                        )
-                    }
-                    if (connected) {
-                        Icon(Icons.Default.Check, null, tint = Amber, modifier = Modifier.size(18.dp))
-                    }
-                }
-
+                val providerCardRequester = remember(item.id) { FocusRequester() }
+                PandaChoiceCard(
+                    title = item.name,
+                    description = state.debridStatusLabel(item.id),
+                    selected = selected,
+                    onClick = { viewModel.selectProvider(item) },
+                    modifier = Modifier.focusRequester(providerCardRequester),
+                )
                 if (selected) {
-                    SelectedProviderAuthControls(
-                        state = state,
-                        viewModel = viewModel,
-                        provider = item,
-                        entryFocusRequester = entryFocusRequester,
-                    )
+                    SelectedProviderAuthControls(state, viewModel, item,
+                        providerCardRequester = providerCardRequester)
                 }
             }
         }
     }
+
 }
 
 @Composable
@@ -137,64 +126,102 @@ private fun SelectedProviderAuthControls(
     viewModel: PandaSetupViewModel,
     provider: PandaProvider,
     entryFocusRequester: FocusRequester? = null,
+    providerCardRequester: FocusRequester,
 ) {
     val supportsOAuth = "oauth" in provider.authMethods
-    val providerConnected = state.debridApiKeys[provider.id]?.isNotBlank() == true ||
-        (state.selectedProvider?.id == provider.id && state.debridApiKey.isNotBlank())
+    val providerConnected = state.hasDebridCredential(provider.id)
+    val providerVerified = state.isDebridVerified(provider.id)
+    val providerEnabled = state.isDebridEnabled(provider.id)
+    val reauthenticateRequester = remember(provider.id, ProviderActionId.REAUTHENTICATE) { FocusRequester() }
+    val disconnectRequester = remember(provider.id, ProviderActionId.DISCONNECT) { FocusRequester() }
+    val enabledToggleRequester = remember(provider.id, ProviderActionId.ENABLED_TOGGLE) { FocusRequester() }
+    val effectiveReauthenticateRequester = entryFocusRequester ?: reauthenticateRequester
+    var pendingAction by remember(provider.id) { mutableStateOf<ProviderActionId?>(null) }
+
+    LaunchedEffect(providerConnected, providerEnabled, pendingAction) {
+        val action = pendingAction ?: return@LaunchedEffect
+        withFrameNanos { }
+        val target = when {
+            action == ProviderActionId.ENABLED_TOGGLE && providerConnected -> enabledToggleRequester
+            action == ProviderActionId.REAUTHENTICATE && providerConnected -> effectiveReauthenticateRequester
+            else -> providerCardRequester
+        }
+        runCatching { target.requestFocus() }
+        pendingAction = null
+    }
 
     Column(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(12.dp))
             .background(Gunmetal.copy(alpha = 0.72f))
-            .border(1.dp, Amber.copy(alpha = 0.35f), RoundedCornerShape(12.dp))
-            .padding(14.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp),
+            .padding(horizontal = 10.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         if (providerConnected) {
-            Column(
+            Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(12.dp))
                     .background(Amber.copy(alpha = 0.15f))
-                    .padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(14.dp),
+                    .padding(horizontal = 10.dp, vertical = 7.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Default.Check, null, tint = Amber, modifier = Modifier.size(24.dp))
-                    Spacer(Modifier.width(12.dp))
-                    Column {
-                        Text(
-                            stringResource(R.string.panda_setup_auth_connected),
-                            style = MaterialTheme.typography.bodyLarge,
-                            fontWeight = FontWeight.SemiBold,
-                            color = Amber,
-                        )
-                        if (state.existingCredentialDetected) {
-                            Text(
-                                "Using existing ${provider.name} credentials",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = Silver,
-                            )
-                        }
-                    }
-                }
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                ) {
-                    FocusRingOutlinedButton(
-                        text = stringResource(R.string.storage_reauth_action),
-                        onClick = { viewModel.reconnectSelectedDebrid() },
-                        modifier = Modifier.weight(1f),
-                        entryFocusRequester = entryFocusRequester,
-                    )
-                    FocusRingOutlinedButton(
-                        text = stringResource(R.string.common_disconnect),
-                        onClick = { viewModel.disconnectSelectedDebrid() },
-                        modifier = Modifier.weight(1f),
+                Icon(if (providerVerified) Icons.Default.Check else Icons.Default.VpnKey,
+                    null, tint = Amber, modifier = Modifier.size(18.dp))
+                Text(
+                    state.debridStatusLabel(provider.id),
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = Amber,
+                    modifier = Modifier.weight(1f),
+                )
+                if (state.existingCredentialDetected) {
+                    Text(
+                        localizedUiText("Existing credentials"),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Silver,
                     )
                 }
+            }
+            PandaProviderAction(
+                text = localizedUiText(if (state.authLoading) "Checking connection…" else "Check connection"),
+                onClick = { viewModel.validateApiKey() },
+                modifier = Modifier.fillMaxWidth(),
+                enabled = !state.authLoading && state.apiKeyInput.isNotBlank(),
+            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                PandaProviderAction(
+                    text = stringResource(R.string.storage_reauth_action),
+                    onClick = {
+                        pendingAction = ProviderActionId.REAUTHENTICATE
+                        viewModel.reconnectSelectedDebrid()
+                    },
+                    modifier = Modifier.weight(1f),
+                    entryFocusRequester = effectiveReauthenticateRequester,
+                )
+                PandaProviderAction(
+                    text = stringResource(R.string.common_disconnect),
+                    onClick = {
+                        pendingAction = ProviderActionId.DISCONNECT
+                        viewModel.disconnectSelectedDebrid()
+                    },
+                    modifier = Modifier.weight(1f),
+                    entryFocusRequester = disconnectRequester,
+                )
+                PandaProviderAction(
+                    text = localizedUiText(if (providerEnabled) "Disable for use" else "Enable for use"),
+                    onClick = {
+                        pendingAction = ProviderActionId.ENABLED_TOGGLE
+                        viewModel.setDebridProviderEnabled(provider.id, !providerEnabled)
+                    },
+                    modifier = Modifier.weight(1.2f),
+                    entryFocusRequester = enabledToggleRequester,
+                )
             }
         }
 
@@ -205,13 +232,13 @@ private fun SelectedProviderAuthControls(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    FocusRingFilterChip(
+                    PandaAuthMethodChip(
                         selected = state.authMethod == "oauth",
                         onClick = { viewModel.setAuthMethod("oauth") },
                         label = stringResource(R.string.panda_setup_auth_oauth),
                         entryFocusRequester = entryFocusRequester,
                     )
-                    FocusRingFilterChip(
+                    PandaAuthMethodChip(
                         selected = state.authMethod == "apikey",
                         onClick = { viewModel.setAuthMethod("apikey") },
                         label = stringResource(R.string.panda_setup_auth_apikey),
@@ -231,77 +258,39 @@ private fun SelectedProviderAuthControls(
         }
 
         state.error?.let { error ->
-            Text(error, color = Ruby, style = MaterialTheme.typography.bodySmall)
+            Text(localizedUiText(error), color = Ruby, style = MaterialTheme.typography.bodySmall)
         }
     }
 }
 
 @Composable
-private fun FocusRingOutlinedButton(
+private fun PandaProviderAction(
     text: String,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     entryFocusRequester: FocusRequester? = null,
+    enabled: Boolean = true,
 ) {
-    val interactionSource = remember { MutableInteractionSource() }
-    val isFocused by interactionSource.collectIsFocusedAsState()
-    val shape = RoundedCornerShape(12.dp)
-    OutlinedButton(
-        onClick = onClick,
-        modifier = modifier
-            .then(entryFocusRequester?.let { Modifier.focusRequester(it) } ?: Modifier)
-            .clip(shape)
-            .border(
-                width = if (isFocused) 2.dp else 1.dp,
-                color = if (isFocused) Amber else Steel.copy(alpha = 0.45f),
-                shape = shape,
-            ),
-        shape = shape,
-        border = null,
-        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp),
-        interactionSource = interactionSource,
-    ) {
-        Text(
-            text = text,
-            color = if (isFocused) Amber else Snow,
-            fontWeight = FontWeight.SemiBold,
-            fontSize = 12.sp,
-            maxLines = 1,
-            softWrap = false,
-            overflow = TextOverflow.Clip,
-        )
+    PandaButton(onClick, modifier.then(entryFocusRequester?.let { Modifier.focusRequester(it) } ?: Modifier), enabled = enabled) {
+        Text(text, fontWeight = FontWeight.SemiBold, fontSize = 12.sp, maxLines = 2)
     }
 }
 
+private enum class ProviderActionId {
+    REAUTHENTICATE,
+    DISCONNECT,
+    ENABLED_TOGGLE,
+}
+
 @Composable
-private fun FocusRingFilterChip(
+private fun PandaAuthMethodChip(
     selected: Boolean,
     onClick: () -> Unit,
     label: String,
     entryFocusRequester: FocusRequester? = null,
 ) {
-    val interactionSource = remember { MutableInteractionSource() }
-    val isFocused by interactionSource.collectIsFocusedAsState()
-    val shape = RoundedCornerShape(8.dp)
-    FilterChip(
-        selected = selected,
-        onClick = onClick,
-        label = { Text(label) },
-        modifier = Modifier
-            .then(entryFocusRequester?.let { Modifier.focusRequester(it) } ?: Modifier)
-            .clip(shape)
-            .border(
-                width = if (isFocused) 2.dp else 1.dp,
-                color = if (isFocused) Amber else Steel.copy(alpha = 0.45f),
-                shape = shape,
-            ),
-        interactionSource = interactionSource,
-        border = null,
-        colors = FilterChipDefaults.filterChipColors(
-            selectedContainerColor = Amber.copy(alpha = 0.2f),
-            selectedLabelColor = Amber,
-        ),
-    )
+    PandaChip(selected, onClick, label,
+        Modifier.then(entryFocusRequester?.let { Modifier.focusRequester(it) } ?: Modifier))
 }
 
 @Composable
@@ -345,45 +334,23 @@ private fun OAuthSection(
             )
             Spacer(Modifier.height(8.dp))
 
-            // Code with copy button
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.Center,
-                modifier = Modifier
-                    .clip(RoundedCornerShape(8.dp))
-                    .clickable { clipboard.setText(AnnotatedString(deviceCode.userCode)) }
-                    .padding(horizontal = 8.dp, vertical = 4.dp),
-            ) {
-                Text(
-                    deviceCode.userCode,
-                    style = MaterialTheme.typography.headlineLarge,
-                    fontWeight = FontWeight.Bold,
-                    color = Amber,
-                    letterSpacing = 4.sp,
-                    textAlign = TextAlign.Center,
-                )
+            PandaButton({ clipboard.setText(AnnotatedString(deviceCode.userCode)) }) {
+                Text(deviceCode.userCode, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
                 Spacer(Modifier.width(8.dp))
-                Icon(
-                    Icons.Default.ContentCopy,
-                    contentDescription = "Copy code",
-                    tint = Silver,
-                    modifier = Modifier.size(20.dp),
-                )
+                Icon(Icons.Default.ContentCopy, stringResource(R.string.common_copy), Modifier.size(20.dp))
             }
 
             Spacer(Modifier.height(16.dp))
-            Button(
+            PandaButton(
                 onClick = {
                     clipboard.setText(AnnotatedString(deviceCode.userCode))
                     val intent = Intent(Intent.ACTION_VIEW, Uri.parse(deviceCode.verificationUrl))
                     intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                     context.startActivity(intent)
                 },
-                colors = ButtonDefaults.buttonColors(containerColor = Amber),
             ) {
                 Text(
                     stringResource(R.string.panda_setup_auth_open_browser),
-                    color = Gunmetal,
                     fontWeight = FontWeight.SemiBold,
                 )
             }
@@ -404,11 +371,11 @@ private fun OAuthSection(
         }
     } else {
         // Failed to start — show retry
-        OutlinedButton(
+        PandaButton(
             onClick = { viewModel.startOAuth() },
             modifier = Modifier.fillMaxWidth(),
         ) {
-            Text(stringResource(R.string.panda_setup_retry), color = Amber)
+            Text(stringResource(R.string.panda_setup_retry))
         }
     }
 }
@@ -437,28 +404,23 @@ private fun ApiKeySection(
             ),
         )
         Spacer(Modifier.height(12.dp))
-        Button(
+        PandaButton(
             onClick = { viewModel.validateApiKey() },
             enabled = state.apiKeyInput.isNotBlank() && !state.authLoading,
             modifier = Modifier.fillMaxWidth(),
-            colors = ButtonDefaults.buttonColors(containerColor = Amber),
-            shape = RoundedCornerShape(12.dp),
         ) {
             if (state.authLoading) {
                 CircularProgressIndicator(
                     modifier = Modifier.size(18.dp),
-                    color = Gunmetal,
                     strokeWidth = 2.dp,
                 )
                 Spacer(Modifier.width(8.dp))
                 Text(
                     stringResource(R.string.panda_setup_auth_validating),
-                    color = Gunmetal,
                 )
             } else {
                 Text(
                     stringResource(R.string.panda_setup_auth_validate),
-                    color = Gunmetal,
                     fontWeight = FontWeight.SemiBold,
                 )
             }

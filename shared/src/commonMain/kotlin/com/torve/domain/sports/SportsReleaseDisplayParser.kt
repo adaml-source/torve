@@ -1,5 +1,7 @@
 package com.torve.domain.sports
 
+import com.torve.util.DisplayTextDecoder
+
 data class SportsReleaseDisplay(
     val sportLabel: String,
     val leagueLabel: String?,
@@ -17,15 +19,17 @@ data class SportsReleaseDisplay(
 
 object SportsReleaseDisplayParser {
     fun parse(rawTitle: String, bucket: SportBucket = SportBucket.classify(rawTitle)): SportsReleaseDisplay {
-        val releaseGroup = extractReleaseGroup(rawTitle)
-        val titleWithoutGroup = releaseGroup?.let { rawTitle.removeSuffix("-$it") } ?: rawTitle
+        // Also decode persisted titles from before the provider decoder existed.
+        val decodedTitle = DisplayTextDecoder.decodeReleaseTitle(rawTitle)
+        val releaseGroup = extractReleaseGroup(decodedTitle)
+        val titleWithoutGroup = releaseGroup?.let { decodedTitle.removeSuffix("-$it") } ?: decodedTitle
         val normalized = titleWithoutGroup
             .replace(Regex("[._]+"), " ")
             .replace(Regex("\\s+"), " ")
             .trim()
         val tokens = normalized.split(" ").filter { it.isNotBlank() }
         val league = detectLeague(tokens, bucket)
-        val date = extractDate(rawTitle)
+        val date = extractDate(decodedTitle)
         val round = extractRound(tokens)
         val quality = QUALITY_REGEX.find(normalized)?.value?.normalizeQuality()
         val source = SOURCE_REGEX.find(normalized)?.value?.uppercase()
@@ -67,6 +71,9 @@ object SportsReleaseDisplayParser {
             tokens.any { it.equals("mlb", true) } -> "MLB"
             tokens.any { it.equals("nba", true) } -> "NBA"
             tokens.any { it.equals("wnba", true) } -> "WNBA"
+            tokens.any { it.equals("euroleague", true) } || "euro league" in joined -> "EuroLeague"
+            tokens.any { it.equals("eurocup", true) } -> "EuroCup"
+            tokens.any { it.equals("fiba", true) } -> "FIBA"
             tokens.any { it.equals("nfl", true) } -> "NFL"
             tokens.any { it.equals("nhl", true) } -> "NHL"
             tokens.any { it.equals("ufc", true) } -> "UFC"
@@ -79,10 +86,10 @@ object SportsReleaseDisplayParser {
     }
 
     private fun extractDate(rawTitle: String): ParsedDate? {
-        val match = DATE_REGEX.find(rawTitle) ?: return null
-        val year = match.groupValues[1].toIntOrNull() ?: return null
-        val month = match.groupValues[2].toIntOrNull() ?: return null
-        val day = match.groupValues[3].toIntOrNull() ?: return null
+        val date = SportsReleaseDateParser.eventDate(rawTitle) ?: return null
+        val year = date.year
+        val month = date.monthNumber
+        val day = date.dayOfMonth
         val monthName = MONTHS.getOrNull(month - 1) ?: return null
         return ParsedDate(
             year = year,
@@ -117,6 +124,18 @@ object SportsReleaseDisplayParser {
                 add(it.year.toString())
                 add(it.month.toString().padStart(2, '0'))
                 add(it.day.toString().padStart(2, '0'))
+                add(it.month.toString())
+                add(it.day.toString())
+                // Dots and underscores become separate tokens above, while
+                // hyphenated/slashed dates remain one token in release names.
+                for (month in setOf(it.month.toString(), it.month.toString().padStart(2, '0'))) {
+                    for (day in setOf(it.day.toString(), it.day.toString().padStart(2, '0'))) {
+                        for (separator in listOf('-', '/')) {
+                            add("${it.year}$separator$month$separator$day")
+                            add("$day$separator$month$separator${it.year}")
+                        }
+                    }
+                }
             }
         }
         var startIndex = 0
@@ -194,7 +213,6 @@ object SportsReleaseDisplayParser {
         val label: String,
     )
 
-    private val DATE_REGEX = Regex("\\b(20\\d{2})[._ -](\\d{2})[._ -](\\d{2})\\b")
     private val QUALITY_REGEX = Regex("\\b(2160p|1080p|720p|480p|4k|uhd|hdr)\\b", RegexOption.IGNORE_CASE)
     private val SOURCE_REGEX = Regex("\\b(WEB-DL|WEBRip|WEB|HDTV|BluRay|HDTVRip|IPTV)\\b", RegexOption.IGNORE_CASE)
     private val CODEC_REGEX = Regex("\\b(x264|x265|h264|h265|hevc|avc)\\b", RegexOption.IGNORE_CASE)

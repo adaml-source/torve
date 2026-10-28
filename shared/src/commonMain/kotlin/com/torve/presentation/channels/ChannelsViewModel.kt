@@ -1,4 +1,6 @@
 package com.torve.presentation.channels
+import com.torve.presentation.settings.OptionalAppFeature
+import com.torve.presentation.settings.isAppFeatureEnabled
 
 import com.torve.domain.model.EnrichedChannel
 import com.torve.domain.model.EpgData
@@ -16,6 +18,9 @@ import com.torve.domain.model.programmesForEpgChannel
 import com.torve.domain.model.stableChannelId
 import com.torve.domain.player.LiveAudioOutputMode
 import com.torve.data.channels.CatchupResolver
+import com.torve.data.channels.XtreamAccountRejected
+import com.torve.presentation.error.UserFacingError
+import com.torve.presentation.error.toUserFacingError
 import com.torve.data.auth.AuthClient
 import com.torve.domain.diagnostics.DiagnosticsRedactor
 import com.torve.domain.repository.ChannelRepository
@@ -35,9 +40,13 @@ import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.datetime.Clock
+import kotlin.time.TimeSource
 
 private const val KEY_CHANNELS_AUDIO_PASSTHROUGH = "channels_audio_passthrough_enabled"
 private const val KEY_CHANNELS_PREFER_SURROUND = "channels_prefer_surround_codecs"
@@ -73,18 +82,30 @@ class ChannelsViewModel(
      */
     private val epgCorrectionRepository: com.torve.data.recording.EpgCorrectionRepository? = null,
     private val epgCorrectionViewModel: com.torve.presentation.recording.EpgCorrectionViewModel? = null,
+    private val stateRelay: ChannelsStateRelay? = null,
+    private val family: com.torve.data.profile.FamilyControls? = null,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + mainDispatcher)
-    private val _state = MutableStateFlow(ChannelsUiState())
+    private val _state = family?.let { com.torve.data.profile.ProfilePolicyStateFlow(it, ChannelsUiState()) } ?: MutableStateFlow(ChannelsUiState())
     val state: StateFlow<ChannelsUiState> = _state.asStateFlow()
 
     private val searchQueryFlow = MutableStateFlow("")
     private var guideJob: Job? = null
     private var epgRefreshJob: Job? = null
+    private var startupJob: Job? = null
+    private var backgroundRefreshJob: Job? = null
+    private var epgRefreshRequestId: Long = 0L
     private var catalogLoadJob: Job? = null
+    private var categoryLoadJob: Job? = null
+    private var categorySelectionGeneration = 0L
     private var startupPhase = "idle"
+    private val liveCategoryCountsMutex = Mutex()
+    private val favoriteMutationMutex = Mutex()
+    private var cachedLiveCategoryCountsByPlaylist: Map<String, List<Pair<String, Long>>> = emptyMap()
+    private var rawLiveCategoryTitlesByPlaylist: Map<String, Map<String, List<String>>> = emptyMap()
 
     init {
+        stateRelay?.attach(state)
         println("CHANNELS_VM_INIT: ChannelsViewModel created")
         // Settings refreshes do not invalidate the channels catalog — the previous
         // `notifier.events.collect { loadPlaylists() }` here caused 3+ rapid CATALOG_LOAD
@@ -94,8 +115,9 @@ class ChannelsViewModel(
         // ── TiviMate-style cache-first startup ──
         // Single orchestrated sequence: restore cache → load prefs → load playlists.
         // All DB/prefs IO runs on backgroundDispatcher. Only _state.update touches Main.
-        scope.launch {
+        startupJob = scope.launch {
             val initStartMs = Clock.System.now().toEpochMilliseconds()
+            if (!prefsRepo.isAppFeatureEnabled(OptionalAppFeature.CHANNELS)) return@launch
             startupPhase = "cache_restore"
 
             // Phase 1: Restore cached categories from preferences (no DB, instant).
@@ -116,11 +138,15 @@ class ChannelsViewModel(
                 .filterNot { isVodCategoryName(it.name) }
             val hasCachedCatalog = cachedPlaylistId != null && cachedCategories.isNotEmpty()
             if (hasCachedCatalog) {
+                val restoredGroup = withContext(backgroundDispatcher) {
+                    resolveRestoredGroup(cachedPlaylistId.orEmpty(), null, cachedCategories.map { it.name }.toSet(), true)
+                }
                 _state.update {
                     it.copy(
                         selectedPlaylistId = cachedPlaylistId,
                         categories = cachedCategories,
                         allCategories = cachedCategories,
+                        selectedGroup = restoredGroup,
                         isLoading = false,
                         isLoadingChannels = false,
                     )
@@ -198,7 +224,7 @@ class ChannelsViewModel(
                     loadPlaylistCatalog(
                         playlistId = targetPlaylistId,
                         restoreSavedState = true,
-                        triggerBackgroundRefresh = false,
+                        triggerBackgroundRefresh = true,
                         showLoadingUntilRefresh = false,
                     )
                     println("STARTUP[${Clock.System.now().toEpochMilliseconds() - initStartMs}ms] db_category_load: triggered")
@@ -222,19 +248,23 @@ class ChannelsViewModel(
     private fun deferredCategoryVerification(playlistId: String) {
         scope.launch {
             val verifyStart = Clock.System.now().toEpochMilliseconds()
-            val dbCategories = withContext(backgroundDispatcher) {
+            val (visibleDbCategories, allDbCategories) = withContext(backgroundDispatcher) {
                 val counts = liveCategoryCounts(playlistId)
-                if (counts.isEmpty()) return@withContext emptyList()
+                if (counts.isEmpty()) return@withContext emptyList<ChannelCategory>() to emptyList()
                 val allCats = CategoryNameCleaner.processCategoryCountsOnly(counts)
                 val hiddenLower = _state.value.hiddenCategories.map { it.lowercase() }.toSet()
-                allCats.filter { it.name.lowercase() !in hiddenLower }
+                allCats.filter { it.name.lowercase() !in hiddenLower } to allCats
             }
             val verifyMs = Clock.System.now().toEpochMilliseconds() - verifyStart
             val currentCategories = _state.value.categories
-            if (dbCategories.isNotEmpty() && dbCategories != currentCategories) {
-                _state.update { it.copy(categories = dbCategories, allCategories = dbCategories) }
-                withContext(backgroundDispatcher) { persistCachedCategoriesNow(dbCategories) }
-                println("STARTUP_DEFERRED[${verifyMs}ms] category_verify: updated ${currentCategories.size} → ${dbCategories.size} categories")
+            if (allDbCategories.isNotEmpty() && (visibleDbCategories != currentCategories || allDbCategories != _state.value.allCategories)) {
+                _state.update { current ->
+                    if (current.selectedPlaylistId != playlistId) current else current.copy(
+                        categories = retainLoadedCategoryChannels(current, visibleDbCategories),
+                        allCategories = retainLoadedCategoryChannels(current, allDbCategories))
+                }
+                withContext(backgroundDispatcher) { persistCachedCategoriesNow(allDbCategories) }
+                println("STARTUP_DEFERRED[${verifyMs}ms] category_verify: updated visible ${currentCategories.size} -> ${visibleDbCategories.size}, all=${allDbCategories.size}")
             } else {
                 println("STARTUP_DEFERRED[${verifyMs}ms] category_verify: cache matches DB (${currentCategories.size} categories)")
             }
@@ -242,7 +272,16 @@ class ChannelsViewModel(
             val playlist = _state.value.playlists.firstOrNull { it.id == playlistId }
             val lastUpdated = playlist?.lastUpdated ?: 0L
             val ageMs = Clock.System.now().toEpochMilliseconds() - lastUpdated
-            println("REFRESH_GATE: playlistId=$playlistId lastUpdated=$lastUpdated ageMs=$ageMs ageSec=${ageMs / 1000} decision=SKIP_AUTO_STARTUP")
+            val shouldRefresh = ageMs > STALE_THRESHOLD_MS
+            println("REFRESH_GATE: playlistId=$playlistId lastUpdated=$lastUpdated ageMs=$ageMs ageSec=${ageMs / 1000} decision=${if (shouldRefresh) "REFRESH" else "SKIP"}")
+            if (shouldRefresh) {
+                refreshPlaylistInBackground(
+                    playlistId = playlistId,
+                    preserveVisibleCatalog = true,
+                    restoreSavedState = true,
+                    includeEpg = false,
+                )
+            }
         }
     }
 
@@ -328,9 +367,12 @@ class ChannelsViewModel(
             channelRepo.getHiddenChannelIds()
         }
         _state.update {
+            val hidden = cats?.split("|||")?.filter { c -> c.isNotBlank() }?.toSet() ?: emptySet()
+            val hiddenLower = hidden.map { it.lowercase() }.toSet()
             it.copy(
-                hiddenCategories = cats?.split("|||")?.filter { c -> c.isNotBlank() }?.toSet() ?: emptySet(),
+                hiddenCategories = hidden,
                 hiddenChannels = migratedSet,
+                categories = it.allCategories.filter { category -> category.name.lowercase() !in hiddenLower },
             )
         }
         if (migratedSet != rawHiddenChannels && migratedSet.isNotEmpty()) {
@@ -381,7 +423,7 @@ class ChannelsViewModel(
 
     companion object {
         private const val KEY_CACHED_CATEGORIES = "channels_cached_categories"
-        private const val STALE_THRESHOLD_MS = 60 * 60 * 1000L // 1 hour
+        private const val STALE_THRESHOLD_MS = 15 * 60 * 1000L
     }
 
     private fun ChannelsUiState.hasUsableCatalogFor(playlistId: String): Boolean {
@@ -407,6 +449,7 @@ class ChannelsViewModel(
 
     fun loadPlaylists(recoverEmptyCatalog: Boolean = true) {
         scope.launch {
+            if (!prefsRepo.isAppFeatureEnabled(OptionalAppFeature.CHANNELS)) return@launch
             _state.update { it.copy(isLoading = it.categories.isEmpty(), error = null) }
             try {
                 val playlists = withContext(backgroundDispatcher) { channelRepo.getPlaylists() }
@@ -425,7 +468,7 @@ class ChannelsViewModel(
                     loadPlaylistCatalog(
                         playlistId = selectedPlaylistId,
                         restoreSavedState = true,
-                        triggerBackgroundRefresh = false,
+                        triggerBackgroundRefresh = true,
                         showLoadingUntilRefresh = false,
                         recoverEmptyCatalog = recoverEmptyCatalog,
                     )
@@ -436,12 +479,22 @@ class ChannelsViewModel(
         }
     }
 
+    fun stopBackgroundUpdates() {
+        startupJob?.cancel()
+        backgroundRefreshJob?.cancel()
+        guideJob?.cancel()
+        epgRefreshJob?.cancel()
+        catalogLoadJob?.cancel()
+        categoryLoadJob?.cancel()
+        _state.update { it.copy(isLoading = false, isLoadingChannels = false) }
+    }
+
     fun selectPlaylist(playlistId: String) {
         scope.launch { withContext(backgroundDispatcher) { persistSelectedPlaylistId(playlistId) } }
         loadPlaylistCatalog(
             playlistId = playlistId,
             restoreSavedState = true,
-            triggerBackgroundRefresh = false,
+            triggerBackgroundRefresh = true,
             showLoadingUntilRefresh = false,
         )
         // Prompt 10C: union the persisted EPG-correction hidden-
@@ -472,7 +525,14 @@ class ChannelsViewModel(
     }
 
     fun selectGroup(group: String?) {
-        _state.update { it.copy(selectedGroup = group) }
+        categoryLoadJob?.cancel()
+        categorySelectionGeneration++
+        if (_state.value.selectedSubTab == ChannelsSubTab.GUIDE) {
+            guideJob?.cancel()
+            _state.update { it.copy(guideChannels = emptyList(), isLoadingGuide = false) }
+        }
+        _state.update { it.copy(selectedGroup = group, isLoadingChannels = false,
+            categoryChannels = if (it.selectedGroup == group) it.categoryChannels else emptyList()) }
         val playlistId = _state.value.selectedPlaylistId ?: return
         scope.launch { withContext(backgroundDispatcher) { persistSelectedGroup(playlistId, group) } }
     }
@@ -481,7 +541,7 @@ class ChannelsViewModel(
         val st = _state.value
         val group = st.selectedGroup
         val base = if (group != null) {
-            st.groupedChannels[group] ?: emptyList()
+            st.categoryChannels.ifEmpty { st.categories.firstOrNull { it.name == group }?.channels.orEmpty().ifEmpty { st.groupedChannels[group].orEmpty() } }
         } else {
             st.channels
         }
@@ -492,14 +552,22 @@ class ChannelsViewModel(
         val st = _state.value
         var result = channels
 
+        val hiddenGroups = st.hiddenCategories.map { it.lowercase() }.toSet()
+        result = result.filter { enriched ->
+            CategoryNameCleaner.clean(enriched.channel.groupTitle.orEmpty()).name.lowercase() !in hiddenGroups &&
+                channelIdentityCandidates(enriched.channel).none(st.hiddenChannels::contains)
+        }
+
         // Country filter
         if (st.selectedCountries.isNotEmpty()) {
-            val selectedCountriesLower = st.selectedCountries.map { it.lowercase() }.toSet()
+            val selectedCountriesLower = st.selectedCountries.map { CategoryNameCleaner.normalizeCountryCode(it).lowercase() }.toSet()
             result = result.filter { enriched ->
-                val country = enriched.channel.tvgCountry ?: return@filter false
+                val country = enriched.channel.tvgCountry
+                    ?: CategoryNameCleaner.clean(enriched.channel.groupTitle.orEmpty()).countryCode
+                    ?: return@filter false
                 val channelCountries = country
                     .split(",", ";")
-                    .map { it.trim().lowercase() }
+                    .map { CategoryNameCleaner.normalizeCountryCode(it).lowercase() }
                     .filter { it.isNotBlank() }
                 channelCountries.any { it in selectedCountriesLower }
             }
@@ -567,8 +635,28 @@ class ChannelsViewModel(
     }
 
     private suspend fun liveCategoryCounts(playlistId: String): List<Pair<String, Long>> {
-        return channelRepo.getLiveCategoryCounts(playlistId)
-            .filterNot { (name, _) -> isVodCategoryName(name) }
+        return liveCategoryCountsMutex.withLock {
+            cachedLiveCategoryCountsByPlaylist[playlistId]?.let { return@withLock it }
+            channelRepo.getLiveCategoryCounts(playlistId)
+                .filterNot { (name, _) -> isVodCategoryName(name) }
+                .also { counts ->
+                    val rawTitlesByCleanedName = counts
+                        .map { (rawTitle, _) -> CategoryNameCleaner.clean(rawTitle).name.lowercase() to rawTitle }
+                        .groupBy(keySelector = { it.first }, valueTransform = { it.second })
+                    if (counts.isNotEmpty()) {
+                        cachedLiveCategoryCountsByPlaylist = cachedLiveCategoryCountsByPlaylist + (playlistId to counts)
+                    }
+                    rawLiveCategoryTitlesByPlaylist = rawLiveCategoryTitlesByPlaylist +
+                        (playlistId to rawTitlesByCleanedName)
+                }
+        }
+    }
+
+    private suspend fun invalidateLiveCategoryCounts(playlistId: String) {
+        liveCategoryCountsMutex.withLock {
+            cachedLiveCategoryCountsByPlaylist = cachedLiveCategoryCountsByPlaylist - playlistId
+            rawLiveCategoryTitlesByPlaylist = rawLiveCategoryTitlesByPlaylist - playlistId
+        }
     }
 
     private fun ChannelsUiState.hasGuideData(): Boolean {
@@ -696,6 +784,16 @@ class ChannelsViewModel(
         }
     }
 
+    private fun retainLoadedCategoryChannels(current: ChannelsUiState, counts: List<ChannelCategory>): List<ChannelCategory> {
+        val loaded = (current.allCategories + current.categories)
+            .filter { it.channels.isNotEmpty() }.associateBy { it.name }
+        return counts.map { category ->
+            loaded[category.name]?.let { old -> category.copy(channels = old.channels.filter { enriched ->
+                channelIdentityCandidates(enriched.channel).none(current.hiddenChannels::contains)
+            }) } ?: category
+        }
+    }
+
     private fun buildLiveCategories() {
         val st = _state.value
         val playlistId = st.selectedPlaylistId ?: return
@@ -713,8 +811,12 @@ class ChannelsViewModel(
                 }
                 val catMs = Clock.System.now().toEpochMilliseconds() - catStartMs
                 println("STARTUP_METRIC: buildLiveCategories(lightweight)=${catMs}ms visible=${visibleCategories.size} all=${allCategories.size}")
-                _state.update { it.copy(categories = visibleCategories, allCategories = allCategories) }
-                withContext(backgroundDispatcher) { persistCachedCategoriesNow(visibleCategories) }
+                _state.update { current ->
+                    if (current.selectedPlaylistId != playlistId) current else current.copy(
+                        categories = retainLoadedCategoryChannels(current, visibleCategories),
+                        allCategories = retainLoadedCategoryChannels(current, allCategories))
+                }
+                withContext(backgroundDispatcher) { persistCachedCategoriesNow(allCategories) }
             } else {
                 // Full dataset available — use the rich path with channel-level filtering.
                 val (visibleCategories, allCategories) = withContext(backgroundDispatcher) {
@@ -731,8 +833,8 @@ class ChannelsViewModel(
                 }
                 val catMs = Clock.System.now().toEpochMilliseconds() - catStartMs
                 println("STARTUP_METRIC: buildLiveCategories(full)=${catMs}ms visible=${visibleCategories.size} all=${allCategories.size} channels=${st.channels.size}")
-                _state.update { it.copy(categories = visibleCategories, allCategories = allCategories) }
-                withContext(backgroundDispatcher) { persistCachedCategoriesNow(visibleCategories) }
+                _state.update { it.copy(categories = visibleCategories, allCategories = allCategories, isLoadingChannels = false) }
+                withContext(backgroundDispatcher) { persistCachedCategoriesNow(allCategories) }
             }
         }
     }
@@ -743,6 +845,14 @@ class ChannelsViewModel(
         // Guide requires enriched channels (with EPG data). If not loaded yet,
         // trigger the full load — guide is an explicit feature activation, not normal browse.
         if (st.channels.isEmpty() && st.categoryChannels.isEmpty()) {
+            // Phone Guide uses on-demand groups too. Never materialize an entire large
+            // playlist just because Guide was opened; initial/category hydration rebuilds it.
+            if (st.selectedSubTab == ChannelsSubTab.GUIDE) {
+                if (st.selectedGroup == null && !st.isLoadingChannels) {
+                    st.categories.firstOrNull()?.let { loadCategoryChannels(it.name) }
+                }
+                return
+            }
             ensureFullPlaylistLoaded()
             return // Will be called again after applyLoadedPlaylist via rebuildGuide
         }
@@ -779,27 +889,32 @@ class ChannelsViewModel(
 
         // Load programme data for guide timeline — local-first, never block on network.
         // Cancel any previous guide build to avoid overlapping state updates.
+        // Keep the import independent from guide search/filter/category jobs.
+        // Those jobs are intentionally cancellable; the import must still
+        // reach a success, error, or cancelled terminal state.
+        if (forceRefreshEpg) {
+            _state.update {
+                it.copy(
+                    guideChannels = guide,
+                    isLoadingGuide = true,
+                    guideError = null,
+                    epgState = EpgState.Loading,
+                )
+            }
+            ensureEpgLoaded(playlistId, forceRefresh = true)
+            return
+        }
+
         guideJob?.cancel()
+        _state.update { it.copy(guideChannels = guide, isLoadingGuide = true, guideError = null) }
         guideJob = scope.launch {
             val buildStartedAt = Clock.System.now().toEpochMilliseconds()
             try {
                 println(
-                    "ChannelsEPG: load start playlistId=$playlistId source=$epgSourceUrl forceRefresh=$forceRefreshEpg",
+                    "ChannelsEPG: load start playlistId=$playlistId sourceConfigured=${epgSourceUrl.isNotBlank()} forceRefresh=$forceRefreshEpg",
                 )
 
                 // Force refresh requested (manual retry) — fetch from network first.
-                if (forceRefreshEpg) {
-                    _state.update {
-                        it.copy(
-                            guideChannels = guide,
-                            isLoadingGuide = true,
-                            guideError = null,
-                            epgState = EpgState.Loading,
-                        )
-                    }
-                    withContext(backgroundDispatcher) { channelRepo.refreshEpg(playlistId, _state.value.hiddenChannels) }
-                }
-
                 // Load EPG from local cache/DB — this is fast and never hits network.
                 val epgData = withContext(backgroundDispatcher) { channelRepo.getEpg(playlistId) }
                 val epgLoadError = withContext(backgroundDispatcher) { channelRepo.getEpgLoadError(playlistId) }
@@ -828,10 +943,8 @@ class ChannelsViewModel(
                             ),
                         )
                     }
-                    // Background refresh: update EPG without blocking UI.
-                    if (!forceRefreshEpg) {
-                        refreshEpgInBackground(playlistId, guide, epgSourceUrl)
-                    }
+                    // Cached EPG is the foreground contract. Provider downloads are
+                    // intentionally left to the worker or an explicit user refresh.
                     return@launch
                 }
 
@@ -845,43 +958,11 @@ class ChannelsViewModel(
                     )
                 }
 
-                if (!forceRefreshEpg) {
-                    println("ChannelsEPG: no local EPG for playlistId=$playlistId, fetching from network")
-                    try {
-                        withContext(backgroundDispatcher) { channelRepo.refreshEpg(playlistId, _state.value.hiddenChannels) }
-                    } catch (e: Exception) {
-                        println("ChannelsEPG: refresh failed playlistId=$playlistId error=${DiagnosticsRedactor.redact(e.message)}")
-                    }
-                }
-
-                val freshEpgData = withContext(backgroundDispatcher) { channelRepo.getEpg(playlistId) }
-                val freshEpgLoadError = withContext(backgroundDispatcher) { channelRepo.getEpgLoadError(playlistId) }
-
-                if (freshEpgData.programmesByChannelKey.isEmpty() && !freshEpgLoadError.isNullOrBlank()) {
-                    throw IllegalStateException(freshEpgLoadError)
-                }
-
-                val buildResult = buildEpgGuideResult(guide, playlistId, freshEpgData)
-                debugLog(
-                    "ChannelsEPG: guide build complete playlistId=$playlistId generation=${freshEpgData.generationId ?: -1} buildMs=${Clock.System.now().toEpochMilliseconds() - buildStartedAt} channels=${guide.size} programmeRows=${freshEpgData.programmes.size} guideMapSize=${buildResult.programmesByKey.size}",
-                )
-
-                _state.update {
-                    it.copy(
-                        guideChannels = guide,
-                        guideProgrammes = buildResult.programmesByKey,
-                        isLoadingGuide = false,
-                        guideError = null,
-                        epgState = EpgState.Loaded(
-                            sourceUrl = epgSourceUrl,
-                            sourceChannelCount = freshEpgData.channels.size,
-                            sourceProgrammeCount = freshEpgData.programmes.size,
-                            matchedChannelCount = buildResult.matchedChannels,
-                            unmatchedChannelCount = buildResult.unmatchedChannels,
-                        ),
-                    )
-                }
+                println("ChannelsEPG: no local EPG for playlistId=$playlistId, starting independent refresh")
+                ensureEpgLoaded(playlistId, forceRefresh = false)
+                return@launch
             } catch (e: Exception) {
+                if (e is CancellationException) throw e
                 val message = e.message ?: "Failed to load EPG"
                 println("ChannelsEPG: load failed playlistId=$playlistId sourceConfigured=${epgSourceUrl.isNotBlank()} error=${DiagnosticsRedactor.redact(message)}")
                 _state.update {
@@ -927,6 +1008,18 @@ class ChannelsViewModel(
         playlistId: String,
         epgData: EpgData,
     ): GuideBuildResult = withContext(backgroundDispatcher) {
+        // The playlist snapshot deliberately holds only a bounded set of schedules.
+        // A selected group may be outside that snapshot even though its programmes
+        // were imported successfully. Use the same indexed per-channel DB lookup
+        // as the Android TV guide instead of treating the snapshot as the whole EPG.
+        val missingChannels = guide.filter {
+            programmesForEpgChannel(epgData.programmesByChannelKey, playlistId, it.channel).isEmpty()
+        }
+        val additionalProgrammes = getProgrammesForChannelsDirect(playlistId, missingChannels)
+        val scopedEpg = if (additionalProgrammes.isEmpty()) epgData else epgData.copy(
+            programmesByChannelKey = epgData.programmesByChannelKey + additionalProgrammes,
+            programmes = epgData.programmes + additionalProgrammes.values.flatten(),
+        )
         // Prompt 10C: apply persisted EPG correction (offset + tvg-id
         // remap) so the rendered guide reflects the user's manual fix
         // for a feed that's slightly off. The applier is a no-op when
@@ -949,7 +1042,7 @@ class ChannelsViewModel(
                     return@forEach
                 }
                 val programmes = programmesForEpgChannel(
-                    programmesByChannelKey = epgData.programmesByChannelKey,
+                    programmesByChannelKey = scopedEpg.programmesByChannelKey,
                     playlistId = playlistId,
                     channel = enriched.channel,
                 )
@@ -966,7 +1059,7 @@ class ChannelsViewModel(
             epgCorrectionViewModel?.updateHealth(
                 matchedChannelCount = matchedChannels,
                 unmatchedChannelCount = unmatchedChannels,
-                programmes = epgData.programmes,
+                programmes = scopedEpg.programmes,
             )
             return@withContext GuideBuildResult(
                 programmesByKey = programmesByKey,
@@ -977,7 +1070,7 @@ class ChannelsViewModel(
         val applied = com.torve.data.recording.EpgCorrectionApplier.apply(
             playlistId = playlistId,
             channels = guide,
-            epgData = epgData,
+            epgData = scopedEpg,
             correction = correction,
         )
         // Drive the stale-EPG banner from the corrected programme list.
@@ -993,50 +1086,16 @@ class ChannelsViewModel(
         )
     }
 
-    private fun refreshEpgInBackground(
-        playlistId: String,
-        guide: List<EnrichedChannel>,
-        epgSourceUrl: String,
-    ) {
-        // Only one EPG network refresh at a time — skip duplicates.
-        if (epgRefreshJob?.isActive == true) {
-            println("ChannelsEPG: background refresh already in progress, skipping duplicate")
-            return
-        }
-        epgRefreshJob = scope.launch {
-            try {
-                println("ChannelsEPG: background refresh start playlistId=$playlistId")
-                withContext(backgroundDispatcher) { channelRepo.refreshEpg(playlistId, _state.value.hiddenChannels) }
-                if (_state.value.selectedPlaylistId != playlistId) return@launch
-                val freshEpg = withContext(backgroundDispatcher) { channelRepo.getEpg(playlistId) }
-                if (freshEpg.programmesByChannelKey.isEmpty()) return@launch
-                val freshResult = buildEpgGuideResult(guide, playlistId, freshEpg)
-                println(
-                    "ChannelsEPG: background refresh complete playlistId=$playlistId " +
-                        "matched=${freshResult.matchedChannels} unmatched=${freshResult.unmatchedChannels}",
-                )
-                _state.update {
-                    it.copy(
-                        guideProgrammes = freshResult.programmesByKey,
-                        epgState = EpgState.Loaded(
-                            sourceUrl = epgSourceUrl,
-                            sourceChannelCount = freshEpg.channels.size,
-                            sourceProgrammeCount = freshEpg.programmes.size,
-                            matchedChannelCount = freshResult.matchedChannels,
-                            unmatchedChannelCount = freshResult.unmatchedChannels,
-                        ),
-                    )
-                }
-            } catch (e: Exception) {
-                println("ChannelsEPG: background refresh failed playlistId=$playlistId error=${DiagnosticsRedactor.redact(e.message)}")
-                // Don't overwrite visible EPG data — stale data is better than no data.
-            }
-        }
-    }
-
     fun retryGuideLoad() {
         buildGuideChannels(forceRefreshEpg = true)
     }
+
+    /** Resolve the same playlist-scoped schedule for native phone and TV guide cells. */
+    fun guideProgrammesForChannel(channel: Channel): List<EpgProgramme> =
+        programmesForGuideChannel(_state.value, channel)
+
+    fun guideProgrammeSlotsForChannel(channel: Channel): List<GuideProgrammeSlot> =
+        guideProgrammeSlots(guideProgrammesForChannel(channel))
 
     /** Update the EPG guide search query (filters channel list by name). */
     fun setGuideSearchQuery(query: String) {
@@ -1069,12 +1128,13 @@ class ChannelsViewModel(
         val currentAllCats = _state.value.allCategories
         val hiddenLower = updated.map { it.lowercase() }.toSet()
         val visibleCategories = currentAllCats.filter { it.name.lowercase() !in hiddenLower }
+        if (_state.value.selectedGroup?.lowercase() in hiddenLower) selectGroup(null)
         _state.update {
             it.copy(
                 hiddenCategories = updated,
                 categories = visibleCategories,
-                selectedGroup = if (categoryName.lowercase() in hiddenLower) null else it.selectedGroup,
-                categoryChannels = if (categoryName.lowercase() in hiddenLower) emptyList() else it.categoryChannels,
+                selectedGroup = if (it.selectedGroup?.lowercase() in hiddenLower) null else it.selectedGroup,
+                categoryChannels = if (it.selectedGroup?.lowercase() in hiddenLower) emptyList() else it.categoryChannels,
             )
         }
         scope.launch { withContext(backgroundDispatcher) { prefsRepo.setString("channels_hidden_categories", updated.joinToString("|||")) } }
@@ -1087,6 +1147,7 @@ class ChannelsViewModel(
         scope.launch {
             withContext(backgroundDispatcher) {
                 channelRepo.syncHiddenChannelsToDb(updated)
+                _state.value.selectedPlaylistId?.let { invalidateLiveCategoryCounts(it) }
                 prefsRepo.setString("channels_hidden_channels", updated.joinToString("|||"))
             }
             buildLiveCategories()
@@ -1099,14 +1160,15 @@ class ChannelsViewModel(
 
     fun hideAllCategories() {
         val allNames = _state.value.allCategories.map { it.name }.toSet()
-        _state.update { it.copy(hiddenCategories = allNames, categories = emptyList()) }
+        selectGroup(null)
+        _state.update { it.copy(hiddenCategories = allNames, categories = emptyList(), selectedGroup = null, categoryChannels = emptyList()) }
         scope.launch { withContext(backgroundDispatcher) { prefsRepo.setString("channels_hidden_categories", allNames.joinToString("|||")) } }
         buildLiveCategories()
     }
 
     fun showAllCategories() {
         val currentAllCategories = _state.value.allCategories
-        _state.update { it.copy(hiddenCategories = emptySet(), categories = currentAllCategories) }
+        _state.update { it.copy(hiddenCategories = emptySet(), categories = currentAllCategories, isLoadingChannels = currentAllCategories.isEmpty()) }
         scope.launch { withContext(backgroundDispatcher) { prefsRepo.setString("channels_hidden_categories", "") } }
         buildLiveCategories()
     }
@@ -1117,7 +1179,10 @@ class ChannelsViewModel(
             .map { it.name }
             .toSet()
         val updated = _state.value.hiddenCategories + matching
-        _state.update { it.copy(hiddenCategories = updated) }
+        if (_state.value.selectedGroup in matching) selectGroup(null)
+        _state.update { it.copy(hiddenCategories = updated, categories = it.allCategories.filter { category -> category.name !in updated },
+            selectedGroup = if (it.selectedGroup in updated) null else it.selectedGroup,
+            categoryChannels = if (it.selectedGroup in updated) emptyList() else it.categoryChannels) }
         scope.launch { withContext(backgroundDispatcher) { prefsRepo.setString("channels_hidden_categories", updated.joinToString("|||")) } }
         buildLiveCategories()
     }
@@ -1175,6 +1240,16 @@ class ChannelsViewModel(
         _state.update { it.copy(showFilterSheet = !it.showFilterSheet) }
     }
 
+    fun setFilterSheetVisible(visible: Boolean) { _state.update { it.copy(showFilterSheet = visible) } }
+
+    fun setCategoryManagerVisible(visible: Boolean) { _state.update { it.copy(showCategoryManager = visible) } }
+
+    fun filterVisibleLiveChannels(channels: List<EnrichedChannel>): List<EnrichedChannel> = applyFilters(channels)
+
+    @Throws(Exception::class)
+    suspend fun getCategoryBrowseChannels(playlistId: String, categoryName: String): List<EnrichedChannel> =
+        withContext(backgroundDispatcher) { applyFilters(getChannelsForCategoryDirect(playlistId, categoryName)) }
+
     fun toggleCategoryManager() {
         _state.update { it.copy(showCategoryManager = !it.showCategoryManager) }
     }
@@ -1182,7 +1257,7 @@ class ChannelsViewModel(
     // --- Add playlist ---
 
     fun showAddPlaylistDialog() {
-        _state.update { it.copy(showAddPlaylist = true) }
+        _state.update { it.copy(showAddPlaylist = true, error = null) }
     }
 
     fun dismissAddPlaylistDialog() {
@@ -1201,6 +1276,7 @@ class ChannelsViewModel(
                 isCheckingEpg = false,
                 epgCheckMessage = null,
                 epgCheckSuccess = null,
+                error = null,
             )
         }
     }
@@ -1237,7 +1313,9 @@ class ChannelsViewModel(
                     epgCheckSuccess = false,
                 )
             }
+            return
         }
+
         scope.launch {
             _state.update {
                 it.copy(
@@ -1329,6 +1407,7 @@ class ChannelsViewModel(
 
     fun addPlaylist() {
         val st = _state.value
+        if (st.isAddingPlaylist) return
         if (st.newPlaylistType == "xtream") {
             addXtreamPlaylist()
         } else {
@@ -1340,8 +1419,9 @@ class ChannelsViewModel(
         val st = _state.value
         if (st.newPlaylistName.isBlank() || st.newPlaylistUrl.isBlank()) return
 
+        // Publish synchronously so repeated Add presses cannot queue duplicate imports.
+        _state.update { it.copy(isAddingPlaylist = true, addPlaylistProgress = null, error = null) }
         scope.launch {
-            _state.update { it.copy(isAddingPlaylist = true, addPlaylistProgress = null, error = null) }
             try {
                 val epg = st.newPlaylistEpgUrl.trim().takeIf { it.isNotEmpty() }
                 val playlist = withContext(backgroundDispatcher) {
@@ -1370,13 +1450,13 @@ class ChannelsViewModel(
                 if (backendOk) println("[PlaylistSync] Backend save OK for M3U '${playlist.id}'")
                 else println("[PlaylistSync] Backend save failed for M3U '${playlist.id}'")
                 dismissAddPlaylistDialog()
-                loadPlaylists()
+                selectNewlyAddedPlaylist(playlist.id)
             } catch (e: Exception) {
                 _state.update {
                     it.copy(
                         isAddingPlaylist = false,
                         addPlaylistProgress = null,
-                        error = com.torve.presentation.error.UserFacingError.CHANNEL_LOAD_FAILED.messageKey,
+                        error = playlistImportError(e).messageKey,
                     )
                 }
             }
@@ -1389,8 +1469,8 @@ class ChannelsViewModel(
             st.newXtreamUsername.isBlank() || st.newXtreamPassword.isBlank()
         ) return
 
+        _state.update { it.copy(isAddingPlaylist = true, addPlaylistProgress = null, error = null) }
         scope.launch {
-            _state.update { it.copy(isAddingPlaylist = true, error = null) }
             try {
                 val playlist = withContext(backgroundDispatcher) {
                     channelRepo.addXtreamPlaylist(
@@ -1398,6 +1478,7 @@ class ChannelsViewModel(
                         server = st.newXtreamServer,
                         username = st.newXtreamUsername,
                         password = st.newXtreamPassword,
+                        epgUrl = st.newPlaylistEpgUrl.trim().takeIf { it.isNotEmpty() },
                     )
                 }
                 // Backup to backend for cross-device restore
@@ -1407,6 +1488,7 @@ class ChannelsViewModel(
                         name = st.newPlaylistName,
                         playlistType = "xtream",
                         server = st.newXtreamServer,
+                        epgUrl = st.newPlaylistEpgUrl.trim().takeIf { it.isNotEmpty() },
                         username = st.newXtreamUsername,
                         password = st.newXtreamPassword,
                     ) ?: false
@@ -1417,16 +1499,38 @@ class ChannelsViewModel(
                 if (backendOk) println("[PlaylistSync] Backend save OK for Xtream '${playlist.id}'")
                 else println("[PlaylistSync] Backend save failed for Xtream '${playlist.id}'")
                 dismissAddPlaylistDialog()
-                loadPlaylists()
+                selectNewlyAddedPlaylist(playlist.id)
             } catch (e: Exception) {
                 _state.update {
                     it.copy(
                         isAddingPlaylist = false,
                         addPlaylistProgress = null,
-                        error = com.torve.presentation.error.UserFacingError.CHANNEL_LOAD_FAILED.messageKey,
+                        error = playlistImportError(e).messageKey,
                     )
                 }
             }
+        }
+    }
+
+    /** Safe playlist-specific copy for native clients; never return raw network exceptions. */
+    fun playlistImportErrorMessage(): String? = when (_state.value.error) {
+        null -> null
+        UserFacingError.INTEGRATION_INVALID_KEY.messageKey -> "Playlist sign-in failed. Check the server, username and password."
+        UserFacingError.INTEGRATION_AUTH_DENIED.messageKey -> "The provider reports that this playlist account is inactive. Check its expiry and account status."
+        UserFacingError.TIMEOUT.messageKey -> "The playlist server timed out. Try again."
+        UserFacingError.NETWORK_FAILURE.messageKey -> "Could not reach the playlist server. Check the address and your internet connection."
+        else -> "Could not import this playlist. Check the address and credentials, then try again."
+    }
+
+    private fun playlistImportError(error: Exception): UserFacingError {
+        if (error is CancellationException) throw error
+        if (error is XtreamAccountRejected) {
+            return if (error.inactive) UserFacingError.INTEGRATION_AUTH_DENIED else UserFacingError.INTEGRATION_INVALID_KEY
+        }
+        return when (val safe = error.toUserFacingError()) {
+            UserFacingError.UNAUTHORIZED -> UserFacingError.INTEGRATION_INVALID_KEY
+            UserFacingError.UNKNOWN -> UserFacingError.CHANNEL_LOAD_FAILED
+            else -> safe
         }
     }
 
@@ -1505,6 +1609,10 @@ class ChannelsViewModel(
     }
 
     fun removePlaylist(playlistId: String) {
+        if (_state.value.selectedPlaylistId == playlistId) {
+            epgRefreshRequestId++
+            epgRefreshJob?.cancel()
+        }
         scope.launch {
             try {
                 withContext(backgroundDispatcher) {
@@ -1528,12 +1636,53 @@ class ChannelsViewModel(
         scope.launch {
             _state.update { it.copy(isLoadingChannels = true) }
             try {
-                withContext(backgroundDispatcher) { channelRepo.refreshPlaylist(playlistId) }
+                withContext(backgroundDispatcher) {
+                    channelRepo.refreshPlaylist(playlistId)
+                    invalidateLiveCategoryCounts(playlistId)
+                }
+                val playlists = withContext(backgroundDispatcher) { channelRepo.getPlaylists() }
+                _state.update { it.copy(playlists = playlists) }
                 loadPlaylistCatalog(
                     playlistId = playlistId,
                     restoreSavedState = true,
                     triggerBackgroundRefresh = false,
                     showLoadingUntilRefresh = false,
+                    forceReload = true,
+                    rebuildGuideAfterLoad = true,
+                )
+            } catch (e: Exception) {
+                _state.update { current ->
+                    current.copy(
+                        isLoadingChannels = false,
+                        error = if (current.hasUsableCatalogFor(playlistId)) {
+                            null
+                        } else {
+                            com.torve.presentation.error.UserFacingError.CHANNEL_LOAD_FAILED.messageKey
+                        },
+                    )
+                }
+            }
+        }
+    }
+
+    fun refreshChannelsCatalog() {
+        val playlistId = _state.value.selectedPlaylistId ?: return
+        scope.launch {
+            _state.update { it.copy(isLoadingChannels = true) }
+            try {
+                withContext(backgroundDispatcher) {
+                    channelRepo.refreshPlaylistCatalog(playlistId)
+                    invalidateLiveCategoryCounts(playlistId)
+                }
+                val playlists = withContext(backgroundDispatcher) { channelRepo.getPlaylists() }
+                _state.update { it.copy(playlists = playlists) }
+                loadPlaylistCatalog(
+                    playlistId = playlistId,
+                    restoreSavedState = true,
+                    triggerBackgroundRefresh = false,
+                    showLoadingUntilRefresh = false,
+                    forceReload = true,
+                    rebuildGuideAfterLoad = false,
                 )
             } catch (e: Exception) {
                 _state.update { current ->
@@ -1551,12 +1700,41 @@ class ChannelsViewModel(
     }
 
     fun deletePlaylist(id: String) {
+        if (_state.value.selectedPlaylistId == id) {
+            epgRefreshRequestId++
+            epgRefreshJob?.cancel()
+        }
         scope.launch {
             try {
                 withContext(backgroundDispatcher) { channelRepo.removePlaylist(id) }
                 runCatching { playlistBackup?.deletePlaylistFromBackend(id) }
                 loadPlaylists()
             } catch (_: Exception) { }
+        }
+    }
+
+    private fun selectNewlyAddedPlaylist(playlistId: String) {
+        scope.launch {
+            val playlists = withContext(backgroundDispatcher) { channelRepo.getPlaylists() }
+            withContext(backgroundDispatcher) { persistSelectedPlaylistId(playlistId) }
+            _state.update {
+                it.copy(
+                    playlists = playlists,
+                    selectedPlaylistId = playlistId,
+                    isAddingPlaylist = false,
+                    addPlaylistProgress = null,
+                    isLoading = false,
+                    error = null,
+                )
+            }
+            loadPlaylistCatalog(
+                playlistId = playlistId,
+                restoreSavedState = true,
+                triggerBackgroundRefresh = false,
+                showLoadingUntilRefresh = false,
+                forceReload = true,
+                rebuildGuideAfterLoad = true,
+            )
         }
     }
 
@@ -1575,17 +1753,37 @@ class ChannelsViewModel(
         val candidateIds = channelIdentityCandidates(channel)
         scope.launch {
             try {
-                withContext(backgroundDispatcher) {
+                favoriteMutationMutex.withLock {
+                val favorites = withContext(backgroundDispatcher) {
                     val existingId = candidateIds.firstOrNull { channelRepo.isFavorite(it) }
-                    if (existingId != null) {
-                        channelRepo.removeFavorite(existingId)
-                    } else {
-                        channelRepo.addFavorite(channel)
-                    }
+                    if (existingId != null) channelRepo.removeFavorite(existingId)
+                    else channelRepo.addFavorite(channel)
+                    channelRepo.getFavorites()
                 }
-                loadFavorites()
-                // Refresh channels to update favorite status
-                _state.value.selectedPlaylistId?.let { selectPlaylist(it) }
+                val favoriteIds = favorites.flatMap(::channelIdentityCandidates).toSet()
+                fun markFavorite(value: Channel) = value.copy(
+                    isFavorite = channelIdentityCandidates(value).any(favoriteIds::contains),
+                )
+                fun markEnriched(values: List<EnrichedChannel>) = values.map { it.copy(channel = markFavorite(it.channel)) }
+                // A favorite mutation changes local metadata, not the playlist.
+                // Keep the selection and EPG intact instead of starting another
+                // provider refresh and rebuilding the whole browser.
+                _state.update { current ->
+                    current.copy(
+                        favorites = favorites,
+                        channels = markEnriched(current.channels),
+                        categoryChannels = markEnriched(current.categoryChannels),
+                        guideChannels = markEnriched(current.guideChannels),
+                        groupedChannels = current.groupedChannels.mapValues { markEnriched(it.value) },
+                        categories = current.categories.map { it.copy(channels = markEnriched(it.channels)) },
+                        allCategories = current.allCategories.map { it.copy(channels = markEnriched(it.channels)) },
+                        recentlyViewedChannels = current.recentlyViewedChannels.map(::markFavorite),
+                        selectedChannel = current.selectedChannel?.let(::markFavorite),
+                        searchResults = current.searchResults.map(::markFavorite),
+                    )
+                }
+                if (_state.value.activeFilter == ChannelsFilterType.FAVORITES) buildLiveCategories()
+                }
             } catch (_: Exception) { }
         }
     }
@@ -1593,7 +1791,15 @@ class ChannelsViewModel(
     // --- Search ---
 
     fun updateSearchQuery(query: String) {
-        _state.update { it.copy(searchQuery = query) }
+        _state.update { current ->
+            current.copy(
+                searchQuery = query,
+                // Results belong to the previous debounced query until the
+                // repository responds. Do not briefly render those rows under
+                // a new query (particularly visible with a TV remote).
+                searchResults = if (current.searchQuery == query) current.searchResults else emptyList(),
+            )
+        }
         searchQueryFlow.value = query
         if (query.trim().length < 2 && _state.value.hasGuideData()) {
             buildGuideChannels()
@@ -1752,7 +1958,9 @@ class ChannelsViewModel(
         restoreSavedState: Boolean,
     ) {
         if (categories.isEmpty()) return
+        val selectionGeneration = categorySelectionGeneration
         scope.launch {
+            val hydrateStartedAt = TimeSource.Monotonic.markNow()
             val categoryNames = categories.map { it.name }.toSet()
             val categoryName = withContext(backgroundDispatcher) {
                 resolveRestoredGroup(
@@ -1766,6 +1974,7 @@ class ChannelsViewModel(
             val categoryChannels = withContext(backgroundDispatcher) {
                 getChannelsForCategoryDirect(playlistId, categoryName)
             }
+            val categoryChannelsMs = hydrateStartedAt.elapsedNow().inWholeMilliseconds
             val restoredChannel = withContext(backgroundDispatcher) {
                 resolveRestoredChannel(
                     playlistId = playlistId,
@@ -1776,7 +1985,8 @@ class ChannelsViewModel(
             } ?: categoryChannels.firstOrNull()?.channel
 
             _state.update { current ->
-                if (current.selectedPlaylistId != playlistId) return@update current
+                if (current.selectedPlaylistId != playlistId ||
+                    (categorySelectionGeneration != selectionGeneration && current.selectedGroup != categoryName)) return@update current
 
                 fun mergeChannels(source: List<ChannelCategory>): List<ChannelCategory> =
                     source.map { category ->
@@ -1793,13 +2003,19 @@ class ChannelsViewModel(
                 )
             }
 
+            if (_state.value.selectedPlaylistId != playlistId || _state.value.selectedGroup != categoryName) return@launch
             withContext(backgroundDispatcher) {
                 persistSelectedGroup(playlistId, categoryName)
                 restoredChannel?.let { persistSelectedChannel(playlistId, it) }
             }
-            if (_state.value.epgState is EpgState.Loaded) {
+            if (_state.value.epgState is EpgState.Loaded || _state.value.selectedSubTab == ChannelsSubTab.GUIDE) {
                 buildGuideChannels()
             }
+            println(
+                "CATALOG_LOAD: initial category hydrated playlist=$playlistId category=$categoryName " +
+                    "channels=${categoryChannels.size} categoryQueryMs=$categoryChannelsMs " +
+                    "totalMs=${hydrateStartedAt.elapsedNow().inWholeMilliseconds}",
+            )
         }
     }
 
@@ -1809,11 +2025,13 @@ class ChannelsViewModel(
         triggerBackgroundRefresh: Boolean,
         showLoadingUntilRefresh: Boolean,
         recoverEmptyCatalog: Boolean = true,
+        forceReload: Boolean = false,
+        rebuildGuideAfterLoad: Boolean = false,
     ) {
         println("CATALOG_LOAD: playlistId=$playlistId triggerRefresh=$triggerBackgroundRefresh")
         // Cache-first: if the requested playlist is already loaded with categories,
         // do nothing. The user is on the same playlist and we already have data.
-        if (_state.value.selectedPlaylistId == playlistId && _state.value.categories.isNotEmpty()) {
+        if (!forceReload && _state.value.selectedPlaylistId == playlistId && _state.value.categories.isNotEmpty()) {
             println("CATALOG_LOAD: skipped — playlist=$playlistId already loaded (${_state.value.categories.size} categories)")
             return
         }
@@ -1836,7 +2054,7 @@ class ChannelsViewModel(
         catalogLoadJob = scope.launch {
             try {
                 var recoveryRefreshStarted = false
-                if (hasCachedCategories) {
+                if (hasCachedCategories && !forceReload) {
                     // Cache is already displayed — remove loading indicator immediately,
                     // then refresh from DB in background to pick up any count changes
                     // (e.g. VOD filter now applied where it wasn't before).
@@ -1852,24 +2070,36 @@ class ChannelsViewModel(
                 } else {
                     // No cache — query DB for category counts (lightweight GROUP BY) then
                     // strip VOD groups in memory (XTREAM names them "VOD: …").
-                    val loadStart = Clock.System.now().toEpochMilliseconds()
+                    val loadStartedAt = TimeSource.Monotonic.markNow()
+                    val categoryQueryStartedAt = TimeSource.Monotonic.markNow()
                     val categoryCounts = withContext(backgroundDispatcher) {
                         liveCategoryCounts(playlistId)
                     }
+                    val categoryQueryMs = categoryQueryStartedAt.elapsedNow().inWholeMilliseconds
                     if (categoryCounts.isNotEmpty()) {
-                        val lightweightCategories = withContext(backgroundDispatcher) {
+                        val cleaningStartedAt = TimeSource.Monotonic.markNow()
+                        val (lightweightCategories, allLightweightCategories) = withContext(backgroundDispatcher) {
                             val st = _state.value
                             val allCats = CategoryNameCleaner.processCategoryCountsOnly(categoryCounts)
                             val hiddenLower = st.hiddenCategories.map { it.lowercase() }.toSet()
-                            allCats.filter { it.name.lowercase() !in hiddenLower }
+                            allCats.filter { it.name.lowercase() !in hiddenLower } to allCats
                         }
+                        val cleaningMs = cleaningStartedAt.elapsedNow().inWholeMilliseconds
                         val selectedPlaylist = _state.value.playlists.firstOrNull { it.id == playlistId }
                         val epgSourceUrl = selectedPlaylist.resolveEpgSourceUrl().orEmpty()
+                        // Publish the saved group together with the first category
+                        // counts; channel hydration may finish several frames later.
+                        val restoredGroup = withContext(backgroundDispatcher) {
+                            resolveRestoredGroup(playlistId, previousPlaylistId,
+                                lightweightCategories.map { it.name }.toSet(), restoreSavedState)
+                                ?: lightweightCategories.firstOrNull()?.name
+                        }
                         _state.update { current ->
                             current.copy(
                                 selectedPlaylistId = playlistId,
-                                categories = lightweightCategories,
-                                allCategories = lightweightCategories,
+                                categories = retainLoadedCategoryChannels(current, lightweightCategories),
+                                allCategories = retainLoadedCategoryChannels(current, allLightweightCategories),
+                                selectedGroup = restoredGroup,
                                 isLoadingChannels = false,
                                 channels = emptyList(),
                                 groupedChannels = emptyMap(),
@@ -1880,19 +2110,34 @@ class ChannelsViewModel(
                                 },
                             )
                         }
-                        withContext(backgroundDispatcher) { persistCachedCategoriesNow(lightweightCategories) }
+                        val cacheStartedAt = TimeSource.Monotonic.markNow()
+                        withContext(backgroundDispatcher) { persistCachedCategoriesNow(allLightweightCategories) }
+                        val cacheMs = cacheStartedAt.elapsedNow().inWholeMilliseconds
                         hydrateInitialCategorySelection(
                             playlistId = playlistId,
                             previousPlaylistId = previousPlaylistId,
                             categories = lightweightCategories,
                             restoreSavedState = restoreSavedState,
                         )
-                        val loadMs = Clock.System.now().toEpochMilliseconds() - loadStart
+                        val loadMs = loadStartedAt.elapsedNow().inWholeMilliseconds
+                        println(
+                            "CATALOG_LOAD: category stages playlist=$playlistId queryMs=$categoryQueryMs " +
+                                "cleanMs=$cleaningMs cacheMs=$cacheMs totalMs=$loadMs",
+                        )
                         println("CATALOG_LOAD: DB categories loaded in ${loadMs}ms — ${lightweightCategories.size} categories")
+                        if (rebuildGuideAfterLoad) {
+                            buildGuideChannels()
+                        }
                     } else {
                         // Fallback: no category counts — full channel load required.
                         val rowCount = withContext(backgroundDispatcher) {
                             channelRepo.getTotalChannelCount(playlistId)
+                        }
+                        if (rowCount > 0 && _state.value.selectedPlaylistId == playlistId &&
+                            _state.value.allCategories.isNotEmpty()) {
+                            // A transient empty live query is not an empty playlist.
+                            _state.update { it.copy(isLoadingChannels = false) }
+                            return@launch
                         }
                         applyLoadedPlaylist(
                             playlistId = playlistId,
@@ -1903,8 +2148,11 @@ class ChannelsViewModel(
                             guideErrorOverride = null,
                             epgStateOverride = null,
                         )
-                        val loadMs = Clock.System.now().toEpochMilliseconds() - loadStart
+                        val loadMs = loadStartedAt.elapsedNow().inWholeMilliseconds
                         println("CATALOG_LOAD: no live category counts in ${loadMs}ms playlist=$playlistId totalRows=$rowCount; skipping full channel load")
+                        if (rebuildGuideAfterLoad) {
+                            buildGuideChannels()
+                        }
                         // Empty DB recovery: if we found neither category counts
                         // nor enriched rows, the playlist hasn't been ingested
                         // on this device yet (or the rows were dropped during
@@ -1966,12 +2214,17 @@ class ChannelsViewModel(
      */
     fun loadCategoryChannels(categoryName: String) {
         val playlistId = _state.value.selectedPlaylistId ?: return
-        scope.launch {
-            val st = _state.value
+        selectGroup(categoryName)
+        val selectionGeneration = categorySelectionGeneration
+        _state.update { it.copy(isLoadingChannels = true, error = null) }
+        categoryLoadJob = scope.launch {
+            try {
             val categoryChannels = withContext(backgroundDispatcher) {
                 getChannelsForCategoryDirect(playlistId, categoryName)
             }
             _state.update { current ->
+                if (current.selectedPlaylistId != playlistId || current.selectedGroup != categoryName ||
+                    categorySelectionGeneration != selectionGeneration) return@update current
                 fun mergeChannels(categories: List<ChannelCategory>): List<ChannelCategory> =
                     categories.map { category ->
                         if (category.name == categoryName) category.copy(channels = categoryChannels)
@@ -1979,35 +2232,23 @@ class ChannelsViewModel(
                     }
 
                 current.copy(
+                    isLoadingChannels = false,
                     selectedGroup = categoryName,
                     categoryChannels = categoryChannels,
                     categories = mergeChannels(current.categories),
                     allCategories = mergeChannels(current.allCategories),
                 )
             }
-            if (categoryChannels.all { it.currentProgramme == null && it.nextProgramme == null }) {
-                // Only kick off an EPG fetch when the EPG hasn't been
-                // loaded yet. If EpgState is already Loaded, the channels
-                // having null programmes means their tvg-ids don't match
-                // the EPG source — re-loading EPG won't change that.
-                //
-                // Without this guard, the cycle is:
-                //   loadCategoryChannels(X) -> ensureEpgLoaded -> cache
-                //   hit -> refreshSelectedCategoryChannels ->
-                //   loadCategoryChannels(X) -> here -> ensureEpgLoaded
-                //   -> ...
-                // Each iteration calls getEpg (the "ChannelsEPG: cache
-                // read" log spam visible during the user's reported
-                // ~10-second flicker on category click). The cycle also
-                // races against the user's click: if a background trigger
-                // fires refreshSelectedCategoryChannels while the new
-                // click is still suspended on the DB query,
-                // refreshSelectedCategoryChannels reads the *old*
-                // selectedGroup and queues a parallel load for the old
-                // category, which lands its state update LATE and flips
-                // the highlight back. Visible as the highlight flickering
-                // between the old and the new category for ~10s.
-                if (_state.value.epgState !is EpgState.Loaded) {
+            if (_state.value.selectedPlaylistId == playlistId &&
+                categorySelectionGeneration == selectionGeneration &&
+                _state.value.selectedSubTab == ChannelsSubTab.GUIDE) {
+                buildGuideChannels()
+            }
+            } catch (e: Exception) {
+                if (e is CancellationException) throw e
+                _state.update { current ->
+                    if (current.selectedPlaylistId != playlistId || categorySelectionGeneration != selectionGeneration) current
+                    else current.copy(isLoadingChannels = false, error = "Could not load this channel group. Try again.")
                 }
             }
         }
@@ -2022,22 +2263,24 @@ class ChannelsViewModel(
      * Must be called from a background dispatcher.
      */
     suspend fun getChannelsForCategoryDirect(playlistId: String, cleanedCategoryName: String): List<EnrichedChannel> {
-        // Get all raw group_title → count pairs from DB
-        val rawCounts = liveCategoryCounts(playlistId)
-        // Find which raw group_titles clean to the target category name
-        val matchingRawTitles = rawCounts
-            .map { it.first }
-            .filter { rawTitle ->
-                val cleaned = CategoryNameCleaner.clean(rawTitle)
-                cleaned.name.equals(cleanedCategoryName, ignoreCase = true)
-            }
+        // Reuse the raw-title mapping built by the category-count query. On a
+        // cache-first start, try the indexed direct title lookup before paying
+        // for a complete GROUP BY to rebuild that mapping.
+        val cleanedKey = cleanedCategoryName.lowercase()
+        var matchingRawTitles = rawLiveCategoryTitlesByPlaylist[playlistId]
+            ?.get(cleanedKey)
+            .orEmpty()
 
         if (matchingRawTitles.isEmpty()) {
             // Fallback: try direct match (category name might already be raw)
             val direct = channelRepo.getChannelsForCategory(playlistId, cleanedCategoryName)
                 .filter(::isLiveBrowseChannel)
             if (direct.isNotEmpty()) return direct.map { EnrichedChannel(channel = it) }
-            return emptyList()
+            liveCategoryCounts(playlistId)
+            matchingRawTitles = rawLiveCategoryTitlesByPlaylist[playlistId]
+                ?.get(cleanedKey)
+                .orEmpty()
+            if (matchingRawTitles.isEmpty()) return emptyList()
         }
 
         // Query channels for all matching raw group_titles
@@ -2190,6 +2433,7 @@ class ChannelsViewModel(
         if (epgSourceUrl.isBlank()) {
             _state.update { it.copy(epgState = EpgState.NotConfigured) }
             println("ChannelsEPG: cached-only skipped playlistId=$playlistId reason=no_epg_source")
+            return
         }
         if (epgRefreshJob?.isActive == true) {
             println("ChannelsEPG: cached-only skipped playlistId=$playlistId reason=epg_job_active")
@@ -2235,6 +2479,8 @@ class ChannelsViewModel(
         if (epgRefreshJob?.isActive == true && !forceRefresh) {
             return
         }
+        if (forceRefresh) epgRefreshJob?.cancel()
+        val requestId = ++epgRefreshRequestId
 
         epgRefreshJob = scope.launch {
             val cachedEpg = withContext(backgroundDispatcher) { channelRepo.getEpg(playlistId) }
@@ -2255,19 +2501,33 @@ class ChannelsViewModel(
                         ),
                         guideProgrammes = cachedEpg.programmesByChannelKey,
                         guideError = null,
+                        isLoadingGuide = false,
+                        epgRefreshProgress = null,
                     )
                 }
                 refreshSelectedCategoryChannels(playlistId)
                 return@launch
             }
 
-            _state.update { it.copy(epgState = EpgState.Loading, guideError = null) }
-            val refreshed = runCatching {
-                withContext(backgroundDispatcher) { channelRepo.refreshEpg(playlistId, _state.value.hiddenChannels) }
-                withContext(backgroundDispatcher) { channelRepo.getEpg(playlistId) }
+            _state.update {
+                it.copy(
+                    epgState = EpgState.Loading,
+                    guideError = null,
+                    epgRefreshProgress = com.torve.domain.repository.EpgRefreshProgress(
+                        phase = com.torve.domain.repository.EpgRefreshProgress.Phase.DOWNLOADING,
+                    ),
+                )
             }
-
-            refreshed.onSuccess { epg ->
+            try {
+                withContext(backgroundDispatcher) {
+                    channelRepo.refreshEpg(playlistId, _state.value.hiddenChannels) { progress ->
+                        if (requestId == epgRefreshRequestId && _state.value.selectedPlaylistId == playlistId) {
+                            _state.update { it.copy(epgRefreshProgress = progress) }
+                        }
+                    }
+                }
+                val epg = withContext(backgroundDispatcher) { channelRepo.getEpg(playlistId) }
+                if (requestId != epgRefreshRequestId) return@launch
                 if (epg.programmesByChannelKey.isNotEmpty()) {
                     _state.update {
                         it.copy(
@@ -2280,6 +2540,8 @@ class ChannelsViewModel(
                             ),
                             guideProgrammes = epg.programmesByChannelKey,
                             guideError = null,
+                            isLoadingGuide = false,
+                            epgRefreshProgress = null,
                         )
                     }
                     refreshSelectedCategoryChannels(playlistId)
@@ -2291,10 +2553,25 @@ class ChannelsViewModel(
                         it.copy(
                             epgState = EpgState.Error(message),
                             guideError = message,
+                            isLoadingGuide = false,
+                            epgRefreshProgress = null,
                         )
                     }
                 }
-            }.onFailure { error ->
+            } catch (cancelled: CancellationException) {
+                if (requestId == epgRefreshRequestId) {
+                    _state.update {
+                        it.copy(
+                            epgState = EpgState.Error("EPG refresh cancelled."),
+                            guideError = "EPG refresh cancelled.",
+                            isLoadingGuide = false,
+                            epgRefreshProgress = null,
+                        )
+                    }
+                }
+                throw cancelled
+            } catch (error: Throwable) {
+                if (requestId != epgRefreshRequestId) return@launch
                 val message = error.message
                     ?: withContext(backgroundDispatcher) { channelRepo.getEpgLoadError(playlistId) }
                     ?: "Failed to load EPG"
@@ -2302,6 +2579,8 @@ class ChannelsViewModel(
                     it.copy(
                         epgState = EpgState.Error(message),
                         guideError = message,
+                        isLoadingGuide = false,
+                        epgRefreshProgress = null,
                     )
                 }
             }
@@ -2417,20 +2696,26 @@ class ChannelsViewModel(
         restoreSavedState: Boolean,
         includeEpg: Boolean = false,
     ) {
-        scope.launch {
+        backgroundRefreshJob = scope.launch {
+            if (!prefsRepo.isAppFeatureEnabled(OptionalAppFeature.CHANNELS)) return@launch
             try {
                 println(
                     "StartupRecovery: background refresh start playlistId=$playlistId " +
                         "preserveVisibleCatalog=$preserveVisibleCatalog includeEpg=$includeEpg",
                 )
+                _state.update { it.copy(isLoadingChannels = true) }
                 withContext(backgroundDispatcher) {
                     if (includeEpg) {
                         channelRepo.refreshPlaylist(playlistId)
                     } else {
                         channelRepo.refreshPlaylistCatalog(playlistId)
                     }
+                    invalidateLiveCategoryCounts(playlistId)
                 }
-                if (_state.value.selectedPlaylistId != playlistId) return@launch
+                if (_state.value.selectedPlaylistId != playlistId) {
+                    _state.update { it.copy(isLoadingChannels = false) }
+                    return@launch
+                }
                 val refreshedLiveCounts = withContext(backgroundDispatcher) { liveCategoryCounts(playlistId) }
                 if (refreshedLiveCounts.isNotEmpty()) {
                     val allCats = withContext(backgroundDispatcher) {
@@ -2440,15 +2725,15 @@ class ChannelsViewModel(
                     val visibleCats = allCats.filter { it.name.lowercase() !in hiddenLower }
                     _state.update { current ->
                         current.copy(
-                            categories = visibleCats,
-                            allCategories = allCats,
+                            categories = retainLoadedCategoryChannels(current, visibleCats),
+                            allCategories = retainLoadedCategoryChannels(current, allCats),
                             channels = emptyList(),
                             groupedChannels = emptyMap(),
                             isLoadingChannels = false,
                             error = null,
                         )
                     }
-                    withContext(backgroundDispatcher) { persistCachedCategoriesNow(visibleCats) }
+                    withContext(backgroundDispatcher) { persistCachedCategoriesNow(allCats) }
                     hydrateInitialCategorySelection(
                         playlistId = playlistId,
                         previousPlaylistId = playlistId,
@@ -2483,13 +2768,15 @@ class ChannelsViewModel(
                 println(
                     "StartupRecovery: background refresh failed playlistId=$playlistId error=${e.message.orEmpty()}",
                 )
-                if (!preserveVisibleCatalog) {
-                    _state.update { current ->
-                        current.copy(
-                            isLoadingChannels = false,
-                            error = com.torve.presentation.error.UserFacingError.CHANNEL_LOAD_FAILED.messageKey,
-                        )
-                    }
+                _state.update { current ->
+                    current.copy(
+                        isLoadingChannels = false,
+                        error = if (preserveVisibleCatalog && current.hasUsableCatalogFor(playlistId)) {
+                            null
+                        } else {
+                            com.torve.presentation.error.UserFacingError.CHANNEL_LOAD_FAILED.messageKey
+                        },
+                    )
                 }
             }
         }

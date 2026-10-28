@@ -1,5 +1,7 @@
 package com.torve.android.ui.settings
 
+import com.torve.android.ui.community.parityLabel as localizedUiText
+
 import com.torve.android.BuildConfig
 import com.torve.android.ui.components.PandaSetupNudgeCard
 import android.content.Context
@@ -8,6 +10,7 @@ import android.net.Uri
 import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.pm.PackageInfoCompat
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -39,9 +42,9 @@ import androidx.compose.material.icons.outlined.VisibilityOff
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
+import com.torve.android.ui.components.MobileGlassButton as Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Card
+import com.torve.android.ui.components.MobileGlassCard as Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilledTonalButton
@@ -50,11 +53,12 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
+import com.torve.android.ui.components.MobileGlassIconButton as IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.MenuAnchorType
-import androidx.compose.material3.OutlinedButton
+import com.torve.android.ui.components.MobileGlassOutlinedButton as OutlinedButton
+import com.torve.android.ui.components.mobileGlassSurface
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
@@ -75,6 +79,8 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
@@ -83,7 +89,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.appcompat.app.AppCompatDelegate
 import androidx.core.os.LocaleListCompat
+import com.torve.android.ui.community.parityLabel
 import com.torve.android.R
+import androidx.compose.material.icons.rounded.CloudSync
 import com.torve.android.background.BackgroundWork
 import com.torve.android.premium.AccessTier
 import com.torve.android.premium.PremiumAccess
@@ -97,6 +105,12 @@ import com.torve.android.ui.subscription.NeedsVerificationBanner
 import com.torve.android.ui.subscription.NeedsVerificationToastEffect
 import com.torve.domain.model.CodecPreference
 import com.torve.domain.model.HdrMode
+import com.torve.domain.model.NextEpisodeMode
+import com.torve.domain.player.SegmentActionMode
+import com.torve.domain.model.NextEpisodePreparationMode
+import com.torve.domain.model.SourceFallbackPolicy
+import com.torve.domain.model.SourceLanguageMatchMode
+import com.torve.domain.model.UnknownSourceMetadataPolicy
 import com.torve.android.ui.theme.Amber
 import com.torve.android.ui.theme.Charcoal
 import com.torve.android.ui.theme.Emerald
@@ -111,10 +125,6 @@ import com.torve.android.ui.transfer.RestoreSetupRecoveryCard
 import com.torve.data.account.AccountSettingsRepository
 import com.torve.android.sync.SyncCoordinator
 import com.torve.presentation.addon.AddonViewModel
-import com.torve.presentation.beta.BetaProgramCopy
-import com.torve.presentation.beta.BetaProgramViewModel
-import com.torve.presentation.beta.shouldShowBetaProgramSettingsEntry
-import com.torve.presentation.beta.toSettingsCardState
 import com.torve.presentation.channels.ChannelsViewModel
 import com.torve.presentation.settings.AppLanguage
 import com.torve.presentation.settings.SettingsViewModel
@@ -137,6 +147,8 @@ import java.time.format.DateTimeFormatter
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(
+    initialGroup: String? = null,
+    storeUpdates: com.torve.android.update.StoreUpdateController? = null,
     accessTier: AccessTier = AccessTier.FREE,
     onLockedFeatureClick: (PremiumFeature) -> Unit = {},
     onDownloadsClick: () -> Unit = {},
@@ -154,6 +166,7 @@ fun SettingsScreen(
     onReportIssueClick: () -> Unit = {},
     onStreamingServicesClick: () -> Unit = {},
     onAddonCatalogClick: () -> Unit = {},
+    onWebReplaySettingsClick: () -> Unit = {},
     onRegexPatternsClick: () -> Unit = {},
     onStreamGroupsClick: () -> Unit = {},
     onHomeLayoutClick: () -> Unit = {},
@@ -161,7 +174,13 @@ fun SettingsScreen(
     onSensitiveMaterialClick: () -> Unit = {},
     onRatingSettingsClick: () -> Unit = {},
     onCardStyleClick: () -> Unit = {},
+    onAppearanceClick: () -> Unit = {},
+    onCollectionsClick: () -> Unit = {},
+    onCustomSectionsClick: () -> Unit = {},
     onIntegrationsClick: () -> Unit = {},
+    onIntegrationServiceClick: (String) -> Unit = {},
+    onConnectionCenterClick: () -> Unit = {},
+    onCloudBackupClick: () -> Unit = {},
     onDiagnosticsClick: () -> Unit = {},
     onSendCredentialsClick: () -> Unit = {},
     onReceiveCredentialsClick: () -> Unit = {},
@@ -169,7 +188,6 @@ fun SettingsScreen(
     onStartSetupClick: () -> Unit = {},
     onSetupPandaClick: () -> Unit = {},
     onStatusRepairClick: () -> Unit = {},
-    onBetaProgramClick: () -> Unit = {},
     viewModel: SettingsViewModel = koinInject(),
     syncCoordinator: SyncCoordinator = koinInject(),
     authClient: AuthClient = koinInject(),
@@ -177,13 +195,18 @@ fun SettingsScreen(
     accountSessionCoordinator: AccountSessionCoordinator = koinInject(),
     channelsViewModel: ChannelsViewModel = koinInject(),
     subscriptionViewModel: SubscriptionViewModel = koinInject(),
-    betaProgramViewModel: BetaProgramViewModel = koinInject(),
 ) {
+    if (com.torve.android.ui.profile.FamilySettingsLocked()) return
+    var showFamilyControls by remember { mutableStateOf(false) }
+    if (showFamilyControls) {
+        com.torve.android.ui.profile.FamilyControlsScreen(onBack = { showFamilyControls = false })
+        return
+    }
+
     val state by viewModel.state.collectAsState()
     val syncState by syncCoordinator.state.collectAsState()
     val accountSettingsState by accountSettingsRepository.state.collectAsState()
     val subscriptionState by subscriptionViewModel.state.collectAsState()
-    val betaProgramState by betaProgramViewModel.state.collectAsState()
     val subscriptionAccess = remember(
         subscriptionState.subscription,
         subscriptionState.isPro,
@@ -252,13 +275,13 @@ fun SettingsScreen(
         if (BuildConfig.HAS_BILLING) {
             subscriptionViewModel.refreshAccess()
         }
-        betaProgramViewModel.onOpenBetaProgram()
     }
 
     val scope = rememberCoroutineScope()
     var refreshAllQueued by remember { mutableStateOf(false) }
     var refreshAllRunId by remember { mutableIntStateOf(0) }
     var refreshAllStatus by remember { mutableStateOf<RefreshAllUiStatus?>(null) }
+    var refreshAllDetails by remember { mutableStateOf(emptyList<String>()) }
     val refreshAllStartedText = stringResource(R.string.settings_refresh_all_started)
     LaunchedEffect(refreshAllRunId) {
         if (refreshAllRunId == 0) return@LaunchedEffect
@@ -324,6 +347,42 @@ fun SettingsScreen(
         }
     }
     val premiumStatusLabel = subscriptionAccess.accessStatusLabel
+    var selectedSettingsGroup by androidx.compose.runtime.saveable.rememberSaveable(initialGroup) { mutableStateOf(initialGroup?.takeIf { it in com.torve.android.ui.community.phoneSettingsGroups }) }
+    var settingsLeaf by androidx.compose.runtime.saveable.rememberSaveable(selectedSettingsGroup) { mutableStateOf<String?>(null) }
+    var sourceNode by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf<String?>(null) }
+    fun backToSettings() { if (settingsLeaf != null) settingsLeaf = null else selectedSettingsGroup = null }
+    androidx.activity.compose.BackHandler(enabled = selectedSettingsGroup != null) { backToSettings() }
+    if (selectedSettingsGroup == null) {
+        com.torve.android.ui.community.PhoneSettingsDirectory { selectedSettingsGroup = it }
+        return
+    }
+    if (settingsLeaf == null && selectedSettingsGroup in listOf("connections", "advanced")) {
+        val sources = selectedSettingsGroup == "connections"
+        com.torve.android.ui.community.PhoneGroupedSettingsMenu(
+            entries = if (sources) com.torve.android.ui.community.SettingsMenus.sources() else com.torve.android.ui.community.SettingsMenus.advanced(),
+            title = localizedUiText(if (sources) "Sources & services" else "Help & advanced"),
+            nodeId = if (sources) sourceNode else null,
+            onNodeChanged = { sourceNode = it }, onBack = { selectedSettingsGroup = null },
+            onOpen = { action ->
+                when (action) {
+                    "web_replays" -> onWebReplaySettingsClick()
+                    "setup" -> onStartSetupClick()
+                    "usenet_setup" -> onSetupPandaClick()
+                    "extensions" -> onAddonCatalogClick()
+                    "Connections" -> onIntegrationServiceClick("debrid")
+                    "OMDb", "Trakt", "SIMKL", "Jellyfin", "Plex", "Seerr", "NzbDAV", "OpenSubtitles", "automation" -> onIntegrationServiceClick(action.lowercase())
+                    "MDBList" -> onMdbListClick()
+                    "collections" -> onCollectionsClick()
+                    "groups" -> onStreamGroupsClick()
+                    "patterns" -> onRegexPatternsClick()
+                    "content" -> onSensitiveMaterialClick()
+                    "health" -> onConnectionCenterClick()
+                    else -> settingsLeaf = action.lowercase()
+                }
+            },
+        )
+        return
+    }
     NeedsVerificationToastEffect(
         message = subscriptionState.verificationEmailMessage,
         onConsumed = subscriptionViewModel::consumeVerificationEmailMessage,
@@ -331,34 +390,27 @@ fun SettingsScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(Obsidian)
+            .background(MaterialTheme.colorScheme.background)
             .statusBarsPadding()
             .verticalScroll(rememberScrollState())
             .padding(16.dp),
     ) {
-        Text(
-            text = stringResource(R.string.settings_title),
-            style = MaterialTheme.typography.displayMedium,
-            color = Snow,
-            fontWeight = FontWeight.Bold,
-        )
-
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            com.torve.android.ui.components.BackButton(onClick = ::backToSettings)
+            Text(localizedUiText(when(settingsLeaf) { "channels" -> "Channels"; "kodi" -> "Kodi remotes"; "ai" -> "AI Search"; "features" -> "App features"; "backup" -> "Backup & restore"; "about" -> "About & help"; else -> com.torve.android.ui.community.phoneSettingsGroups[selectedSettingsGroup]?.first ?: "Settings" }),
+                style = MaterialTheme.typography.headlineSmall, modifier = Modifier.weight(1f), color = Torve.colors.textPrimary)
+        }
         Spacer(Modifier.height(16.dp))
-
-        // Persistent nudge encouraging users to run the Panda wizard,
-        // which is the easiest way to get debrid + indexer plumbing wired
-        // up. Hidden once Panda is configured OR the user dismisses, AND
-        // only shown to users who can actually finish the flow — Panda
-        // depends on the premium-gated addon catalog, so signed-out,
-        // unverified, or free-tier users would be told to set up
-        // something they can't complete.
-        val pandaNudgeEligible = authUser != null &&
-            authUser?.isVerified == true
-        PandaSetupNudgeCard(
-            onSetupClick = onSetupPandaClick,
-            eligible = pandaNudgeEligible,
-        )
-
+        if (selectedSettingsGroup == "appearance") {
+            SettingsNavRow(title = localizedUiText("App background & rail spacing"), subtitle = localizedUiText("Appearance across all pages"), onClick = onAppearanceClick)
+            SettingsNavRow(title = localizedUiText("Home layout"), subtitle = localizedUiText("Choose and arrange content rows"), locked = customLayoutLocked,
+                onClick = { onPremiumAction(PremiumFeature.SYNC_CUSTOM_LAYOUTS) { onHomeLayoutClick() } })
+            SettingsNavRow(title = localizedUiText("Card appearance"), subtitle = localizedUiText("Global card styles across the app"), onClick = onCardStyleClick)
+            SettingsNavRow(title = localizedUiText("Custom sections"), subtitle = localizedUiText("Create your own content rows"), onClick = onCustomSectionsClick)
+            SettingsNavRow(title = localizedUiText("Ratings"), subtitle = localizedUiText("Rating providers and badges"), onClick = onRatingSettingsClick)
+            SettingsNavRow(title = stringResource(R.string.settings_streaming_services), subtitle = stringResource(R.string.settings_streaming_services_sub), onClick = onStreamingServicesClick)
+        }
+        if (selectedSettingsGroup == "account") {
         // Prominent subscription summary card. Only rendered when the user
         // is signed in — for signed-out users the existing account card
         // already provides the sign-in CTA, and rendering this card on top
@@ -369,7 +421,7 @@ fun SettingsScreen(
         if (BuildConfig.HAS_BILLING && authUser != null) {
             Card(
                 modifier = Modifier.fillMaxWidth(),
-                colors = CardDefaults.cardColors(containerColor = Charcoal),
+                colors = CardDefaults.cardColors(containerColor = com.torve.android.ui.theme.menuPanelColor(), contentColor = MaterialTheme.colorScheme.onSurface),
             ) {
                 Column(modifier = Modifier.padding(16.dp)) {
                     Text(
@@ -382,7 +434,7 @@ fun SettingsScreen(
                     Text(
                         text = subscriptionAccess.accessStatusLabel,
                         style = MaterialTheme.typography.titleMedium,
-                        color = Snow,
+                        color = Torve.colors.textPrimary,
                         fontWeight = FontWeight.Bold,
                     )
                     if (subscriptionAccess.accessHelperText.isNotBlank()) {
@@ -396,7 +448,7 @@ fun SettingsScreen(
                     subscriptionMarketplaceLabel(subscriptionState.subscription?.platform)?.let { label ->
                         Spacer(Modifier.height(2.dp))
                         Text(
-                            text = "Managed through $label",
+                            text = localizedUiText("Managed through $label"),
                             style = MaterialTheme.typography.bodySmall,
                             color = Torve.colors.textTertiary,
                         )
@@ -424,109 +476,28 @@ fun SettingsScreen(
             Spacer(Modifier.height(12.dp))
         }
 
-        val hasExistingPremiumAccess = subscriptionState.hasEntitlement || subscriptionState.isPro
-        val showBetaProgramCard = shouldShowBetaProgramSettingsEntry(
-            state = betaProgramState,
-            hasPremiumAccess = hasExistingPremiumAccess,
-        )
-        if (showBetaProgramCard) {
-        val betaCard = betaProgramState.run {
-            com.torve.domain.beta.BetaProgramStatus(
-                signedIn = isSignedIn,
-                applicationStatus = applicationStatus,
-                betaAccess = com.torve.domain.beta.BetaAccessState(
-                    active = betaAccessActive,
-                    expiresAt = betaAccessExpiresAt,
-                    status = betaGrantStatus,
-                ),
-                daysRemaining = daysRemaining,
-                eligibility = com.torve.domain.beta.BetaEligibilityState(
-                    canApply = canApply,
-                    blockedReason = blockedReason,
-                    isEmailVerificationRequired = isEmailVerificationRequired,
-                ),
-                signupCloseAt = signupCloseAt,
-                freeAccessEndAt = freeAccessEndAt,
-                discordInviteUrl = discordInviteUrl,
-            ).toSettingsCardState()
-        }
-        val betaSubtitle = when {
-            hasExistingPremiumAccess &&
-                betaProgramState.isSignedIn &&
-                !betaProgramState.isEmailVerificationRequired &&
-                !betaProgramState.betaAccessActive &&
-                betaProgramState.blockedReason != com.torve.domain.beta.BetaBlockedReason.BETA_SIGNUP_CLOSED &&
-                betaProgramState.blockedReason != com.torve.domain.beta.BetaBlockedReason.BETA_ACCESS_ENDED ->
-                BetaProgramCopy.PREMIUM_TESTER_APPLICATION
-            else -> betaCard.subtitle
-        }
-        Card(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clickable(onClick = onBetaProgramClick),
-            colors = CardDefaults.cardColors(containerColor = Charcoal),
-        ) {
-            Column(modifier = Modifier.padding(16.dp)) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(
-                        text = betaCard.title,
-                        style = MaterialTheme.typography.titleMedium,
-                        color = Snow,
-                        fontWeight = FontWeight.Bold,
-                    )
-                    betaCard.badge?.let {
-                        Text(
-                            text = it,
-                            style = MaterialTheme.typography.labelSmall,
-                            color = Amber,
-                        )
-                    }
-                }
-                Spacer(Modifier.height(4.dp))
-                Text(
-                    text = betaSubtitle,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = Torve.colors.textSecondary,
-                )
-                Spacer(Modifier.height(10.dp))
-                OutlinedButton(
-                    onClick = onBetaProgramClick,
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Amber),
-                ) {
-                    ButtonLabel("Open Beta Program")
-                }
-            }
-        }
-        Spacer(Modifier.height(12.dp))
-        }
-
         // Account & Sync card (top of settings)
         Card(
             modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(containerColor = Charcoal),
+            colors = CardDefaults.cardColors(containerColor = com.torve.android.ui.theme.menuPanelColor(), contentColor = MaterialTheme.colorScheme.onSurface),
         ) {
             Column(modifier = Modifier.padding(16.dp)) {
                 if (authUser != null) {
                     Text(
-                        text = "Signed in as ${authUser?.email ?: ""}",
+                        text = localizedUiText("Signed in as ${authUser?.email ?: ""}"),
                         style = MaterialTheme.typography.bodyMedium,
-                        color = Snow,
+                        color = Torve.colors.textPrimary,
                         fontWeight = FontWeight.SemiBold,
                     )
                     if (subscriptionState.needsVerification) {
-                        Spacer(Modifier.height(8.dp))
+                        Spacer(Modifier.height(12.dp))
                         NeedsVerificationBanner(
                             isSending = subscriptionState.isSendingVerificationEmail,
                             onSendVerificationEmail = subscriptionViewModel::sendVerificationEmail,
                             onRefreshAccess = subscriptionViewModel::refreshAccess,
                         )
                     } else if (authUser?.isVerified == false) {
-                        Spacer(Modifier.height(8.dp))
+                        Spacer(Modifier.height(12.dp))
                         VerificationBanner(
                             email = authUser?.email ?: "",
                             authClient = authClient,
@@ -534,76 +505,7 @@ fun SettingsScreen(
                         )
                     }
                     Spacer(Modifier.height(4.dp))
-                    val pairedDeviceCount = syncState.devices.count { it.revokedAt == null }
-                    Text(
-                        text = if (pairedDeviceCount == 1) {
-                            stringResource(R.string.settings_paired_count_one, pairedDeviceCount)
-                        } else {
-                            stringResource(R.string.settings_paired_count_other, pairedDeviceCount)
-                        },
-                        style = MaterialTheme.typography.bodySmall,
-                        color = Torve.colors.textSecondary,
-                    )
                     Spacer(Modifier.height(12.dp))
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        OutlinedButton(
-                            onClick = {
-                                onPremiumAction(PremiumFeature.PHONE_PAIRING) { onDevicesClick() }
-                            },
-                            modifier = Modifier.weight(1f),
-                            colors = ButtonDefaults.outlinedButtonColors(contentColor = Amber),
-                        ) {
-                            if (pairingLocked) {
-                                Icon(
-                                    imageVector = Icons.Default.Lock,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(16.dp),
-                                )
-                                Spacer(Modifier.width(6.dp))
-                            }
-                            Text(if (pairingLocked) stringResource(R.string.settings_manage_pairings_locked) else stringResource(R.string.settings_manage_pairings))
-                        }
-                        OutlinedButton(
-                            onClick = {
-                                if (canOpenManageDevices) {
-                                    onManageDevicesClick()
-                                } else {
-                                    onLockedFeatureClick(PremiumFeature.DEVICE_LINKING)
-                                }
-                            },
-                            modifier = Modifier.weight(1f),
-                            colors = ButtonDefaults.outlinedButtonColors(contentColor = Amber),
-                        ) {
-                            if (!canOpenManageDevices && deviceLinkingLocked) {
-                                Icon(
-                                    imageVector = Icons.Default.Lock,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(16.dp),
-                                )
-                                Spacer(Modifier.width(6.dp))
-                            }
-                            Text(if (!canOpenManageDevices && deviceLinkingLocked) stringResource(R.string.settings_manage_devices_locked) else stringResource(R.string.settings_manage_devices))
-                        }
-                    }
-                    Spacer(Modifier.height(8.dp))
-                    // "Sign in a TV with this phone" — entry point for the
-                    // QR-sign-in flow. The TV displays a QR encoding
-                    // `torve-signin:<CODE>`; native phone camera apps don't
-                    // know how to interpret that scheme, so the scanner has
-                    // to live inside Torve. Discoverable from the top-level
-                    // Account card so users don't have to dig through the
-                    // legacy "Devices" pairing screen.
-                    OutlinedButton(
-                        onClick = onSignInTvClick,
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Amber),
-                    ) {
-                        Text(stringResource(R.string.settings_sign_in_tv_with_phone))
-                    }
-                    Spacer(Modifier.height(8.dp))
                     var showSignOutConfirm by remember { mutableStateOf(false) }
                     OutlinedButton(
                         onClick = { showSignOutConfirm = true },
@@ -661,13 +563,13 @@ fun SettingsScreen(
                     if (showDeleteConfirm) {
                         AlertDialog(
                             onDismissRequest = { if (!isDeletingAccount) showDeleteConfirm = false },
-                            containerColor = Charcoal,
-                            title = { Text(stringResource(R.string.settings_delete_account_title), color = Snow) },
+                            containerColor = MaterialTheme.colorScheme.surface,
+                            title = { Text(stringResource(R.string.settings_delete_account_title), color = Torve.colors.textPrimary) },
                             text = {
                                 Column {
-                                    Text(stringResource(R.string.settings_delete_account_body), color = Silver)
+                                    Text(stringResource(R.string.settings_delete_account_body), color = MaterialTheme.colorScheme.onSurfaceVariant)
                                     deleteError?.let { err ->
-                                        Spacer(Modifier.height(8.dp))
+                                        Spacer(Modifier.height(12.dp))
                                         Text(err, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
                                     }
                                 }
@@ -689,12 +591,12 @@ fun SettingsScreen(
                                         }
                                     },
                                     enabled = !isDeletingAccount,
-                                    colors = ButtonDefaults.buttonColors(containerColor = Ruby, contentColor = Snow),
+                                    colors = ButtonDefaults.buttonColors(containerColor = Ruby, contentColor = MaterialTheme.colorScheme.onSurface),
                                 ) {
                                     if (isDeletingAccount) {
                                         CircularProgressIndicator(
                                             modifier = Modifier.size(16.dp),
-                                            color = Snow,
+                                            color = Torve.colors.textPrimary,
                                             strokeWidth = 2.dp,
                                         )
                                     } else {
@@ -707,7 +609,7 @@ fun SettingsScreen(
                                     onClick = { showDeleteConfirm = false },
                                     enabled = !isDeletingAccount,
                                 ) {
-                                    Text(stringResource(R.string.common_cancel), color = Silver)
+                                    Text(stringResource(R.string.common_cancel), color = MaterialTheme.colorScheme.onSurfaceVariant)
                                 }
                             },
                         )
@@ -735,174 +637,56 @@ fun SettingsScreen(
 
         Spacer(Modifier.height(12.dp))
 
-        // Quick links. The dedicated Subscription button is no longer
-        // shown for signed-in users on billing-enabled builds — the top
-        // Subscription card already exposes Manage Subscription / Upgrade
-        // to Premium. For signed-out users we still surface a path into
-        // the account access surface here without requiring sign-in.
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            if (BuildConfig.HAS_BILLING && authUser == null) {
-                OutlinedButton(
-                    onClick = onSubscriptionClick,
-                    modifier = Modifier.weight(1f),
-                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Amber),
-                ) {
-                    ButtonLabel(stringResource(R.string.settings_subscription))
-                }
-            }
-            OutlinedButton(
-                onClick = onProfilesClick,
-                modifier = Modifier.weight(1f),
-                colors = ButtonDefaults.outlinedButtonColors(contentColor = Amber),
-            ) {
-                ButtonLabel(stringResource(R.string.settings_profiles))
-            }
-        }
-        if (BuildConfig.HAS_BILLING) {
-            // Status text only shown when the top subscription card is NOT
-            // present (i.e. signed-out users) to avoid duplicating
-            // "Premium active / Premium is active on this device" twice.
-            if (authUser == null) {
-                Spacer(Modifier.height(8.dp))
-                Text(
-                    text = premiumStatusLabel,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = Torve.colors.textSecondary,
-                )
-                Spacer(Modifier.height(2.dp))
-                Text(
-                    text = subscriptionAccess.accessHelperText,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = Torve.colors.textSecondary,
-                )
-                subscriptionMarketplaceLabel(subscriptionState.subscription?.platform)?.let { label ->
-                    Spacer(Modifier.height(2.dp))
-                    Text(
-                        text = "Managed through $label",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = Torve.colors.textSecondary,
+        MobileProfileActions(
+            onProfiles = onProfilesClick,
+            onFamily = { showFamilyControls = true },
+            syncing = refreshAllQueued,
+            onSync = if (!subscriptionState.isLoggedIn) null else ({
+                    refreshAllQueued = true
+                    refreshAllDetails = emptyList()
+                    refreshAllStatus = RefreshAllUiStatus(
+                        label = "Syncing account data...",
+                        progress = 0f,
+                        complete = false,
+                        failed = false,
                     )
-                }
-            }
-            Spacer(Modifier.height(8.dp))
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                if (subscriptionAccess.shouldShowManageDevices) {
-                    Button(
-                        onClick = onManageDevicesClick,
-                        modifier = Modifier.weight(1f),
-                        colors = ButtonDefaults.buttonColors(containerColor = Amber, contentColor = Obsidian),
-                    ) {
-                        ButtonLabel(stringResource(R.string.manage_devices_title))
-                    }
-                }
-                if (subscriptionState.isLoggedIn) {
-                    OutlinedButton(
-                        onClick = { subscriptionViewModel.refreshAccess() },
-                        modifier = Modifier.weight(1f),
-                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Amber),
-                    ) {
-                        ButtonLabel(stringResource(R.string.premium_refresh_access))
-                    }
-                }
-            }
-            if (subscriptionState.isLoggedIn) {
-                Spacer(Modifier.height(8.dp))
-                OutlinedButton(
-                    onClick = {
-                        refreshAllQueued = true
-                        refreshAllStatus = RefreshAllUiStatus(
-                            label = "Syncing account data...",
-                            progress = 0f,
-                            complete = false,
-                            failed = false,
-                        )
-                        scope.launch {
-                            runCatching {
-                                accountSessionCoordinator.refreshAccountDataAfterCredentialTransfer(
-                                    initialMessage = "Refreshing account data...",
-                                )
-                            }
-                            viewModel.refreshSettings()
-                            subscriptionViewModel.refreshAccess()
-                            syncCoordinator.refreshDevices()
-                            channelsViewModel.loadPlaylists(recoverEmptyCatalog = true)
-                            channelsViewModel.loadFavorites()
-                            PostSignInRefresh.enqueueFullRefreshAfterCredentialImport(settingsContext)
-                            refreshAllRunId += 1
+                    scope.launch {
+                        val accountRefresh = runCatching {
+                            accountSessionCoordinator.refreshAccountDataAfterCredentialTransfer(
+                                initialMessage = "Refreshing account data...",
+                            )
                         }
-                    },
-                    enabled = !refreshAllQueued,
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Amber),
-                ) {
-                    ButtonLabel(stringResource(R.string.settings_refresh_all))
-                }
-                if (refreshAllQueued) {
-                    Spacer(Modifier.height(6.dp))
-                    RefreshAllStatusView(refreshAllStatus)
-                }
+                        val accountResult = accountRefresh.getOrNull()
+                        refreshAllDetails = if (accountResult == null) emptyList() else accountResult.issues
+                        viewModel.refreshSettings()
+                        subscriptionViewModel.refreshAccess()
+                        syncCoordinator.refreshDevices()
+                        channelsViewModel.loadPlaylists(recoverEmptyCatalog = true)
+                        channelsViewModel.loadFavorites()
+                        PostSignInRefresh.enqueueFullRefreshAfterCredentialImport(settingsContext)
+                        refreshAllRunId += 1
+                    }
+            }),
+        )
+        if (refreshAllQueued) {
+            Spacer(Modifier.height(12.dp))
+            RefreshAllStatusView(refreshAllStatus)
+            refreshAllDetails.forEach { issue ->
+                Text(issue, style = MaterialTheme.typography.bodySmall, color = Ruby, modifier = Modifier.padding(top = 4.dp))
             }
         }
-        Spacer(Modifier.height(8.dp))
-        OutlinedButton(
-            onClick = onCalendarClick,
-            modifier = Modifier.fillMaxWidth(),
-            colors = ButtonDefaults.outlinedButtonColors(contentColor = Amber),
-        ) {
-            ButtonLabel(stringResource(R.string.settings_calendar))
+        Spacer(Modifier.height(24.dp))
         }
-
-        if (subscriptionState.isLoggedIn) {
-            Spacer(Modifier.height(8.dp))
-            ProviderStatusSummaryCard(onViewAll = onStatusRepairClick)
-            Spacer(Modifier.height(16.dp))
-            // ─── Configure Sources ──────────────────────────────────
-            // The actual credential editors. Status/repair lives above
-            // — these rows are configuration-only, no inline status.
-            Text(
-                text = "Configure Sources",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.SemiBold,
-                color = Snow,
-            )
-            Spacer(Modifier.height(8.dp))
-            RestoreSetupRecoveryCard(
+        if (selectedSettingsGroup == "devices") {
+            MobileDeviceActions(
+                onPairings = { onPremiumAction(PremiumFeature.PHONE_PAIRING) { onDevicesClick() } },
+                onDevices = { if (canOpenManageDevices) onManageDevicesClick() else onLockedFeatureClick(PremiumFeature.DEVICE_LINKING) },
+                onTvSignIn = onSignInTvClick,
+                onSend = onSendCredentialsClick,
                 onReceive = onReceiveCredentialsClick,
             )
-            Spacer(Modifier.height(8.dp))
-            OutlinedButton(
-                onClick = onStartSetupClick,
-                modifier = Modifier.fillMaxWidth(),
-                colors = ButtonDefaults.outlinedButtonColors(contentColor = Amber),
-            ) {
-                ButtonLabel("Start setup again")
-            }
-            Spacer(Modifier.height(8.dp))
-            OutlinedButton(
-                onClick = onSendCredentialsClick,
-                modifier = Modifier.fillMaxWidth(),
-                colors = ButtonDefaults.outlinedButtonColors(contentColor = Amber),
-            ) {
-                ButtonLabel(stringResource(R.string.settings_send_credentials))
-            }
-            Spacer(Modifier.height(8.dp))
-            OutlinedButton(
-                onClick = onReceiveCredentialsClick,
-                modifier = Modifier.fillMaxWidth(),
-                colors = ButtonDefaults.outlinedButtonColors(contentColor = Amber),
-            ) {
-                ButtonLabel(stringResource(R.string.settings_receive_credentials))
-            }
         }
-
-        Spacer(Modifier.height(24.dp))
-
+        if (selectedSettingsGroup == "connections" && settingsLeaf == "channels") {
         // ── Channels Section ──
         LiveTvSettingsSection(
             locked = collectionsLocked,
@@ -911,13 +695,18 @@ fun SettingsScreen(
 
         Spacer(Modifier.height(24.dp))
 
+
+        }
+        if (selectedSettingsGroup == "playback") {
         // ── Stream Quality & Size ──
+        com.torve.android.ui.product.MobilePlaybackPresetSelector(viewModel.buildStreamPreferences(), viewModel::applyPlaybackPreset)
+        Spacer(Modifier.height(16.dp))
         SectionHeader(title = stringResource(R.string.settings_stream_quality))
         Spacer(Modifier.height(8.dp))
 
         Card(
             modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(containerColor = Charcoal),
+            colors = CardDefaults.cardColors(containerColor = com.torve.android.ui.theme.menuPanelColor(), contentColor = MaterialTheme.colorScheme.onSurface),
         ) {
             Column(modifier = Modifier.padding(16.dp)) {
                 // Max quality dropdown
@@ -931,7 +720,7 @@ fun SettingsScreen(
                             .fillMaxWidth()
                             .menuAnchor(MenuAnchorType.PrimaryNotEditable),
                         shape = RoundedCornerShape(8.dp),
-                        color = Gunmetal,
+                        color = MaterialTheme.colorScheme.surfaceVariant,
                     ) {
                         Row(
                             modifier = Modifier
@@ -943,9 +732,9 @@ fun SettingsScreen(
                                 Text(stringResource(R.string.settings_max_quality), style = MaterialTheme.typography.bodySmall, color = Torve.colors.textSecondary)
                                 Spacer(Modifier.height(2.dp))
                                 Text(
-                                    state.maxQuality.label,
+                                    localizedUiText(state.maxQuality.label),
                                     style = MaterialTheme.typography.bodyMedium,
-                                    color = Snow,
+                                    color = Torve.colors.textPrimary,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis,
                                 )
@@ -982,7 +771,7 @@ fun SettingsScreen(
                             .fillMaxWidth()
                             .menuAnchor(MenuAnchorType.PrimaryNotEditable),
                         shape = RoundedCornerShape(8.dp),
-                        color = Gunmetal,
+                        color = MaterialTheme.colorScheme.surfaceVariant,
                     ) {
                         Row(
                             modifier = Modifier
@@ -994,9 +783,9 @@ fun SettingsScreen(
                                 Text(stringResource(R.string.settings_min_quality), style = MaterialTheme.typography.bodySmall, color = Torve.colors.textSecondary)
                                 Spacer(Modifier.height(2.dp))
                                 Text(
-                                    state.minQuality.label,
+                                    localizedUiText(state.minQuality.label),
                                     style = MaterialTheme.typography.bodyMedium,
-                                    color = Snow,
+                                    color = Torve.colors.textPrimary,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis,
                                 )
@@ -1039,6 +828,59 @@ fun SettingsScreen(
 
                 Spacer(Modifier.height(12.dp))
 
+                var minSizePerHourText by remember(state.minSourceSizePerHourMb) {
+                    mutableStateOf(state.minSourceSizePerHourMb.takeIf { it > 0 }?.toString().orEmpty())
+                }
+                SettingsTextField(
+                    value = minSizePerHourText,
+                    onValueChange = { text ->
+                        minSizePerHourText = text.filter(Char::isDigit)
+                        viewModel.setMinSourceSizePerHourMb(minSizePerHourText.toIntOrNull() ?: 0)
+                    },
+                    label = stringResource(R.string.settings_min_size_per_hour),
+                    placeholder = stringResource(R.string.settings_min_size_per_hour_hint),
+                )
+
+                Spacer(Modifier.height(12.dp))
+
+                val audioChoices = listOf("" to stringResource(R.string.playback_language_interface),
+                    "any" to stringResource(R.string.source_language_any)) +
+                    com.torve.data.addon.SourceLanguages.allOptions().map { it.code to "${it.label} (${it.code})" }
+                val audioChoice = when {
+                    state.preferredAudioLanguage in listOf("", "system") -> ""
+                    state.preferredAudioLanguage == "any" -> "any"
+                    else -> com.torve.domain.player.PlaybackLanguagePolicy.preferredLanguage(state.preferredAudioLanguage, state.appLanguage.code)
+                }
+                SettingsChoiceField(label = stringResource(R.string.playback_audio_language),
+                    value = audioChoices.firstOrNull { it.first == audioChoice }?.second.orEmpty(),
+                    choices = audioChoices, onSelected = viewModel::setPreferredAudioLanguage)
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Text(stringResource(R.string.playback_language_subtitle_fallback), Modifier.weight(1f))
+                    Switch(checked = state.allowSubtitleLanguageFallback, onCheckedChange = viewModel::setAllowSubtitleLanguageFallback)
+                }
+                Text(stringResource(R.string.playback_language_subtitle_description), style = MaterialTheme.typography.bodySmall,
+                    color = Torve.colors.textSecondary)
+
+                Spacer(Modifier.height(12.dp))
+
+                SettingsChoiceField(
+                    label = stringResource(R.string.settings_unknown_source_size),
+                    value = state.unknownSourceSizePolicy.label,
+                    choices = UnknownSourceMetadataPolicy.entries.map { it.name to it.label },
+                    onSelected = { viewModel.setUnknownSourceSizePolicy(UnknownSourceMetadataPolicy.valueOf(it)) },
+                )
+
+                Spacer(Modifier.height(12.dp))
+
+                SettingsChoiceField(
+                    label = stringResource(R.string.settings_source_fallback),
+                    value = state.sourceFallbackPolicy.label,
+                    choices = SourceFallbackPolicy.entries.map { it.name to it.label },
+                    onSelected = { viewModel.setSourceFallbackPolicy(SourceFallbackPolicy.valueOf(it)) },
+                )
+
+                Spacer(Modifier.height(12.dp))
+
                 // Cached only toggle
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -1064,6 +906,17 @@ fun SettingsScreen(
                     )
                 }
 
+                Spacer(Modifier.height(8.dp))
+
+                val inspector = koinInject<com.torve.android.player.AndroidSourceTrackInspector>()
+                var scanAudio by remember(state.personalDataUserId) { mutableStateOf(inspector.scanningEnabled()) }
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Text(localizedUiText("Scan source audio"), Modifier.weight(1f))
+                    Switch(scanAudio, onCheckedChange = { scanAudio = it; inspector.setScanningEnabled(it) },
+                        modifier = Modifier.semantics { contentDescription = "Scan source audio" })
+                }
+                Text(localizedUiText("Turn scanning off to use provider language hints without background checks."),
+                    style = MaterialTheme.typography.bodySmall, color = Torve.colors.textSecondary)
                 Spacer(Modifier.height(8.dp))
 
                 // HDR toggle
@@ -1093,6 +946,34 @@ fun SettingsScreen(
 
                 Spacer(Modifier.height(8.dp))
 
+                Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text(stringResource(R.string.upgrade_hideWatched), style = MaterialTheme.typography.bodyMedium)
+                        Text(stringResource(R.string.upgrade_hideWatched_desc), style = MaterialTheme.typography.bodySmall, color = Torve.colors.textSecondary)
+                    }
+                    Switch(checked = state.hideWatched, onCheckedChange = { viewModel.setHideWatched(it) })
+                }
+                Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text(stringResource(R.string.upgrade_excludeSeasonPacks), style = MaterialTheme.typography.bodyMedium)
+                        Text(stringResource(R.string.upgrade_excludeSeasonPacks_desc), style = MaterialTheme.typography.bodySmall, color = Torve.colors.textSecondary)
+                    }
+                    Switch(checked = state.excludeSeasonPacks, onCheckedChange = { viewModel.setExcludeSeasonPacks(it) })
+                }
+                Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text(stringResource(R.string.upgrade_matchFrameRate), style = MaterialTheme.typography.bodyMedium)
+                        Text(stringResource(R.string.upgrade_matchFrameRate_desc), style = MaterialTheme.typography.bodySmall, color = Torve.colors.textSecondary)
+                    }
+                    Switch(checked = state.matchFrameRate, onCheckedChange = { viewModel.setMatchFrameRate(it) })
+                }
+                Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text(stringResource(R.string.upgrade_keepSubtitlesAboveControls), style = MaterialTheme.typography.bodyMedium)
+                        Text(stringResource(R.string.upgrade_keepSubtitlesAboveControls_desc), style = MaterialTheme.typography.bodySmall, color = Torve.colors.textSecondary)
+                    }
+                    Switch(checked = state.keepSubtitlesAboveControls, onCheckedChange = { viewModel.setKeepSubtitlesAboveControls(it) })
+                }
                 // Deduplicate results toggle
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -1130,7 +1011,7 @@ fun SettingsScreen(
 
         Card(
             modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(containerColor = Charcoal),
+            colors = CardDefaults.cardColors(containerColor = com.torve.android.ui.theme.menuPanelColor(), contentColor = MaterialTheme.colorScheme.onSurface),
         ) {
             Column(modifier = Modifier.padding(16.dp)) {
                 // Auto-Play toggle
@@ -1160,22 +1041,108 @@ fun SettingsScreen(
 
                 Spacer(Modifier.height(12.dp))
 
-                // Auto-Play Next Episode toggle
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
+                SettingsChoiceField(
+                    label = stringResource(R.string.settings_next_episode_timing),
+                    value = state.nextEpisodeMode.label,
+                    choices = NextEpisodeMode.entries.map { it.name to it.label },
+                    onSelected = { viewModel.setNextEpisodeMode(NextEpisodeMode.valueOf(it)) },
+                )
+
+                Spacer(Modifier.height(12.dp))
+
+                SettingsChoiceField(
+                    label = stringResource(R.string.settings_skip_intros),
+                    value = segmentActionModeLabel(state.skipIntroMode),
+                    choices = SegmentActionMode.entries.map { it.name to segmentActionModeLabel(it) },
+                    onSelected = { viewModel.setSkipIntroMode(SegmentActionMode.valueOf(it)) },
+                )
+
+                Spacer(Modifier.height(12.dp))
+
+                SettingsChoiceField(
+                    label = stringResource(R.string.settings_skip_recaps),
+                    value = segmentActionModeLabel(state.skipRecapMode),
+                    choices = SegmentActionMode.entries.map { it.name to segmentActionModeLabel(it) },
+                    onSelected = { viewModel.setSkipRecapMode(SegmentActionMode.valueOf(it)) },
+                )
+
+                Spacer(Modifier.height(12.dp))
+
+                SettingsChoiceField(
+                    label = stringResource(R.string.settings_play_next_credits),
+                    value = segmentActionModeLabel(state.playNextDuringCreditsMode),
+                    choices = SegmentActionMode.entries.map { it.name to segmentActionModeLabel(it) },
+                    onSelected = { viewModel.setPlayNextDuringCreditsMode(SegmentActionMode.valueOf(it)) },
+                )
+
+                Spacer(Modifier.height(12.dp))
+
+                PlaybackSettingToggle(
+                    label = stringResource(R.string.settings_protect_post_credit),
+                    checked = state.protectPostCreditScenes,
+                    onCheckedChange = viewModel::setProtectPostCreditScenes,
+                )
+
+                Spacer(Modifier.height(12.dp))
+
+                PlaybackSettingToggle(
+                    label = stringResource(R.string.settings_smart_segment_detection),
+                    checked = state.smartSegmentDetectionEnabled,
+                    onCheckedChange = viewModel::setSmartSegmentDetectionEnabled,
+                )
+
+                Spacer(Modifier.height(12.dp))
+
+                SettingsChoiceField(
+                    label = stringResource(R.string.settings_next_episode_preparation),
+                    value = state.nextEpisodePreparationMode.label,
+                    choices = NextEpisodePreparationMode.entries.map { it.name to it.label },
+                    onSelected = {
+                        viewModel.setNextEpisodePreparationMode(NextEpisodePreparationMode.valueOf(it))
+                    },
+                )
+
+                if (state.nextEpisodePreparationMode == NextEpisodePreparationMode.RESOLVE_AND_BUFFER) {
+                    Spacer(Modifier.height(12.dp))
+                    var preloadSecondsText by remember(state.nextEpisodePreloadBufferSeconds) {
+                        mutableStateOf(state.nextEpisodePreloadBufferSeconds.toString())
+                    }
+                    SettingsTextField(
+                        value = preloadSecondsText,
+                        onValueChange = { text ->
+                            preloadSecondsText = text.filter(Char::isDigit)
+                            preloadSecondsText.toIntOrNull()?.let(viewModel::setNextEpisodePreloadBufferSeconds)
+                        },
+                        label = stringResource(R.string.settings_preload_buffer_seconds),
+                    )
+                    Spacer(Modifier.height(12.dp))
+                    var preloadMaxText by remember(state.nextEpisodePreloadMaxMb) {
+                        mutableStateOf(state.nextEpisodePreloadMaxMb.toString())
+                    }
+                    SettingsTextField(
+                        value = preloadMaxText,
+                        onValueChange = { text ->
+                            preloadMaxText = text.filter(Char::isDigit)
+                            preloadMaxText.toIntOrNull()?.let(viewModel::setNextEpisodePreloadMaxMb)
+                        },
+                        label = stringResource(R.string.settings_preload_max_mb),
+                    )
+                }
+
+                Spacer(Modifier.height(12.dp))
+
+                Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     Column(modifier = Modifier.weight(1f)) {
-                        Text(stringResource(R.string.settings_auto_play_next), style = MaterialTheme.typography.bodyMedium)
+                        Text(stringResource(R.string.settings_preload_wifi_only), style = MaterialTheme.typography.bodyMedium)
                         Text(
-                            stringResource(R.string.settings_auto_play_next_desc),
+                            stringResource(R.string.settings_preload_wifi_only_desc),
                             style = MaterialTheme.typography.bodySmall,
                             color = Torve.colors.textSecondary,
                         )
                     }
                     Switch(
-                        checked = state.autoPlayNextEpisodeEnabled,
-                        onCheckedChange = { viewModel.setAutoPlayNextEpisodeEnabled(it) },
+                        checked = state.nextEpisodePreloadWifiOnly,
+                        onCheckedChange = viewModel::setNextEpisodePreloadWifiOnly,
                         colors = SwitchDefaults.colors(
                             checkedThumbColor = Amber,
                             checkedTrackColor = Amber.copy(alpha = 0.3f),
@@ -1198,7 +1165,7 @@ fun SettingsScreen(
                             .fillMaxWidth()
                             .menuAnchor(MenuAnchorType.PrimaryNotEditable),
                         shape = RoundedCornerShape(8.dp),
-                        color = Gunmetal,
+                        color = MaterialTheme.colorScheme.surfaceVariant,
                     ) {
                         Row(
                             modifier = Modifier
@@ -1210,9 +1177,9 @@ fun SettingsScreen(
                                 Text(stringResource(R.string.settings_codec_preference), style = MaterialTheme.typography.bodySmall, color = Torve.colors.textSecondary)
                                 Spacer(Modifier.height(2.dp))
                                 Text(
-                                    state.codecPreference.label,
+                                    localizedUiText(state.codecPreference.label),
                                     style = MaterialTheme.typography.bodyMedium,
-                                    color = Snow,
+                                    color = Torve.colors.textPrimary,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis,
                                 )
@@ -1249,7 +1216,7 @@ fun SettingsScreen(
                             .fillMaxWidth()
                             .menuAnchor(MenuAnchorType.PrimaryNotEditable),
                         shape = RoundedCornerShape(8.dp),
-                        color = Gunmetal,
+                        color = MaterialTheme.colorScheme.surfaceVariant,
                     ) {
                         Row(
                             modifier = Modifier
@@ -1261,9 +1228,9 @@ fun SettingsScreen(
                                 Text(stringResource(R.string.settings_hdr_mode), style = MaterialTheme.typography.bodySmall, color = Torve.colors.textSecondary)
                                 Spacer(Modifier.height(2.dp))
                                 Text(
-                                    state.hdrMode.label,
+                                    localizedUiText(state.hdrMode.label),
                                     style = MaterialTheme.typography.bodyMedium,
-                                    color = Snow,
+                                    color = Torve.colors.textPrimary,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis,
                                 )
@@ -1291,104 +1258,9 @@ fun SettingsScreen(
 
         Spacer(Modifier.height(24.dp))
 
-        // ── Content Management ──
-        val addonViewModel: AddonViewModel = koinInject()
-        val addonState by addonViewModel.state.collectAsState()
-        SectionHeader(title = stringResource(R.string.settings_content_management))
-        Spacer(Modifier.height(8.dp))
 
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(containerColor = Charcoal),
-        ) {
-            Column(modifier = Modifier.padding(vertical = 4.dp)) {
-                SettingsNavRow(
-                    title = stringResource(R.string.settings_home_layout),
-                    subtitle = stringResource(R.string.settings_home_layout_sub),
-                    locked = customLayoutLocked,
-                    onClick = {
-                        onPremiumAction(PremiumFeature.SYNC_CUSTOM_LAYOUTS) { onHomeLayoutClick() }
-                    },
-                )
-                if (BuildConfig.FLAVOR.contains("google", ignoreCase = true)) {
-                    HorizontalDivider(color = Steel.copy(alpha = 0.2f), modifier = Modifier.padding(horizontal = 16.dp))
-                    SettingsNavRow(
-                        title = stringResource(R.string.settings_sensitive_material),
-                        subtitle = stringResource(R.string.settings_sensitive_material_sub),
-                        onClick = onSensitiveMaterialClick,
-                    )
-                }
-                HorizontalDivider(color = Steel.copy(alpha = 0.2f), modifier = Modifier.padding(horizontal = 16.dp))
-                SettingsNavRow(
-                    title = stringResource(R.string.settings_card_style),
-                    subtitle = stringResource(R.string.settings_card_style_sub),
-                    onClick = onCardStyleClick,
-                )
-                HorizontalDivider(color = Steel.copy(alpha = 0.2f), modifier = Modifier.padding(horizontal = 16.dp))
-                SettingsNavRow(
-                    title = stringResource(R.string.settings_addons_title),
-                    subtitle = stringResource(R.string.settings_addons_sub, addonState.addons.size),
-                    locked = addonLocked,
-                    onClick = {
-                        onPremiumAction(PremiumFeature.ADDON_INSTALL_AND_MANAGEMENT) { onAddonCatalogClick() }
-                    },
-                )
-                HorizontalDivider(color = Steel.copy(alpha = 0.2f), modifier = Modifier.padding(horizontal = 16.dp))
-                SettingsNavRow(
-                    title = stringResource(R.string.settings_streaming_services),
-                    subtitle = stringResource(R.string.settings_streaming_services_sub),
-                    locked = customSourcesLocked,
-                    onClick = {
-                        onPremiumAction(PremiumFeature.CUSTOM_SOURCE_MANAGEMENT) { onStreamingServicesClick() }
-                    },
-                )
-                HorizontalDivider(color = Steel.copy(alpha = 0.2f), modifier = Modifier.padding(horizontal = 16.dp))
-                SettingsNavRow(
-                    title = stringResource(R.string.settings_stream_groups),
-                    subtitle = stringResource(R.string.settings_stream_groups_sub, state.streamGroups.size),
-                    locked = customSourcesLocked,
-                    onClick = {
-                        onPremiumAction(PremiumFeature.CUSTOM_SOURCE_MANAGEMENT) { onStreamGroupsClick() }
-                    },
-                )
-                HorizontalDivider(color = Steel.copy(alpha = 0.2f), modifier = Modifier.padding(horizontal = 16.dp))
-                SettingsNavRow(
-                    title = stringResource(R.string.settings_regex_patterns),
-                    subtitle = stringResource(R.string.settings_regex_patterns_sub, state.regexPatterns.size),
-                    locked = customSourcesLocked,
-                    onClick = {
-                        onPremiumAction(PremiumFeature.ADVANCED_CONNECTION_CONFIGURATION) { onRegexPatternsClick() }
-                    },
-                )
-                HorizontalDivider(color = Steel.copy(alpha = 0.2f), modifier = Modifier.padding(horizontal = 16.dp))
-                SettingsNavRow(
-                    title = "MDBList",
-                    subtitle = if (state.mdblistApiKey.isNotBlank()) "Connected" else "Curated community lists",
-                    locked = mdbListLocked,
-                    onClick = {
-                        onPremiumAction(PremiumFeature.MDBLIST_SETUP) { onMdbListClick() }
-                    },
-                )
-                HorizontalDivider(color = Steel.copy(alpha = 0.2f), modifier = Modifier.padding(horizontal = 16.dp))
-                SettingsNavRow(
-                    title = stringResource(R.string.settings_ratings),
-                    subtitle = stringResource(R.string.settings_ratings_sub),
-                    onClick = onRatingSettingsClick,
-                )
-                HorizontalDivider(color = Steel.copy(alpha = 0.2f), modifier = Modifier.padding(horizontal = 16.dp))
-                SettingsNavRow(
-                    title = stringResource(R.string.settings_integrations),
-                    subtitle = stringResource(R.string.settings_integrations_sub),
-                    locked = traktLocked,
-                    onClick = {
-                        onPremiumAction(PremiumFeature.TRAKT_CONNECT) { onIntegrationsClick() }
-                    },
-                )
-            }
         }
-
-        Spacer(Modifier.height(24.dp))
-
+        if (selectedSettingsGroup == "connections" && settingsLeaf == "kodi") {
         // ── Kodi Remote ──
         SectionHeader(title = stringResource(R.string.settings_kodi_remote))
         Spacer(Modifier.height(8.dp))
@@ -1402,7 +1274,7 @@ fun SettingsScreen(
         } else {
             Card(
                 modifier = Modifier.fillMaxWidth(),
-                colors = CardDefaults.cardColors(containerColor = Charcoal),
+                colors = CardDefaults.cardColors(containerColor = com.torve.android.ui.theme.menuPanelColor(), contentColor = MaterialTheme.colorScheme.onSurface),
             ) {
                 Column(modifier = Modifier.padding(16.dp)) {
                 if (state.kodiHosts.isEmpty()) {
@@ -1514,6 +1386,9 @@ fun SettingsScreen(
 
         Spacer(Modifier.height(24.dp))
 
+
+        }
+        if (selectedSettingsGroup == "advanced" && settingsLeaf == "ai") {
         // ── AI Features ──
         SectionHeader(title = stringResource(R.string.settings_ai_features))
         Spacer(Modifier.height(8.dp))
@@ -1527,13 +1402,13 @@ fun SettingsScreen(
         } else {
             Card(
                 modifier = Modifier.fillMaxWidth(),
-                colors = CardDefaults.cardColors(containerColor = Charcoal),
+                colors = CardDefaults.cardColors(containerColor = com.torve.android.ui.theme.menuPanelColor(), contentColor = MaterialTheme.colorScheme.onSurface),
             ) {
                 Column(modifier = Modifier.padding(16.dp)) {
                 Text(
-                    "Choose your AI provider and add your API key to enable AI-powered search. Your provider account must have active billing or credits.",
+                    localizedUiText("Choose your AI provider and add your API key to enable AI-powered search. Your provider account must have active billing or credits."),
                     style = MaterialTheme.typography.bodySmall,
-                    color = Silver,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 Spacer(Modifier.height(8.dp))
 
@@ -1548,7 +1423,7 @@ fun SettingsScreen(
                             .fillMaxWidth()
                             .menuAnchor(MenuAnchorType.PrimaryNotEditable),
                         shape = RoundedCornerShape(8.dp),
-                        color = Gunmetal,
+                        color = MaterialTheme.colorScheme.surfaceVariant,
                     ) {
                         Row(
                             modifier = Modifier
@@ -1560,9 +1435,9 @@ fun SettingsScreen(
                                 Text(stringResource(R.string.settings_ai_provider), style = MaterialTheme.typography.bodySmall, color = Torve.colors.textSecondary)
                                 Spacer(Modifier.height(2.dp))
                                 Text(
-                                    state.aiProvider.label,
+                                    localizedUiText(state.aiProvider.label),
                                     style = MaterialTheme.typography.bodyMedium,
-                                    color = Snow,
+                                    color = Torve.colors.textPrimary,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis,
                                 )
@@ -1590,7 +1465,7 @@ fun SettingsScreen(
                 SettingsTextField(
                     value = state.activeAiApiKey,
                     onValueChange = { viewModel.updateActiveAiApiKeyInput(it) },
-                    label = "${state.aiProvider.label} API Key",
+                    label = localizedUiText("${state.aiProvider.label} API Key"),
                     placeholder = state.aiProvider.keyPlaceholder,
                     isSensitive = true,
                 )
@@ -1628,12 +1503,12 @@ fun SettingsScreen(
                             CircularProgressIndicator(modifier = Modifier.size(16.dp), color = Obsidian, strokeWidth = 2.dp)
                             Spacer(Modifier.width(6.dp))
                         }
-                        ButtonLabel(if (state.aiKeyValidating) "Saving..." else "Save & Test")
+                        ButtonLabel(localizedUiText(if (state.aiKeyValidating) "Saving..." else "Save & Test"))
                     }
                     state.aiKeyValidationResult?.let { result ->
                         when (result) {
                             "valid" -> Text(
-                                "Key works! (${state.aiProvider.label})",
+                                localizedUiText("Key works! (${state.aiProvider.label})"),
                                 color = Emerald,
                                 style = MaterialTheme.typography.bodySmall,
                             )
@@ -1648,7 +1523,7 @@ fun SettingsScreen(
                 }
                 Spacer(Modifier.height(4.dp))
                 Text(
-                    "API keys only work when the provider account has funds. If your balance is zero, AI search will fail.",
+                    localizedUiText("API keys only work when the provider account has funds. If your balance is zero, AI search will fail."),
                     style = MaterialTheme.typography.bodySmall,
                     color = Torve.colors.textSecondary,
                 )
@@ -1658,13 +1533,27 @@ fun SettingsScreen(
 
         Spacer(Modifier.height(24.dp))
 
+        }
+        if (selectedSettingsGroup == "advanced" && settingsLeaf == "features") {
+        AppFeaturesSettingsCard(
+            features = state.optionalAppFeatures, loaded = state.optionalAppFeaturesLoaded,
+            onChanged = viewModel::setOptionalAppFeature,
+        )
+        Spacer(Modifier.height(24.dp))
+
+
+        }
+        if (selectedSettingsGroup == "appearance") {
         // ── Appearance ──
         SectionHeader(title = stringResource(R.string.settings_appearance))
+        SettingsChoiceField(label = localizedUiText("Theme"), value = state.themeMode.name.lowercase().replaceFirstChar { it.uppercase() },
+            choices = ThemeMode.entries.map { it.name to it.name.lowercase().replaceFirstChar { ch -> ch.uppercase() } },
+            onSelected = { viewModel.setThemeMode(ThemeMode.valueOf(it)) })
         Spacer(Modifier.height(8.dp))
 
         Card(
             modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(containerColor = Charcoal),
+            colors = CardDefaults.cardColors(containerColor = com.torve.android.ui.theme.menuPanelColor(), contentColor = MaterialTheme.colorScheme.onSurface),
         ) {
             Column(modifier = Modifier.padding(16.dp)) {
 
@@ -1678,7 +1567,7 @@ fun SettingsScreen(
                     Surface(
                         modifier = Modifier.fillMaxWidth().menuAnchor(MenuAnchorType.PrimaryNotEditable),
                         shape = RoundedCornerShape(8.dp),
-                        color = Gunmetal,
+                        color = MaterialTheme.colorScheme.surfaceVariant,
                     ) {
                         Row(
                             modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp),
@@ -1694,7 +1583,7 @@ fun SettingsScreen(
                                 Text(
                                     state.appLanguage.displayName,
                                     style = MaterialTheme.typography.bodyMedium,
-                                    color = Snow,
+                                    color = Torve.colors.textPrimary,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis,
                                 )
@@ -1724,13 +1613,16 @@ fun SettingsScreen(
 
         Spacer(Modifier.height(24.dp))
 
+
+        }
+        if (selectedSettingsGroup == "downloads") {
         // ── Storage & Cache ──
         SectionHeader(title = stringResource(R.string.settings_storage))
         Spacer(Modifier.height(8.dp))
 
         Card(
             modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(containerColor = Charcoal),
+            colors = CardDefaults.cardColors(containerColor = com.torve.android.ui.theme.menuPanelColor(), contentColor = MaterialTheme.colorScheme.onSurface),
         ) {
             Column(modifier = Modifier.padding(16.dp)) {
                 var showClearConfirm by remember { mutableStateOf(false) }
@@ -1761,8 +1653,8 @@ fun SettingsScreen(
                 if (showClearConfirm) {
                     AlertDialog(
                         onDismissRequest = { showClearConfirm = false },
-                        containerColor = Charcoal,
-                        title = { Text(stringResource(R.string.settings_clear_cache), color = Snow) },
+                        containerColor = MaterialTheme.colorScheme.surface,
+                        title = { Text(stringResource(R.string.settings_clear_cache), color = Torve.colors.textPrimary) },
                         text = { Text(stringResource(R.string.settings_clear_cache_confirm), color = Torve.colors.textSecondary) },
                         confirmButton = {
                             Button(
@@ -1770,7 +1662,7 @@ fun SettingsScreen(
                                     viewModel.clearCache()
                                     showClearConfirm = false
                                 },
-                                colors = ButtonDefaults.buttonColors(containerColor = Ruby, contentColor = Snow),
+                                colors = ButtonDefaults.buttonColors(containerColor = Ruby, contentColor = MaterialTheme.colorScheme.onSurface),
                             ) {
                                 ButtonLabel(stringResource(R.string.common_clear))
                             }
@@ -1787,6 +1679,13 @@ fun SettingsScreen(
 
         Spacer(Modifier.height(24.dp))
 
+
+        }
+        if (selectedSettingsGroup == "advanced" && settingsLeaf == "backup") {
+        OutlinedButton(onClick = onCloudBackupClick, modifier = Modifier.fillMaxWidth()) {
+            Text(localizedUiText("Cloud backup"))
+        }
+        Spacer(Modifier.height(16.dp))
         // ── Backup & Sync ──
         SectionHeader(title = stringResource(R.string.settings_backup))
         Spacer(Modifier.height(8.dp))
@@ -1800,7 +1699,7 @@ fun SettingsScreen(
         } else {
             Card(
                 modifier = Modifier.fillMaxWidth(),
-                colors = CardDefaults.cardColors(containerColor = Charcoal),
+                colors = CardDefaults.cardColors(containerColor = com.torve.android.ui.theme.menuPanelColor(), contentColor = MaterialTheme.colorScheme.onSurface),
             ) {
             val backupContext = LocalContext.current
 
@@ -1900,7 +1799,7 @@ fun SettingsScreen(
                 state.syncError?.let { error ->
                     Spacer(Modifier.height(8.dp))
                     Text(
-                        error,
+                        localizedUiText(error),
                         style = MaterialTheme.typography.bodySmall,
                         color = Ruby,
                     )
@@ -1918,7 +1817,10 @@ fun SettingsScreen(
 
         Spacer(Modifier.height(24.dp))
 
+        }
+        if (selectedSettingsGroup == "advanced" && settingsLeaf == "about") {
         // ── About & Legal ──
+        storeUpdates?.let { com.torve.android.update.StoreUpdateSettings(it) }
         SectionHeader(title = stringResource(R.string.settings_about))
         Spacer(Modifier.height(8.dp))
 
@@ -1926,7 +1828,7 @@ fun SettingsScreen(
 
         Card(
             modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(containerColor = Charcoal),
+            colors = CardDefaults.cardColors(containerColor = com.torve.android.ui.theme.menuPanelColor(), contentColor = MaterialTheme.colorScheme.onSurface),
         ) {
             Column(modifier = Modifier.padding(16.dp)) {
                 SettingsLinkItem(
@@ -1989,8 +1891,9 @@ fun SettingsScreen(
                                 context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: "unknown"
                             } catch (_: Exception) { "unknown" }
                             val versionCode = try {
-                                @Suppress("DEPRECATION")
-                                context.packageManager.getPackageInfo(context.packageName, 0).longVersionCode.toString()
+                                PackageInfoCompat.getLongVersionCode(
+                                    context.packageManager.getPackageInfo(context.packageName, 0),
+                                ).toString()
                             } catch (_: Exception) { "unknown" }
                             val transferSnapshot = runCatching { transferCollector.collect(probeRelay = false) }.getOrNull()
                             val bundle = com.torve.domain.diagnostics.DiagnosticsBundleBuilder.build(
@@ -2023,6 +1926,9 @@ fun SettingsScreen(
             }
         }
 
+
+        }
+        if (selectedSettingsGroup == "appearance") {
         // ── Reset Appearance ──
         Spacer(Modifier.height(24.dp))
         HorizontalDivider(color = Steel.copy(alpha = 0.3f))
@@ -2081,10 +1987,12 @@ fun SettingsScreen(
         Spacer(Modifier.height(16.dp))
 
         Text(
-            text = stringResource(R.string.settings_version, "0.5.0"),
+            text = stringResource(R.string.settings_version, BuildConfig.VERSION_NAME),
             style = MaterialTheme.typography.bodySmall,
             color = Torve.colors.textTertiary,
         )
+        }
+
     }
 }
 
@@ -2130,7 +2038,7 @@ private fun RefreshAllStatusView(status: RefreshAllUiStatus?) {
             trackColor = Snow.copy(alpha = 0.14f),
         )
         Text(
-            text = current.label,
+            text = localizedUiText(current.label),
             style = MaterialTheme.typography.bodySmall,
             color = textColor,
         )
@@ -2149,7 +2057,7 @@ private fun subscriptionMarketplaceLabel(value: String?): String? {
 @Composable
 private fun SectionHeader(title: String) {
     Text(
-        text = title,
+        text = localizedUiText(title),
         style = MaterialTheme.typography.titleMedium,
         color = Amber,
         fontWeight = FontWeight.SemiBold,
@@ -2192,7 +2100,7 @@ private fun LockedSettingsCard(
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = Charcoal),
+        colors = CardDefaults.cardColors(containerColor = com.torve.android.ui.theme.menuPanelColor(), contentColor = MaterialTheme.colorScheme.onSurface),
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -2206,7 +2114,7 @@ private fun LockedSettingsCard(
                 Text(
                     text = "$title · ${stringResource(R.string.premium_locked)}",
                     style = MaterialTheme.typography.titleSmall,
-                    color = Snow,
+                    color = Torve.colors.textPrimary,
                     fontWeight = FontWeight.SemiBold,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
@@ -2247,7 +2155,7 @@ private fun SettingsLinkItem(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
-                text = title,
+                text = localizedUiText(title),
                 style = MaterialTheme.typography.bodyMedium,
                 color = if (locked) Amber else Torve.colors.textPrimary,
                 modifier = Modifier.weight(1f, fill = false),
@@ -2284,13 +2192,13 @@ private fun SettingsTextField(
     var revealed by remember { mutableStateOf(false) }
     val peekTransformation = com.torve.android.ui.components.rememberPeekPasswordTransformation(value)
     Column(modifier = modifier) {
-        Text(label, style = MaterialTheme.typography.bodySmall, color = Torve.colors.textSecondary)
+        Text(localizedUiText(label), style = MaterialTheme.typography.bodySmall, color = Torve.colors.textSecondary)
         Spacer(Modifier.height(4.dp))
         BasicTextField(
             value = value,
             onValueChange = onValueChange,
             modifier = Modifier.fillMaxWidth(),
-            textStyle = MaterialTheme.typography.bodyMedium.copy(color = Snow),
+            textStyle = MaterialTheme.typography.bodyMedium.copy(color = Torve.colors.textPrimary),
             singleLine = true,
             cursorBrush = SolidColor(Amber),
             visualTransformation = if (isSensitive && !revealed) peekTransformation else VisualTransformation.None,
@@ -2313,8 +2221,8 @@ private fun SettingsTextField(
                         IconButton(onClick = { revealed = !revealed }, modifier = Modifier.size(32.dp)) {
                             Icon(
                                 imageVector = if (revealed) Icons.Outlined.VisibilityOff else Icons.Outlined.Visibility,
-                                contentDescription = if (revealed) "Hide" else "Show",
-                                tint = Silver,
+                                contentDescription = localizedUiText(if (revealed) "Hide" else "Show"),
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
                                 modifier = Modifier.size(18.dp),
                             )
                         }
@@ -2322,6 +2230,85 @@ private fun SettingsTextField(
                 }
             },
         )
+    }
+}
+
+@Composable
+private fun segmentActionModeLabel(mode: SegmentActionMode): String = when (mode) {
+    SegmentActionMode.OFF -> stringResource(R.string.segment_action_off)
+    SegmentActionMode.SHOW_BUTTON -> stringResource(R.string.segment_action_button)
+    SegmentActionMode.AUTOMATIC -> stringResource(R.string.segment_action_automatic)
+}
+
+@Composable
+private fun PlaybackSettingToggle(
+    label: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(localizedUiText(label), style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+        Switch(
+            checked = checked,
+            onCheckedChange = onCheckedChange,
+            colors = SwitchDefaults.colors(
+                checkedThumbColor = Amber,
+                checkedTrackColor = Amber.copy(alpha = 0.3f),
+                uncheckedThumbColor = Silver,
+                uncheckedTrackColor = Gunmetal,
+            ),
+        )
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun SettingsChoiceField(
+    label: String,
+    value: String,
+    choices: List<Pair<String, String>>,
+    onSelected: (String) -> Unit,
+) {
+    var expanded by remember { mutableStateOf(false) }
+    ExposedDropdownMenuBox(
+        expanded = expanded,
+        onExpandedChange = { expanded = !expanded },
+    ) {
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth()
+                .menuAnchor(MenuAnchorType.PrimaryNotEditable),
+            shape = RoundedCornerShape(8.dp),
+            color = MaterialTheme.colorScheme.surfaceVariant,
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 14.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(localizedUiText(label), style = MaterialTheme.typography.bodySmall, color = Torve.colors.textSecondary)
+                    Spacer(Modifier.height(2.dp))
+                    Text(localizedUiText(if (label in listOf("Theme", localizedUiText("Theme"))) localizedUiText(value) else value), style = MaterialTheme.typography.bodyMedium, color = Torve.colors.textPrimary)
+                }
+                Icon(Icons.Default.ArrowDropDown, contentDescription = null, tint = Torve.colors.textSecondary)
+            }
+        }
+        ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            choices.forEach { (key, display) ->
+                DropdownMenuItem(
+                    text = { MenuItemLabel(localizedUiText(if (label in listOf("Theme", localizedUiText("Theme"))) localizedUiText(display) else display)) },
+                    onClick = {
+                        onSelected(key)
+                        expanded = false
+                    },
+                )
+            }
+        }
     }
 }
 
@@ -2372,6 +2359,8 @@ private fun SettingsNavRow(
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .padding(vertical = 3.dp)
+            .mobileGlassSurface(quiet = true)
             .clickable(onClick = onClick)
             .padding(horizontal = 16.dp, vertical = 14.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -2379,9 +2368,9 @@ private fun SettingsNavRow(
         Column(modifier = Modifier.weight(1f)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    text = title,
+                    text = localizedUiText(title),
                     style = MaterialTheme.typography.bodyMedium,
-                    color = Snow,
+                    color = Torve.colors.textPrimary,
                     fontWeight = FontWeight.Medium,
                     modifier = Modifier.weight(1f, fill = false),
                     maxLines = 1,
@@ -2401,7 +2390,7 @@ private fun SettingsNavRow(
                 text = if (locked) {
                     "$subtitle · ${stringResource(R.string.premium_requires_lifetime)}"
                 } else {
-                    subtitle
+                    localizedUiText(subtitle)
                 },
                 style = MaterialTheme.typography.bodySmall,
                 color = if (locked) Amber.copy(alpha = 0.9f) else Torve.colors.textSecondary,
@@ -2446,7 +2435,7 @@ private fun LiveTvSettingsSection(
 
     Card(
         modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = Charcoal),
+        colors = CardDefaults.cardColors(containerColor = com.torve.android.ui.theme.menuPanelColor(), contentColor = MaterialTheme.colorScheme.onSurface),
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
             if (channelsState.playlists.isEmpty()) {
@@ -2473,7 +2462,7 @@ private fun LiveTvSettingsSection(
                             Text(
                                 text = playlist.name,
                                 style = MaterialTheme.typography.bodyMedium,
-                                color = Snow,
+                                color = Torve.colors.textPrimary,
                             )
                             Text(
                                 text = "$channelCountText - $guideStatusText",
@@ -2517,7 +2506,7 @@ private fun LiveTvSettingsSection(
                         text = editingPlaylist.name,
                         style = MaterialTheme.typography.bodyMedium,
                         fontWeight = FontWeight.SemiBold,
-                        color = Snow,
+                        color = Torve.colors.textPrimary,
                     )
                     SettingsTextField(
                         value = editingEpgUrl,

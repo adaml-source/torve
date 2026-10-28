@@ -1,0 +1,31 @@
+{
+  "verified": true,
+  "source": "https://torve.app/downloads/releases.json",
+  "checked_at": 1792918112,
+  "channel": "stable",
+  "platforms": {
+    "windows": {
+      "version": "1.3.0",
+      "build": "",
+      "available": true
+    },
+    "android_tv": {
+      "version": "1.6.0",
+      "build": "20169",
+      "available": true
+    },
+    "android_mobile": {
+      "version": "1.6.0",
+      "build": "10169",
+      "available": true
+    },
+    "fire_tv": {
+      "version": "1.6.0",
+      "build": "20169",
+      "available": true
+    }
+  },
+  "manifest_sha256": "68bd79f6d51344fc7fad2a55531988f563cde8d04f68e945656c86068ad80a69",
+  "source_commit": "91dd20699cf8973f420d6de7e15e3273c7c0684b",
+  "source_has_uncommitted_changes": true
+}

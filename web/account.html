@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Torve Account Services</title>
+  <meta name="description" content="Manage Torve account-backed sync, media automation connections, device linking, data requests, and account deletion." />
+  <link rel="canonical" href="https://torve.app/account.html" />
+  <meta property="og:title" content="Torve Account Services" />
+  <meta property="og:description" content="Account services for sync and data controls." />
+  <meta property="og:type" content="website" />
+  <meta property="og:url" content="https://torve.app/account.html" />
+  <meta property="og:image" content="https://torve.app/assets/torve-logo-transparent.png" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <link rel="icon" type="image/png" href="assets/favicon.png" />
+  <link rel="stylesheet" href="assets/site-base.css?v=20260701-storecopy" />
+  <link rel="stylesheet" href="assets/style.css?v=20260701-storecopy" />
+  <link rel="stylesheet" href="account-automation.css?v=20260727-portal4" />
+  <link rel="stylesheet" href="/assets/modern-site.css?v=20261012-7" />
+  <meta name="robots" content="noindex, nofollow" />
+</head>
+<body class="modern-page">
+  <a class="skip-link" href="#main">Skip to content</a>
+  <header class="site-header" data-site-header>
+    <div class="site-header-inner">
+      <a class="site-brand" href="/" aria-label="Torve home"><img src="/assets/torve-logo-transparent.png" alt="Torve" class="site-header-logo" /></a>
+      <nav id="site-navigation" class="site-header-nav" aria-label="Main navigation"><a href="/#explore">Explore</a><a href="/download.html">Downloads</a><a href="/app/help.html">Guide</a><a href="/support.html">Support</a></nav>
+      <div class="site-header-actions"><a class="site-account-link" href="/account.html">My account</a><button class="t-btn t-btn-secondary" data-logout type="button">Sign out</button></div>
+      <button class="site-menu-toggle" type="button" aria-label="Open menu" aria-controls="site-navigation" aria-expanded="false"><span></span><span></span></button>
+    </div>
+  </header>
+
+  <main id="main">
+    <section class="page-hero">
+      <div class="container article-wide center">
+        <div class="eyebrow">Account</div>
+        <h1 class="section-title">Account services</h1>
+        <p class="section-subtitle">Manage account-backed sync, media automation, linked devices, data requests, and account deletion.</p>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="container">
+        <div data-session-view></div>
+
+        <section class="connection-overview" data-connection-overview hidden aria-labelledby="connection-overview-title">
+          <div class="connection-overview-header">
+            <div>
+              <div class="eyebrow">Saved account setup</div>
+              <h2 id="connection-overview-title">Connections overview</h2>
+              <p>See what is saved to your Torve account across integrations, IPTV, source add-ons, Usenet, Seerr, and the *Arr stack. Secrets stay encrypted and are never displayed here.</p>
+            </div>
+            <div class="connection-overview-actions">
+              <a class="t-btn t-btn-primary" href="/app/setup.html">Manage services &amp; IPTV</a>
+              <button class="t-btn t-btn-secondary" type="button" data-refresh-overview>Refresh overview</button>
+            </div>
+          </div>
+          <div class="connection-overview-summary" data-overview-summary aria-live="polite"></div>
+          <div class="connection-overview-grid" data-overview-grid></div>
+          <p class="automation-message" data-overview-message role="status" aria-live="polite"></p>
+        </section>
+
+        <section class="automation-portal" data-automation-portal hidden aria-labelledby="automation-title">
+          <div class="automation-heading">
+            <div class="eyebrow">Cross-device setup</div>
+            <h2 id="automation-title">Media automation</h2>
+            <p>Save Seerr and *Arr connections once, then restore them on Torve TV, mobile, and desktop devices with <strong>Refresh all</strong>.</p>
+          </div>
+
+          <div class="automation-grid">
+            <section class="automation-card" id="seerr-setup" aria-labelledby="seerr-title">
+              <div class="automation-card-header">
+                <div>
+                  <h3 id="seerr-title">Seerr</h3>
+                  <p class="automation-help">Lets Torve send movie and show requests from title pages.</p>
+                </div>
+                <span class="automation-badge" data-seerr-state>Not saved</span>
+              </div>
+              <form class="automation-form" data-seerr-form>
+                <label class="automation-label">
+                  Server URL
+                  <input name="serverUrl" type="url" inputmode="url" placeholder="http://192.168.1.20:5055" autocomplete="url" required />
+                </label>
+                <label class="automation-label">
+                  API key
+                  <span class="automation-secret-field">
+                    <input name="apiKey" type="password" autocomplete="new-password" spellcheck="false" data-secret-input required />
+                    <button class="automation-secret-toggle" type="button" data-toggle-secret aria-pressed="false">Show</button>
+                  </span>
+                </label>
+                <div class="automation-actions">
+                  <button class="t-btn t-btn-primary" type="submit">Save Seerr</button>
+                  <button class="t-btn t-btn-secondary" type="button" data-verify-seerr>Save &amp; verify</button>
+                  <button class="t-btn t-btn-secondary automation-button-danger" type="button" data-remove-seerr>Remove</button>
+                </div>
+                <p class="automation-help">Saved secrets are not sent back to a web browser. When replacing this setup, enter the API key again. Your Torve device tests private-network access after Refresh all.</p>
+                <p class="automation-message" data-seerr-message role="status" aria-live="polite"></p>
+              </form>
+            </section>
+
+            <aside class="automation-card" aria-labelledby="reachability-title">
+              <div class="automation-card-header">
+                <div>
+                  <h3 id="reachability-title">Use a reachable address</h3>
+                  <p class="automation-help">Enter the LAN, VPN, or public address your Torve devices can reach. <strong>localhost</strong> points back to each device and normally will not work.</p>
+                </div>
+              </div>
+              <p class="automation-help">The web portal securely stores configuration but cannot test private home-network servers. Torve validates and uses the connection on the device after sync.</p>
+              <div class="automation-security">API keys are sent through the signed-in account session and encrypted at rest. They are never shown in the normal integration list.</div>
+            </aside>
+
+            <section class="automation-card automation-card-wide" id="arr-setup" aria-labelledby="arr-title">
+              <div class="automation-card-header">
+                <div>
+                  <h3 id="arr-title">*Arr stack connections</h3>
+                  <p class="automation-help">Configure Sonarr, Radarr, Prowlarr, Bazarr, and Tdarr. Multiple Sonarr or Radarr instances are supported for standard and 4K libraries.</p>
+                </div>
+                <span class="automation-badge" data-arr-state>Not saved</span>
+              </div>
+
+              <div class="automation-add-actions" aria-label="Add automation connection">
+                <button class="t-btn t-btn-secondary" type="button" data-add-service="SONARR">Add Sonarr</button>
+                <button class="t-btn t-btn-secondary" type="button" data-add-service="RADARR">Add Radarr</button>
+                <button class="t-btn t-btn-secondary" type="button" data-add-service="PROWLARR">Add Prowlarr</button>
+                <button class="t-btn t-btn-secondary" type="button" data-add-service="BAZARR">Add Bazarr</button>
+                <button class="t-btn t-btn-secondary" type="button" data-add-service="TDARR">Add Tdarr</button>
+              </div>
+
+              <form data-arr-form>
+                <div class="connection-list" data-connection-list></div>
+                <p class="connection-empty" data-connection-empty>No *Arr connections have been added yet.</p>
+                <div class="automation-actions">
+                  <button class="t-btn t-btn-primary" type="submit">Save all connections</button>
+                  <button class="t-btn t-btn-secondary automation-button-danger" type="button" data-remove-arr>Remove saved stack</button>
+                </div>
+                <p class="automation-help">Connection names and server addresses can be shown safely. API keys remain encrypted; re-enter them when replacing the stack from the website.</p>
+                <p class="automation-message" data-arr-message role="status" aria-live="polite"></p>
+              </form>
+            </section>
+          </div>
+        </section>
+
+        <template data-connection-template>
+          <article class="connection-card" data-connection-card>
+            <div class="connection-card-header">
+              <h4 data-connection-title>Connection</h4>
+              <button class="t-btn t-btn-secondary automation-button-danger" type="button" data-remove-connection>Remove</button>
+            </div>
+            <div class="connection-fields">
+              <label class="automation-label">
+                Service
+                <select name="serviceType" data-service-type>
+                  <option value="SONARR">Sonarr</option>
+                  <option value="RADARR">Radarr</option>
+                  <option value="PROWLARR">Prowlarr</option>
+                  <option value="BAZARR">Bazarr</option>
+                  <option value="TDARR">Tdarr</option>
+                </select>
+              </label>
+              <label class="automation-label">
+                Connection name
+                <input name="name" type="text" maxlength="80" placeholder="Home Sonarr" required />
+              </label>
+              <label class="automation-label">
+                Server URL
+                <input name="serverUrl" type="url" inputmode="url" placeholder="http://192.168.1.20:8989" autocomplete="url" required />
+              </label>
+              <label class="automation-label">
+                API key <span data-api-key-note></span>
+                <span class="automation-secret-field">
+                  <input name="apiKey" type="password" autocomplete="new-password" spellcheck="false" data-api-key data-secret-input />
+                  <button class="automation-secret-toggle" type="button" data-toggle-secret aria-pressed="false">Show</button>
+                </span>
+              </label>
+              <label class="automation-label" data-role-field>
+                Library role
+                <select name="role">
+                  <option value="STANDARD">Standard</option>
+                  <option value="UHD">4K / UHD</option>
+                </select>
+              </label>
+              <div class="connection-options">
+                <label class="automation-checkbox"><input name="enabled" type="checkbox" checked /> Enabled</label>
+                <label class="automation-checkbox"><input name="isDefault" type="checkbox" data-default /> Default for this service</label>
+              </div>
+            </div>
+            <input name="id" type="hidden" />
+          </article>
+        </template>
+
+        <div class="trust-grid account-actions-grid">
+          <section class="trust-item fade-in">
+            <h3>Sync</h3>
+            <p>Use the app to sync supported account-backed settings, watch state, preferences, and devices.</p>
+          </section>
+          <section class="trust-item fade-in">
+            <h3>Data export</h3>
+            <p>Request an export of account-backed data through support while web export tooling is pending.</p>
+            <a class="pricing-cta" href="mailto:support@torve.app?subject=Torve%20Data%20Export%20Request">Request export</a>
+          </section>
+          <section class="trust-item fade-in">
+            <h3>Account deletion</h3>
+            <p>Delete your account from the app or from the public deletion route.</p>
+            <a class="pricing-cta pricing-cta-featured" href="/account-deletion.html">Delete account</a>
+          </section>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer"><div class="container footer-main"><div><a class="footer-wordmark" href="/">TORVE<span aria-hidden="true">.</span></a><p>For the love of film.<br>Your sources. Your watchlist. Your media.</p></div><nav aria-label="Explore Torve"><span>Explore</span><a href="/#explore">The app</a><a href="/download.html">Downloads</a><a href="/firetv.html">Fire TV setup</a></nav><nav aria-label="Torve help"><span>Here to help</span><a href="/support.html">Support</a><a href="/app/help.html">Documentation</a><a href="/signin.html">Sign in</a><a href="/source.html">Open source</a><a href="/status.html">Service status</a></nav><nav aria-label="Torve policies"><span>The details</span><a href="/privacy.html">Privacy</a><a href="/terms.html">Terms</a><a href="/account-deletion.html">Delete account</a><a href="/credits.html">Image credits</a></nav></div><div class="container footer-bottom"><span>© <span data-current-year>2026</span> Torve · AGPL-3.0-or-later</span><span>Bring your own lawful media.</span></div></footer>
+
+  <script src="assets/script.js"></script>
+  <script src="automation-codec.js?v=20260727-arr3"></script>
+  <script src="site.js?v=20260727-arr3"></script>
+  <script src="/assets/modern-site.js?v=20261012-7" defer></script>
+</body>
+</html>

@@ -41,7 +41,7 @@ class WatchlistViewModel(
     }
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
-    private val _state = MutableStateFlow(WatchlistUiState())
+    private val _state = contentPolicyFilter.profileState(WatchlistUiState())
     val state: StateFlow<WatchlistUiState> = _state.asStateFlow()
 
     init {
@@ -187,7 +187,7 @@ class WatchlistViewModel(
 
     private fun applyContentPolicy(items: List<WatchlistItem>): List<WatchlistItem> {
         val policy = currentPolicy()
-        if (!policy.enforcementEnabled) return items
+        if (!policy.enforcementEnabled && !contentPolicyFilter.hasFamilyBoundary) return items
         return items.mapNotNull { watchlistItem ->
             val mediaItem = MediaItem(
                 id = watchlistItem.mediaId,

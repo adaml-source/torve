@@ -1,5 +1,7 @@
 package com.torve.android.tv.screens
 
+import com.torve.android.tv.components.tvSettingsLabel as localizedUiText
+
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -113,13 +115,7 @@ fun TvPairingSignInScreen(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            IconButton(onClick = ::exitSignIn) {
-                Icon(
-                    Icons.AutoMirrored.Filled.ArrowBack,
-                    contentDescription = stringResource(R.string.common_back),
-                    tint = Snow,
-                )
-            }
+            com.torve.android.ui.components.BackButton(onClick = ::exitSignIn)
             OutlinedButton(
                 onClick = ::exitSignIn,
                 modifier = Modifier.focusRequester(cancelRequester),
@@ -212,7 +208,7 @@ fun TvPairingSignInScreen(
                         )
                         Spacer(Modifier.height(8.dp))
                         Text(
-                            text = s.message,
+                            text = localizedUiText(s.message),
                             color = Torve.colors.textSecondary,
                             textAlign = TextAlign.Center,
                         )

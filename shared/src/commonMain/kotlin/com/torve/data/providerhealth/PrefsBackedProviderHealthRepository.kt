@@ -4,6 +4,7 @@ import com.torve.domain.providerhealth.ProviderHealthCategory
 import com.torve.domain.providerhealth.ProviderHealthEntry
 import com.torve.domain.providerhealth.ProviderHealthRepository
 import com.torve.domain.repository.PreferencesRepository
+import com.torve.presentation.settings.isHealthProviderEnabled
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -37,16 +38,24 @@ class PrefsBackedProviderHealthRepository(
             }
             val decoded = runCatching { json.decodeFromString(serializer, raw) }
                 .getOrDefault(emptyList())
-            _entries.value = decoded
+            _entries.value = decoded.filter { prefs.isHealthProviderEnabled(it.providerKey, it.category) }
         }
     }
 
     override suspend fun upsert(entry: ProviderHealthEntry) {
         mutex.withLock {
             val current = _entries.value
-            val merged = current
-                .filterNot { it.category == entry.category && it.providerKey == entry.providerKey }
-                .plus(entry)
+            if (!prefs.isHealthProviderEnabled(entry.providerKey, entry.category)) {
+                persist(current.filterNot { it.providerKey == entry.providerKey })
+                return@withLock
+            }
+            val index = current.indexOfFirst {
+                it.category == entry.category && it.providerKey == entry.providerKey
+            }
+            // A completed check updates its row instead of moving it to the end.
+            val merged = if (index < 0) current + entry else current.toMutableList().apply {
+                this[index] = entry
+            }
             persist(merged)
         }
     }

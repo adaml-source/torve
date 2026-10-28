@@ -38,15 +38,18 @@ class AccountSettingsApi(
     private val baseUrlProvider: () -> String,
     private val channelProvider: ContentChannelProvider? = null,
     private val installationIdProvider: () -> String? = { null },
+    private val parentGrantProvider: () -> String? = { null },
+    private val profileIdProvider: () -> String = { "default" },
 ) {
     private fun baseUrl() = baseUrlProvider().trimEnd('/')
 
     suspend fun getAccountSettings(accessToken: String): AccountSettingsDto {
-        val raw = httpClient.get("${baseUrl()}/me/account-settings") {
+        val response = httpClient.get("${baseUrl()}/me/account-settings") {
             bearerAuth(accessToken)
             appendBackendHeaders()
-        }.bodyAsText()
-        return parseAccountSettingsResponse(raw)
+        }
+        if (!response.status.isSuccess()) throw AccountApiException(response.status.value, "GET /me/account-settings")
+        return parseAccountSettingsResponse(response.bodyAsText())
     }
 
     /**
@@ -75,14 +78,11 @@ class AccountSettingsApi(
     }
 
     /**
-     * Fetch the credential for a single account-mode integration.
-     * Returns null if the integration is device-only, not found, or the call fails.
-     * Never call this for device-only integrations — the backend will return empty.
-     */
-    /**
-     * Fetch credentials dict for a single integration.
-     * Returns the full map so multi-value credentials (e.g. Trakt access+refresh tokens)
-     * can be restored correctly.
+     * Fetch the complete credential map for one account-mode integration.
+     *
+     * A missing integration returns null. Authentication, network and server failures
+     * throw so restore callers can refresh the session or report the affected
+     * connection instead of silently treating a failed request as empty credentials.
      */
     suspend fun getIntegrationCredentials(
         accessToken: String,
@@ -111,6 +111,13 @@ class AccountSettingsApi(
                 }
                 if (!response.status.isSuccess()) {
                     if (response.status.value == 404) return null
+                    if (response.status.value == 401) {
+                        throw AccountApiException(401, integrationType)
+                    }
+                    val retryableClientFailure = response.status.value in setOf(408, 429)
+                    if ((response.status.value in 400..499).and(retryableClientFailure.not())) {
+                        throw AccountApiException(response.status.value, integrationType)
+                    }
                     lastError = RuntimeException("HTTP ${response.status.value}")
                     continue
                 }
@@ -123,6 +130,9 @@ class AccountSettingsApi(
                 val dto: IntegrationCredentialsDto = lenientJson.decodeFromString(raw)
                 return dto.credentials
             } catch (e: Exception) {
+                if (e is AccountApiException) {
+                    if (e.statusCode == 401) throw e
+                }
                 lastError = e
                 torveVerboseLog {
                     "[IntegrationAPI] GET credentials FAILED for $integrationType " +
@@ -134,7 +144,7 @@ class AccountSettingsApi(
             "[IntegrationAPI] GET credentials gave up for $integrationType after ${backoffsMs.size} attempts: " +
                 DiagnosticsRedactor.redact(lastError?.message)
         }
-        return null
+        throw requireNotNull(lastError)
     }
 
     /**
@@ -166,6 +176,22 @@ class AccountSettingsApi(
             ok
         } catch (e: Exception) {
             torveVerboseLog { "[IntegrationAPI] PUT exception: ${e::class.simpleName} ${DiagnosticsRedactor.redact(e.message)}" }
+            false
+        }
+    }
+
+    /** Remove an account integration. A missing row is already the desired state. */
+    suspend fun deleteIntegration(accessToken: String, integrationType: String): Boolean {
+        return try {
+            val response = httpClient.delete("${baseUrl()}/me/integrations/$integrationType") {
+                bearerAuth(accessToken)
+                appendBackendHeaders()
+            }
+            response.status.isSuccess() || response.status.value == 404
+        } catch (e: Exception) {
+            torveVerboseLog {
+                "[IntegrationAPI] DELETE exception: ${e::class.simpleName} ${DiagnosticsRedactor.redact(e.message)}"
+            }
             false
         }
     }
@@ -292,10 +318,11 @@ class AccountSettingsApi(
 
     suspend fun deletePlaylist(accessToken: String, playlistId: String): Boolean {
         return try {
-            httpClient.delete("${baseUrl()}/me/playlists/$playlistId") {
+            val status = httpClient.delete("${baseUrl()}/me/playlists/$playlistId") {
                 bearerAuth(accessToken)
                 appendBackendHeaders()
-            }.status.isSuccess()
+            }.status
+            status.isSuccess() || status.value == 404
         } catch (_: Exception) {
             false
         }
@@ -314,6 +341,10 @@ class AccountSettingsApi(
                 if (response.status.isSuccess()) {
                     return response.body()
                 }
+                if (response.status.value == 404) return null
+                if (response.status.value == 401) {
+                    throw AccountApiException(401, playlistId)
+                }
                 if (response.status.value == 429 && attempt < 2) {
                     val delayMs = playlistCredentialRetryDelayMs(
                         retryAfterHeader = response.headers["Retry-After"],
@@ -326,8 +357,11 @@ class AccountSettingsApi(
                     return@repeat
                 }
                 torveVerboseLog { "[PlaylistAPI] GET credentials FAILED for $playlistId: ${response.status.value}" }
-                return null
+                throw AccountApiException(response.status.value, playlistId)
             } catch (e: Exception) {
+                if (e is AccountApiException) {
+                    if (e.statusCode == 401) throw e
+                }
                 if (attempt < 2) {
                     val delayMs = playlistCredentialRetryDelayMs(retryAfterHeader = null, attempt = attempt)
                     torveVerboseLog {
@@ -337,22 +371,36 @@ class AccountSettingsApi(
                     return@repeat
                 }
                 torveVerboseLog { "[PlaylistAPI] GET credentials FAILED for $playlistId: ${e::class.simpleName} ${DiagnosticsRedactor.redact(e.message)}" }
-                return null
+                throw e
             }
         }
-        return null
+        error(playlistId)
+    }
+
+    suspend fun rotateTraktTokens(accessToken: String, profile: String, previous: String, credentials: Map<String, String>): Map<String, String> {
+        val response = httpClient.post("${baseUrl()}/me/family/connections/trakt/rotate") {
+            bearerAuth(accessToken); appendBackendHeaders(); contentType(ContentType.Application.Json)
+            setBody(kotlinx.serialization.json.buildJsonObject {
+                put("profile", JsonPrimitive(profile)); put("previousRefreshToken", JsonPrimitive(previous))
+                put("credentials", JsonObject(credentials.mapValues { JsonPrimitive(it.value) }))
+            })
+        }
+        if (!response.status.isSuccess()) throw AccountApiException(response.status.value, "Trakt connection refresh")
+        return response.body<JsonObject>().getValue("credentials").jsonObject.mapValues { it.value.jsonPrimitive.content }
     }
 
     suspend fun patchAccountSettings(
         accessToken: String,
         settings: Map<String, String?>,
     ): AccountSettingsDto {
-        val raw = httpClient.patch("${baseUrl()}/me/account-settings") {
+        val response = httpClient.patch("${baseUrl()}/me/account-settings") {
             bearerAuth(accessToken)
+            contentType(ContentType.Application.Json)
             appendBackendHeaders()
             setBody(AccountSettingsPatchRequest(settings))
-        }.bodyAsText()
-        return parseAccountSettingsResponse(raw)
+        }
+        if (!response.status.isSuccess()) throw AccountApiException(response.status.value, "PATCH /me/account-settings")
+        return parseAccountSettingsResponse(response.bodyAsText())
     }
 
     suspend fun getAddons(accessToken: String): List<AddonDto> {
@@ -422,6 +470,8 @@ class AccountSettingsApi(
 
     private fun io.ktor.client.request.HttpRequestBuilder.appendBackendHeaders() {
         channelProvider?.channel?.let { header("X-Torve-Channel", it) }
+        parentGrantProvider()?.let { header("X-Torve-Parent-Grant", it) }
+        header("X-Torve-Profile-Id", profileIdProvider())
         installationIdProvider()?.takeIf { it.isNotBlank() }?.let {
             header("X-Torve-Installation-Id", it)
         }
@@ -442,8 +492,9 @@ private fun parseAccountSettingsResponse(raw: String): AccountSettingsDto {
     val root = lenientJson.parseToJsonElement(raw).jsonObject
     val settingsObj = root["settings"]?.jsonObject ?: JsonObject(emptyMap())
     val filtered = mutableMapOf<String, String>()
+    val removed = mutableSetOf<String>()
     for ((key, value) in settingsObj) {
-        if (value is JsonNull) continue
+        if (value is JsonNull) { removed += key; continue }
         if (value is JsonPrimitive && value.isString) {
             filtered[key] = value.content
         } else if (value is JsonPrimitive) {
@@ -454,6 +505,7 @@ private fun parseAccountSettingsResponse(raw: String): AccountSettingsDto {
     val updatedByDeviceId = root["updated_by_device_id"]?.jsonPrimitive?.content
     return AccountSettingsDto(
         settings = filtered,
+        removedKeys = removed,
         updatedAt = updatedAt,
         updatedByDeviceId = updatedByDeviceId,
     )
@@ -462,6 +514,7 @@ private fun parseAccountSettingsResponse(raw: String): AccountSettingsDto {
 @Serializable
 data class AccountSettingsDto(
     val settings: Map<String, String> = emptyMap(),
+    val removedKeys: Set<String> = emptySet(),
     @SerialName("updated_at")
     val updatedAt: String? = null,
     @SerialName("updated_by_device_id")

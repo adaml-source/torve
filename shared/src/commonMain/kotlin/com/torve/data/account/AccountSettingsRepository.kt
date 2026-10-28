@@ -108,11 +108,11 @@ class AccountSettingsRepositoryImpl(
         _state.update { it.copy(isRefreshing = true, lastError = null) }
         return runCatching {
             val response = accountSettingsApi.getAccountSettings(token)
-            val applied = applyRemoteSettings(response.settings, response.updatedAt)
+            val applied = applyRemoteSettings(response.settings, response.updatedAt, response.removedKeys)
             if (allowMigration) {
                 // Push any local shared keys that the backend doesn't have yet.
                 // This handles both first-time migration and expanded key sets.
-                reconcileLocalToRemote(token, response.settings)
+                reconcileLocalToRemote(token, response.settings, response.removedKeys)
             }
             localSettingsRepository.setString(KEY_MIGRATION_DONE, TRUE)
             localSettingsRepository.setString(KEY_LAST_FETCHED_AT, nowMs().toString())
@@ -140,12 +140,20 @@ class AccountSettingsRepositoryImpl(
     private suspend fun applyRemoteSettings(
         remoteSettings: Map<String, String>,
         updatedAt: String?,
+        removedKeys: Set<String>,
     ): Boolean {
         var changed = false
+        for (key in removedKeys.filter(AccountSettingsSyncPolicy::isSharedKey)) {
+            val scopedKey = if (key.startsWith("profilepref_v1:")) key else "profilepref_v1:default:$key"
+            if (localSettingsRepository.getString(scopedKey) != null) {
+                localSettingsRepository.remove(scopedKey); changed = true
+            }
+        }
         for ((key, value) in AccountSettingsSyncPolicy.normalizeRemoteSettings(remoteSettings)) {
-            val localValue = localSettingsRepository.getString(key)
+            val scopedKey = if (key.startsWith("profilepref_v1:")) key else "profilepref_v1:default:$key"
+            val localValue = localSettingsRepository.getString(scopedKey)
             if (localValue != value) {
-                localSettingsRepository.setString(key, value)
+                localSettingsRepository.setString(scopedKey, value)
                 changed = true
             }
         }
@@ -160,14 +168,15 @@ class AccountSettingsRepositoryImpl(
     private suspend fun reconcileLocalToRemote(
         token: String,
         remoteSettings: Map<String, String>,
+        removedKeys: Set<String>,
     ) {
         // Find local shared keys that the backend doesn't have yet and push them.
         val patch = mutableMapOf<String, String?>()
         for (key in AccountSettingsSyncPolicy.sharedKeys()) {
-            val localValue = localSettingsRepository.getString(key) ?: continue
+            val localValue = localSettingsRepository.getString("profilepref_v1:default:$key") ?: continue
             val outgoing = AccountSettingsSyncPolicy.outgoingRemoteSettings(key, localValue)
             for ((remoteKey, remoteValue) in outgoing) {
-                if (remoteValue != null && !remoteSettings.containsKey(remoteKey)) {
+                if (remoteValue != null && !remoteSettings.containsKey(remoteKey) && remoteKey !in removedKeys) {
                     patch[remoteKey] = remoteValue
                 }
             }

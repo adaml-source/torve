@@ -12,6 +12,8 @@ import io.ktor.client.statement.HttpResponse
 import io.ktor.http.isSuccess
 import io.ktor.http.appendPathSegments
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.datetime.Clock
@@ -68,13 +70,14 @@ data class TmdbRequestDiagnostic(
 
 class TmdbApiClient(
     private val httpClient: HttpClient,
-    private val apiKeyProvider: () -> String = ::tmdbApiKey,
+    private val apiKeyProvider: suspend () -> String = { tmdbApiKey() },
     private val resolvedHostProvider: (String) -> List<String>? = ::lookupHostAddresses,
     private val diagnostics: (TmdbRequestDiagnostic) -> Unit = { diagnostic ->
         torveVerboseLog { diagnostic.toLogLine() }
     },
     /** Returns a TMDB language tag (e.g. "de", "es", "fr") or null for the TMDB default (English). */
     private val languageProvider: () -> String? = { null },
+    private val requestAllowed: suspend (String) -> Boolean = { true },
 ) {
 
     companion object {
@@ -91,12 +94,14 @@ class TmdbApiClient(
     /** Mutable language override. Set by SettingsViewModel when the user changes language. */
     var contentLanguage: String? = null
 
+    fun resolvedContentLanguage(): String = (contentLanguage ?: languageProvider()).orEmpty().ifBlank { "en" }
+
     /** Base params included in every TMDB call: API key + language (if set). */
-    private fun baseParams(): List<Pair<String, Any>> = buildList {
+    private suspend fun baseParams(language: String? = null): List<Pair<String, Any>> = buildList {
         add("api_key" to apiKeyProvider())
-        val lang = contentLanguage ?: languageProvider()
+        val lang = language ?: contentLanguage ?: languageProvider()
         torveVerboseLog { "TMDB_BASE_PARAMS contentLanguage=$contentLanguage languageProvider=${languageProvider()} resolved=$lang" }
-        lang?.takeIf { it.isNotBlank() && it != "en" }?.let {
+        lang?.takeIf { it.isNotBlank() && (language != null || it != "en") }?.let {
             add("language" to it)
         }
     }
@@ -209,6 +214,18 @@ class TmdbApiClient(
         )
     }
 
+    internal suspend fun titleCompletions(query: String): List<TitleCompletion> {
+        // Use the same explicit catalogue permission as normal text search.
+        if (!requestAllowed("/search/multi")) throw TmdbExtensionDisabledException()
+        val value = query.trim().lowercase().take(160)
+        if (value.length < 2) return emptyList()
+        return httpClient.get("https://v3.sg.media-imdb.com") {
+            url { appendPathSegments("suggestion", "x", "$value.json", encodeSlash = true) }
+        }.body<TitleCompletionResponse>().d
+            .filter { it.id.matches(Regex("tt[0-9]+")) && it.mediaType != null }
+            .distinctBy { it.id }.take(6)
+    }
+
     /**
      * Adult-permissive movie search. Used by the desktop "Adult" catalog;
      * gated behind a Settings toggle and intended for users who source
@@ -243,14 +260,52 @@ class TmdbApiClient(
         )
     }
 
-    suspend fun findByImdbId(imdbId: String): TmdbFindResponse {
+    suspend fun findByImdbId(imdbId: String, language: String? = null): TmdbFindResponse {
         return get(
             endpoint = "/find/$imdbId",
             requestCategory = "tmdb.find.imdb",
-            parameters = baseParams() + listOf(
+            parameters = baseParams(language) + listOf(
                 "external_source" to "imdb_id",
             ),
         )
+    }
+
+    /** Small, explicitly scoped presentation lookups also repair imported library cards. */
+    suspend fun getMoviePresentation(id: Int, language: String, includeCast: Boolean = false): TmdbMovie = get(
+        endpoint = "/movie/$id", requestCategory = "tmdb.presentation.movie",
+        parameters = baseParams(language) + listOf(
+            "append_to_response" to if (includeCast) "images,credits" else "images",
+            "include_image_language" to listOf(language, "en", "null").distinct().joinToString(","),
+        ),
+    )
+
+    suspend fun getTvPresentation(id: Int, language: String, includeCast: Boolean = false): TmdbTv = get(
+        endpoint = "/tv/$id", requestCategory = "tmdb.presentation.tv",
+        parameters = baseParams(language) + listOf(
+            "append_to_response" to if (includeCast) "images,credits" else "images",
+            "include_image_language" to listOf(language, "en", "null").distinct().joinToString(","),
+        ),
+    )
+
+    suspend fun getAgeCertifications(item: com.torve.domain.model.MediaItem): List<com.torve.domain.model.AgeCertification> = familyCertificationProof(item).second
+
+    internal suspend fun familyCertificationProof(item: com.torve.domain.model.MediaItem): Pair<Int?, List<com.torve.domain.model.AgeCertification>> {
+        val id = item.tmdbId ?: item.id.toIntOrNull() ?: item.imdbId?.let {
+            val found = findByImdbId(it)
+            if (item.type == com.torve.domain.model.MediaType.MOVIE) found.movieResults.firstOrNull()?.id else found.tvResults.firstOrNull()?.id
+        } ?: item.id.takeIf { it.startsWith("tt") }?.let {
+            val found = findByImdbId(it)
+            if (item.type == com.torve.domain.model.MediaType.MOVIE) found.movieResults.firstOrNull()?.id else found.tvResults.firstOrNull()?.id
+        } ?: return null to emptyList()
+        return id to if (item.type == com.torve.domain.model.MediaType.MOVIE) {
+            val response: TmdbReleaseDates = get(endpoint = "/movie/$id/release_dates", requestCategory = "family.certification.movie", parameters = baseParams())
+            response.results.flatMap { country -> country.releases.mapNotNull { release ->
+                release.certification.takeIf { it.isNotBlank() }?.let { com.torve.domain.model.AgeCertification(country.country, it) }
+            } }
+        } else {
+            val response: TmdbContentRatings = get(endpoint = "/tv/$id/content_ratings", requestCategory = "family.certification.tv", parameters = baseParams())
+            response.results.filter { it.rating.isNotBlank() }.map { com.torve.domain.model.AgeCertification(it.country, it.rating) }
+        }
     }
 
     suspend fun getMovieDetail(id: Int): TmdbMovie {
@@ -258,7 +313,7 @@ class TmdbApiClient(
             endpoint = "/movie/$id",
             requestCategory = "tmdb.detail.movie",
             parameters = baseParams() + listOf(
-                "append_to_response" to "credits,videos,similar,external_ids,images",
+                "append_to_response" to "credits,videos,similar,external_ids,images,release_dates",
                 "include_image_language" to imageLanguageParam(),
                 // Fetch trailers in the user's language and English as a
                 // fallback so the trailer mapper has options. TMDB returns
@@ -274,7 +329,7 @@ class TmdbApiClient(
             endpoint = "/tv/$id",
             requestCategory = "tmdb.detail.tv",
             parameters = baseParams() + listOf(
-                "append_to_response" to "credits,videos,similar,external_ids,images",
+                "append_to_response" to "credits,videos,similar,external_ids,images,content_ratings",
                 "include_image_language" to imageLanguageParam(),
                 "include_video_language" to videoLanguageParam(),
             ),
@@ -407,6 +462,21 @@ class TmdbApiClient(
         )
     }
 
+    suspend fun getCollection(id: Int): TmdbCollection = get(
+        endpoint = "/collection/$id", requestCategory = "tmdb.collection", parameters = baseParams())
+
+    suspend fun searchCollections(query: String): TmdbResponse<TmdbCollection> = get(
+        endpoint = "/search/collection", requestCategory = "tmdb.collection.search",
+        parameters = baseParams() + listOf("query" to query, "include_adult" to false))
+
+    suspend fun getMovieLists(id: Int, page: Int): TmdbResponse<TmdbCuratedList> = get(
+        endpoint = "/movie/$id/lists", requestCategory = "tmdb.collection.choices",
+        parameters = baseParams() + listOf("page" to page))
+
+    suspend fun getCuratedList(id: Int, page: Int): TmdbCuratedList = get(
+        endpoint = "/list/$id", requestCategory = "tmdb.collection.list",
+        parameters = baseParams() + listOf("page" to page))
+
     suspend fun getPersonCredits(personId: Int): TmdbPersonCredits {
         return get(
             endpoint = "/person/$personId/combined_credits",
@@ -455,7 +525,9 @@ class TmdbApiClient(
         withWatchProviders: String? = null,
         watchRegion: String? = null,
         withKeywords: String? = null,
+        withCompanies: String? = null,
         requestCategory: String = "tmdb.discover.movie",
+        minimumVoteCount: Int? = null,
     ): TmdbResponse<TmdbMovie> {
         return get(
             endpoint = "/discover/movie",
@@ -479,15 +551,13 @@ class TmdbApiClient(
                 withCast?.let { add("with_cast" to it) }
                 withCrew?.let { add("with_crew" to it) }
                 withWatchProviders?.let { add("with_watch_providers" to it) }
+                if (!withWatchProviders.isNullOrBlank()) add("with_watch_monetization_types" to "flatrate|free|ads")
                 watchRegion?.let { add("watch_region" to it) }
                 withKeywords?.let { add("with_keywords" to it) }
-                // Floor vote_count at 100 globally to exclude indie shorts
-                // with 1-2 votes that pollute the top of any sort
-                // (especially IMDB-rating sort, which previously showed a
-                // wall of "10.0" titles by 1-vote items). 100 is permissive
-                // enough to keep most legitimate small-release content
-                // while filtering the long tail of fringe entries.
-                add("vote_count.gte" to 100)
+                withCompanies?.let { add("with_companies" to it) }
+                // Rating-sorted discovery is otherwise dominated by lightly
+                // voted titles and requires excessive external verification.
+                add("vote_count.gte" to (minimumVoteCount ?: if (sortBy == "vote_average.desc") 500 else 100))
             },
         )
     }
@@ -508,7 +578,9 @@ class TmdbApiClient(
         withWatchProviders: String? = null,
         watchRegion: String? = null,
         withKeywords: String? = null,
+        withCompanies: String? = null,
         requestCategory: String = "tmdb.discover.tv",
+        minimumVoteCount: Int? = null,
     ): TmdbResponse<TmdbTv> {
         return get(
             endpoint = "/discover/tv",
@@ -516,7 +588,7 @@ class TmdbApiClient(
             parameters = buildList {
                 addAll(baseParams())
                 add("page" to page)
-                add("sort_by" to sortBy)
+                add("sort_by" to sortBy.replace("primary_release_date", "first_air_date"))
                 withGenres?.let { add("with_genres" to it) }
                 minRating?.let { add("vote_average.gte" to it) }
                 year?.let { add("first_air_date.gte" to "$it-01-01") }
@@ -528,19 +600,23 @@ class TmdbApiClient(
                 withCast?.let { add("with_cast" to it) }
                 withCrew?.let { add("with_crew" to it) }
                 withWatchProviders?.let { add("with_watch_providers" to it) }
+                if (!withWatchProviders.isNullOrBlank()) add("with_watch_monetization_types" to "flatrate|free|ads")
                 watchRegion?.let { add("watch_region" to it) }
                 withKeywords?.let { add("with_keywords" to it) }
-                // Floor vote_count at 100 globally (see discoverMovie comment).
-                add("vote_count.gte" to 100)
+                // The TV filter exposes networks (Netflix, HBO, etc.); TMDB's
+                // equivalent discovery parameter is with_networks rather than
+                // the movie endpoint's with_companies.
+                withCompanies?.let { add("with_networks" to it) }
+                add("vote_count.gte" to (minimumVoteCount ?: if (sortBy == "vote_average.desc") 500 else 100))
             },
         )
     }
 
-    suspend fun getTvSeasonDetail(tvId: Int, seasonNumber: Int): TmdbSeasonDetail {
+    suspend fun getTvSeasonDetail(tvId: Int, seasonNumber: Int, language: String? = null): TmdbSeasonDetail {
         return get(
             endpoint = "/tv/$tvId/season/$seasonNumber",
             requestCategory = "tmdb.season.detail.tv",
-            parameters = baseParams(),
+            parameters = baseParams(language),
         )
     }
 
@@ -554,12 +630,12 @@ class TmdbApiClient(
         )
     }
 
-    suspend fun getWatchProviders(type: String = "movie", region: String = "US"): TmdbWatchProvidersResponse {
+    suspend fun getWatchProviders(type: String = "movie", region: String? = "US"): TmdbWatchProvidersResponse {
         return get(
             endpoint = "/watch/providers/$type",
             requestCategory = "tmdb.watch_providers.$type",
-            parameters = baseParams() + listOf(
-                "watch_region" to region,
+            parameters = baseParams() + listOfNotNull(
+                region?.takeIf { it.isNotBlank() }?.let { "watch_region" to it },
             ),
         )
     }
@@ -577,6 +653,7 @@ class TmdbApiClient(
         type: String,
         region: String,
     ): Map<Int, String> {
+        if (!requestAllowed("/watch/providers/$type")) throw TmdbExtensionDisabledException()
         val response: Map<String, String> = httpClient.get(baseUrl) {
             url { appendPathSegments("tmdb", "providers", "logos") }
             parameter("type", type)
@@ -592,6 +669,8 @@ class TmdbApiClient(
         requestCategory: String,
         parameters: List<Pair<String, Any?>>,
     ): T {
+        // Check before DNS, queueing or HTTP, and again after waiting for a permit.
+        if (!requestAllowed(endpoint)) throw TmdbExtensionDisabledException()
         val queuedAtMs = Clock.System.now().toEpochMilliseconds()
         val queueMark = TimeSource.Monotonic.markNow()
         val requestId = "$requestCategory@$queuedAtMs"
@@ -618,6 +697,7 @@ class TmdbApiClient(
         var startedAtMs: Long? = null
         try {
             return requestLimiter.withPermit {
+                if (!requestAllowed(endpoint)) throw TmdbExtensionDisabledException()
                 val startedMs = Clock.System.now().toEpochMilliseconds()
                 startedAtMs = startedMs
                 val runMark = TimeSource.Monotonic.markNow()
@@ -643,7 +723,9 @@ class TmdbApiClient(
                 try {
                     val response = request(endpoint, parameters)
                     val statusCode = response.status.value
-                    val body = response.body<T>()
+                    // Ktor resumes body conversion on the caller's dispatcher.
+                    // Large season responses must never decode on the UI thread.
+                    val body = withContext(Dispatchers.Default) { response.body<T>() }
                     diagnostics(
                         TmdbRequestDiagnostic(
                             requestId = requestId,

@@ -24,6 +24,8 @@ import kotlinx.serialization.json.Json
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 
 class TrustSignalsApiContractTest {
     private val json = Json { ignoreUnknownKeys = true; explicitNulls = false }
@@ -72,6 +74,10 @@ class TrustSignalsApiContractTest {
             assertEquals("install-trust-1", request.headers["X-Torve-Installation-Id"])
             val header = request.headers[ClientTrustHeaders.TRUST_SIGNAL_HEADER].orEmpty()
             val body = parseBody(request)
+            val payload = Json.parseToJsonElement(body).jsonObject
+            assertEquals("android_tv", payload["platform"]?.jsonPrimitive?.content)
+            assertEquals("login", payload["event_type"]?.jsonPrimitive?.content)
+            assertFalse("trust_signal" in payload)
             assertFalse(header.contains("full-play-integrity-token"))
             assertFalse(body.contains("full-play-integrity-token"))
             assertFalse(body.contains("integrity_token"))

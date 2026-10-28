@@ -9,16 +9,6 @@ import com.torve.data.debrid.DebridMissingException
 import com.torve.data.debrid.DebridNoCachedStreamException
 import com.torve.db.Stream_resolve_memory
 import io.ktor.client.HttpClient
-import io.ktor.client.plugins.HttpTimeout
-import io.ktor.client.plugins.timeout
-import io.ktor.client.request.get
-import io.ktor.client.request.head
-import io.ktor.client.request.header
-import io.ktor.client.statement.HttpResponse
-import io.ktor.http.HttpHeaders
-import io.ktor.http.isSuccess
-import kotlinx.serialization.SerialName
-import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import com.torve.domain.model.ContentWarmupResult
 import com.torve.domain.model.ContentWarmupTrigger
@@ -54,14 +44,9 @@ import com.torve.domain.telemetry.TelemetryEmitter
 import com.torve.platform.TorveRuntimeDebug
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.datetime.Clock
-
-@Serializable
-private data class AddonNotReadyErrorBody(
-    val error: String = "",
-    val message: String? = null,
-    @SerialName("retry_after") val retryAfter: Int? = null,
-)
 
 internal fun interface StreamAggregationSource {
     suspend fun resolveStreams(
@@ -85,7 +70,12 @@ class StreamRepositoryImpl(
     private val telemetry: TelemetryEmitter,
     preferencesRepository: PreferencesRepository? = null,
     subscriptionRepository: SubscriptionRepository? = null,
+    private val family: com.torve.data.profile.FamilyControls? = null,
+    private val configuredUsenet: com.torve.data.usenet.ConfiguredUsenetSources? = null,
 ) : StreamRepository {
+    override suspend fun hasConfiguredUsenetSources(): Boolean = configuredUsenet?.hasSources() == true
+    private data class FamilyStreamGrant(val stamp: String, val source: String, val item: com.torve.domain.model.MediaItem)
+    private val familyStreams = mutableMapOf<String, FamilyStreamGrant>()
     private var streamAggregationSourceOverride: StreamAggregationSource? = null
 
     internal constructor(
@@ -97,6 +87,8 @@ class StreamRepositoryImpl(
         telemetry: TelemetryEmitter,
         preferencesRepository: PreferencesRepository? = null,
         subscriptionRepository: SubscriptionRepository? = null,
+        family: com.torve.data.profile.FamilyControls? = null,
+        configuredUsenet: com.torve.data.usenet.ConfiguredUsenetSources? = null,
     ) : this(
         debridClient = debridClient,
         streamAggregator = StreamAggregator(
@@ -110,13 +102,11 @@ class StreamRepositoryImpl(
         telemetry = telemetry,
         preferencesRepository = preferencesRepository,
         subscriptionRepository = subscriptionRepository,
+        family = family,
+        configuredUsenet = configuredUsenet,
     ) {
         streamAggregationSourceOverride = streamAggregationSource
     }
-
-    // Dedicated parser so we can decode the 504 body without bringing in the
-    // shared Json instance (which may be configured for strict mode).
-    private val readinessJson = Json { ignoreUnknownKeys = true; isLenient = true }
 
     private inline fun repositoryDebugLog(message: () -> String) {
         if (TorveRuntimeDebug.verboseLoggingEnabled) {
@@ -124,16 +114,7 @@ class StreamRepositoryImpl(
         }
     }
 
-    // Probe-only client with redirect-follow disabled. Panda's 302 points at
-    // a signed CDN URL — we explicitly don't want to chase that from the
-    // probe since (a) the CDN often ignores HEAD or responds slowly, and
-    // (b) the 302 is itself proof of readiness. The base client's engine is
-    // shared; only the redirect policy differs.
-    private val probeClient: HttpClient by lazy {
-        httpClient.config {
-            followRedirects = false
-        }
-    }
+    private val playbackProbe by lazy { AddonPlaybackProbe(httpClient) }
 
     private data class StreamRequestKey(
         val type: MediaType,
@@ -161,6 +142,9 @@ class StreamRepositoryImpl(
         val streams: List<ParsedStream>,
         val fetchedAt: Long,
         val policy: StreamFetchPolicy,
+        val addons: List<InstalledAddon>,
+        val preferences: StreamPreferences,
+        val providerStats: List<com.torve.domain.model.ProviderSourceStat> = emptyList(),
     ) {
         fun isUsableFor(requestedPolicy: StreamFetchPolicy, now: Long): Boolean {
             if (now - fetchedAt > STARTUP_CACHE_TTL_MS) return false
@@ -215,7 +199,50 @@ class StreamRepositoryImpl(
         debridAccounts: Map<DebridServiceType, String>,
         preferences: StreamPreferences,
         fetchPolicy: StreamFetchPolicy,
-    ): StreamFetchResult {
+    ): StreamFetchResult = fetchStreamsInternal(type, imdbId, contentId, title, season, episode, addons, debridAccounts, preferences, fetchPolicy, null)
+
+    override suspend fun fetchStreamsProgressively(
+        type: MediaType,
+        imdbId: String,
+        contentId: String?,
+        title: String?,
+        season: Int?,
+        episode: Int?,
+        addons: List<InstalledAddon>,
+        debridAccounts: Map<DebridServiceType, String>,
+        preferences: StreamPreferences,
+        fetchPolicy: StreamFetchPolicy,
+        onPartialResults: suspend (StreamFetchResult) -> Unit,
+    ): StreamFetchResult = fetchStreamsInternal(type, imdbId, contentId, title, season, episode, addons, debridAccounts, preferences, fetchPolicy, onPartialResults)
+
+    private suspend fun fetchStreamsInternal(
+        type: MediaType,
+        imdbId: String,
+        contentId: String?,
+        title: String?,
+        season: Int?,
+        episode: Int?,
+        addons: List<InstalledAddon>,
+        debridAccounts: Map<DebridServiceType, String>,
+        preferences: StreamPreferences,
+        fetchPolicy: StreamFetchPolicy,
+        onPartialResults: (suspend (StreamFetchResult) -> Unit)?,
+    ): StreamFetchResult = coroutineScope {
+        family?.initialize()
+        val familyStamp = family?.sessionKey()
+        val familyAddons = addons.filter { family?.allowsSource("extension:${it.manifest.id}") != false }
+        val allowUsenet = configuredUsenet != null && family?.allowsSource("usenet") != false &&
+            familyAddons.none { isPandaExtension(it.manifest.id, it.manifestUrl) }
+        if (family?.state?.value?.isKids == true && familyAddons.isEmpty() && !allowUsenet) return@coroutineScope StreamFetchResult(emptyList())
+        val familySource = familyAddons.firstOrNull()?.let { "extension:${it.manifest.id}" } ?: if (allowUsenet) "usenet" else "catalogue"
+        family?.requireMediaAccess(type, contentId ?: imdbId, imdbId, familySource)
+        // Explicit saved connections are searched independently of extension installation and
+        // the extension-only startup cache. Settings changes cannot leave an indexer cached out.
+        val usenetSearch = async {
+            if (allowUsenet && fetchPolicy == StreamFetchPolicy.FULL)
+                configuredUsenet!!.search(type, imdbId, season, episode, preferences)
+            else StreamFetchResult(emptyList())
+        }
         val request = StreamRequestKey(
             type = type,
             imdbId = imdbId,
@@ -226,15 +253,16 @@ class StreamRepositoryImpl(
             debridSignature = debridSignature(debridAccounts),
         )
         val now = Clock.System.now().toEpochMilliseconds()
+        var providerStats = emptyList<com.torve.domain.model.ProviderSourceStat>()
         val cached = memoryMutex.withLock {
             startupCache[request.contentKey]
-                ?.takeIf { it.isUsableFor(fetchPolicy, now) }
-                ?.streams
+                ?.takeIf { it.isUsableFor(fetchPolicy, now) && it.addons == familyAddons && it.preferences == preferences }
+                ?.also { batch -> providerStats = batch.providerStats.map { it.copy(fromCache = true) } }?.streams
         }
 
         val baseStreams = cached ?: run {
             val localStreams = streamAggregationSourceOverride?.resolveStreams(
-                addons = addons,
+                addons = familyAddons,
                 type = type,
                 imdbId = imdbId,
                 season = season,
@@ -243,7 +271,7 @@ class StreamRepositoryImpl(
                 preferences = preferences,
                 fetchPolicy = fetchPolicy,
             ) ?: streamAggregator.resolveStreams(
-                addons = addons,
+                addons = familyAddons,
                 type = type,
                 imdbId = imdbId,
                 season = season,
@@ -251,6 +279,14 @@ class StreamRepositoryImpl(
                 debridAccounts = debridAccounts,
                 preferences = preferences,
                 fetchPolicy = fetchPolicy,
+                onStatistics = { providerStats = it },
+                onPartialStreams = onPartialResults?.let { publish -> { rows ->
+                    if (familyStamp == family?.sessionKey()) {
+                        val allowed = grantFamilyStreams(rows.filterNot { preferences.excludeSeasonPacks && it.isSeasonPack() }, familyAddons, type, contentId, imdbId, title, familyStamp)
+                        rememberStreamRequest(request, allowed)
+                        publish(applyRuntimeStreamFilters(allowed).copy(providerStats = providerStats))
+                    }
+                } },
             )
             val mergedStreams = if (fetchPolicy == StreamFetchPolicy.PLAYBACK_STARTUP) {
                 val startupRequest = SourceAccelerationRequest(
@@ -261,7 +297,7 @@ class StreamRepositoryImpl(
                     seasonNumber = season,
                     episodeNumber = episode,
                     context = com.torve.domain.model.SourceAccelerationContext(
-                        addons = addons,
+                        addons = familyAddons,
                         debridAccounts = debridAccounts,
                         preferences = preferences,
                         startupFetchPolicy = fetchPolicy,
@@ -275,19 +311,50 @@ class StreamRepositoryImpl(
             } else {
                 localStreams
             }
-            memoryMutex.withLock {
-                startupCache[request.contentKey] = PrefetchedStreamBatch(
-                    streams = mergedStreams,
-                    fetchedAt = now,
-                    policy = fetchPolicy,
-                )
+            // Empty aggregation can mean every remote addon timed out. Do not
+            // turn that transient failure into a two-minute authoritative
+            // "no sources" result; the next user attempt must perform a real
+            // lookup.
+            if (mergedStreams.isNotEmpty()) {
+                memoryMutex.withLock {
+                    startupCache[request.contentKey] = PrefetchedStreamBatch(
+                        streams = mergedStreams,
+                        fetchedAt = now,
+                        policy = fetchPolicy,
+                        addons = familyAddons.toList(),
+                        preferences = preferences, providerStats = providerStats,
+                    )
+                }
             }
             mergedStreams
         }
 
-        rememberStreamRequest(request, baseStreams)
-        val memoryAdjustedStreams = applyResolveMemory(request, baseStreams)
-        return applyRuntimeStreamFilters(memoryAdjustedStreams)
+        val usenet = usenetSearch.await()
+        val combined = (baseStreams + usenet.streams).distinctBy { it.directUrl ?: it.infoHash ?: it.title }
+        val allowedStreams = grantFamilyStreams(combined.filterNot { preferences.excludeSeasonPacks && it.isSeasonPack() }, familyAddons, type, contentId, imdbId, title, familyStamp)
+        rememberStreamRequest(request, allowedStreams)
+        val memoryAdjustedStreams = applyResolveMemory(request, allowedStreams)
+        applyRuntimeStreamFilters(memoryAdjustedStreams.sortedByDescending { it.score }).copy(
+            providerStats = providerStats + usenet.providerStats, sourceErrors = usenet.sourceErrors)
+    }
+
+    private fun grantFamilyStreams(streams: List<ParsedStream>, familyAddons: List<InstalledAddon>,
+        type: MediaType, contentId: String?, imdbId: String, title: String?, familyStamp: String?): List<ParsedStream> {
+        if (familyStamp != family?.sessionKey()) return emptyList()
+        return if (family?.state?.value?.isKids == true) {
+            if (familyStamp != family.sessionKey()) return emptyList()
+            streams.filter { stream ->
+                val addon = familyAddons.firstOrNull { candidate ->
+                    stream.addonBaseUrl?.trimEnd('/') == candidate.manifestUrl.removeSuffix("/manifest.json").trimEnd('/')
+                }
+                val source = if (stream.configuredNzb != null) "usenet" else
+                    addon?.let { "extension:${it.manifest.id}" } ?: return@filter false
+                if (!family.allowsSource(source)) return@filter false
+                val item = com.torve.domain.model.MediaItem(id = contentId ?: imdbId, imdbId = imdbId, type = type, title = title.orEmpty(), familySourceKey = source)
+                familyStreams[streamMemoryKey(stream)] = FamilyStreamGrant(family.sessionKey(), source, item)
+                true
+            }
+        } else streams
     }
 
     private suspend fun applyRuntimeStreamFilters(streams: List<ParsedStream>): StreamFetchResult {
@@ -312,88 +379,24 @@ class StreamRepositoryImpl(
     }
 
     /**
-     * Ask an addon-hosted URL whether it's actually serving content right
-     * now. Single HEAD with redirect-follow disabled so the status code we
-     * see is Panda's (not a downstream CDN's 200 after Panda's 302). Panda's
-     * contract:
-     *  - 2xx → serving directly
-     *  - 3xx → redirecting to a ready CDN URL (still Ready — the player
-     *    will follow the redirect on its own request)
-     *  - 504 + `{"error":"nzb_not_ready", …}` → cloud client is still
-     *    downloading. Retry in ~15–30s.
-     *  - Anything else → genuine failure; bubble up so the caller can
-     *    fall back to another candidate.
-     *
-     * Network-level failures (DNS, timeout) are [Failed]: we don't know if
-     * the server would have said "preparing", and pretending it's preparing
-     * would spin the user forever on a dead connection.
+     * Resolve a selected addon URL once with a bounded Range GET. Ready
+     * redirects are handed directly to the player; provider error videos
+     * remain errors rather than being played or counted as watched content.
      */
     override suspend fun probeStreamReadiness(url: String): StreamReadiness {
-        // Probe uses a 1-byte Range GET on the no-redirect-follow probe
-        // client. This is the only shape that sees the same status Panda
-        // will hand the player:
-        //   • HEAD doesn't work — Panda returns 404/405 for HEAD on the
-        //     /nzb/ route, which would falsely say Ready while a GET would
-        //     return 504 nzb_not_ready.
-        //   • Range GET with followRedirects=true would chase Panda's 302
-        //     to the CDN, pulling unnecessary bytes and timing out on slow
-        //     CDNs.
-        //   • Range GET with followRedirects=false lets us see Panda's own
-        //     302 (Ready, no CDN fetch) / 504 (Preparing) / 2xx (Ready, at
-        //     most 1 byte pulled).
-        //
-        // The probe still fails open on network-level errors — a spurious
-        // timeout here must never block a URL the player could otherwise
-        // stream.
-        val response: HttpResponse = try {
-            probeClient.get(url) {
-                header(HttpHeaders.Range, "bytes=0-0")
-                timeout {
-                    requestTimeoutMillis = PANDA_READINESS_PROBE_TIMEOUT_MS
-                    socketTimeoutMillis = PANDA_READINESS_PROBE_TIMEOUT_MS
-                }
-            }
-        } catch (cancelled: kotlinx.coroutines.CancellationException) {
-            throw cancelled
-        } catch (e: Exception) {
-            // Probe timed out / couldn't reach Panda. For addon-hosted URLs
-            // this almost always means the upstream is taking its time
-            // (large file, cloud client warming up). Treating this as
-            // Preparing keeps the overlay on screen — it'll re-probe every
-            // 15s, and the player never sees an unfulfillable URL. If the
-            // server is genuinely dead, the 5-min budget still terminates
-            // with a friendly timeout message.
-            repositoryDebugLog { "[StreamProbe] probe error -> Preparing: ${e::class.simpleName}: ${DiagnosticsRedactor.redact(e.message)}" }
-            return StreamReadiness.Preparing
-        }
-        val code = response.status.value
-        return when {
-            // 2xx = serving directly. 3xx = Panda 302s to a ready CDN URL.
-            // ExoPlayer follows redirects itself, so both are playable.
-            code in 200..299 || code in 300..399 -> StreamReadiness.Ready(url)
-            code == 504 -> {
-                val body = runCatching {
-                    response.safeAddonBodyAsText(maxBytes = PANDA_READINESS_ERROR_BODY_MAX_BYTES)
-                }.getOrNull().orEmpty()
-                val parsed = runCatching {
-                    readinessJson.decodeFromString(AddonNotReadyErrorBody.serializer(), body)
-                }.getOrNull()
-                val err = parsed?.error?.takeIf { it.isNotBlank() }
-                if (err == null || err.equals("nzb_not_ready", ignoreCase = true)) {
-                    StreamReadiness.Preparing
-                } else {
-                    StreamReadiness.Failed("Server error (504): $err")
-                }
-            }
-            // Any other status (4xx/5xx) is a real server failure. Let the
-            // caller fall back to another candidate rather than throwing a
-            // "Source error" in the player a few seconds later.
-            else -> StreamReadiness.Failed("HTTP $code")
-        }
+        val result = playbackProbe.check(url)
+        if (result is StreamReadiness.Ready) family?.inheritPlayback(url, result.finalUrl)
+        return result
     }
 
     private fun isNzbDownloadLink(url: String): Boolean {
-        return url.contains("/getnzb/") || url.endsWith(".nzb") || url.contains("nzbindex") || url.contains("nzbgeek") || url.contains("scenenzbs")
+        val path = runCatching { io.ktor.http.Url(url).encodedPath }.getOrDefault(url.substringBefore('?'))
+        return url.contains("/getnzb/") ||
+            path.endsWith(".nzb", ignoreCase = true) ||
+            url.contains("nzbindex") ||
+            url.contains("nzbgeek") ||
+            url.contains("scenenzbs") ||
+            url.contains("treasure-maps")
     }
 
     override suspend fun resolveStream(
@@ -402,13 +405,53 @@ class StreamRepositoryImpl(
         apiKey: String,
     ): ResolvedStream = resolveStreamInternal(stream, provider, apiKey, trackPath = true)
 
-    private suspend fun resolveStreamInternal(
+    private suspend fun resolveStreamInternal(stream: ParsedStream, provider: DebridServiceType?, apiKey: String, trackPath: Boolean): ResolvedStream {
+        family?.initialize()
+        val stamp = family?.sessionKey()
+        requireFamilyStreamGrant(stream)
+        val result = resolveStreamUnchecked(stream, provider, apiKey, trackPath)
+        check(stamp == family?.sessionKey()) { "Profile changed during playback preparation." }
+        return authorizePreparedStream(stream, result)
+    }
+
+    private fun requireFamilyStreamGrant(stream: ParsedStream): FamilyStreamGrant? {
+        val grant = familyStreams[streamMemoryKey(stream)]
+        if (family?.state?.value?.isKids == true) {
+            check(grant != null && grant.stamp == family.sessionKey() && family.allows(grant.item, grant.source)) {
+                "This source is not available in this profile."
+            }
+            return grant
+        }
+        check(family?.allowsSource("playback") != false) { "Unlock an adult profile to play this title." }
+        return null
+    }
+
+    override suspend fun authorizePreparedStream(stream: ParsedStream, resolved: ResolvedStream): ResolvedStream {
+        family?.initialize()
+        val grant = requireFamilyStreamGrant(stream)
+        if (grant != null) {
+            // Apple prefers HLS when available; fallback and recovery paths can
+            // select any of these provider-returned URLs for the same title.
+            listOfNotNull(resolved.url, resolved.transcodeUrls?.hls,
+                resolved.transcodeUrls?.mp4, resolved.transcodeUrls?.webm)
+                .filter { it.isNotBlank() }.distinct().forEach { url ->
+                    family?.registerPlayback(url, grant.source, grant.item)
+                }
+        }
+        return resolved
+    }
+
+    private suspend fun resolveStreamUnchecked(
         stream: ParsedStream,
         provider: DebridServiceType?,
         apiKey: String,
         trackPath: Boolean,
     ): ResolvedStream {
         return try {
+            if (stream.configuredNzb != null) {
+                return (configuredUsenet ?: error("Configured Usenet playback is unavailable."))
+                    .resolve(stream).requirePlayableUrl()
+            }
             if (trackPath) {
                 playbackPathForStream(stream)?.let { path ->
                     val request = memoryMutex.withLock { lastRequestByStreamKey[streamMemoryKey(stream)] }
@@ -442,22 +485,32 @@ class StreamRepositoryImpl(
             // streams through Real-Debrid even when no debrid was configured.
             val magnetUrl = stream.magnetUrl
                 ?: stream.directUrl?.takeIf { it.isMagnetUri() }
+            if (ExtensionRuntimePolicy.userManagedOnly && magnetUrl == null &&
+                stream.directUrl != null && isNzbDownloadLink(stream.directUrl)
+            ) {
+                throw Exception("This source returns an NZB file. Configure a compatible download service with your extension provider so it returns a playable video link.")
+            }
             val resolved = if (stream.directUrl != null && stream.isAddonHostedUrl()) {
-                // Don't probe here — the caller (DetailViewModel) does the
+                // Don't probe here â€” the caller (DetailViewModel) does the
                 // readiness check via probeStreamReadiness so it can render
                 // a preparing UI while we wait.
                 ResolvedStream(url = stream.directUrl, service = null)
             } else if (magnetUrl == null && stream.directUrl != null) {
-                if (isNzbDownloadLink(stream.directUrl)) {
-                    // Raw .nzb link from a non-Panda addon — can't be played
+                if (stream.hasPreResolvedAddonPlaybackUrl()) {
+                    // Configured Torrentio already returned the provider's
+                    // playback URL. Wrapping it through WebDL again creates a
+                    // nested temporary URL which can expire during playback.
+                    ResolvedStream(url = stream.directUrl, service = provider)
+                } else if (isNzbDownloadLink(stream.directUrl)) {
+                    // Raw .nzb link from a non-Panda addon â€” can't be played
                     // without a download client resolving it first.
-                    throw Exception("NZB files require a download client (NZBget/SABnzbd). Configure one in Panda settings.")
+                    throw Exception("This source returns an NZB file. Configure a compatible download service with your extension provider so it returns a playable video link.")
                 } else if (stream.infoHash == null) {
                     // Hoster URL that needs unrestricting (Real-Debrid, etc.).
                     // Without a provider we can't proceed.
                     if (provider == null || apiKey.isBlank()) {
                         throw DebridMissingException(
-                            "Connect Real-Debrid in Panda to use this stream.",
+                            "Configure a compatible playback service with your extension provider, then add its configured manifest URL.",
                         )
                     }
                     debridClient.unrestrictUrl(provider, apiKey, stream.directUrl)
@@ -473,7 +526,7 @@ class StreamRepositoryImpl(
                     ?: throw Exception("Stream has no infoHash, magnet, or direct URL")
                 if (provider == null || apiKey.isBlank()) {
                     throw DebridMissingException(
-                        "Connect Real-Debrid in Panda to use torrent streams.",
+                        "This torrent source needs a compatible playback service. Configure it with your extension provider and add its configured manifest URL.",
                     )
                 }
                 debridClient.resolveStream(
@@ -505,20 +558,21 @@ override suspend fun resolveStreamWithFallback(
         stream: ParsedStream,
         providers: Map<DebridServiceType, String>,
     ): ResolvedStream {
+        if (stream.configuredNzb != null) return resolveStreamInternal(stream, null, "", trackPath = true)
         if (stream.canUseGenericStreamHandoff()) {
             return resolveStreamInternal(stream, provider = null, apiKey = "", trackPath = true)
         }
 
-        // Addon-hosted streams (Panda's /u/<token>/nzb/..., /u/<token>/easynews/..., …)
+        // Addon-hosted streams (Panda's /u/<token>/nzb/..., /u/<token>/easynews/..., â€¦)
         // bypass debrid entirely. The infoHash field, when present, just identifies
-        // the release — the addon's own server handles fetching it. Skip the chain.
+        // the release â€” the addon's own server handles fetching it. Skip the chain.
         if (stream.directUrl != null && stream.isAddonHostedUrl()) {
             return resolveStreamInternal(stream, provider = null, apiKey = "", trackPath = true)
         }
 
         if (providers.isEmpty()) {
             throw DebridMissingException(
-                "No debrid provider is configured — playback can't unrestrict this source.",
+                "No debrid provider is configured â€” playback can't unrestrict this source.",
             )
         }
 
@@ -544,7 +598,7 @@ override suspend fun resolveStreamWithFallback(
             }
         }
         throw DebridNoCachedStreamException(
-            "Tried " + providers.size + " debrid provider(s) — none produced a playable URL. " +
+            "Tried " + providers.size + " debrid provider(s) â€” none produced a playable URL. " +
                 "Common cause: the source isn't cached on any of them. Tried: " +
                 attempts.joinToString("; "),
         )
@@ -591,6 +645,10 @@ override suspend fun resolveStreamWithFallback(
         provider: DebridServiceType?,
         success: Boolean,
     ) {
+        // This only feeds source acceleration; watched history and progress
+        // have their own synchronization. Never delay a manual extension link
+        // on an optional backend report before handing it to the player.
+        if (ExtensionRuntimePolicy.userManagedOnly) return
         val request = memoryMutex.withLock { lastRequestByStreamKey[streamMemoryKey(stream)] }
         val contentId = request?.contentId
             ?: request?.imdbId?.takeIf { it.isNotBlank() }?.let { "imdb:$it" }
@@ -645,6 +703,7 @@ override suspend fun resolveStreamWithFallback(
         request: SourceAccelerationRequest,
         maxAgeMs: Long,
     ): StartupCandidatesSnapshot? {
+        if (family?.state?.value?.isKids == true) return null
         return warmupRegistry.getFreshSnapshot(
             request = request,
             maxAgeMs = maxAgeMs,
@@ -975,13 +1034,6 @@ override suspend fun resolveStreamWithFallback(
     private companion object {
         const val STARTUP_CACHE_TTL_MS = 2 * 60 * 1000L
         const val MAX_TRACKED_STREAM_KEYS = 512
-        // Panda polls the upstream cloud client for up to ~12s before
-        // replying with 504. For large files (15GB+) the internal wait
-        // sometimes stretches, so 30s gives Panda room to respond with an
-        // accurate status rather than us timing out client-side and
-        // falling back to Preparing on guesswork.
-        const val PANDA_READINESS_PROBE_TIMEOUT_MS = 30_000L
-        const val PANDA_READINESS_ERROR_BODY_MAX_BYTES = 64 * 1024
     }
 }
 
@@ -1034,7 +1086,7 @@ private fun ResolvedStream.requirePlayableUrl(): ResolvedStream {
         // different source rather than re-configure anything.
         val providerLabel = service?.name?.takeIf { it.isNotBlank() } ?: "the active debrid"
         throw IllegalStateException(
-            "$providerLabel returned no playable URL — this source likely isn't " +
+            "$providerLabel returned no playable URL â€” this source likely isn't " +
                 "cached. Try a different source or re-check provider connectivity.",
         )
     }

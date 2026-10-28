@@ -24,10 +24,16 @@ import io.ktor.http.Parameters
 import io.ktor.http.ParametersBuilder
 import io.ktor.http.contentType
 import io.ktor.http.encodeURLParameter
+import io.ktor.http.isSuccess
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.booleanOrNull
+import kotlinx.serialization.json.decodeFromJsonElement
 
 /**
  * Callback to refresh an expired RD OAuth token.
@@ -40,6 +46,10 @@ class DebridNoCachedStreamException(message: String) : Exception(message)
 class DebridServiceUnavailableException(message: String) : Exception(message)
 class DebridSourceBlockedException(message: String) : Exception(message)
 
+data class DebridCloudFile(val id: String, val name: String, val size: Long, val ready: Boolean)
+data class DebridCloudFolder(val id: String, val name: String, val status: String, val size: Long)
+data class DebridCloudInventory(val folders: List<DebridCloudFolder>, val notice: String? = null)
+
 fun interface RdTokenRefresher {
     suspend fun refresh(): String?
 }
@@ -50,6 +60,91 @@ class DebridClient(
     private val accelerationApi: AccelerationApi? = null,
     var rdTokenRefresher: RdTokenRefresher? = null,
 ) {
+    /** Read-only cloud browsing; opening an existing file never creates another torrent. */
+    suspend fun cloudFolders(provider: DebridServiceType, key: String): List<DebridCloudFolder> = cloudInventory(provider, key).folders
+    suspend fun cloudInventory(provider: DebridServiceType, key: String): DebridCloudInventory {
+        if (provider == DebridServiceType.TORBOX) return coroutineScope {
+            suspend fun inventory(kind: String): List<DebridCloudFolder>? = try {
+                readCloudFolders("$TB_BASE/$kind/mylist", key, if (kind == "usenet") "usenet:" else "torrent:")
+            } catch (cancelled: CancellationException) { throw cancelled }
+              catch (_: Exception) { null }
+            val torrents = async { inventory("torrents") }
+            val usenet = async { inventory("usenet") }
+            val t = torrents.await(); val u = usenet.await()
+            check(t != null || u != null) { "Could not read the TorBox account. Check the connection and try again." }
+            DebridCloudInventory(t.orEmpty() + u.orEmpty(), when {
+                t == null -> "TorBox torrents could not be loaded. Usenet downloads are shown. Try Refresh."
+                u == null -> "TorBox Usenet downloads could not be loaded. Torrents are shown. Check Usenet access or try Refresh."
+                else -> null
+            })
+        }
+        check(provider == DebridServiceType.REAL_DEBRID) { "Cloud browsing is available for Real-Debrid and TorBox." }
+        return DebridCloudInventory(readCloudFolders("$RD_BASE/torrents", key))
+    }
+    private suspend fun readCloudFolders(endpoint: String, key: String, prefix: String = ""): List<DebridCloudFolder> {
+        val response = httpClient.get(endpoint) { header("Authorization", "Bearer $key") }
+        check(response.status.value in 200..299) { "Could not read the cloud account. Check the connection." }
+        val body = json.parseToJsonElement(response.bodyAsText())
+        check((body as? JsonObject)?.get("success")?.jsonPrimitive?.booleanOrNull != false) { "Could not read the cloud account. Check the connection." }
+        val items = extractInventoryItems(body)
+        return items.mapNotNull { item ->
+            fun value(name: String) = item[name]?.jsonPrimitive?.content.orEmpty()
+            value("id").takeIf { it.isNotBlank() }?.let { id -> DebridCloudFolder(prefix + id,
+                value("filename").ifBlank { value("name").ifBlank { "Cloud download" } },
+                value("status").ifBlank { value("download_state") },
+                value("bytes").toLongOrNull() ?: value("size").toLongOrNull() ?: 0) }
+        }
+    }
+    private fun torBoxCloudLocation(folder: String): Pair<String, String> {
+        val kind = if (folder.startsWith("usenet:")) "usenet" else "torrents"
+        val id = folder.removePrefix("usenet:").removePrefix("torrent:")
+        check(id.isNotBlank() && id.all(Char::isDigit)) { "This cloud download is no longer available. Refresh the page." }
+        return kind to id
+    }
+    private suspend fun torBoxCloudInfo(key: String, folder: String): TbTorrentInfoData {
+        val (kind, id) = torBoxCloudLocation(folder)
+        val response = httpClient.get("$TB_BASE/$kind/mylist") {
+            header("Authorization", "Bearer $key"); parameter("id", id); parameter("bypass_cache", true)
+        }
+        check(response.status.isSuccess()) { "Could not load the cloud download. Check the connection." }
+        val body = json.parseToJsonElement(response.bodyAsText()) as? JsonObject
+        check(body?.get("success")?.jsonPrimitive?.booleanOrNull == true) { "Could not load the cloud download." }
+        val data = body?.get("data")
+        val item = (data as? JsonObject) ?: extractInventoryItems(data).firstOrNull { it["id"]?.jsonPrimitive?.content == id }
+        val info = item?.let { json.decodeFromJsonElement<TbTorrentInfoData>(it) } ?: error("This cloud download is no longer available.")
+        check(info.id.toString() == id) { "This cloud download is no longer available. Refresh the page." }
+        return info
+    }
+    suspend fun cloudFiles(provider: DebridServiceType, key: String, folder: String): List<DebridCloudFile> = when (provider) {
+        DebridServiceType.REAL_DEBRID -> rdGetTorrentInfo(key, folder).let { info ->
+            info.files.map { DebridCloudFile(it.id.toString(), it.path.removePrefix("/"), it.bytes,
+                info.status == "downloaded" && it.selected == 1 && info.links.isNotEmpty()) }
+        }
+        DebridServiceType.TORBOX -> {
+            val info = torBoxCloudInfo(key, folder)
+            info.files.map { DebridCloudFile(it.id.toString(), it.name, it.size, info.downloadFinished || info.downloadPresent || info.cached) }
+        }
+        else -> error("Cloud browsing is available for Real-Debrid and TorBox.")
+    }
+    suspend fun playCloudFile(provider: DebridServiceType, key: String, folder: String, fileId: String): String = when (provider) {
+        DebridServiceType.REAL_DEBRID -> {
+            val info = rdGetTorrentInfo(key, folder)
+            check(info.status == "downloaded") { "This download is not ready yet." }
+            val index = info.files.filter { it.selected == 1 }.indexOfFirst { it.id.toString() == fileId }
+            val link = info.links.getOrNull(index) ?: error("This file is not selected in the cloud download.")
+            rdUnrestrictLink(key, link).download
+        }
+        DebridServiceType.TORBOX -> {
+            check(cloudFiles(provider, key, folder).any { it.id == fileId && it.ready }) { "This download is not ready yet." }
+            val (kind, id) = torBoxCloudLocation(folder)
+            val response: TbResponse<String> = httpClient.get("$TB_BASE/$kind/requestdl") {
+                header("Authorization", "Bearer $key"); parameter("token", key)
+                parameter(if (kind == "usenet") "usenet_id" else "torrent_id", id); parameter("file_id", fileId)
+            }.body()
+            response.data?.takeIf { response.success && it.isNotBlank() } ?: error("Could not resolve this cloud file.")
+        }
+        else -> error("Cloud browsing is available for Real-Debrid and TorBox.")
+    }
     private data class CacheCheckEntry(
         val cached: Boolean,
         val observedAt: Long,
@@ -236,7 +331,9 @@ class DebridClient(
                 )
                 cachedResults[normalized] = cached
             }
-            accelerationApi?.reportHashes(
+            // User-managed source searches use the provider directly. Optional
+            // acceleration reporting must not consume the cache-check deadline.
+            if (!com.torve.data.addon.ExtensionRuntimePolicy.userManagedOnly) accelerationApi?.reportHashes(
                 providerType = provider.apiValue,
                 observations = result.map { (infoHash, isCached) ->
                     HashAvailabilityObservationDto(
@@ -247,6 +344,7 @@ class DebridClient(
             )
             cachedResults
         } catch (e: Exception) {
+            if (e is kotlinx.coroutines.CancellationException) throw e
             if (e is RdAuthException || e is DebridNeedsReconnectException || e is DebridServiceUnavailableException) {
                 throw e
             }
@@ -370,19 +468,25 @@ class DebridClient(
                 )
             }
             DebridServiceType.TORBOX -> {
-                val createResp: TbResponse<TbTorrentData> = httpClient.post("$TB_BASE/webdl/createwebdownload") {
+                val createResp: TbResponse<TbWebDownloadData> = httpClient.submitForm(
+                    url = "$TB_BASE/webdl/createwebdownload",
+                    formParameters = Parameters.build {
+                        append("link", url)
+                    },
+                ) {
                     header("Authorization", "Bearer $apiKey")
-                    contentType(ContentType.Application.Json)
-                    setBody("""{"url":"$url"}""")
                 }.body()
-                val downloadId = createResp.data?.id ?: throw Exception("Download creation failed")
+                val downloadId = createResp.data?.id?.takeIf { it > 0 }
+                    ?: throw Exception(createResp.detail ?: "Download creation failed")
                 // Get the download link
-                val linkResp: TbResponse<TbDownloadLinkData> =
+                val linkResp: TbResponse<String> =
                     httpClient.get("$TB_BASE/webdl/requestdl") {
                         header("Authorization", "Bearer $apiKey")
+                        parameter("token", apiKey)
                         parameter("web_id", downloadId)
                     }.body()
-                val downloadUrl = linkResp.data?.data ?: throw Exception("No download link available")
+                val downloadUrl = linkResp.data?.takeIf { it.isNotBlank() }
+                    ?: throw Exception(linkResp.detail ?: "No download link available")
                 ResolvedStream(
                     url = downloadUrl,
                     service = provider,
@@ -429,9 +533,18 @@ class DebridClient(
 
     private suspend fun rdVerifyApiKey(apiKey: String): DebridResult {
         return try {
-            val user: RdUserResponse = httpClient.get("$RD_BASE/user") {
+            val response = httpClient.get("$RD_BASE/user") {
                 header("Authorization", "Bearer $apiKey")
-            }.body()
+            }
+            // The shared HTTP client does not throw on non-2xx responses.
+            // An error JSON otherwise decodes to an empty, default RdUserResponse.
+            if (!response.status.isSuccess()) {
+                return DebridResult(success = false, error = "Real-Debrid verification failed (HTTP ${response.status.value}).")
+            }
+            val user: RdUserResponse = response.body()
+            if (user.username.isBlank() || user.type.isBlank()) {
+                return DebridResult(success = false, error = "Real-Debrid did not return a valid account.")
+            }
             DebridResult(
                 success = true,
                 user = DebridUser(
@@ -443,6 +556,7 @@ class DebridClient(
                 ),
             )
         } catch (e: Exception) {
+            if (e is CancellationException) throw e
             DebridResult(success = false, error = extractError(e, "Real-Debrid"))
         }
     }
@@ -1077,7 +1191,8 @@ class DebridClient(
             header("Authorization", "Bearer $apiKey")
         }.body()
 
-        val torrentId = createResp.data?.id ?: throw Exception("Create download failed")
+        val torrentId = createResp.data?.id?.takeIf { it > 0 }
+            ?: throw Exception(createResp.detail ?: "Create download failed")
 
         // 2. Poll until ready
         for (attempt in 0 until 30) {
@@ -1085,25 +1200,37 @@ class DebridClient(
                 httpClient.get("$TB_BASE/torrents/mylist") {
                     header("Authorization", "Bearer $apiKey")
                     parameter("id", torrentId)
+                    parameter("bypass_cache", true)
                 }.body()
 
             val info = infoResp.data
-            if (info != null && info.downloadState == "downloaded" && info.files.isNotEmpty()) {
+            val ready = info != null && (
+                info.downloadFinished ||
+                    info.downloadPresent ||
+                    info.cached ||
+                    info.downloadState.lowercase() in setOf("downloaded", "cached", "completed", "uploading")
+                )
+            if (info != null && ready && info.files.isNotEmpty()) {
                 // 3. Get download link
-                val targetFile = if (fileIdx != null && fileIdx < info.files.size) {
-                    info.files[fileIdx]
-                } else {
-                    info.files.maxByOrNull { it.size } ?: info.files.first()
+                val videoFiles = info.files.filter { file ->
+                    file.name.substringAfterLast('.', "").lowercase() in VIDEO_EXTENSIONS
                 }
+                val playableFiles = videoFiles.ifEmpty { info.files }
+                val targetFile = fileIdx?.let { requestedIndex ->
+                    playableFiles.firstOrNull { it.id == requestedIndex.toLong() }
+                        ?: playableFiles.getOrNull(requestedIndex)
+                } ?: playableFiles.maxByOrNull { it.size }
+                    ?: throw Exception("No downloadable files found")
 
-                val linkResp: TbResponse<TbDownloadLinkData> =
+                val linkResp: TbResponse<String> =
                     httpClient.get("$TB_BASE/torrents/requestdl") {
                         header("Authorization", "Bearer $apiKey")
+                        parameter("token", apiKey)
                         parameter("torrent_id", torrentId)
                         parameter("file_id", targetFile.id)
                     }.body()
 
-                val downloadUrl = linkResp.data?.data
+                val downloadUrl = linkResp.data?.takeIf { it.isNotBlank() }
                     ?: throw Exception("No download link available")
 
                 return ResolvedStream(
@@ -1233,6 +1360,7 @@ class DebridClient(
             header("Authorization", "Bearer $apiKey")
             parameter("hash", hashParam)
             parameter("list_files", false)
+            parameter("format", "object")
         }.bodyAsText()
 
         val result = mutableMapOf<String, Boolean>()
@@ -1242,7 +1370,11 @@ class DebridClient(
             if (data is kotlinx.serialization.json.JsonObject) {
                 for (hash in hashes) {
                     val entry = data[hash.lowercase()] ?: data[hash]
-                    val isCached = entry is kotlinx.serialization.json.JsonArray && entry.isNotEmpty()
+                    val isCached = when (entry) {
+                        is JsonObject -> entry.isNotEmpty()
+                        is kotlinx.serialization.json.JsonArray -> entry.isNotEmpty()
+                        else -> false
+                    }
                     result[hash] = isCached
                 }
             }

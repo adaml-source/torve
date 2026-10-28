@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="tv_nav_iptv">Canais</string>
     <string name="tv_nav_search">Pesquisar</string>
@@ -68,7 +68,7 @@
     <string name="tv_settings_section_app">App</string>
     <string name="tv_settings_section_about">Sobre</string>
     <string name="tv_settings_cloud_service">Servi\u00e7o na nuvem</string>
-    <string name="tv_settings_trakt">Trakt</string>
+    <string name="tv_settings_trakt">"Trakt"</string>
     <string name="tv_settings_phone_pairing">Emparelhamento do telefone</string>
     <string name="tv_settings_language">Idioma</string>
     <string name="tv_settings_playback_quality">Qualidade de reprodu\u00e7\u00e3o</string>
@@ -101,9 +101,9 @@
     <string name="tv_iptv_no_channels_in_group">Nenhum canal neste grupo</string>
     <string name="tv_iptv_search_hint">Pesquisar canais\u2026</string>
     <string name="tv_iptv_filter_all">Todos</string>
-    <string name="tv_iptv_filter_hd">HD</string>
+    <string name="tv_iptv_filter_hd">"HD"</string>
     <string name="tv_iptv_filter_fhd">FHD</string>
-    <string name="tv_iptv_filter_4k">4K</string>
+    <string name="tv_iptv_filter_4k">"4K"</string>
     <string name="tv_iptv_filter_favorites">Favoritos</string>
     <string name="tv_iptv_preview">Pr\u00e9-visualiza\u00e7\u00e3o</string>
     <string name="tv_iptv_hold_to_favorite">Segure OK para favoritar</string>
@@ -128,7 +128,7 @@
     <string name="tv_settings_mode_ios_desc">Emparelhe seu iPhone para sincronizar configura\u00e7\u00f5es</string>
     <string name="tv_settings_mode_tv_only">Apenas TV \u2014 sem app m\u00f3vel</string>
     <string name="tv_settings_mode_tv_only_desc">Configure tudo diretamente na sua TV</string>
-    <string name="tv_settings_simkl">SIMKL</string>
+    <string name="tv_settings_simkl">"SIMKL"</string>
     <string name="tv_settings_change_provider">Provedor na nuvem</string>
     <string name="tv_settings_sync_note">Para personalizar o layout da tela inicial, estilos de cart\u00e3o e fontes de avalia\u00e7\u00e3o \u2014 configure no app m\u00f3vel e toque em Sincronizar.</string>
 
@@ -182,18 +182,18 @@
     <string name="tv_catalog_movies_preparing">Filmes est\u00e3o sendo preparados em segundo plano</string>
     <string name="tv_catalog_shows_preparing">S\u00e9ries est\u00e3o sendo preparadas em segundo plano</string>
     <string name="tv_search_ai_provider_required">Configure um provedor de IA nas Configura\u00e7\u00f5es antes de usar a Pesquisa IA.</string>
-    <string name="tv_settings_panda_streaming_setup">Configura\u00e7\u00e3o de streaming do Panda</string>
+    <string name="tv_settings_panda_streaming_setup">Fontes de streaming</string>
     <string name="tv_settings_panda_streaming_setup_desc">Configure debrid, usenet, clientes de download e sa\u00fade dos provedores em um s\u00f3 lugar.</string>
     <string name="tv_settings_panda_configured_enabled">Configurado e ativado. Reconfigure provedores de streaming e automa\u00e7\u00e3o.</string>
-    <string name="tv_settings_panda_configured_disabled">Configurado, mas desativado. Abra o Panda para ativar ou reconfigurar.</string>
+    <string name="tv_settings_panda_configured_disabled">Configurado, mas desativado. Abra a configura\u00e7\u00e3o de streaming para ativar ou reconfigurar.</string>
     <string name="tv_settings_panda_setup_desc">Prepare o Torve para streaming com debrid, usenet e clientes de download.</string>
     <string name="tv_settings_realdebrid_connect">Conectar Real-Debrid</string>
-    <string name="tv_settings_realdebrid_connect_panda">Conectar Real-Debrid no Panda</string>
-    <string name="tv_settings_realdebrid_managed_authorize">Gerenciado pelo Panda. Conclua a autoriza\u00e7\u00e3o do dispositivo para conectar o Real-Debrid.</string>
-    <string name="tv_settings_realdebrid_managed_connected">Gerenciado pelo Panda. Conectado.</string>
-    <string name="tv_settings_realdebrid_managed_connected_as">Gerenciado pelo Panda. Conectado como %1$s.</string>
-    <string name="tv_settings_realdebrid_managed_reconnect">Gerenciado pelo Panda. Precisa reconectar: %1$s</string>
-    <string name="tv_settings_realdebrid_managed_not_connected">Gerenciado pelo Panda. N\u00e3o conectado.</string>
+    <string name="tv_settings_realdebrid_connect_panda">Conectar Real-Debrid</string>
+    <string name="tv_settings_realdebrid_managed_authorize">Conclua a autoriza\u00e7\u00e3o do dispositivo para conectar o Real-Debrid.</string>
+    <string name="tv_settings_realdebrid_managed_connected">Conectado pela configura\u00e7\u00e3o de streaming.</string>
+    <string name="tv_settings_realdebrid_managed_connected_as">Conectado como %1$s pela configura\u00e7\u00e3o de streaming.</string>
+    <string name="tv_settings_realdebrid_managed_reconnect">Precisa reconectar: %1$s</string>
+    <string name="tv_settings_realdebrid_managed_not_connected">N\u00e3o conectado.</string>
     <string name="tv_settings_auth_waiting_authorization">Aguardando autoriza\u00e7\u00e3o\u2026</string>
     <string name="tv_settings_auth_open_url_code">Abra a URL em outro dispositivo e digite o c\u00f3digo.</string>
     <string name="tv_settings_panda_health_monitor">Monitor de sa\u00fade do Panda</string>
@@ -221,20 +221,20 @@
 
     <!-- Integrations section -->
     <string name="tv_settings_section_integrations">Integra\u00e7\u00f5es</string>
-    <string name="tv_settings_omdb">OMDB</string>
+    <string name="tv_settings_omdb">"OMDB"</string>
     <string name="tv_settings_omdb_api_key">Chave API OMDB</string>
     <string name="tv_settings_omdb_test">Testar OMDB</string>
-    <string name="tv_settings_mdblist">MDBList</string>
+    <string name="tv_settings_mdblist">"MDBList"</string>
     <string name="tv_settings_mdblist_api_key">Chave API MDBList</string>
-    <string name="tv_settings_jellyfin">Jellyfin</string>
+    <string name="tv_settings_jellyfin">"Jellyfin"</string>
     <string name="tv_settings_jellyfin_url">URL do servidor Jellyfin</string>
     <string name="tv_settings_jellyfin_api_key">Chave API Jellyfin</string>
     <string name="tv_settings_jellyfin_test">Testar Jellyfin</string>
-    <string name="tv_settings_plex">Plex</string>
+    <string name="tv_settings_plex">"Plex"</string>
     <string name="tv_settings_plex_url">URL do servidor Plex</string>
     <string name="tv_settings_plex_token">Token de acesso Plex</string>
     <string name="tv_settings_plex_test">Testar Plex</string>
-    <string name="tv_settings_kodi">Kodi</string>
+    <string name="tv_settings_kodi">"Kodi"</string>
     <string name="tv_settings_kodi_name">Nome</string>
     <string name="tv_settings_kodi_ip">Host / IP</string>
     <string name="tv_settings_kodi_port">Porta</string>
@@ -448,10 +448,10 @@
     <string name="tv_live_audio_prefer_surround">Preferir faixas surround</string>
     <string name="tv_live_audio_prefer_surround_desc">Priorizar \u00e1udio multicanal sobre est\u00e9reo</string>
     <string name="tv_notification_device_removed_data_cleared">Esta TV foi removida dos seus dispositivos ativos. Os dados locais do Torve foram apagados.</string>
-    <string name="tv_notification_setup_sync_premium_verify_failed">Setup sync could not refresh account access on this TV.</string>
-    <string name="tv_notification_setup_sync_premium_device_blocked">Setup sync is waiting for this TV device registration.</string>
-    <string name="tv_notification_setup_sync_premium_required">This TV needs account setup before receiving setup sync.</string>
-    <string name="tv_notification_setup_sync_premium_offline">Connect to Torve before receiving setup sync.</string>
+    <string name="tv_notification_setup_sync_premium_verify_failed">A sincronização não atualizou o acesso à conta nesta TV.</string>
+    <string name="tv_notification_setup_sync_premium_device_blocked">A sincronização aguarda o registro desta TV.</string>
+    <string name="tv_notification_setup_sync_premium_required">Configure a conta nesta TV antes de sincronizar.</string>
+    <string name="tv_notification_setup_sync_premium_offline">Conecte-se ao Torve antes de sincronizar a configuração.</string>
     <string name="tv_notification_invalid_settings_data">Dados de configura\u00e7\u00e3o inv\u00e1lidos: %1$s</string>
     <string name="tv_notification_sync_import_failed">Falha ao importar sincroniza\u00e7\u00e3o: %1$s</string>
     <string name="tv_notification_settings_synced">Configura\u00e7\u00f5es sincronizadas: %1$s</string>
@@ -464,8 +464,8 @@
     <string name="tv_notification_sync_summary_progress">%1$d entradas de progresso</string>
     <string name="tv_notification_sync_error">Erro de sincroniza\u00e7\u00e3o: %1$s</string>
     <string name="tv_notification_downloads_completed">%1$d downloads conclu\u00eddos</string>
-    <string name="tv_unlock_purchase_phone_title">Torve is free software</string>
-    <string name="tv_unlock_purchase_phone_body">Torve is free software. No subscriptions. No paid tiers.</string>
+    <string name="tv_unlock_purchase_phone_title">Torve é gratuito</string>
+    <string name="tv_unlock_purchase_phone_body">Torve é gratuito. Sem assinaturas ou planos pagos.</string>
     <string name="tv_action_got_it">Entendi</string>
     <string name="tv_home_on_now">No ar agora</string>
     <string name="tv_home_available_now">Dispon\u00edvel agora</string>
@@ -502,14 +502,14 @@
     <string name="tv_auth_sign_out_second_press_hint">Exige uma segunda press\u00e3o para evitar sair por acidente.</string>
     <string name="tv_settings_pair_phone_title">Entrar com o telefone</string>
     <string name="tv_settings_pair_phone_subtitle">Escaneie um QR com o app Torve no telefone - sem digitar.</string>
-    <string name="tv_purchase_verifying_premium">Access refresh received.</string>
-    <string name="tv_purchase_restore_started">Access refresh started.</string>
-    <string name="tv_purchase_cancelled">No purchase required.</string>
-    <string name="tv_purchase_verification_pending">Account access refresh is already pending.</string>
-    <string name="tv_purchase_billing_managed_by">No billing is required.</string>
-    <string name="tv_purchase_choose_billing_store">Torve is free software. No billing is required.</string>
-    <string name="tv_settings_receive_credentials_import_desc">Mostre um c\u00f3digo de pareamento \u00fanico para importar segredos Debrid, Plex e Panda sem digitar.</string>
-    <string name="tv_settings_receive_credentials_tv_desc">Mostre um c\u00f3digo de pareamento \u00fanico para que um desktop ou telefone envie credenciais Debrid, Plex e Panda sem digitar no controle remoto.</string>
+    <string name="tv_purchase_verifying_premium">Atualização de acesso recebida.</string>
+    <string name="tv_purchase_restore_started">Atualização de acesso iniciada.</string>
+    <string name="tv_purchase_cancelled">Nenhuma compra necessária.</string>
+    <string name="tv_purchase_verification_pending">A atualização do acesso já está pendente.</string>
+    <string name="tv_purchase_billing_managed_by">Nenhuma cobrança necessária.</string>
+    <string name="tv_purchase_choose_billing_store">Torve é gratuito. Nenhuma cobrança necessária.</string>
+    <string name="tv_settings_receive_credentials_import_desc">Mostrar um código de emparelhamento de utilização única para importar credenciais sem as escrever.</string>
+    <string name="tv_settings_receive_credentials_tv_desc">Mostrar um código de emparelhamento de utilização única para enviar credenciais de um computador ou telefone para esta TV.</string>
     <string name="tv_settings_open_transfer_arrow">Abrir transfer\u00eancia &gt;</string>
     <string name="tv_settings_open_diagnostics_arrow">Abrir diagn\u00f3sticos &gt;</string>
     <string name="tv_settings_debrid_connecting_to">Conectando a %1$s...</string>
@@ -526,4 +526,19 @@
     <string name="tv_vod_rating_value">Avalia\u00e7\u00e3o %1$s</string>
     <!-- Added translations for recently introduced strings. -->
     <string name="tv_library_tab_vod">VOD</string>
+    <string name="tv_season_mark_watched">Marcar T%1$d como vista</string>
+    <string name="tv_season_watched">T%1$d vista</string>
+    <string name="tv_settings_custom_epg_url">URL de EPG personalizada (opcional)</string>
+    <string name="tv_settings_channels_count_pending">Os canais ainda não foram contados. Se faltarem dados do guia, use Atualizar EPG abaixo.</string>
+    <string name="tv_settings_import_refresh_subtitle">Atualizar conta, listas, credenciais, favoritos e estado das ligações. Se faltarem canais ou programas, abra Canais e atualize o guia.</string>
+    <string name="tv_settings_open_panda_setup">Abrir configuração de streaming</string>
+    <string name="tv_notification_setup_sync_refresh_failed">A sincronização da configuração não conseguiu atualizar o estado da conta. A continuar com a configuração recebida.</string>
+    <string name="tv_unlock_purchase_options_title">Torve é software livre</string>
+    <string name="tv_unlock_purchase_options_body">Torve é software livre. Sem subscrições. Sem níveis pagos.</string>
+    <string name="tv_unlock_go_to_premium">Continuar</string>
+    <string name="tv_settings_account_refreshed_epg_hint">Configuração da conta atualizada. Se ainda faltarem canais ou dados do guia, abra Definições &gt; Canais e escolha Atualizar EPG.</string>
+    <string name="tv_update_available">Torve %1$s está disponível e pronto para baixar.</string>
+    <string name="tv_settings_refresh_channels_title">Atualizar canais</string>
+    <string name="tv_settings_refresh_channels_subtitle">Baixar novamente a lista de canais sem obter o guia de programação</string>
+    <string name="tv_settings_refresh_channels_started">Atualização de canais iniciada</string>
 </resources>

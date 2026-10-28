@@ -16,7 +16,11 @@ data class WatchProgress(
     val showTitle: String? = null,
     val updatedAt: Long = 0,
     val isContentPlaceholder: Boolean = false,
+    /** Null retains imported/legacy semantics; a tracked file never uses its position as proof. */
+    val verifiedWatched: Boolean? = null,
 ) {
+    fun isWatched(threshold: Float = .85f): Boolean = verifiedWatched ?: (durationMs > 0 && progressPercent >= threshold)
+
     val progressPercent: Float
         get() = if (durationMs > 0) (positionMs.toFloat() / durationMs) else 0f
 }

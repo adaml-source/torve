@@ -1,0 +1,16 @@
+{
+  "id": "com.torve.demo.playback",
+  "version": "1.0.0",
+  "name": "Demo Playback",
+  "description": "Public testing extension using original synthetic media only.",
+  "resources": [
+    "stream"
+  ],
+  "types": [
+    "movie"
+  ],
+  "idPrefixes": [
+    "torve-original-"
+  ],
+  "catalogs": []
+}

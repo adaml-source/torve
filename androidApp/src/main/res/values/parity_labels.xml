@@ -1,0 +1,147 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="parity_988391b0226f" formatted="false">Account &amp; profiles</string>
+    <string name="parity_35d0f52965cf" formatted="false">Account, subscription and devices</string>
+    <string name="parity_ef3bd24d94eb" formatted="false">Adjusts content rows on Home, Movies and TV Shows. Changes save automatically.</string>
+    <string name="parity_f2132dff6155" formatted="false">Advanced &amp; support</string>
+    <string name="parity_a52ace420f21" formatted="false">All</string>
+    <string name="parity_69558e9e33a9" formatted="false">All genres</string>
+    <string name="parity_11e06e7039f7" formatted="false">All sports</string>
+    <string name="parity_3cc62b50aa61" formatted="false">App background</string>
+    <string name="parity_ed33d641558d" formatted="false">Appearance &amp; discovery</string>
+    <string name="parity_427ce653aaf2" formatted="false">Autoplay, languages and stream quality</string>
+    <string name="parity_ca8e826d9c2e" formatted="false">Avatar</string>
+    <string name="parity_76900f1bfd16" formatted="false">Back</string>
+    <string name="parity_ba20b8c0fd4b" formatted="false">Backup, AI Search, diagnostics and help</string>
+    <string name="parity_879a2da3e874" formatted="false">Browse with TMDB</string>
+    <string name="parity_19766ed6ccb2" formatted="false">Cancel</string>
+    <string name="parity_14782425ea33" formatted="false">Card appearance</string>
+    <string name="parity_103451395067" formatted="false">Catalogue</string>
+    <string name="parity_104b4733b89e" formatted="false">Cloud files</string>
+    <string name="parity_7cd60470fa91" formatted="false">Collections and household.</string>
+    <string name="parity_9c98a1e84401" formatted="false">Configure this extension with its provider, then paste the configured manifest URL.</string>
+    <string name="parity_0cb9b177fc22" formatted="false">Configure with provider</string>
+    <string name="parity_5a7f92ee336e" formatted="false">Custom sections</string>
+    <string name="parity_8777486a87ae" formatted="false">Direct image address (HTTPS)</string>
+    <string name="parity_600a1338102f" formatted="false">Downloads &amp; storage</string>
+    <string name="parity_85b69fc302ae" formatted="false">Enrich extension metadata with TMDB</string>
+    <string name="parity_9893d5ed6940" formatted="false">Episode calendar</string>
+    <string name="parity_fe3436af86b4" formatted="false">Extensions</string>
+    <string name="parity_7a1f2a83aca9" formatted="false">Favorites</string>
+    <string name="parity_8a7d87af9068" formatted="false">Fills missing artwork, descriptions and cast for recognised IMDb/TMDB titles. You can enable this without browsing the TMDB catalogue.</string>
+    <string name="parity_8abf7cc95e99" formatted="false">Home layout</string>
+    <string name="parity_0ce0a77c01e2" formatted="false">Household profiles</string>
+    <string name="parity_af2061e5f8fc" formatted="false">Install selected</string>
+    <string name="parity_f8b32f4e92bd" formatted="false">Installed</string>
+    <string name="parity_ecbb2e88512b" formatted="false">JSON or manifest URL</string>
+    <string name="parity_8e03b3c29d2b" formatted="false">Jellyfin</string>
+    <string name="parity_30334b10959f" formatted="false">Libraries &amp; extensions</string>
+    <string name="parity_c2d1a4fd7130" formatted="false">Library tools</string>
+    <string name="parity_ac8991ef0101" formatted="false">Load more</string>
+    <string name="parity_c5a26bf7bff1" formatted="false">Manage extensions</string>
+    <string name="parity_dff924b69f96" formatted="false">Movies</string>
+    <string name="parity_dcd1d5223f73" formatted="false">Name</string>
+    <string name="parity_c3abaf2ec5d3" formatted="false">No extensions installed. Add a link above to get started.</string>
+    <string name="parity_08ca0aeba620" formatted="false">No items to show</string>
+    <string name="parity_ec22a3b09518" formatted="false">Number of aired episodes left to watch on Up Next and started shows.</string>
+    <string name="parity_b50b826bd272" formatted="false">Offline library</string>
+    <string name="parity_2a0f141811e6" formatted="false">Offline viewing and cache</string>
+    <string name="parity_fe7564971134" formatted="false">Open connection settings</string>
+    <string name="parity_48bdb2e04cb3" formatted="false">Optional movie and TV discovery, search and title details. Playback sources are not included.</string>
+    <string name="parity_50c7e99f6589" formatted="false">Paste a manifest or collection link supplied by the extension provider you choose. Preview it before installing.</string>
+    <string name="parity_821ba4696759" formatted="false">Personal TMDB API key</string>
+    <string name="parity_4660a983366f" formatted="false">Please wait…</string>
+    <string name="parity_50f38c2c40b0" formatted="false">Preview link</string>
+    <string name="parity_690dbe9dc099" formatted="false">Recent</string>
+    <string name="parity_0e9161011702" formatted="false">Refresh</string>
+    <string name="parity_c3812fc4acb8" formatted="false">Remove</string>
+    <string name="parity_7d678678da42" formatted="false">Remove extension?</string>
+    <string name="parity_fb02275214a0" formatted="false">Remove personal key</string>
+    <string name="parity_2d678b75b796" formatted="false">Remove request</string>
+    <string name="parity_a09f914287d8" formatted="false">Remove request?</string>
+    <string name="parity_ada27592c957" formatted="false">Requests</string>
+    <string name="parity_0bc82cc4bfeb" formatted="false">Retry request</string>
+    <string name="parity_3fe25aec5885" formatted="false">Save key &amp; enable browsing</string>
+    <string name="parity_7cd22bbd4446" formatted="false">Saved collections</string>
+    <string name="parity_49c266baaaa7" formatted="false">Search</string>
+    <string name="parity_d63c39681158" formatted="false">Search this catalogue</string>
+    <string name="parity_24987507acda" formatted="false">Search this collection</string>
+    <string name="parity_74a883a037bc" formatted="false">Settings</string>
+    <string name="parity_edda4fce255c" formatted="false">Show remaining episodes</string>
+    <string name="parity_eed55ce9131e" formatted="false">Sources, trackers and media servers</string>
+    <string name="parity_9b1f5daf0a3d" formatted="false">Sports</string>
+    <string name="parity_abe631f94cd6" formatted="false">TMDB API key (v3)</string>
+    <string name="parity_2d4ae9c93d65" formatted="false">TMDB catalogue</string>
+    <string name="parity_6adcc6960b86" formatted="false">TV Shows</string>
+    <string name="parity_1ec1be5259bb" formatted="false">Theme, language, Home and cards</string>
+    <string name="parity_f9b20278f0e3" formatted="false">This removes its catalogues and sources from this device.</string>
+    <string name="parity_d8b8392e2c54" formatted="false">Try again</string>
+    <string name="parity_37ed74234560" formatted="false">Viewing history</string>
+    <string name="parity_fbc594054d51" formatted="false">Watching</string>
+    <string name="parity_2945457d8b31" formatted="false">Your shows</string>
+    <string name="parity_ui_calendar">Calendar</string>
+    <string name="parity_ui_theme">Theme</string>
+    <string name="parity_ui_light">Light</string>
+    <string name="parity_ui_dark">Dark</string>
+    <string name="parity_09fda055ccc5">A safety backup is saved before restoring. Your connections will be kept.</string>
+    <string name="parity_11fb682be0a0">AI</string>
+    <string name="parity_fb50673ef76f">About &amp; help</string>
+    <string name="parity_e143ad273e8b">Account &amp; devices</string>
+    <string name="parity_218d8aba9387">Account &amp; support</string>
+    <string name="parity_f08d9b859fdb">Advanced &amp; diagnostics</string>
+    <string name="parity_726e5e044745">Allow subtitle language fallback</string>
+    <string name="parity_9d5bcc43aa2f">App background &amp; rail spacing</string>
+    <string name="parity_3907fa7f8072">Appearance</string>
+    <string name="parity_2218e9b2e45c">Automatic daily backup</string>
+    <string name="parity_02a2840b598b">Back up now</string>
+    <string name="parity_58cfee3698e2">Backup &amp; Sync</string>
+    <string name="parity_fef7a7574831">Browse library</string>
+    <string name="parity_6609d47b43d5">Cached streams only</string>
+    <string name="parity_4c8906cf76f5">Channels</string>
+    <string name="parity_08a923af9157">Choose a source automatically</string>
+    <string name="parity_cd9a62e6a1af">Cloud backup</string>
+    <string name="parity_4d2710c14a2a">Confirm your account email before using cloud backup.</string>
+    <string name="parity_ca90b1f73cce">Connection tests</string>
+    <string name="parity_dc273117482b">Connections</string>
+    <string name="parity_0305ac2f7dc1">Content sources</string>
+    <string name="parity_5faed70952d4">Disconnect Plex</string>
+    <string name="parity_4fef020d12f0">Disconnect Seerr</string>
+    <string name="parity_92c1cdfdf4cb">Enabled</string>
+    <string name="parity_a1c6c97f415f">Household</string>
+    <string name="parity_49ddef66d9c0">MDBList</string>
+    <string name="parity_a2e69e8d0ad2">Manage MDBList lists</string>
+    <string name="parity_46ccbbcf5ef1">Manage playlists &amp; guide</string>
+    <string name="parity_1621b86a1b61">Maximum file size (GB)</string>
+    <string name="parity_21931e4d1ed8">More playback settings</string>
+    <string name="parity_e520a082286b">New API key</string>
+    <string name="parity_8b74a4e997f9">No cloud backups yet.</string>
+    <string name="parity_9349be57d8c8">NzbDAV</string>
+    <string name="parity_9cf4d4fbf439">OpenSubtitles</string>
+    <string name="parity_347e2506a589">Play the next episode</string>
+    <string name="parity_2db1db07062e">Playback</string>
+    <string name="parity_f9624fd5f7aa">Plex</string>
+    <string name="parity_a27f6e98699d">Preferred audio language</string>
+    <string name="parity_aba84630da79">Preferred subtitles</string>
+    <string name="parity_535e52e4a261">Profiles</string>
+    <string name="parity_ff862693daa8">Ratings</string>
+    <string name="parity_69f8e1392c31">Receive credentials</string>
+    <string name="parity_521a653469c4">Remaining episodes badge</string>
+    <string name="parity_a76e13b98392">Restore</string>
+    <string name="parity_d3357dea7f97">Restore this backup?</string>
+    <string name="parity_0570daa12fe5">Restore this version</string>
+    <string name="parity_284580e8af00">SIMKL</string>
+    <string name="parity_1509f561f241">Save</string>
+    <string name="parity_826590b6b7b2">Save API key</string>
+    <string name="parity_4f9f0e2830ed">Save limit</string>
+    <string name="parity_03218b5318d8">Save versions of your library and preferences. Connections and credentials are kept separately.</string>
+    <string name="parity_bddb9129d59e">Saved versions</string>
+    <string name="parity_65d087f107cb">Scan source audio</string>
+    <string name="parity_2d4742351037">Seerr</string>
+    <string name="parity_22f5ebc3ad3f">Server URL</string>
+    <string name="parity_bfd402b2f6f3">Sign in</string>
+    <string name="parity_ef72e30c6a77">Sign in to save and restore your account backups.</string>
+    <string name="parity_02d5265db999">Subtitles on by default</string>
+    <string name="parity_5bcf311b19d8">Test connection</string>
+    <string name="parity_a83ce4f49068">Trakt</string>
+    <string name="parity_ed2b7470f112">Turn scanning off to use provider language hints without background checks.</string>
+</resources>

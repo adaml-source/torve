@@ -3,6 +3,8 @@ package com.torve.desktop.download
 import com.torve.data.addon.ParsedStream
 import com.torve.data.download.BulkDownloadManager
 import com.torve.data.download.EpisodeTarget
+import com.torve.desktop.diagnostics.DiagnosticsRedactor
+import com.torve.desktop.launch.launchGuardLog
 import com.torve.desktop.playback.DesktopPlaybackSession
 import com.torve.desktop.playback.DesktopPlaybackSourceCandidate
 import com.torve.domain.model.DeviceCodecCaps
@@ -31,6 +33,13 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.cancelChildren
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.collectLatest
+import kotlin.coroutines.coroutineContext
+import com.torve.data.auth.withPersonalDataScope
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -66,8 +75,10 @@ class DesktopDownloadManager(
     private val bulkDownloadManager: BulkDownloadManager,
     private val streamRepository: StreamRepository,
     private val settingsViewModel: SettingsViewModel,
+    private val userIdProvider: com.torve.data.auth.UserIdProvider? = null,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val queuedJobs = SupervisorJob(scope.coroutineContext[kotlinx.coroutines.Job])
     private val _state = MutableStateFlow(DesktopDownloadManagerState())
     val state: StateFlow<DesktopDownloadManagerState> = _state.asStateFlow()
 
@@ -75,15 +86,35 @@ class DesktopDownloadManager(
 
     private var lastScanSignature: String? = null
 
+    private suspend fun runPersonal(block: suspend () -> Unit) {
+        if (userIdProvider != null) userIdProvider.withPersonalDataScope(block) else block()
+    }
+
+    private fun launchPersonal(block: suspend () -> Unit) {
+        val person = userIdProvider?.currentDataUserId()
+        scope.launch(queuedJobs) {
+            if (userIdProvider?.currentDataUserId() != person) return@launch
+            runPersonal(block)
+        }
+    }
+
     init {
         scope.launch {
-            recoverInterruptedDownloads()
-            refreshLocalMedia()
-            while (isActive) {
-                val handled = processNextDownload()
-                if (!handled) {
-                    refreshLocalMediaIfNeeded()
-                    delay(2_000)
+            settingsViewModel.state.map { it.personalDataUserId }.distinctUntilChanged().collectLatest { person ->
+                queuedJobs.cancelChildren()
+                if (userIdProvider != null && person != userIdProvider.currentDataUserIdOrNull()) return@collectLatest
+                _state.value = DesktopDownloadManagerState()
+                lastScanSignature = null
+                runPersonal {
+                    recoverInterruptedDownloads()
+                    refreshLocalMedia()
+                    while (kotlinx.coroutines.currentCoroutineContext().isActive) {
+                        val handled = processNextDownload()
+                        if (!handled) {
+                            refreshLocalMediaIfNeeded()
+                            delay(2_000)
+                        }
+                    }
                 }
             }
         }
@@ -99,7 +130,7 @@ class DesktopDownloadManager(
     }
 
     fun queueMovieDownload(session: DesktopPlaybackSession) {
-        scope.launch {
+        launchPersonal {
             val existing = downloadRepo.getAllDownloads().firstOrNull {
                 it.mediaId == session.mediaItem.id &&
                     it.mediaType == MediaType.MOVIE &&
@@ -108,16 +139,16 @@ class DesktopDownloadManager(
             if (existing != null) {
                 _state.update { it.copy(lastEvent = "${session.mediaItem.title} is already queued or downloaded.") }
                 notifyDownloadsChanged()
-                return@launch
+                return@launchPersonal
             }
 
             val resolved = resolveSessionForDownload(session) ?: run {
                 _state.update { it.copy(lastEvent = "Could not resolve a downloadable source for ${session.mediaItem.title}.") }
-                return@launch
+                return@launchPersonal
             }
             val downloadUrl = resolved.resolvedUrl?.takeIf { it.isNotBlank() }
                 ?: resolved.transcodeUrls["mp4"]?.takeIf { it.isNotBlank() }
-                ?: return@launch
+                ?: return@launchPersonal
 
             val now = System.currentTimeMillis()
             val download = Download(
@@ -159,6 +190,19 @@ class DesktopDownloadManager(
         data class Error(val message: String) : QueueResult
     }
 
+    /** Check the local destination before doing any remote NZB work. */
+    fun isDownloadFolderConfigured(surface: NzbDownloadSurface): Boolean =
+        configuredDownloadPath(surface).isNotBlank()
+
+    private fun configuredDownloadPath(surface: NzbDownloadSurface): String {
+        val settings = settingsViewModel.state.value
+        return when (surface) {
+            NzbDownloadSurface.MOVIES -> settings.movieDownloadPath
+            NzbDownloadSurface.ADULT -> settings.adultDownloadPath
+            NzbDownloadSurface.SPORTS -> settings.sportsDownloadPath
+        }
+    }
+
     /**
      * Direct download entry-point for the NZB-driven catalog pages
      * (Adult / Sports / Movies-via-Usenet). The caller has already
@@ -180,12 +224,7 @@ class DesktopDownloadManager(
             _state.update { it.copy(lastEvent = "Cannot download: empty stream URL.") }
             return QueueResult.Error("empty stream URL")
         }
-        val s = settingsViewModel.state.value
-        val configured = when (surface) {
-            NzbDownloadSurface.MOVIES -> s.movieDownloadPath
-            NzbDownloadSurface.ADULT -> s.adultDownloadPath
-            NzbDownloadSurface.SPORTS -> s.sportsDownloadPath
-        }
+        val configured = configuredDownloadPath(surface)
         if (configured.isBlank()) {
             _state.update {
                 it.copy(
@@ -270,11 +309,11 @@ class DesktopDownloadManager(
                 file.delete()
             }
         }
-        scope.launch { refreshLocalMedia() }
+        launchPersonal { refreshLocalMedia() }
     }
 
     fun refreshLocalMediaAsync() {
-        scope.launch { refreshLocalMedia() }
+        launchPersonal { refreshLocalMedia() }
     }
 
     private fun queueShowTargets(
@@ -282,14 +321,14 @@ class DesktopDownloadManager(
         targets: List<EpisodeTarget>,
         successLabel: String,
     ) {
-        scope.launch {
+        launchPersonal {
             if (targets.isEmpty()) {
                 _state.update { it.copy(lastEvent = "No episodes available for download.") }
-                return@launch
+                return@launchPersonal
             }
             if (settingsViewModel.getDebridApiKey().isBlank()) {
                 _state.update { it.copy(lastEvent = "Connect a debrid account before downloading.") }
-                return@launch
+                return@launchPersonal
             }
 
             val ids = bulkDownloadManager.enqueueBulk(
@@ -344,104 +383,127 @@ class DesktopDownloadManager(
             _state.update { it.copy(lastEvent = "Downloaded ${next.title}.") }
             true
         }.getOrElse { error ->
+            if (error is kotlinx.coroutines.CancellationException) throw error
             downloadRepo.updateProgress(next.id, next.downloadedBytes, DownloadStatus.FAILED)
             _state.update { it.copy(lastEvent = error.message ?: "Download failed for ${next.title}.") }
+            launchGuardLog(
+                "download_failed",
+                "mediaType" to next.mediaType.name,
+                "surface" to (parseNzbSurface(next.mediaId)?.tag ?: "standard"),
+                "type" to error::class.simpleName,
+                "message" to DiagnosticsRedactor.redact(error.message).take(300),
+            )
             notifyDownloadsChanged()
             true
         }
     }
 
     private suspend fun downloadFile(download: Download) {
+        coroutineContext.ensureActive()
         val target = buildTarget(download)
         target.directory.mkdirs()
 
-        val tempFile = File(target.directory, "${target.baseName}.part")
+        val tempFile = File(target.directory, "${target.baseName}-${download.id.hashCode().toUInt().toString(16)}.part")
         if (tempFile.exists()) {
             tempFile.delete()
         }
 
         val connection = openConnection(download.streamUrl)
-        connection.connect()
-        val contentLength = connection.contentLengthLong.takeIf { it > 0L }
-        if (contentLength != null) {
-            downloadRepo.updateFileSize(download.id, contentLength)
-        }
+        try {
+            connection.connect()
+            val responseCode = connection.responseCode
+            check(responseCode in 200..299) {
+                "Download server returned HTTP $responseCode. Try the item again."
+            }
+            val contentLength = connection.contentLengthLong.takeIf { it > 0L }
+            if (contentLength != null) check(target.directory.usableSpace > contentLength + 64L * 1024 * 1024) {
+                "Not enough free space for this download."
+            }
+            if (contentLength != null) {
+                downloadRepo.updateFileSize(download.id, contentLength)
+            }
 
-        val extension = resolveExtension(
-            url = connection.url.toString(),
-            contentType = connection.contentType,
-            preferredFileName = download.title,
-        )
-        val finalFile = File(target.directory, target.baseName + extension)
-        if (finalFile.exists() && finalFile.length() > 0L) {
-            downloadRepo.markCompleted(download.id, finalFile.absolutePath)
-            downloadRepo.updateProgress(download.id, finalFile.length(), DownloadStatus.COMPLETED)
-            notifyDownloadsChanged()
-            refreshLocalMedia()
-            return
-        }
-
-        connection.inputStream.use { input ->
-            FileOutputStream(tempFile).use { output ->
-                downloadRepo.updateProgress(download.id, 0L, DownloadStatus.DOWNLOADING)
+            val extension = resolveExtension(
+                url = connection.url.toString(),
+                contentType = connection.contentType,
+                preferredFileName = download.title,
+            )
+            val finalFile = File(target.directory, target.baseName + extension)
+            if (finalFile.exists() && finalFile.length() > 0L) {
+                downloadRepo.markCompleted(download.id, finalFile.absolutePath)
+                downloadRepo.updateProgress(download.id, finalFile.length(), DownloadStatus.COMPLETED)
                 notifyDownloadsChanged()
+                refreshLocalMedia()
+                return
+            }
 
-                // Large buffer keeps syscalls/read cycles low on fast links.
-                val buffer = ByteArray(256 * 1024)
-                var downloadedBytes = 0L
-                var lastUiUpdateAt = 0L
-                var lastPersistedBytes = 0L
-                while (true) {
-                    val read = input.read(buffer)
-                    if (read < 0) break
-                    output.write(buffer, 0, read)
-                    downloadedBytes += read
-                    val now = System.currentTimeMillis()
-                    // Persist progress + fan out UI updates at most ~twice per second.
-                    // Writing to DB and StateFlow on every 8KB chunk previously caused
-                    // tens of thousands of recompositions and blocked the download loop.
-                    if (now - lastUiUpdateAt >= 500L) {
+            connection.inputStream.use { input ->
+                FileOutputStream(tempFile).use { output ->
+                    downloadRepo.updateProgress(download.id, 0L, DownloadStatus.DOWNLOADING)
+                    notifyDownloadsChanged()
+
+                    // Large buffer keeps syscalls/read cycles low on fast links.
+                    val buffer = ByteArray(256 * 1024)
+                    var downloadedBytes = 0L
+                    var lastUiUpdateAt = 0L
+                    var lastPersistedBytes = 0L
+                    while (true) {
+                        coroutineContext.ensureActive()
+                        val read = input.read(buffer)
+                        if (read < 0) break
+                        output.write(buffer, 0, read)
+                        downloadedBytes += read
+                        val now = System.currentTimeMillis()
+                        // Persist progress + fan out UI updates at most ~twice per second.
+                        // Writing to DB and StateFlow on every 8KB chunk previously caused
+                        // tens of thousands of recompositions and blocked the download loop.
+                        if (now - lastUiUpdateAt >= 500L) {
+                            downloadRepo.updateProgress(download.id, downloadedBytes, DownloadStatus.DOWNLOADING)
+                            _state.update {
+                                it.copy(
+                                    activeDownloadId = download.id,
+                                    activeDownloadTitle = download.title,
+                                    activeProgress = if (contentLength != null && contentLength > 0L) {
+                                        downloadedBytes.toFloat() / contentLength.toFloat()
+                                    } else {
+                                        0f
+                                    },
+                                )
+                            }
+                            notifyDownloadsChanged()
+                            lastUiUpdateAt = now
+                            lastPersistedBytes = downloadedBytes
+                        }
+                    }
+                    // Final flush so the last bytes past the throttle window aren't lost from the DB.
+                    if (contentLength != null) check(downloadedBytes == contentLength) { "The download ended before all bytes arrived. Retry this item." }
+                    if (lastPersistedBytes < downloadedBytes) {
                         downloadRepo.updateProgress(download.id, downloadedBytes, DownloadStatus.DOWNLOADING)
                         _state.update {
                             it.copy(
-                                activeDownloadId = download.id,
-                                activeDownloadTitle = download.title,
                                 activeProgress = if (contentLength != null && contentLength > 0L) {
                                     downloadedBytes.toFloat() / contentLength.toFloat()
-                                } else {
-                                    0f
-                                },
+                                } else 1f,
                             )
                         }
-                        notifyDownloadsChanged()
-                        lastUiUpdateAt = now
-                        lastPersistedBytes = downloadedBytes
-                    }
-                }
-                // Final flush so the last bytes past the throttle window aren't lost from the DB.
-                if (lastPersistedBytes < downloadedBytes) {
-                    downloadRepo.updateProgress(download.id, downloadedBytes, DownloadStatus.DOWNLOADING)
-                    _state.update {
-                        it.copy(
-                            activeProgress = if (contentLength != null && contentLength > 0L) {
-                                downloadedBytes.toFloat() / contentLength.toFloat()
-                            } else 1f,
-                        )
                     }
                 }
             }
-        }
 
-        Files.move(
-            tempFile.toPath(),
-            finalFile.toPath(),
-            StandardCopyOption.REPLACE_EXISTING,
-        )
-        val finalSize = finalFile.length()
-        downloadRepo.markCompleted(download.id, finalFile.absolutePath)
-        downloadRepo.updateProgress(download.id, finalSize, DownloadStatus.COMPLETED)
-        notifyDownloadsChanged()
-        refreshLocalMedia()
+            coroutineContext.ensureActive()
+            Files.move(
+                tempFile.toPath(),
+                finalFile.toPath(),
+                StandardCopyOption.REPLACE_EXISTING,
+            )
+            val finalSize = finalFile.length()
+            downloadRepo.markCompleted(download.id, finalFile.absolutePath)
+            downloadRepo.updateProgress(download.id, finalSize, DownloadStatus.COMPLETED)
+            notifyDownloadsChanged()
+            refreshLocalMedia()
+        } finally {
+            connection.disconnect()
+        }
     }
 
     private suspend fun resolveSessionForDownload(

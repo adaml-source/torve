@@ -10,5 +10,9 @@
             android:name="com.torve.android.test.TorveTestHostActivity"
             android:exported="false"
             android:theme="@android:style/Theme.DeviceDefault.NoActionBar" />
+        <activity
+            android:name="com.torve.android.test.IptvEpgPerformanceProbeActivity"
+            android:exported="true"
+            android:theme="@android:style/Theme.DeviceDefault.NoActionBar" />
     </application>
 </manifest>

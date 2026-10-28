@@ -1,11 +1,15 @@
 package com.torve.android.ui.components
 
+import com.torve.android.ui.community.parityLabel as localizedUiText
+
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
@@ -39,6 +43,7 @@ import com.torve.android.R
  * Stateless: owner supplies current selections + change callbacks.
  */
 @Composable
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 fun MediaSortFilterBar(
     currentSort: SortOption,
     availableSorts: List<SortOption>,
@@ -52,7 +57,43 @@ fun MediaSortFilterBar(
     onYearRangeChanged: (Int?, Int?) -> Unit,
     onClearFilters: () -> Unit,
     modifier: Modifier = Modifier,
+    compact: Boolean = false,
+    additionalFilterCount: Int = 0,
+    additionalFilters: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit = {},
 ) {
+    var showSheet by remember { mutableStateOf(false) }
+    if (compact) {
+        val active = selectedGenreIds.size + (if (selectedYearFrom != null) 1 else 0) +
+            (if (selectedYearTo != null) 1 else 0) + additionalFilterCount
+        Row(modifier.fillMaxWidth().padding(horizontal = 20.dp),
+            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(localizedUiText(currentSort.label), Modifier.weight(1f), style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1,
+                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+            androidx.compose.material3.TextButton(onClick = { showSheet = true },
+                modifier = Modifier.heightIn(min = 48.dp)) {
+                Icon(Icons.Default.Sort, null)
+                Spacer(Modifier.width(8.dp))
+                Text(if (active == 0) stringResource(R.string.gap_library_filter)
+                    else stringResource(R.string.gap_library_filters_active, active))
+            }
+        }
+        if (showSheet) com.torve.android.ui.system.TorveModalBottomSheet(onDismissRequest = { showSheet = false }) {
+            Column(Modifier.fillMaxWidth().heightIn(max = 480.dp).verticalScroll(rememberScrollState())) {
+            Text(stringResource(R.string.gap_library_filter), Modifier.padding(20.dp),
+                style = MaterialTheme.typography.titleLarge)
+            MediaSortFilterBar(currentSort, availableSorts, onSortSelected, availableGenres,
+                selectedGenreIds, onGenreToggled, availableYearRange, selectedYearFrom, selectedYearTo,
+                onYearRangeChanged, onClearFilters)
+            additionalFilters()
+            }
+            androidx.compose.material3.TextButton(onClick = { showSheet = false },
+                modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).padding(12.dp)) {
+                Text(stringResource(R.string.common_done))
+            }
+        }
+        return
+    }
     Column(modifier = modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp)) {
         Row(
             modifier = Modifier
@@ -136,7 +177,7 @@ private fun SortDropdown(
     DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
         options.forEach { opt ->
             DropdownMenuItem(
-                text = { Text(opt.label) },
+                text = { Text(localizedUiText(opt.label)) },
                 onClick = {
                     onSelected(opt)
                     expanded = false

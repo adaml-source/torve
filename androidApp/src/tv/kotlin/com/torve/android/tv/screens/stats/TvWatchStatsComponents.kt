@@ -1,5 +1,7 @@
 package com.torve.android.tv.screens.stats
 
+import com.torve.android.tv.components.tvSettingsLabel as localizedUiText
+
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
@@ -352,7 +354,7 @@ internal fun TvStatsPill(
         contentAlignment = Alignment.Center,
     ) {
         Text(
-            text = label,
+            text = localizedUiText(label),
             style = MaterialTheme.typography.labelSmall,
             color = when {
                 focused || selected -> AmberLight
@@ -385,7 +387,7 @@ internal fun TvStatsMetricLine(label: String, value: String) {
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
-            text = label,
+            text = localizedUiText(label),
             style = MaterialTheme.typography.bodySmall,
             color = Silver,
             maxLines = 1,

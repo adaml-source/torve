@@ -20,6 +20,9 @@ import com.torve.domain.repository.DownloadRepository
 import com.torve.domain.repository.PreferencesRepository
 import com.torve.domain.repository.WatchProgressRepository
 import com.torve.presentation.contentpolicy.ContentPolicyFilter
+import kotlinx.coroutines.*
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -34,6 +37,7 @@ import kotlinx.serialization.json.Json
 
 data class DownloadCatalogueUiState(
     val isLoading: Boolean = true,
+    val error: String? = null,
     val catalogue: CatalogueState = CatalogueState(),
     val prefs: DownloadCataloguePrefs = DownloadCataloguePrefs(),
     val activeDownloads: List<Download> = emptyList(),
@@ -47,10 +51,15 @@ class DownloadCatalogueViewModel(
     private val catalogueBuilder: DownloadCatalogueBuilder,
     private val contentPolicyRepository: ContentPolicyRepository? = null,
     private val contentPolicyFilter: ContentPolicyFilter = ContentPolicyFilter(),
+    private val workDispatcher: CoroutineDispatcher = com.torve.util.ioDispatcher,
+    private val loadTimeoutMs: Long = 10_000L,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
-    private val _state = MutableStateFlow(DownloadCatalogueUiState())
+    private val _state = contentPolicyFilter.profileState(DownloadCatalogueUiState())
     val state: StateFlow<DownloadCatalogueUiState> = _state.asStateFlow()
+
+    private var loadJob: Job? = null
+    fun clear() { scope.cancel() }
 
     private val jsonParser = Json { ignoreUnknownKeys = true }
 
@@ -59,22 +68,19 @@ class DownloadCatalogueViewModel(
     var onDownloadCancelled: ((downloadId: String) -> Unit)? = null
 
     init {
-        loadPrefs()
         loadCatalogue()
-        // Relock hardening: observe content policy state directly.
-        // When policy transitions to locked, immediately clear sensitive metadata
-        // from the visible catalogue without waiting for a full async reload.
-        if (contentPolicyRepository != null) {
+        scope.launch {
+            contentPolicyFilter.profileOwners().distinctUntilChanged().drop(1).collectLatest {
+                _state.value = DownloadCatalogueUiState()
+                loadCatalogue()
+            }
+        }
+        contentPolicyRepository?.let { repository ->
             scope.launch {
-                var wasLocked = contentPolicyRepository.state.value.isLocked
-                contentPolicyRepository.state.collectLatest { policy ->
-                    val nowLocked = policy.isLocked
-                    if (nowLocked && !wasLocked) {
-                        // Transition to locked — rebuild catalogue with policy applied
-                        _state.update { it.copy(isLoading = true) }
-                        loadCatalogue()
-                    }
-                    wasLocked = nowLocked
+                repository.state.drop(1).collectLatest {
+                    // Discard retained metadata immediately when access rules change.
+                    _state.value = DownloadCatalogueUiState(prefs = _state.value.prefs)
+                    loadCatalogue()
                 }
             }
         }
@@ -85,57 +91,67 @@ class DownloadCatalogueViewModel(
     }
 
     fun loadCatalogue() {
-        scope.launch {
-            _state.update { it.copy(isLoading = true) }
+        loadJob?.cancel()
+        loadJob = scope.launch {
+            var owner = contentPolicyFilter.profileOwnerKey()
+            _state.update { it.copy(isLoading = true, error = null) }
             try {
-                val allDownloads = downloadRepo.getAllDownloads()
-                val policy = currentPolicy()
-
-                // Apply content policy to active downloads (display metadata only)
-                val rawActive = allDownloads.filter {
-                    it.status in listOf(DownloadStatus.PENDING, DownloadStatus.DOWNLOADING, DownloadStatus.PAUSED)
+                withTimeout(loadTimeoutMs) {
+                    contentPolicyFilter.awaitProfileBoundary()
+                    owner = contentPolicyFilter.profileOwnerKey()
+                    val policy = currentPolicy()
+                    val fallbackPrefs = _state.value.prefs
+                    val loaded = withContext(workDispatcher) {
+                        val allDownloads = downloadRepo.getAllDownloads()
+                        val active = contentPolicyFilter.filterDownloads(policy, ContentAccessContext.LIBRARY_OR_WATCHLIST,
+                            allDownloads.filter { it.status in listOf(DownloadStatus.PENDING, DownloadStatus.DOWNLOADING, DownloadStatus.PAUSED) })
+                        val allProgress = watchProgressRepo.getAllProgress()
+                        val progressMap = allProgress.associateBy { Triple(it.mediaId, it.seasonNumber, it.episodeNumber) }
+                        val items = allDownloads.filter { it.status == DownloadStatus.COMPLETED }.map { download ->
+                            download.toDownloadedItem(progressMap[Triple(download.mediaId, download.seasonNumber, download.episodeNumber)])
+                        }.let { applyPolicyToDownloadedItems(it, policy) }
+                        val prefs = prefsRepo.getString(KEY_CATALOGUE_PREFS)?.let {
+                            runCatching { jsonParser.decodeFromString<DownloadCataloguePrefs>(it) }.getOrNull()
+                        } ?: fallbackPrefs
+                        DownloadCatalogueUiState(isLoading = false, catalogue = catalogueBuilder.buildCatalogue(items, prefs),
+                            prefs = prefs, activeDownloads = active, allDownloadedItems = items)
+                    }
+                    ensureActive()
+                    if (owner == contentPolicyFilter.profileOwnerKey()) _state.value = loaded
                 }
-                val active = contentPolicyFilter.filterDownloads(
-                    policy = policy,
-                    context = ContentAccessContext.LIBRARY_OR_WATCHLIST,
-                    items = rawActive,
-                )
-
-                val completed = allDownloads.filter { it.status == DownloadStatus.COMPLETED }
-
-                // Convert completed downloads to DownloadedItems with watch progress
-                val allProgress = try { watchProgressRepo.getAllProgress() } catch (_: Exception) { emptyList() }
-                val progressMap = allProgress.associateBy { it.mediaId }
-
-                val rawDownloadedItems = completed.map { download ->
-                    download.toDownloadedItem(watchProgress = progressMap[download.mediaId])
+            } catch (timeout: TimeoutCancellationException) {
+                if (owner == contentPolicyFilter.profileOwnerKey()) _state.update {
+                    it.copy(isLoading = false, error = "Loading your downloaded library took too long. Try again.")
                 }
-
-                // Apply content policy to catalogue items
-                val downloadedItems = applyPolicyToDownloadedItems(rawDownloadedItems, policy)
-
-                val prefs = _state.value.prefs
-                val catalogue = catalogueBuilder.buildCatalogue(downloadedItems, prefs)
-
-                _state.update {
-                    it.copy(
-                        isLoading = false,
-                        catalogue = catalogue,
-                        activeDownloads = active,
-                        allDownloadedItems = downloadedItems,
-                    )
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                if (owner == contentPolicyFilter.profileOwnerKey()) _state.update {
+                    it.copy(isLoading = false, error = "Could not load your downloaded library. Try again.")
                 }
-            } catch (e: Exception) {
-                _state.update { it.copy(isLoading = false) }
             }
         }
+    }
+
+    /** Re-read the current profile's entry instead of trusting a retained card or file path. */
+    @Throws(Exception::class)
+    suspend fun downloadForPlayback(id: String): Download = withTimeout(loadTimeoutMs) {
+        contentPolicyFilter.awaitProfileBoundary()
+        val owner = contentPolicyFilter.profileOwnerKey()
+        val download = withContext(workDispatcher) { downloadRepo.getDownload(id) }
+            ?: error("This download is no longer available.")
+        check(owner == contentPolicyFilter.profileOwnerKey()) { "The active profile changed." }
+        check(download.status == DownloadStatus.COMPLETED && !download.filePath.isNullOrBlank()) { "This download is not ready." }
+        val visible = contentPolicyFilter.filterDownloads(currentPolicy(), ContentAccessContext.LIBRARY_OR_WATCHLIST, listOf(download))
+        check(visible.singleOrNull()?.title == download.title && download.title != LOCKED_CONTENT_TITLE) { "This download is not available in this profile." }
+        download
     }
 
     private fun applyPolicyToDownloadedItems(
         items: List<DownloadedItem>,
         policy: ContentPolicyState,
     ): List<DownloadedItem> {
-        if (!policy.enforcementEnabled) return items
+        if (!policy.enforcementEnabled && !contentPolicyFilter.hasFamilyBoundary) return items
         return items.map { item ->
             val synthetic = MediaItem(
                 id = item.mediaId,
@@ -229,18 +245,6 @@ class DownloadCatalogueViewModel(
         if (items.isNotEmpty()) {
             val catalogue = catalogueBuilder.buildCatalogue(items, prefs)
             _state.update { it.copy(catalogue = catalogue) }
-        }
-    }
-
-    private fun loadPrefs() {
-        scope.launch {
-            try {
-                val json = prefsRepo.getString(KEY_CATALOGUE_PREFS)
-                if (json != null) {
-                    val prefs = jsonParser.decodeFromString<DownloadCataloguePrefs>(json)
-                    _state.update { it.copy(prefs = prefs) }
-                }
-            } catch (_: Exception) {}
         }
     }
 

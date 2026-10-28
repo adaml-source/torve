@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="tv_source_all">All sources</string>
+    <string name="tv_source_best">Recommended</string>
+    <string name="tv_source_largest">Largest first</string>
+    <string name="tv_source_smallest">Smallest first</string>
+    <string name="tv_source_quality">Quality</string>
+    <string name="tv_source_all_qualities">All qualities</string>
+    <string name="tv_source_cached">Cached</string>
+    <string name="tv_source_count">%1$d of %2$d sources</string>
+    <string name="tv_source_sort">Sort</string>
+    <string name="tv_source_hints">Source language hints are unverified. Checked audio tracks take precedence.</string>
+    <string name="tv_source_clear">Clear filters</string>
+    <string name="tv_source_override">This source does not match your playback rules</string>
+    <string name="tv_source_status_ready">Ready now</string>
+    <string name="tv_source_status_preparing">Preparing</string>
+    <string name="tv_source_status_unavailable">Unavailable</string>
+    <string name="tv_source_status_check">Check on play</string>
+    <string name="tv_source_status_unconfirmed">Availability unconfirmed</string>
+    <string name="tv_source_status_direct">Direct source</string>
+    <string name="source_tracks_verified">Checked file tracks</string>
+    <string name="source_tracks_hint">Source information · tracks not checked</string>
+</resources>

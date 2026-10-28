@@ -19,7 +19,9 @@ import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
 import io.ktor.serialization.kotlinx.json.json
 import kotlinx.coroutines.async
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.datetime.Clock
 import kotlinx.datetime.Instant
@@ -56,6 +58,25 @@ class TraktRequestControlTest {
 
         assertEquals(42L, error.retryAfterSeconds)
         assertEquals(TraktRequestBucket.AUTHENTICATED_GET, error.bucket)
+    }
+
+    @Test
+    fun forbidden_device_poll_is_reported_as_terminal_oauth_rejection() = runTest {
+        val client = client { respondJson("{}", HttpStatusCode.Forbidden) }
+
+        val result = client.pollDeviceToken("device-code")
+
+        assertTrue(result is TraktPollResult.Error)
+        assertTrue(result.message.contains("OAuth application"))
+    }
+
+    @Test
+    fun rate_limited_device_poll_requests_a_slower_interval() = runTest {
+        val client = client {
+            respondJson("{}", HttpStatusCode.TooManyRequests, retryAfter = "5")
+        }
+
+        assertEquals(TraktPollResult.SlowDown, client.pollDeviceToken("device-code"))
     }
 
     @Test
@@ -119,16 +140,22 @@ class TraktRequestControlTest {
     fun identical_concurrent_get_calls_coalesce_into_one_network_call() = runTest {
         var networkCalls = 0
         val events = mutableListOf<String>()
+        val requestStarted = CompletableDeferred<Unit>()
+        val releaseRequest = CompletableDeferred<Unit>()
         val client = client(
             diagnostics = TraktDiagnosticsLogger { event, _ -> events += event },
         ) { _ ->
             networkCalls += 1
-            delay(50)
+            requestStarted.complete(Unit)
+            releaseRequest.await()
             respondJson("[]")
         }
 
         val first = async { client.getWatchlist("access") }
+        requestStarted.await()
         val second = async { client.getWatchlist("access") }
+        runCurrent()
+        releaseRequest.complete(Unit)
 
         assertEquals(emptyList(), first.await())
         assertEquals(emptyList(), second.await())

@@ -1,5 +1,7 @@
 package com.torve.presentation.channels
 
+import kotlin.test.assertNull
+
 import com.torve.domain.model.Channel
 import com.torve.domain.model.ChannelContentType
 import com.torve.domain.model.ChannelPlaylist
@@ -11,9 +13,12 @@ import com.torve.domain.model.stableChannelId
 import com.torve.domain.repository.ChannelRepository
 import com.torve.domain.repository.PreferencesRepository
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.advanceUntilIdle
+import kotlinx.coroutines.test.advanceTimeBy
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
@@ -40,7 +45,117 @@ class ChannelsViewModelStartupTest {
     }
 
     @Test
-    fun startup_with_persisted_catalog_restores_local_channels_without_startup_refresh() = runTest(dispatcher) {
+    fun saved_group_is_published_before_initial_channel_hydration_finishes() = runTest(dispatcher) {
+        val news = sampleChannel("playlist-1", "News One", "news.one")
+        val sport = sampleChannel("playlist-1", "Sports One", "sports.one").copy(groupTitle = "Sports")
+        val base = FakeChannelRepository(listOf(samplePlaylist("playlist-1")),
+            mutableMapOf("playlist-1" to listOf(news, sport)), mutableMapOf("playlist-1" to listOf(news, sport)))
+        val hydration = CompletableDeferred<Unit>()
+        val repo = object : ChannelRepository by base {
+            override suspend fun getChannelsForCategory(playlistId: String, categoryName: String): List<Channel> {
+                hydration.await()
+                return base.getChannelsForCategory(playlistId, categoryName)
+            }
+        }
+        val prefs = FakePreferencesRepository(mutableMapOf("channels_selected_playlist" to "playlist-1",
+            "channels_selected_group_playlist-1" to "Sports"))
+        val viewModel = ChannelsViewModel(repo, prefs, backgroundDispatcher = dispatcher)
+        advanceUntilIdle()
+        assertTrue(viewModel.state.value.categories.isNotEmpty())
+        assertEquals("Sports", viewModel.state.value.selectedGroup)
+        assertTrue(viewModel.state.value.categoryChannels.isEmpty())
+        hydration.complete(Unit)
+        advanceUntilIdle()
+        assertEquals("Sports One", viewModel.state.value.selectedChannel?.name)
+    }
+
+    @Test fun categoryDisplayDoesNotDependOnTheFullPlaylistAndCountryVisibilityPersists() = runTest(dispatcher) {
+        val german = sampleChannel("playlist-1", "German News", "de.news").copy(groupTitle = "DE| Germany News")
+        val albanian = sampleChannel("playlist-1", "Albanian News", "al.news").copy(groupTitle = "AL| Albania News")
+        val data = mutableMapOf("playlist-1" to listOf(german, albanian))
+        val prefs = FakePreferencesRepository(mutableMapOf("channels_selected_playlist" to "playlist-1"))
+        val repo = FakeChannelRepository(listOf(samplePlaylist("playlist-1")), data, data)
+        val vm = ChannelsViewModel(repo, prefs, backgroundDispatcher = dispatcher)
+        advanceUntilIdle()
+        assertTrue(vm.state.value.channels.isEmpty())
+        vm.loadCategoryChannels("Germany News"); advanceUntilIdle()
+        assertEquals(listOf("German News"), vm.getDisplayChannels().map { it.channel.name })
+        vm.toggleCountry("DE"); advanceUntilIdle()
+        assertEquals(listOf("German News"), vm.getDisplayChannels().map { it.channel.name })
+        vm.hideCountryCategories("DE"); advanceUntilIdle()
+        assertFalse(vm.state.value.categories.any { it.countryCode == "DE" })
+        assertTrue(vm.getDisplayChannels().isEmpty())
+        vm.showCountryCategories("DE"); advanceUntilIdle()
+        assertTrue(vm.state.value.categories.any { it.countryCode == "DE" })
+        vm.setCategoryManagerVisible(true); vm.setCategoryManagerVisible(false); vm.setCategoryManagerVisible(false)
+        assertFalse(vm.state.value.showCategoryManager)
+    }
+
+    @Test fun slowCategoryRequestCannotReplaceTheMostRecentSelection() = runTest(dispatcher) {
+        val news = sampleChannel("playlist-1", "News One", "news.one")
+        val sport = sampleChannel("playlist-1", "Sport One", "sport.one").copy(groupTitle = "Sports")
+        val data = mutableMapOf("playlist-1" to listOf(news, sport))
+        val base = FakeChannelRepository(listOf(samplePlaylist("playlist-1")), data, data)
+        val gate = CompletableDeferred<Unit>()
+        val repo = object : ChannelRepository by base {
+            override suspend fun getChannelsForCategory(playlistId: String, categoryName: String): List<Channel> {
+                if (categoryName == "Sports") gate.await()
+                return base.getChannelsForCategory(playlistId, categoryName)
+            }
+        }
+        val vm = ChannelsViewModel(repo, FakePreferencesRepository(mutableMapOf("channels_selected_playlist" to "playlist-1")), backgroundDispatcher = dispatcher)
+        advanceUntilIdle()
+        vm.loadCategoryChannels("Sports"); runCurrent()
+        vm.loadCategoryChannels("News"); runCurrent()
+        gate.complete(Unit); advanceUntilIdle()
+        assertEquals("News", vm.state.value.selectedGroup)
+        assertEquals(listOf("News One"), vm.getDisplayChannels().map { it.channel.name })
+    }
+
+    @Test fun hidingACountryDuringLoadingCannotRestoreItsHiddenGroup() = runTest(dispatcher) {
+        val data = mutableMapOf("playlist-1" to listOf(
+            sampleChannel("playlist-1", "News One", "news"),
+            sampleChannel("playlist-1", "Albanian News", "al").copy(groupTitle = "AL| Albania News")))
+        val base = FakeChannelRepository(listOf(samplePlaylist("playlist-1")), data, data)
+        val gate = CompletableDeferred<Unit>()
+        val repo = object : ChannelRepository by base {
+            override suspend fun getChannelsForCategory(playlistId: String, categoryName: String): List<Channel> {
+                if (categoryName.startsWith("AL|")) gate.await()
+                return base.getChannelsForCategory(playlistId, categoryName)
+            }
+        }
+        val vm = ChannelsViewModel(repo, FakePreferencesRepository(mutableMapOf("channels_selected_playlist" to "playlist-1")), backgroundDispatcher = dispatcher)
+        advanceUntilIdle()
+        vm.loadCategoryChannels("Albania News"); runCurrent()
+        assertTrue(vm.state.value.isLoadingChannels)
+        vm.hideCountryCategories("AL"); runCurrent()
+        gate.complete(Unit); advanceUntilIdle()
+        assertNull(vm.state.value.selectedGroup)
+        assertFalse(vm.state.value.isLoadingChannels)
+        assertFalse(vm.state.value.categories.any { it.countryCode == "AL" })
+        assertTrue(vm.getDisplayChannels().isEmpty())
+    }
+
+    @Test fun failedCategoryReadLeavesAnExplanationAndStopsTheLoadingIndicator() = runTest(dispatcher) {
+        val data = mutableMapOf("playlist-1" to listOf(sampleChannel("playlist-1", "News One", "news")))
+        val base = FakeChannelRepository(listOf(samplePlaylist("playlist-1")), data, data)
+        var fail = false
+        val repo = object : ChannelRepository by base {
+            override suspend fun getChannelsForCategory(playlistId: String, categoryName: String): List<Channel> {
+                if (fail) error("Local database failure")
+                return base.getChannelsForCategory(playlistId, categoryName)
+            }
+        }
+        val vm = ChannelsViewModel(repo, FakePreferencesRepository(mutableMapOf("channels_selected_playlist" to "playlist-1")), backgroundDispatcher = dispatcher)
+        advanceUntilIdle()
+        fail = true
+        vm.loadCategoryChannels("News"); advanceUntilIdle()
+        assertFalse(vm.state.value.isLoadingChannels)
+        assertTrue(vm.state.value.error.orEmpty().contains("Could not load"))
+    }
+
+    @Test
+    fun startup_with_stale_persisted_catalog_refreshes_in_background() = runTest(dispatcher) {
         val channel = sampleChannel("playlist-1", "News One", tvgId = "news.one")
         val repo = FakeChannelRepository(
             playlists = listOf(samplePlaylist("playlist-1")),
@@ -60,15 +175,15 @@ class ChannelsViewModelStartupTest {
 
         assertEquals("playlist-1", viewModel.state.value.selectedPlaylistId)
         assertEquals(1, viewModel.state.value.categoryChannels.size)
-        assertEquals("News One", viewModel.state.value.categoryChannels.first().channel.name)
+        assertEquals("News One HD", viewModel.state.value.categoryChannels.first().channel.name)
         assertEquals("News", viewModel.state.value.selectedGroup)
         assertEquals(stableChannelId(channel), stableChannelId(viewModel.state.value.selectedChannel!!))
         assertEquals(0, repo.refreshCalls)
-        assertEquals(0, repo.catalogRefreshCalls)
+        assertEquals(1, repo.catalogRefreshCalls)
     }
 
     @Test
-    fun startup_with_persisted_catalog_keeps_last_known_good_catalog_without_startup_refresh() = runTest(dispatcher) {
+    fun failed_background_refresh_keeps_last_known_good_catalog() = runTest(dispatcher) {
         val localChannel = sampleChannel("playlist-1", "Sports One", tvgId = "sports.one")
         val repo = FakeChannelRepository(
             playlists = listOf(samplePlaylist("playlist-1")),
@@ -87,7 +202,7 @@ class ChannelsViewModelStartupTest {
         assertEquals("Sports One", viewModel.state.value.categoryChannels.first().channel.name)
         assertFalse(viewModel.state.value.isLoadingChannels)
         assertEquals(0, repo.refreshCalls)
-        assertEquals(0, repo.catalogRefreshCalls)
+        assertEquals(1, repo.catalogRefreshCalls)
     }
 
     @Test
@@ -183,6 +298,161 @@ class ChannelsViewModelStartupTest {
         advanceUntilIdle()
 
         assertEquals(stableChannelId(channel), stableChannelId(secondViewModel.state.value.selectedChannel!!))
+    }
+
+    @Test
+    fun favorite_changes_update_local_catalog_without_refresh_or_selection_loss() = runTest(dispatcher) {
+        val channel = sampleChannel("playlist-1", "News One", tvgId = "news.one")
+        val repo = FakeChannelRepository(
+            playlists = listOf(samplePlaylist("playlist-1")),
+            persistedChannels = mutableMapOf("playlist-1" to listOf(channel)),
+            remoteChannels = mutableMapOf("playlist-1" to listOf(channel)),
+        )
+        val viewModel = ChannelsViewModel(repo, FakePreferencesRepository(), backgroundDispatcher = dispatcher)
+        advanceUntilIdle()
+        viewModel.selectChannel(channel)
+        advanceUntilIdle()
+        val refreshCount = repo.refreshCalls
+        val catalogRefreshCount = repo.catalogRefreshCalls
+
+        viewModel.toggleFavorite(channel)
+        advanceUntilIdle()
+        assertTrue(viewModel.state.value.favorites.any { stableChannelId(it) == stableChannelId(channel) })
+        assertTrue(viewModel.state.value.categoryChannels.single().channel.isFavorite)
+        assertEquals(stableChannelId(channel), stableChannelId(viewModel.state.value.selectedChannel!!))
+
+        viewModel.toggleFavorite(channel)
+        advanceUntilIdle()
+        assertTrue(viewModel.state.value.favorites.isEmpty())
+        assertFalse(viewModel.state.value.categoryChannels.single().channel.isFavorite)
+        assertEquals(refreshCount, repo.refreshCalls)
+        assertEquals(catalogRefreshCount, repo.catalogRefreshCalls)
+        assertFalse(viewModel.state.value.isLoadingChannels)
+    }
+
+    @Test
+    fun consecutive_favorite_toggles_are_serialized() = runTest(dispatcher) {
+        val channel = sampleChannel("playlist-1", "News One", tvgId = "news.one")
+        val repo = FakeChannelRepository(listOf(samplePlaylist("playlist-1")),
+            mutableMapOf("playlist-1" to listOf(channel)), mutableMapOf("playlist-1" to listOf(channel)))
+        val viewModel = ChannelsViewModel(repo, FakePreferencesRepository(), backgroundDispatcher = dispatcher)
+        advanceUntilIdle()
+        viewModel.toggleFavorite(channel)
+        viewModel.toggleFavorite(channel)
+        advanceUntilIdle()
+        assertTrue(viewModel.state.value.favorites.isEmpty())
+        assertFalse(viewModel.state.value.categoryChannels.single().channel.isFavorite)
+    }
+
+    @Test
+    fun changing_search_query_clears_results_until_new_debounced_results_arrive() = runTest(dispatcher) {
+        val channel = sampleChannel("playlist-1", "News One", tvgId = "news.one")
+        val repo = FakeChannelRepository(
+            playlists = listOf(samplePlaylist("playlist-1")),
+            persistedChannels = mutableMapOf("playlist-1" to listOf(channel)),
+            remoteChannels = mutableMapOf("playlist-1" to listOf(channel)),
+        )
+        val viewModel = ChannelsViewModel(repo, FakePreferencesRepository(), backgroundDispatcher = dispatcher)
+        advanceUntilIdle()
+
+        viewModel.updateSearchQuery("News")
+        advanceTimeBy(301)
+        runCurrent()
+        assertEquals(listOf("News One"), viewModel.state.value.searchResults.map { it.name })
+
+        viewModel.updateSearchQuery("Sports")
+
+        assertTrue(viewModel.state.value.searchResults.isEmpty())
+    }
+
+    @Test
+    fun repeated_add_presses_start_only_one_xtream_import() = runTest(dispatcher) {
+        val base = FakeChannelRepository(emptyList(), mutableMapOf(), mutableMapOf())
+        val finish = CompletableDeferred<Unit>()
+        var calls = 0
+        val repo = object : ChannelRepository by base {
+            override suspend fun addXtreamPlaylist(name: String, server: String, username: String, password: String, id: String?, epgUrl: String?): ChannelPlaylist {
+                calls++
+                finish.await()
+                throw IllegalStateException("import failed")
+            }
+        }
+        val model = ChannelsViewModel(repo, FakePreferencesRepository(), backgroundDispatcher = dispatcher)
+        advanceUntilIdle()
+        enterXtreamDraft(model)
+        model.addPlaylist()
+        assertTrue(model.state.value.isAddingPlaylist, "Busy state must be immediate, before the coroutine runs")
+        model.addPlaylist()
+        runCurrent()
+        assertEquals(1, calls)
+        finish.complete(Unit)
+        advanceUntilIdle()
+        assertFalse(model.state.value.isAddingPlaylist)
+        assertTrue(model.state.value.showAddPlaylist)
+    }
+
+    @Test
+    fun rejected_login_keeps_the_draft_and_retry_can_select_the_imported_playlist() = runTest(dispatcher) {
+        val playlists = mutableListOf<ChannelPlaylist>()
+        val base = FakeChannelRepository(playlists, mutableMapOf(), mutableMapOf())
+        var calls = 0
+        val repo = object : ChannelRepository by base {
+            override suspend fun addXtreamPlaylist(name: String, server: String, username: String, password: String, id: String?, epgUrl: String?): ChannelPlaylist {
+                calls++
+                if (calls == 1) throw com.torve.data.channels.XtreamAccountRejected(inactive = false)
+                return samplePlaylist("new-playlist").also { playlists += it }
+            }
+        }
+        val model = ChannelsViewModel(repo, FakePreferencesRepository(), backgroundDispatcher = dispatcher)
+        advanceUntilIdle()
+        enterXtreamDraft(model)
+        model.addPlaylist()
+        advanceUntilIdle()
+        assertTrue(model.state.value.showAddPlaylist)
+        assertFalse(model.state.value.isAddingPlaylist)
+        assertEquals("Local test", model.state.value.newPlaylistName)
+        assertEquals("test-only", model.state.value.newXtreamPassword)
+        assertEquals("Playlist sign-in failed. Check the server, username and password.", model.playlistImportErrorMessage())
+        model.addPlaylist()
+        advanceUntilIdle()
+        assertEquals(2, calls)
+        assertFalse(model.state.value.showAddPlaylist)
+        assertEquals("new-playlist", model.state.value.selectedPlaylistId)
+        assertEquals(null, model.playlistImportErrorMessage())
+        assertEquals("", model.state.value.newXtreamPassword)
+    }
+
+    @Test
+    fun m3u_failure_shows_safe_retry_copy_and_preserves_the_input() = runTest(dispatcher) {
+        val base = FakeChannelRepository(emptyList(), mutableMapOf(), mutableMapOf())
+        val repo = object : ChannelRepository by base {
+            override suspend fun addPlaylist(name: String, url: String, epgUrl: String?, id: String?, onProgress: ((com.torve.domain.repository.PlaylistAddProgress) -> Unit)?): ChannelPlaylist {
+                throw IllegalStateException("Failed fetch: https://example.test/list?password=test-secret")
+            }
+        }
+        val model = ChannelsViewModel(repo, FakePreferencesRepository(), backgroundDispatcher = dispatcher)
+        advanceUntilIdle()
+        model.showAddPlaylistDialog()
+        model.setNewPlaylistName("Local test")
+        model.setNewPlaylistUrl("https://example.test/list.m3u")
+        model.addPlaylist()
+        advanceUntilIdle()
+        assertTrue(model.state.value.showAddPlaylist)
+        assertFalse(model.state.value.isAddingPlaylist)
+        assertEquals("https://example.test/list.m3u", model.state.value.newPlaylistUrl)
+        val copy = model.playlistImportErrorMessage().orEmpty()
+        assertTrue(copy.contains("try again"))
+        assertFalse(copy.contains("test-secret"))
+        assertFalse(copy.contains("example.test"))
+    }
+
+    private fun enterXtreamDraft(model: ChannelsViewModel) {
+        model.showAddPlaylistDialog()
+        model.setNewPlaylistType("xtream")
+        model.setNewPlaylistName("Local test")
+        model.setNewXtreamServer("http://127.0.0.1")
+        model.setNewXtreamUsername("fixture")
+        model.setNewXtreamPassword("test-only")
     }
 
     private fun samplePlaylist(id: String) = ChannelPlaylist(

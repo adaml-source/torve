@@ -2,6 +2,10 @@ package com.torve.domain.stats
 
 interface WatchStatsRepository {
     suspend fun getSessions(filters: WatchStatsFilters = WatchStatsFilters()): List<WatchSession>
+    suspend fun getLatestPlayerSession(mediaId: String): WatchSession? =
+        getSessions(WatchStatsFilters(sources = setOf(WatchSessionSource.TORVE_PLAYER)))
+            .filter { it.mediaId == mediaId }
+            .maxWithOrNull(compareBy<WatchSession> { it.startedAt }.thenBy { it.updatedAt })
     suspend fun getAggregation(filters: WatchStatsFilters = WatchStatsFilters()): WatchStatsSummary
     suspend fun upsertSession(session: WatchSession)
     suspend fun updateSessionProgress(

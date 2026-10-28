@@ -1,5 +1,7 @@
 ﻿package com.torve.android.tv.screens
 
+import com.torve.android.tv.components.tvSettingsLabel as localizedUiText
+
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -23,6 +25,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
+import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
@@ -71,6 +74,7 @@ import com.torve.android.ui.theme.Snow
 import com.torve.domain.model.Channel
 import com.torve.domain.model.ChannelCategory
 import com.torve.domain.model.EnrichedChannel
+import com.torve.domain.model.supportsCatchupArchive
 
 private const val GROUP_PANEL_WIDTH_DP = 236
 private const val DETAIL_PANEL_WIDTH_DP = 340
@@ -397,7 +401,7 @@ private fun ZappingOverlayHeader(
     val channel = previewEnriched?.channel
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Text(
-            text = if (channel?.url == currentChannelUrl) "Now playing" else "Switch channel",
+            text = localizedUiText(if (channel?.url == currentChannelUrl) "Now playing" else "Switch channel"),
             color = Silver,
             fontSize = 12.sp,
             fontWeight = FontWeight.Medium,
@@ -490,14 +494,14 @@ private fun SelectedChannelDetailsPanel(
                     trackColor = Graphite.copy(alpha = 0.8f),
                 )
             } ?: Text(
-                text = "No programme data",
+                text = localizedUiText("No programme data"),
                 color = Silver,
                 fontSize = 12.sp,
                 maxLines = 1,
             )
             enrichedChannel?.nextProgramme?.let { next ->
                 Text(
-                    text = "Next: ${next.title}",
+                    text = localizedUiText("Next: ${next.title}"),
                     color = Silver,
                     fontSize = 12.sp,
                     maxLines = 2,
@@ -631,6 +635,18 @@ private fun ChannelListItem(
                         overflow = TextOverflow.Ellipsis,
                     )
                 }
+            }
+
+            if (ch.supportsCatchupArchive) {
+                Icon(
+                    // The solid History glyph remains legible at TV distance: a
+                    // counter-clockwise circular arrow around visible clock hands.
+                    imageVector = Icons.Filled.History,
+                    contentDescription = localizedUiText("Timeshift available"),
+                    tint = Amber,
+                    modifier = Modifier.size(20.dp),
+                )
+                Spacer(Modifier.width(7.dp))
             }
 
             Icon(

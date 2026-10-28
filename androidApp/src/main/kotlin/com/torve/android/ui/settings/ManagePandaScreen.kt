@@ -1,5 +1,7 @@
 ﻿package com.torve.android.ui.settings
 
+import com.torve.android.ui.community.parityLabel as localizedUiText
+
 import android.content.Intent
 import android.net.Uri
 import androidx.compose.foundation.background
@@ -58,12 +60,13 @@ import com.torve.android.ui.theme.Silver
 import com.torve.android.ui.theme.Snow
 import com.torve.android.ui.theme.Steel
 import com.torve.presentation.addon.AddonViewModel
+import com.torve.presentation.legal.LegalUrls
 import com.torve.presentation.panda.PandaSetupViewModel
 import com.torve.presentation.settings.SettingsViewModel
 import org.koin.compose.koinInject
 
-private const val HELP_URL_MANAGEMENT_TOKEN =
-    "https://torve.app/help.html#article:panda-management-token"
+private val HELP_URL_MANAGEMENT_TOKEN =
+    "${LegalUrls.HELP}#article:panda-management-token"
 
 @Composable
 fun ManagePandaScreen(
@@ -122,7 +125,7 @@ fun ManagePandaScreen(
                 stringResource(R.string.manage_panda_title),
                 style = MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.Bold,
-                color = Snow,
+                color = MaterialTheme.colorScheme.onSurface,
             )
         }
 
@@ -144,7 +147,7 @@ fun ManagePandaScreen(
             ) {
                 AsyncImage(
                     model = pandaLogoUrl,
-                    contentDescription = "Panda",
+                    contentDescription = localizedUiText("Panda"),
                     modifier = Modifier.size(48.dp),
                 )
             }
@@ -155,14 +158,14 @@ fun ManagePandaScreen(
                 stringResource(R.string.addon_popular_panda_name),
                 style = MaterialTheme.typography.headlineSmall,
                 fontWeight = FontWeight.Bold,
-                color = Snow,
+                color = MaterialTheme.colorScheme.onSurface,
             )
 
             pandaAddon?.manifest?.version?.let { version ->
                 Text(
                     stringResource(R.string.manage_panda_version, version),
                     style = MaterialTheme.typography.bodySmall,
-                    color = Silver,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
 
@@ -172,7 +175,7 @@ fun ManagePandaScreen(
                 pandaAddon?.manifest?.description
                     ?: stringResource(R.string.addon_popular_panda_desc),
                 style = MaterialTheme.typography.bodyMedium,
-                color = Silver,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
 
             Spacer(Modifier.height(24.dp))
@@ -184,7 +187,7 @@ fun ManagePandaScreen(
                     Modifier
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(12.dp))
-                        .background(Gunmetal)
+                        .background(MaterialTheme.colorScheme.surface)
                         .padding(horizontal = 16.dp, vertical = 12.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -192,7 +195,7 @@ fun ManagePandaScreen(
                     Text(
                         stringResource(R.string.manage_panda_enabled),
                         style = MaterialTheme.typography.bodyLarge,
-                        color = Snow,
+                        color = MaterialTheme.colorScheme.onSurface,
                     )
                     Switch(
                         checked = isEnabled,
@@ -213,12 +216,14 @@ fun ManagePandaScreen(
                 Text(
                     stringResource(R.string.manage_panda_not_installed),
                     style = MaterialTheme.typography.bodyMedium,
-                    color = Silver,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 Spacer(Modifier.height(16.dp))
             }
 
-            if (isInstalled && (!settingsState.debridConnected || settingsState.connectedDebridProviders.isEmpty())) {
+            if (isInstalled && settingsState.connectedDebridProviders.isEmpty()) {
+                val hasConfiguredDebrid = settingsState.configuredDebridProviders.isNotEmpty() ||
+                    settingsState.debridConnected
                 Card(
                     modifier = Modifier.fillMaxWidth(),
                     colors = CardDefaults.cardColors(containerColor = Ruby.copy(alpha = 0.12f)),
@@ -226,16 +231,20 @@ fun ManagePandaScreen(
                 ) {
                     Column(Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
                         Text(
-                            "Real-Debrid not connected",
+                            localizedUiText(if (hasConfiguredDebrid) "Debrid providers disabled" else "Debrid not connected"),
                             style = MaterialTheme.typography.bodyLarge,
                             fontWeight = FontWeight.SemiBold,
                             color = Ruby,
                         )
                         Spacer(Modifier.height(4.dp))
                         Text(
-                            "Your debrid token may have expired. Go to Settings â†’ Integrations â†’ Debrid to reconnect, then tap Reconfigure below to sync.",
+                            localizedUiText(if (hasConfiguredDebrid) {
+                                "Your credentials are retained, but no debrid provider is enabled for use. Open streaming-source setup to enable one."
+                            } else {
+                                "Your debrid token may have expired. Go to Settings → Integrations → Debrid to reconnect, then tap Reconfigure below to sync."
+                            }),
                             style = MaterialTheme.typography.bodySmall,
-                            color = Silver,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
                 }
@@ -284,7 +293,7 @@ fun ManagePandaScreen(
                 ) {
                     Text(
                         stringResource(R.string.panda_setup_web_fallback),
-                        color = Silver,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
 
@@ -297,7 +306,7 @@ fun ManagePandaScreen(
                         stringResource(R.string.manage_panda_management_token_heading),
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.SemiBold,
-                        color = Snow,
+                        color = MaterialTheme.colorScheme.onSurface,
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(top = 4.dp),
@@ -309,7 +318,7 @@ fun ManagePandaScreen(
                             stringResource(R.string.manage_panda_token_missing_desc)
                         },
                         style = MaterialTheme.typography.bodySmall,
-                        color = Silver,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
 
                     if (!pandaState.hasManagementToken) {
@@ -318,7 +327,7 @@ fun ManagePandaScreen(
                             modifier = Modifier.fillMaxWidth(),
                             shape = RoundedCornerShape(12.dp),
                         ) {
-                            Text(stringResource(R.string.manage_panda_need_token), color = Silver)
+                            Text(stringResource(R.string.manage_panda_need_token), color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                     } else {
                         OutlinedButton(
@@ -327,7 +336,7 @@ fun ManagePandaScreen(
                             modifier = Modifier.fillMaxWidth(),
                             shape = RoundedCornerShape(12.dp),
                         ) {
-                            Text(stringResource(R.string.manage_panda_rotate_token), color = Silver)
+                            Text(stringResource(R.string.manage_panda_rotate_token), color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                         OutlinedButton(
                             onClick = { pandaViewModel.rotateManifestUrl() },
@@ -335,7 +344,7 @@ fun ManagePandaScreen(
                             modifier = Modifier.fillMaxWidth(),
                             shape = RoundedCornerShape(12.dp),
                         ) {
-                            Text(stringResource(R.string.manage_panda_reset_manifest_url), color = Silver)
+                            Text(stringResource(R.string.manage_panda_reset_manifest_url), color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                     }
 
@@ -380,7 +389,7 @@ fun ManagePandaScreen(
             state.installError?.let { error ->
                 Spacer(Modifier.height(12.dp))
                 Text(
-                    error,
+                    localizedUiText(error),
                     style = MaterialTheme.typography.bodySmall,
                     color = Ruby,
                 )
@@ -388,7 +397,7 @@ fun ManagePandaScreen(
             state.error?.let { error ->
                 Spacer(Modifier.height(12.dp))
                 Text(
-                    error,
+                    localizedUiText(error),
                     style = MaterialTheme.typography.bodySmall,
                     color = Ruby,
                 )
@@ -434,7 +443,7 @@ private fun RecoveryDialog(
                 Text(
                     stringResource(R.string.manage_panda_token_desc),
                     style = MaterialTheme.typography.bodySmall,
-                    color = Silver,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 Spacer(Modifier.height(12.dp))
                 OutlinedTextField(
@@ -446,7 +455,7 @@ private fun RecoveryDialog(
                 )
                 error?.let {
                     Spacer(Modifier.height(8.dp))
-                    Text(it, color = Ruby, style = MaterialTheme.typography.bodySmall)
+                    Text(localizedUiText(it), color = Ruby, style = MaterialTheme.typography.bodySmall)
                 }
             }
         },
@@ -462,7 +471,7 @@ private fun RecoveryDialog(
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text(stringResource(R.string.common_cancel), color = Silver) }
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.common_cancel), color = MaterialTheme.colorScheme.onSurfaceVariant) }
         },
     )
 }

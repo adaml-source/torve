@@ -5,6 +5,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -29,8 +30,10 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
@@ -61,6 +64,9 @@ fun TvHeroOverlay(
     isInWatchlist: Boolean = false,
     onWatchlistToggle: () -> Unit = {},
     logoLookupInFlight: Boolean = false,
+    allowLogoArtwork: Boolean = true,
+    topPadding: Dp = 56.dp,
+    overviewMaxLines: Int = 3,
     modifier: Modifier = Modifier,
 ) {
     val settingsViewModel: SettingsViewModel = koinInject()
@@ -70,12 +76,14 @@ fun TvHeroOverlay(
     }
 
     Column(modifier = modifier.fillMaxWidth()) {
-        Spacer(modifier = Modifier.height(56.dp))
+        Spacer(modifier = Modifier.height(topPadding))
 
         AnimatedContent(
             targetState = featuredItem,
             transitionSpec = {
-                fadeIn(tween(300)) togetherWith fadeOut(tween(200))
+                // Keep the title change legible without retaining two complete
+                // hero trees for hundreds of milliseconds on Fire TV.
+                (fadeIn(tween(90)) togetherWith fadeOut(tween(60))).using(null)
             },
             contentKey = { it?.id },
             label = "heroOverlay",
@@ -87,7 +95,9 @@ fun TvHeroOverlay(
             ) {
                 val logoUrl = item?.logoUrl?.takeIf { it.isNotBlank() }
                 var logoFailed by remember(logoUrl) { mutableStateOf(false) }
-                if (!logoUrl.isNullOrBlank() && !logoFailed) {
+                val artworkPending = !logoFailed && (!allowLogoArtwork || logoLookupInFlight)
+                Box(Modifier.fillMaxWidth().height(72.dp).testTag("tv.hero.title"), contentAlignment = Alignment.CenterStart) {
+                if (allowLogoArtwork && !logoUrl.isNullOrBlank() && !logoFailed) {
                     AsyncImage(
                         model = logoUrl,
                         contentDescription = item.title,
@@ -102,14 +112,14 @@ fun TvHeroOverlay(
                             .fillMaxWidth(0.42f)
                             .heightIn(min = 32.dp, max = 54.dp),
                     )
-                } else {
+                } else if (!artworkPending) {
                     val titleText = item?.title ?: subtitle
-                    if (titleText.isNotBlank() && (!logoLookupInFlight || logoFailed)) {
+                    if (titleText.isNotBlank()) {
                         Text(
                             text = titleText,
                             style = MaterialTheme.typography.headlineMedium.copy(
-                                fontSize = 38.sp,
-                                lineHeight = 42.sp,
+                                fontSize = 30.sp,
+                                lineHeight = 34.sp,
                                 letterSpacing = 0.6.sp,
                                 shadow = Shadow(
                                     color = Color.Black.copy(alpha = 0.82f),
@@ -121,13 +131,16 @@ fun TvHeroOverlay(
                             fontWeight = FontWeight.SemiBold,
                             maxLines = 2,
                             overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.fillMaxWidth(0.38f),
+                            modifier = Modifier.fillMaxWidth(0.6f),
                         )
                     } else {
                         Spacer(modifier = Modifier.height(44.dp))
                     }
                 }
 
+                }
+
+                Box(Modifier.height(24.dp)) {
                 if (item != null) {
                     Row(
                         horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -155,7 +168,7 @@ fun TvHeroOverlay(
                         }
                         item.voteCount?.takeIf { it > 0 }?.let { votes ->
                             Text(
-                                text = if (votes >= 1000) "${votes / 1000}K votes" else "$votes votes",
+                                text = com.torve.android.tv.components.tvSettingsLabel(if (votes >= 1000) "${votes / 1000}K votes" else "$votes votes"),
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = Snow.copy(alpha = 0.62f),
                             )
@@ -163,16 +176,20 @@ fun TvHeroOverlay(
                     }
                 }
 
+                }
+
                 val overview = item?.overview.orEmpty()
+                Box(Modifier.fillMaxWidth().height(48.dp).testTag("tv.hero.synopsis")) {
                 if (overview.isNotBlank()) {
                     Text(
                         text = overview,
                         style = MaterialTheme.typography.bodyMedium,
-                        color = Snow.copy(alpha = 0.84f),
-                        maxLines = 3,
+                        color = Snow.copy(alpha = 0.96f),
+                        maxLines = overviewMaxLines.coerceAtMost(2),
                         overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.width(680.dp),
+                        modifier = Modifier.fillMaxWidth(0.7f),
                     )
+                }
                 }
             }
         }

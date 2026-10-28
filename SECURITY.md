@@ -1,19 +1,26 @@
-# Security Policy
+# Security policy
 
-## Supported Versions
+Please report suspected vulnerabilities privately before opening a public
+issue. Email `support@torve.app` with the subject prefix `[SECURITY]` and include
+the affected Torve version, platform, impact, and minimal reproduction steps.
 
-Security fixes are considered for the current `main` branch. Released builds may lag behind source until maintainers publish platform-specific updates.
+Do not send real passwords, API keys, refresh tokens, playlist credentials,
+private stream URLs, signing material, database exports, or other users’ data.
+Use redacted examples or temporary test credentials that can be revoked.
 
-## Reporting a Vulnerability
+Security reports for the current public release and the current `master`
+branch are in scope. Relevant areas include:
 
-Do not report vulnerabilities in public issues if the report includes exploit details, credentials, tokens, private user data, or operational secrets.
+- account authentication, password recovery, sessions, and device linking;
+- encrypted integration credentials and cross-device synchronization;
+- update download, checksum, signature, and installer behavior;
+- local network services, URL validation, and server-side request forgery;
+- diagnostic redaction, data export, and account deletion;
+- unauthorized access across account or device ownership boundaries.
 
-Use GitHub private vulnerability reporting for this repository if it is enabled. If it is not enabled, contact the maintainers through an existing private channel and ask where to send the report.
+The project will confirm receipt when the reporting channel is available,
+investigate without exposing the reporter or users, and coordinate a fix and
+disclosure appropriate to the risk. Do not publicly disclose an unresolved
+issue that could expose users.
 
-Do not include real credentials, production secrets, database dumps, logs with tokens, or sensitive user data in reports. Use redacted examples and reproduction steps where possible.
-
-## Scope
-
-Security-sensitive areas include authentication, refresh tokens, account deletion and export, device linking, account-scoped sync, integration secret storage, backend authorization, release/update flows, and any code handling provider credentials.
-
-Reports about paid-tier bypasses, premium gates, donor-only access, or subscription enforcement do not apply to Torve's current product model because Torve has no subscriptions, no paid tiers, no premium features, and no purchase requirement.
+For ordinary bugs and feature requests, use the public issue tracker instead.

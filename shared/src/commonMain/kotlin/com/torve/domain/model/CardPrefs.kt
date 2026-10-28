@@ -89,6 +89,9 @@ enum class ShelfTitleStyle {
 }
 
 @Serializable
+enum class CardOverlayPosition { TOP_LEFT, TOP_RIGHT, BOTTOM_LEFT, BOTTOM_RIGHT, BELOW }
+
+@Serializable
 data class CardAppearancePrefs(
     val cornerRadiusDp: Int = 8,
     val cardSpacingDp: Int = 12,
@@ -101,6 +104,9 @@ data class CardAppearancePrefs(
     val showTypeBadge: Boolean = false,
     val showRuntime: Boolean = false,
     val scrollAnimation: CardScrollAnimation = CardScrollAnimation.NONE,
+    val yearPosition: CardOverlayPosition = CardOverlayPosition.TOP_LEFT,
+    val ratingPosition: CardOverlayPosition = CardOverlayPosition.BOTTOM_LEFT,
+    val postersPerRow: Int = 0,
 )
 
 @Serializable

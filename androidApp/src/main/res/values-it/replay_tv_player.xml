@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="replay_highlight_tv_playback">Gli highlights si aprono a schermo intero in YouTube o SmartTube. Premi Indietro per tornare qui.</string>
+    <string name="replay_highlight_tv_missing_player">Installa YouTube o SmartTube per riprodurre gli highlights a schermo intero.</string>
+</resources>

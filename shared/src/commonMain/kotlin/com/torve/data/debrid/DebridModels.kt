@@ -265,6 +265,7 @@ data class TbResponse<T>(
     val success: Boolean = false,
     val data: T? = null,
     val error: String? = null,
+    val detail: String? = null,
 )
 
 @Serializable
@@ -276,15 +277,23 @@ data class TbUserData(
 
 @Serializable
 data class TbTorrentData(
-    val id: Long = 0,
+    @SerialName("torrent_id") val id: Long = 0,
     val hash: String = "",
     val name: String = "",
+)
+
+@Serializable
+data class TbWebDownloadData(
+    @SerialName("webdownload_id") val id: Long = 0,
 )
 
 @Serializable
 data class TbTorrentInfoData(
     val id: Long = 0,
     @SerialName("download_state") val downloadState: String = "",
+    @SerialName("download_finished") val downloadFinished: Boolean = false,
+    @SerialName("download_present") val downloadPresent: Boolean = false,
+    val cached: Boolean = false,
     val files: List<TbFileInfo> = emptyList(),
 )
 
@@ -293,9 +302,4 @@ data class TbFileInfo(
     val id: Long = 0,
     val name: String = "",
     val size: Long = 0,
-)
-
-@Serializable
-data class TbDownloadLinkData(
-    val data: String? = null,
 )

@@ -1,5 +1,7 @@
 package com.torve.android.tv.screens
 
+import com.torve.android.tv.components.tvSettingsLabel as localizedUiText
+
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -320,7 +322,7 @@ private fun TvBugReportChoice(
             .focusable(),
     ) {
         Text(
-            text = title,
+            text = localizedUiText(title),
             color = if (focused || selected) Amber else Snow,
             style = MaterialTheme.typography.bodyLarge,
             fontWeight = FontWeight.SemiBold,
@@ -366,7 +368,7 @@ private fun TvBugReportAction(
             }
             .focusable(),
     ) {
-        Text(title, color = if (focused && enabled) Amber else Snow, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-        Text(subtitle, color = Silver, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(top = 4.dp))
+        Text(localizedUiText(title), color = if (focused && enabled) Amber else Snow, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+        Text(localizedUiText(subtitle), color = Silver, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(top = 4.dp))
     }
 }

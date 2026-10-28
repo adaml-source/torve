@@ -1,0 +1,15 @@
+{
+  "isolated_runner_ack": false,
+  "repository": "/srv/torve-repair/source-mirror",
+  "output_dir": "/srv/torve-repair/proposals",
+  "codex_home": "/srv/torve-repair/codex-auth",
+  "source_commit": "REQUIRED_VERIFIED_RELEASE_COMMIT",
+  "manifest_sha256": "REQUIRED_VERIFIED_MANIFEST_SHA256",
+  "test_image": "torve-repair-tests@sha256:REQUIRED_PRELOADED_IMAGE_DIGEST",
+  "codex_image": "torve-codex@sha256:REQUIRED_PRELOADED_CODEX_IMAGE_DIGEST",
+  "codex_network": "torve-codex-egress",
+  "allowed_categories": ["ui_bug", "parsing_bug", "state_bug"],
+  "code_prefixes": ["REPLACE_WITH_ONE_REVIEWED_COMPONENT/src"],
+  "test_prefixes": ["REPLACE_WITH_THAT_COMPONENT/tests"],
+  "checks": {"component_regression": ["REPLACE_WITH_TRUSTED_TEST_EXECUTABLE", "REVIEWED_TEST_ARGUMENT"]}
+}

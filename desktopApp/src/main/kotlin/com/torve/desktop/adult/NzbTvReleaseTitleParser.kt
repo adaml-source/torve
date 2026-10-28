@@ -1,5 +1,7 @@
 package com.torve.desktop.adult
 
+import com.torve.util.DisplayTextDecoder
+
 /**
  * Parse a scene-style TV release name into the show title we can hand
  * to TMDB. Scene patterns vary widely, but they always follow a
@@ -30,7 +32,7 @@ object NzbTvReleaseTitleParser {
     )
 
     fun parse(release: String): Parsed? {
-        val cleaned = release.substringBeforeLast(".nzb").trim()
+        val cleaned = DisplayTextDecoder.decodeReleaseTitle(release).substringBeforeLast(".nzb").trim()
         val seasonMatch = SEASON_REGEX.find(cleaned) ?: return null
         val rawTitle = cleaned.substring(0, seasonMatch.range.first)
         val title = rawTitle

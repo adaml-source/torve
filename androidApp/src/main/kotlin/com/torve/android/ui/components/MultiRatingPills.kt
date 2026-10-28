@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
@@ -41,6 +42,7 @@ private val TraktRed = Color(0xFFED1C24)
 private val MdblistOrange = Color(0xFFFF6B00)
 private val MalBlue = Color(0xFF2E51A2)
 private val ChipBg = Color(0xFF1A1A2E)
+private val RatingChipHeight = 22.dp
 
 @Composable
 @OptIn(ExperimentalLayoutApi::class)
@@ -66,22 +68,44 @@ fun MultiRatingPills(
 
     if (pills.isEmpty()) return
 
-    FlowRow(
-        modifier = modifier
-            .testTag("rating_pills")
-            .padding(horizontal = 2.dp, vertical = 2.dp),
-        horizontalArrangement = Arrangement.spacedBy(3.dp),
-        verticalArrangement = Arrangement.spacedBy(3.dp),
-    ) {
-        pills.forEach { (source, value, _) ->
-            key(source) {
-                RatingChip(
-                    source = source,
-                    displayValue = value,
-                    isMissing = false,
-                    style = prefs.pillStyle,
-                    ratings = ratings,
-                )
+    if (prefs.maxRatingsOnCard <= 2) {
+        Row(
+            modifier = modifier
+                .testTag("rating_pills")
+                .padding(horizontal = 2.dp, vertical = 2.dp),
+            horizontalArrangement = Arrangement.spacedBy(3.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            pills.forEach { (source, value, _) ->
+                key(source) {
+                    RatingChip(
+                        source = source,
+                        displayValue = value,
+                        isMissing = false,
+                        style = prefs.pillStyle,
+                        ratings = ratings,
+                    )
+                }
+            }
+        }
+    } else {
+        FlowRow(
+            modifier = modifier
+                .testTag("rating_pills")
+                .padding(horizontal = 2.dp, vertical = 2.dp),
+            horizontalArrangement = Arrangement.spacedBy(3.dp),
+            verticalArrangement = Arrangement.spacedBy(3.dp),
+        ) {
+            pills.forEach { (source, value, _) ->
+                key(source) {
+                    RatingChip(
+                        source = source,
+                        displayValue = value,
+                        isMissing = false,
+                        style = prefs.pillStyle,
+                        ratings = ratings,
+                    )
+                }
             }
         }
     }
@@ -93,14 +117,7 @@ fun PreferredRatingPills(
     modifier: Modifier = Modifier,
     prefs: RatingDisplayPrefs = LocalRatingPrefs.current,
 ) {
-    val selectedExternalProviders = if (prefs.enabledProviders.isEmpty()) {
-        listOf(RatingSource.TMDB)
-    } else {
-        prefs.enabledProviders.filterNot { it == RatingSource.TORVE }
-    }
-    val orderedExternalProviders = (prefs.providerOrder + RatingSource.entries)
-        .distinct()
-        .filter { it in selectedExternalProviders && ratings.hasValueFor(it) }
+    val orderedExternalProviders = preferredExternalRatingProviders(ratings, prefs)
     if (orderedExternalProviders.isNotEmpty()) {
         MultiRatingPills(
             ratings = ratings,
@@ -128,6 +145,29 @@ fun PreferredRatingPills(
     }
 }
 
+internal fun preferredExternalRatingProviders(
+    ratings: MediaRatings,
+    prefs: RatingDisplayPrefs,
+): List<RatingSource> {
+    val selectedExternalProviders = if (prefs.enabledProviders.isEmpty()) {
+        listOf(RatingSource.TMDB)
+    } else {
+        prefs.enabledProviders.filterNot { it == RatingSource.TORVE }
+    }
+    val selectedWithValues = (prefs.providerOrder + RatingSource.entries)
+        .distinct()
+        .filter { it in selectedExternalProviders && ratings.hasValueFor(it) }
+    if (selectedWithValues.isNotEmpty()) return selectedWithValues
+
+    // Keep the card informative when selected online providers are unavailable.
+    // The TMDB branding remains explicit, so this never masquerades as IMDb/RT.
+    return if (selectedExternalProviders.isNotEmpty() && ratings.hasValueFor(RatingSource.TMDB)) {
+        listOf(RatingSource.TMDB)
+    } else {
+        emptyList()
+    }
+}
+
 @Composable
 private fun RatingChip(
     source: RatingSource,
@@ -142,12 +182,14 @@ private fun RatingChip(
     } else {
         getSourceColors(source, displayValue, ratings)
     }
+    val valueFontSize = if (source == RatingSource.ROTTEN_TOMATOES && displayValue.length >= 4) 8.sp else 9.sp
 
     Row(
         modifier = Modifier
             .testTag("rating_chip_${source.name}")
+            .height(RatingChipHeight)
             .background(ChipBg.copy(alpha = 0.85f), RoundedCornerShape(4.dp))
-            .padding(horizontal = 5.dp, vertical = 2.dp),
+            .padding(horizontal = 5.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(3.dp),
     ) {
@@ -158,35 +200,39 @@ private fun RatingChip(
                     Image(
                         painter = painterResource(id = iconRes),
                         contentDescription = source.displayName,
-                        modifier = Modifier.size(14.dp),
+                        modifier = Modifier.size(13.dp),
                     )
                 } else {
                     Text(
                         text = source.iconChar,
-                        style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp),
+                        style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp, lineHeight = 10.sp),
                         color = iconColor,
                         fontWeight = FontWeight.Bold,
+                        maxLines = 1,
                     )
                 }
                 Text(
                     text = displayValue,
-                    style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp, letterSpacing = 0.sp),
+                    style = MaterialTheme.typography.labelSmall.copy(fontSize = valueFontSize, lineHeight = 12.sp, letterSpacing = 0.sp),
                     color = textColor,
                     fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
                 )
             }
             RatingPillStyle.LETTER -> {
                 Text(
                     text = source.iconChar,
-                    style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp),
+                    style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp, lineHeight = 10.sp),
                     color = iconColor,
                     fontWeight = FontWeight.Bold,
+                    maxLines = 1,
                 )
                 Text(
                     text = displayValue,
-                    style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp, letterSpacing = 0.sp),
+                    style = MaterialTheme.typography.labelSmall.copy(fontSize = valueFontSize, lineHeight = 12.sp, letterSpacing = 0.sp),
                     color = textColor,
                     fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
                 )
             }
         }

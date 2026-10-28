@@ -11,35 +11,62 @@ import com.torve.domain.model.Season
 
 object TmdbMappers {
 
+    private fun imageUrl(path: String?, size: String): String? {
+        val normalized = path?.trim()?.takeIf { it.isNotEmpty() } ?: return null
+        return if (normalized.startsWith("http://") || normalized.startsWith("https://")) {
+            normalized
+        } else {
+            val rootedPath = if (normalized.startsWith('/')) normalized else "/$normalized"
+            "${TmdbApiClient.IMAGE_BASE}/$size$rootedPath"
+        }
+    }
+
     fun posterUrl(path: String?, size: String = "w500"): String? =
-        path?.let { "${TmdbApiClient.IMAGE_BASE}/$size$it" }
+        imageUrl(path, size)
 
     fun backdropUrl(path: String?, size: String = "w1280"): String? =
-        path?.let { "${TmdbApiClient.IMAGE_BASE}/$size$it" }
+        imageUrl(path, size)
 
     fun profileUrl(path: String?, size: String = "w185"): String? =
-        path?.let { "${TmdbApiClient.IMAGE_BASE}/$size$it" }
+        imageUrl(path, size)
 
     fun logoUrl(path: String?, size: String = "w500"): String? =
-        path?.let { "${TmdbApiClient.IMAGE_BASE}/$size$it" }
+        imageUrl(path, size)
 
-    /** Pick the best title logo from a TMDB images response. */
-    fun bestLogoPath(images: TmdbImages?): String? {
-        if (images == null) return null
-        val logos = images.logos
+    /** Title logos contain language-specific text, even when their language tag is missing. */
+    fun bestLogoPath(images: TmdbImages?, preferredLanguage: String = "en"): String? {
+        val language = preferredLanguage.substringBefore('-').substringBefore('_').lowercase()
+        // Unlike a scene backdrop, an untagged logo is not proof of neutral artwork.
+        // TMDB can return a foreign title graphic tagged null (for example Korean
+        // Spider-Man lettering). Keep only the requested language and English;
+        // callers render the localized text title when neither is available.
+        return bestImagePath(images?.logos.orEmpty().filter {
+            it.iso6391 == language || it.iso6391 == "en"
+        }, language)
+    }
+
+    /** Localized backdrops often contain the title; only neutral scenes can sit behind a logo. */
+    private fun titlelessBackdropPath(images: TmdbImages?): String? =
+        bestImagePath(images?.backdrops.orEmpty().filter { it.iso6391.isNullOrBlank() }, "en")
+
+    /** Prefer localized artwork over a higher-rated image in another language. */
+    internal fun bestImagePath(images: List<TmdbImageItem>, preferredLanguage: String): String? {
+        val logos = images.filter { it.filePath.isNotBlank() }
         if (logos.isEmpty()) return null
         val ranked = logos.sortedWith(
             compareByDescending<TmdbImageItem> { it.voteAverage * it.voteCount }
                 .thenByDescending { it.voteCount }
                 .thenByDescending { it.width },
         )
-        val best = ranked.firstOrNull { it.iso6391 == "en" }
-            ?: ranked.firstOrNull { it.iso6391 == null }
+        val language = preferredLanguage.substringBefore('-').substringBefore('_').lowercase()
+        val best = ranked.firstOrNull { it.iso6391 == language }
+            ?: ranked.firstOrNull { it.iso6391.isNullOrBlank() }
+            ?: ranked.firstOrNull { it.iso6391 == "en" }
             ?: ranked.firstOrNull()
         return best?.filePath
     }
 
-    fun movieToMediaItem(m: TmdbMovie): MediaItem {
+    fun movieToMediaItem(m: TmdbMovie, preferredLanguage: String = "en"): MediaItem {
         val trailer = pickBestTrailer(m.videos?.results)
         val director = m.credits?.crew?.firstOrNull { it.job == "Director" }
         return MediaItem(
@@ -48,12 +75,16 @@ object TmdbMappers {
             imdbId = m.imdbId,
             type = MediaType.MOVIE,
             title = m.title,
+            collectionId = m.collection?.id,
+            collectionName = m.collection?.name,
             adult = m.adult,
+            ageCertifications = m.releaseDates?.results.orEmpty().flatMap { c -> c.releases.filter { it.certification.isNotBlank() }.map { com.torve.domain.model.AgeCertification(c.country, it.certification) } },
             year = m.releaseDate?.take(4)?.toIntOrNull(),
             overview = m.overview,
-            posterUrl = posterUrl(m.posterPath),
-            backdropUrl = backdropUrl(m.backdropPath),
-            logoUrl = logoUrl(bestLogoPath(m.images)),
+            posterUrl = posterUrl(bestImagePath(m.images?.posters.orEmpty(), preferredLanguage) ?: m.posterPath),
+            backdropUrl = backdropUrl(titlelessBackdropPath(m.images) ?: bestImagePath(m.images?.backdrops.orEmpty(), preferredLanguage) ?: m.backdropPath),
+            titlelessBackdropUrl = backdropUrl(titlelessBackdropPath(m.images)),
+            logoUrl = logoUrl(bestLogoPath(m.images, preferredLanguage)),
             rating = m.voteAverage,
             voteCount = m.voteCount,
             runtime = m.runtime,
@@ -80,7 +111,7 @@ object TmdbMappers {
         )
     }
 
-    fun tvToMediaItem(t: TmdbTv): MediaItem {
+    fun tvToMediaItem(t: TmdbTv, preferredLanguage: String = "en"): MediaItem {
         val trailer = pickBestTrailer(t.videos?.results)
         val director = t.credits?.crew?.firstOrNull { it.job == "Director" }
         return MediaItem(
@@ -90,11 +121,13 @@ object TmdbMappers {
             type = MediaType.SERIES,
             title = t.name,
             adult = t.adult,
+            ageCertifications = t.contentRatings?.results.orEmpty().filter { it.rating.isNotBlank() }.map { com.torve.domain.model.AgeCertification(it.country, it.rating) },
             year = t.firstAirDate?.take(4)?.toIntOrNull(),
             overview = t.overview,
-            posterUrl = posterUrl(t.posterPath),
-            backdropUrl = backdropUrl(t.backdropPath),
-            logoUrl = logoUrl(bestLogoPath(t.images)),
+            posterUrl = posterUrl(bestImagePath(t.images?.posters.orEmpty(), preferredLanguage) ?: t.posterPath),
+            backdropUrl = backdropUrl(titlelessBackdropPath(t.images) ?: bestImagePath(t.images?.backdrops.orEmpty(), preferredLanguage) ?: t.backdropPath),
+            titlelessBackdropUrl = backdropUrl(titlelessBackdropPath(t.images)),
+            logoUrl = logoUrl(bestLogoPath(t.images, preferredLanguage)),
             rating = t.voteAverage,
             voteCount = t.voteCount,
             genres = t.genres?.map { Genre(it.id, it.name) } ?: emptyList(),
@@ -142,12 +175,15 @@ object TmdbMappers {
             tmdbId = c.id,
             type = if (c.mediaType == "tv") MediaType.SERIES else MediaType.MOVIE,
             title = c.title ?: c.name ?: "",
+            creditCharacter = c.character,
             year = date?.take(4)?.toIntOrNull(),
             posterUrl = posterUrl(c.posterPath),
             backdropUrl = backdropUrl(c.backdropPath),
             rating = c.voteAverage,
             releaseDate = date,
             popularity = c.popularity,
+            genreIds = c.genreIds,
+            voteCount = c.voteCount,
             ratings = c.voteAverage?.let { MediaRatings(tmdbScore = it.toFloat()) },
         )
     }
@@ -166,12 +202,16 @@ object TmdbMappers {
             tmdbId = c.id,
             type = if (c.mediaType == "tv") MediaType.SERIES else MediaType.MOVIE,
             title = c.title ?: c.name ?: "",
+            creditJob = c.job,
+            creditIsCrew = true,
             year = date?.take(4)?.toIntOrNull(),
             posterUrl = posterUrl(c.posterPath),
             backdropUrl = backdropUrl(c.backdropPath),
             rating = c.voteAverage,
             releaseDate = date,
             popularity = c.popularity,
+            genreIds = c.genreIds,
+            voteCount = c.voteCount,
             ratings = c.voteAverage?.let { MediaRatings(tmdbScore = it.toFloat()) },
         )
     }

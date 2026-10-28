@@ -1,10 +1,15 @@
 package com.torve.presentation.settings
+import com.torve.data.metadata.tmdbExtensionSelection
 
 import com.torve.presentation.error.defaultMessage
 import com.torve.data.auth.UserIdProvider
 import com.torve.data.ai.AiProvider
 import com.torve.data.ai.AiSuggestClient
 import com.torve.data.debrid.DebridClient
+import com.torve.data.panda.readPandaDebridActivationSnapshot
+import com.torve.data.panda.writePandaDebridActivationSnapshot
+import com.torve.data.panda.enabledCredentials
+import com.torve.data.panda.pandaProviderId
 import com.torve.data.kodi.KodiClient
 import com.torve.data.kodi.KodiHost
 import com.torve.data.simkl.SimklClient
@@ -16,7 +21,10 @@ import com.torve.data.trakt.repo.TraktSyncRepository
 import com.torve.db.TorveDatabase
 import com.torve.domain.integrations.IntegrationSecretKey
 import com.torve.domain.integrations.IntegrationSecretStore
+import com.torve.domain.integrations.IntegrationStorageMode
 import com.torve.domain.integrations.LibraryOverlayService
+import com.torve.domain.integrations.MediaLifecycleService
+import com.torve.domain.integrations.buildJellyfinAccountPayload
 import com.torve.domain.model.CardOrientation
 import com.torve.domain.model.CardPrefs
 import com.torve.domain.model.CardStyle
@@ -36,7 +44,14 @@ import com.torve.domain.model.defaultTorveWeights
 import com.torve.domain.diagnostics.DiagnosticsRedactor
 import com.torve.domain.model.StreamPreferences
 import com.torve.domain.model.StreamQuality
+import com.torve.domain.model.NextEpisodeMode
+import com.torve.domain.model.NextEpisodePreparationMode
+import com.torve.domain.model.SourceFallbackPolicy
+import com.torve.domain.model.SourceLanguageMatchMode
+import com.torve.domain.model.UnknownSourceMetadataPolicy
+import com.torve.domain.model.canResolveStreams
 import com.torve.domain.player.DesktopPlaybackHotkeys
+import com.torve.domain.player.SegmentActionMode
 import com.torve.domain.repository.AddonRepository
 import com.torve.domain.repository.PreferencesRepository
 import com.torve.domain.repository.WatchHistoryRepository
@@ -52,9 +67,11 @@ import com.torve.platform.recommendedMaxQuality
 import com.torve.platform.torveVerboseLog
 import com.torve.presentation.integrations.syncTorBoxCredentialPair
 import com.torve.presentation.settings.SettingsRefreshNotifier
+import com.torve.util.ioDispatcher
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
@@ -65,9 +82,25 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.datetime.Clock
 import kotlin.random.Random
+
+private data class SmartPlaybackSavedSettings(
+    val minSourceSizePerHourMb: Int,
+    val nextEpisodeMode: NextEpisodeMode,
+    val preparationMode: NextEpisodePreparationMode,
+    val preloadBufferSeconds: Int,
+    val preloadMaxMb: Int,
+    val preloadWifiOnly: Boolean,
+    val languageMatchMode: SourceLanguageMatchMode,
+    val unknownSizePolicy: UnknownSourceMetadataPolicy,
+    val unknownLanguagePolicy: UnknownSourceMetadataPolicy,
+    val fallbackPolicy: SourceFallbackPolicy,
+)
 
 class SettingsViewModel(
     private val debridClient: DebridClient,
@@ -91,13 +124,28 @@ class SettingsViewModel(
     private val settingsRefreshNotifier: SettingsRefreshNotifier,
     private val addonRepo: AddonRepository,
     private val userIdProvider: UserIdProvider,
+    private val mediaLifecycleService: MediaLifecycleService? = null,
+    private val simklSyncService: com.torve.data.simkl.SimklSyncService? = null,
+    private val configuredUsenet: com.torve.data.usenet.ConfiguredUsenetSources? = null,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private val _state = MutableStateFlow(SettingsUiState())
     val state: StateFlow<SettingsUiState> = _state.asStateFlow()
 
     private var debridPollJob: Job? = null
+    private var traktAuthRequestJob: Job? = null
     private var traktPollJob: Job? = null
+    private val traktSyncCoordinator = TraktSyncCoordinator(
+        scope = scope,
+        prepareSession = { ensureTraktSessionReady() },
+        importTrakt = { initialTraktImport() },
+        onStarted = { _state.update { it.copy(traktSyncing = true, traktSyncSuccess = false, traktError = null) } },
+        onFinished = { success ->
+            _state.update { it.copy(traktSyncing = false, traktSyncSuccess = success) }
+            scope.launch { refreshTraktPendingWrites() }
+        },
+        onFailure = { _state.update { it.copy(traktError = com.torve.presentation.error.UserFacingError.INTEGRATION_CONNECT_FAILED.defaultMessage()) } },
+    )
     private var rdStartupRefreshDone = false
     private var simklValidationRunning = false
     private var simklLastValidatedAt = 0L
@@ -105,12 +153,46 @@ class SettingsViewModel(
     /**
      * Callback to push an integration credential to the backend.
      * Set by the DI layer after construction to avoid circular dependency.
-     * Signature: (integrationType, credentials map, displayIdentifier) -> Unit
+     * Signature returns true when the encrypted account write succeeds.
      */
-    var onIntegrationSaved: (suspend (String, Map<String, String>, String?) -> Unit)? = null
+    var onIntegrationSaved:
+        (suspend (String, Map<String, String>, String?, Map<String, String>) -> Boolean)? = null
+
+    /**
+     * Removes an account-backed integration after an explicit disconnect.
+     * The local disconnect tombstone remains authoritative when this write is
+     * offline; account restore retries the backend deletion on the next sync.
+     */
+    var onIntegrationDeleted: (suspend (String) -> Boolean)? = null
 
     /** Notifies the TMDB client when the user changes the app language. Set by DI. */
     var onLanguageChanged: ((AppLanguage) -> Unit)? = null
+    var onOptionalFeaturesChanged: (suspend () -> Unit)? = null
+
+    fun setOptionalAppFeature(feature: OptionalAppFeature, enabled: Boolean) {
+        scope.launch(com.torve.data.auth.PersonalDataScope(userIdProvider.currentUserId(), userIdProvider.currentProfileId())) {
+            prefsRepo.setString(feature.preferenceKey, enabled.toString())
+            _state.update { it.copy(optionalAppFeatures = it.optionalAppFeatures.withEnabled(feature, enabled)) }
+            onOptionalFeaturesChanged?.invoke()
+            settingsRefreshNotifier.notifyRefresh(Clock.System.now().toEpochMilliseconds())
+        }
+    }
+
+    fun setTmdbCatalogueEnabled(enabled: Boolean) = setTmdbExtensionChoice(true, enabled)
+    fun setTmdbEnrichmentEnabled(enabled: Boolean) = setTmdbExtensionChoice(false, enabled)
+
+    private fun setTmdbExtensionChoice(catalogue: Boolean, enabled: Boolean) {
+        val owner = userIdProvider.currentDataUserId()
+        scope.launch(com.torve.data.auth.PersonalDataScope(userIdProvider.currentUserId(), userIdProvider.currentProfileId())) {
+            val key = if (catalogue) com.torve.data.metadata.KEY_TMDB_CATALOGUE_ENABLED
+                else com.torve.data.metadata.KEY_TMDB_ENRICHMENT_ENABLED
+            prefsRepo.setString(key, enabled.toString())
+            if (owner != userIdProvider.currentDataUserId()) return@launch
+            _state.update { if (catalogue) it.copy(tmdbCatalogueEnabled = enabled)
+                else it.copy(tmdbEnrichmentEnabled = enabled) }
+            settingsRefreshNotifier.notifyRefresh(Clock.System.now().toEpochMilliseconds())
+        }
+    }
 
     companion object {
         const val KEY_DEBRID_PROVIDER = "debrid_provider"
@@ -129,6 +211,11 @@ class SettingsViewModel(
         const val KEY_MAX_QUALITY = "stream_max_quality"
         const val KEY_MIN_QUALITY = "stream_min_quality"
         const val KEY_MAX_FILE_SIZE_MB = "stream_max_file_size_mb"
+        const val KEY_MIN_SOURCE_SIZE_PER_HOUR_MB = "stream_min_source_size_per_hour_mb"
+        const val KEY_HIDE_WATCHED = "browse_hide_watched"
+        const val KEY_EXCLUDE_SEASON_PACKS = "stream_exclude_season_packs"
+        const val KEY_MATCH_FRAME_RATE = "playback_match_frame_rate"
+        const val KEY_KEEP_SUBTITLES_ABOVE_CONTROLS = "playback_keep_subtitles_above_controls"
         const val KEY_CACHED_ONLY = "stream_cached_only"
         const val KEY_HDR_ENABLED = "stream_hdr_enabled"
         const val KEY_TRAKT_SCROBBLE = "trakt_scrobble_enabled"
@@ -136,11 +223,27 @@ class SettingsViewModel(
         const val KEY_SIMKL_ACCESS_TOKEN = "simkl_access_token"
         const val KEY_KODI_HOSTS = "kodi_hosts_json"
         const val KEY_THEME_MODE = "theme_mode"
+        const val KEY_SHOW_REMAINING_EPISODES = "show_remaining_episodes"
+        const val KEY_RAIL_SPACING_DP = "rail_spacing_dp"
         const val KEY_APP_LANGUAGE = "app_language"
         const val KEY_AUTO_PLAY_ENABLED = "auto_play_enabled"
         const val KEY_CODEC_PREFERENCE = "codec_preference"
         const val KEY_HDR_MODE = "hdr_mode"
         const val KEY_AUTO_PLAY_NEXT_EPISODE = "auto_play_next_episode"
+        const val KEY_NEXT_EPISODE_MODE = "next_episode_mode"
+        const val KEY_NEXT_EPISODE_PREPARATION_MODE = "next_episode_preparation_mode"
+        const val KEY_NEXT_EPISODE_PRELOAD_BUFFER_SECONDS = "next_episode_preload_buffer_seconds"
+        const val KEY_NEXT_EPISODE_PRELOAD_MAX_MB = "next_episode_preload_max_mb"
+        const val KEY_NEXT_EPISODE_PRELOAD_WIFI_ONLY = "next_episode_preload_wifi_only"
+        const val KEY_SKIP_INTRO_MODE = "playback_skip_intro_mode"
+        const val KEY_SKIP_RECAP_MODE = "playback_skip_recap_mode"
+        const val KEY_PLAY_NEXT_CREDITS_MODE = "playback_play_next_credits_mode"
+        const val KEY_PROTECT_POST_CREDIT = "playback_protect_post_credit"
+        const val KEY_SMART_SEGMENT_DETECTION = "playback_smart_segment_detection"
+        const val KEY_SOURCE_LANGUAGE_MATCH_MODE = "source_language_match_mode"
+        const val KEY_UNKNOWN_SOURCE_SIZE_POLICY = "unknown_source_size_policy"
+        const val KEY_UNKNOWN_SOURCE_LANGUAGE_POLICY = "unknown_source_language_policy"
+        const val KEY_SOURCE_FALLBACK_POLICY = "source_fallback_policy"
         const val KEY_AUTO_SOURCE_MODE = "auto_source_mode"
         const val KEY_ALLOW_4K_AUTO = "allow_4k_auto"
         const val KEY_PREFER_COMPATIBLE_CODECS = "prefer_compatible_codecs"
@@ -152,6 +255,7 @@ class SettingsViewModel(
         const val KEY_SUBTITLES_ENABLED_DEFAULT = "subtitles_enabled_default"
         const val KEY_PREFERRED_SUBTITLE_LANGUAGE = "preferred_subtitle_language"
         const val KEY_PREFERRED_AUDIO_LANGUAGE = "preferred_audio_language"
+        const val KEY_ALLOW_SUBTITLE_LANGUAGE_FALLBACK = "allow_subtitle_language_fallback"
         const val KEY_REMEMBER_VOLUME = "remember_volume"
         const val KEY_LAST_VOLUME = "last_volume"
         const val KEY_DESKTOP_PLAYBACK_HOTKEYS = "desktop_playback_hotkeys"
@@ -187,12 +291,15 @@ class SettingsViewModel(
         const val KEY_MDBLIST_API_KEY = "mdblist_api_key"
         const val KEY_JELLYFIN_SERVER_URL = "jellyfin_server_url"
         const val KEY_PLEX_SERVER_URL = "plex_server_url"
+        const val KEY_SEERR_SERVER_URL = "seerr_server_url"
         const val KEY_REGION_CODE = "content_region_code"
         const val KEY_RATING_PREFS = "rating_display_prefs"
         const val KEY_CARD_PREFS = "card_prefs"
         const val KEY_CARD_STYLE_PRESETS = "card_style_presets"
         const val KEY_CARD_DEFAULT_PRESET_ID = "card_style_default_preset_id"
         const val KEY_HOME_LAYOUT_SOURCE = "home_layout_source"
+        const val KEY_MOVIES_HERO = "movies_hero_enabled"
+        const val KEY_SHOWS_HERO = "shows_hero_enabled"
         const val KEY_LAN_SERVING_ENABLED = "lan_serving_enabled"
         /**
          * Prompt 9 — desktop-only. Controls bind interface when
@@ -251,6 +358,10 @@ class SettingsViewModel(
         return credentials
     }
 
+    private var savedSettingsJob: Job? = null
+    private var savedSettingsOwner: Pair<String?, String?>? = null
+    private var savedSettingsRefreshPending = false
+
     init {
         loadSavedSettings()
         scope.launch {
@@ -288,13 +399,58 @@ class SettingsViewModel(
     }
 
     private fun loadSavedSettings() {
-        scope.launch {
+        val owner = userIdProvider.currentUserId() to userIdProvider.currentProfileId()
+        if (savedSettingsJob?.isActive == true && savedSettingsOwner == owner) {
+            savedSettingsRefreshPending = true
+            return
+        }
+        savedSettingsJob?.cancel()
+        savedSettingsOwner = owner
+        savedSettingsJob = scope.launch(com.torve.data.auth.PersonalDataScope(owner.first, owner.second)) {
+            do {
+                savedSettingsRefreshPending = false
+                loadSavedSettingsSnapshot()
+            } while (savedSettingsRefreshPending)
+        }
+    }
+
+    suspend fun awaitPlaybackSettings() {
+        check(withTimeoutOrNull(10_000L) {
+            state.first { it.playbackSettingsLoaded && it.personalDataUserId == userIdProvider.currentDataUserIdOrNull() }
+        } != null) { "Playback settings have not finished loading" }
+    }
+
+    private suspend fun loadSavedSettingsSnapshot() {
+            val showRemainingEpisodes = prefsRepo.getString(KEY_SHOW_REMAINING_EPISODES) != "false"
+            val railSpacingDp = prefsRepo.getString(KEY_RAIL_SPACING_DP)?.toIntOrNull()?.coerceIn(0, 64)
             if (!userIdProvider.isSignedIn()) {
                 rdStartupRefreshDone = false
-                _state.value = SettingsUiState()
-                return@launch
+                traktSyncCoordinator.cancel()
+                // Guest consent is device-local and separate from account/profile choices.
+                val selection = prefsRepo.tmdbExtensionSelection()
+                val guestTheme = ThemeMode.entries.firstOrNull { it.name == prefsRepo.getString(KEY_THEME_MODE) } ?: ThemeMode.SYSTEM
+                val guestLanguage = AppLanguage.entries.firstOrNull { it.name == prefsRepo.getString(KEY_APP_LANGUAGE) } ?: AppLanguage.ENGLISH
+                onLanguageChanged?.invoke(guestLanguage)
+                _state.value = SettingsUiState(hasStreamAddon = runCatching { addonRepo.getEnabledAddons().any { it.canResolveStreams() } }.getOrDefault(false), themeMode = guestTheme, appLanguage = guestLanguage, railSpacingDp = railSpacingDp, showRemainingEpisodes = showRemainingEpisodes, tmdbCatalogueEnabled = selection.catalogue,
+                    tmdbEnrichmentEnabled = selection.enrichment,
+                    tmdbExtensionsLoaded = true, optionalAppFeaturesLoaded = true, playbackSettingsLoaded = true)
+                return
             }
 
+            val person = userIdProvider.currentDataUserId()
+            if (_state.value.personalDataUserId != person) {
+                traktSyncCoordinator.cancel()
+                traktPollJob?.cancel()
+                simklValidationRunning = false
+                simklLastValidatedAt = 0L
+                rdStartupRefreshDone = false
+                _state.value = SettingsUiState(personalDataUserId = person)
+            }
+            val optionalFeatures = prefsRepo.readOptionalAppFeatures()
+            _state.update { it.copy(optionalAppFeatures = optionalFeatures, optionalAppFeaturesLoaded = true) }
+            val tmdbSelection = prefsRepo.tmdbExtensionSelection()
+            _state.update { it.copy(tmdbCatalogueEnabled = tmdbSelection.catalogue,
+                tmdbEnrichmentEnabled = tmdbSelection.enrichment, tmdbExtensionsLoaded = true) }
             val provider = prefsRepo.getString(KEY_DEBRID_PROVIDER)?.let {
                 try { DebridServiceType.valueOf(it) } catch (_: Exception) { null }
             } ?: DebridServiceType.REAL_DEBRID
@@ -316,32 +472,30 @@ class SettingsViewModel(
                 integrationSecretStore.remove(IntegrationSecretKey.DEBRID_API_KEY)
                 prefsRepo.remove(KEY_DEBRID_API_KEY)
             }
-            // One-shot startup refresh: if we have RD OAuth credentials and haven't
-            // refreshed yet this session, get a fresh access token now so the first
-            // play attempt never hits a bad_token 401.
-            if (!rdStartupRefreshDone && provider == DebridServiceType.REAL_DEBRID) {
-                rdStartupRefreshDone = true
-                val refreshToken = integrationSecretStore.get(IntegrationSecretKey.DEBRID_RD_REFRESH_TOKEN)
-                val clientId = integrationSecretStore.get(IntegrationSecretKey.DEBRID_RD_CLIENT_ID)
-                val clientSecret = integrationSecretStore.get(IntegrationSecretKey.DEBRID_RD_CLIENT_SECRET)
-                torveVerboseLog { "TORVE_RD: startup refresh check hasRefreshCredential=${refreshToken != null} hasClientId=${clientId != null} hasClientSecret=${clientSecret != null}" }
-                if (refreshToken != null && clientId != null && clientSecret != null) {
-                    try {
-                        val tokens = debridClient.rdRefreshAccessToken(refreshToken, clientId, clientSecret)
-                        integrationSecretStore.put(IntegrationSecretKey.DEBRID_API_KEY_REAL_DEBRID, tokens.accessToken)
-                        integrationSecretStore.put(IntegrationSecretKey.DEBRID_RD_REFRESH_TOKEN, tokens.refreshToken)
-                        prefsRepo.setString(KEY_DEBRID_RD_EXPIRES_AT, tokens.expiresAt.toString())
-                        allDebridKeys[provider] = tokens.accessToken
-                        torveVerboseLog { "TORVE_RD: startup refresh OK" }
-                    } catch (e: Exception) {
-                        torveVerboseLog { "TORVE_RD: startup refresh failed ${e::class.simpleName} ${DiagnosticsRedactor.redact(e.message)}" }
-                    }
+            val activation = prefsRepo.readPandaDebridActivationSnapshot()
+            activation.disconnectedProviderIds.forEach { providerId ->
+                val disconnectedProvider = DebridServiceType.entries.firstOrNull {
+                    it.pandaProviderId() == providerId
                 }
+                if (disconnectedProvider != null) allDebridKeys.remove(disconnectedProvider)
             }
 
             val apiKey = allDebridKeys[provider] ?: ""
-            torveVerboseLog { "[SettingsLoad] Debrid provider=$provider hasCredential=${apiKey.isNotBlank()} providers=${allDebridKeys.keys}" }
-            // Trakt: secure store is authoritative. Migrate legacy pref keys once.
+            val enabledDebridKeys = activation.enabledCredentials(allDebridKeys)
+            torveVerboseLog {
+                "[SettingsLoad] Debrid provider=$provider hasCredential=${apiKey.isNotBlank()} " +
+                    "configured=${allDebridKeys.keys} enabled=${enabledDebridKeys.keys}"
+            }
+            // Trakt: apply a complete configured OAuth app identity when one was
+            // transferred or saved during setup. Incomplete pairs fall back to
+            // the bundled identity so the code and token requests never use
+            // different clients.
+            migrateSecretPref(KEY_TRAKT_CLIENT_SECRET, IntegrationSecretKey.TRAKT_CLIENT_SECRET)
+            val traktClientId = prefsRepo.getString(KEY_TRAKT_CLIENT_ID) ?: ""
+            val traktClientSecret = integrationSecretStore.get(IntegrationSecretKey.TRAKT_CLIENT_SECRET) ?: ""
+            traktClient.setCredentials(traktClientId, traktClientSecret)
+
+            // Trakt tokens: secure store is authoritative. Migrate legacy pref keys once.
             val traktTokens = traktTokenStore.read()
             migrateSecretPref(KEY_TRAKT_ACCESS_TOKEN, IntegrationSecretKey.TRAKT_ACCESS_TOKEN)
             migrateSecretPref(KEY_TRAKT_REFRESH_TOKEN, IntegrationSecretKey.TRAKT_REFRESH_TOKEN)
@@ -360,23 +514,28 @@ class SettingsViewModel(
                 )
             }
 
-            val maxQuality = prefsRepo.getString(KEY_MAX_QUALITY)?.let {
+            val savedPlaybackPreferences = readSavedPlaybackPreferences()
+            val maxQuality = savedPlaybackPreferences[KEY_MAX_QUALITY]?.let {
                 try { StreamQuality.valueOf(it) } catch (_: Exception) { null }
             } ?: StreamQuality.REMUX_4K
-            val minQuality = prefsRepo.getString(KEY_MIN_QUALITY)?.let {
+            val minQuality = savedPlaybackPreferences[KEY_MIN_QUALITY]?.let {
                 try { StreamQuality.valueOf(it) } catch (_: Exception) { null }
             } ?: StreamQuality.SD_480P
-            val maxFileSizeMb = prefsRepo.getString(KEY_MAX_FILE_SIZE_MB)?.toIntOrNull()
-            val cachedOnly = prefsRepo.getString(KEY_CACHED_ONLY)?.toBooleanStrictOrNull() ?: true
-            val hdrEnabled = prefsRepo.getString(KEY_HDR_ENABLED)?.toBooleanStrictOrNull() ?: false
-            val scrobbleEnabled = prefsRepo.getString(KEY_TRAKT_SCROBBLE)?.toBooleanStrictOrNull() ?: true
-            val simklClientId = prefsRepo.getString(KEY_SIMKL_CLIENT_ID) ?: ""
+            val maxFileSizeMb = savedPlaybackPreferences[KEY_MAX_FILE_SIZE_MB]?.toIntOrNull()
+            val hideWatched = savedPlaybackPreferences[KEY_HIDE_WATCHED]?.toBooleanStrictOrNull() ?: false
+            val excludeSeasonPacks = savedPlaybackPreferences[KEY_EXCLUDE_SEASON_PACKS]?.toBooleanStrictOrNull() ?: false
+            val matchFrameRate = savedPlaybackPreferences[KEY_MATCH_FRAME_RATE]?.toBooleanStrictOrNull() ?: false
+            val keepSubtitlesAboveControls = savedPlaybackPreferences[KEY_KEEP_SUBTITLES_ABOVE_CONTROLS]?.toBooleanStrictOrNull() ?: true
+            val cachedOnly = savedPlaybackPreferences[KEY_CACHED_ONLY]?.toBooleanStrictOrNull() ?: true
+            val hdrEnabled = savedPlaybackPreferences[KEY_HDR_ENABLED]?.toBooleanStrictOrNull() ?: false
+            val scrobbleEnabled = savedPlaybackPreferences[KEY_TRAKT_SCROBBLE]?.toBooleanStrictOrNull() ?: true
+            val simklClientId = savedPlaybackPreferences[KEY_SIMKL_CLIENT_ID] ?: ""
             // Simkl: secure store is authoritative. Migrate legacy pref key once.
             migrateSecretPref(KEY_SIMKL_ACCESS_TOKEN, IntegrationSecretKey.SIMKL_ACCESS_TOKEN)
             val simklAccessToken = integrationSecretStore.get(IntegrationSecretKey.SIMKL_ACCESS_TOKEN) ?: ""
             if (simklClientId.isNotBlank()) simklClient.setClientId(simklClientId)
 
-            val kodiHosts = prefsRepo.getString(KEY_KODI_HOSTS)?.let { json ->
+            val kodiHosts = savedPlaybackPreferences[KEY_KODI_HOSTS]?.let { json ->
                 try {
                     Json.decodeFromString<List<KodiHostJson>>(json).map {
                         KodiHost(name = it.name, ip = it.ip, port = it.port)
@@ -384,149 +543,122 @@ class SettingsViewModel(
                 } catch (_: Exception) { emptyList() }
             } ?: emptyList()
 
-            val themeMode = prefsRepo.getString(KEY_THEME_MODE)?.let {
+            val themeMode = savedPlaybackPreferences[KEY_THEME_MODE]?.let {
                 try { ThemeMode.valueOf(it) } catch (_: Exception) { null }
             } ?: ThemeMode.SYSTEM
-            val appLanguage = prefsRepo.getString(KEY_APP_LANGUAGE)?.let {
+            val appLanguage = savedPlaybackPreferences[KEY_APP_LANGUAGE]?.let {
                 try { AppLanguage.valueOf(it) } catch (_: Exception) { null }
             } ?: AppLanguage.ENGLISH
             onLanguageChanged?.invoke(appLanguage)
-            val homeLayoutSource = prefsRepo.getString(KEY_HOME_LAYOUT_SOURCE)
+            val moviesHeroEnabled = savedPlaybackPreferences[KEY_MOVIES_HERO] != "false"
+            val showsHeroEnabled = savedPlaybackPreferences[KEY_SHOWS_HERO] != "false"
+            val homeLayoutSource = savedPlaybackPreferences[KEY_HOME_LAYOUT_SOURCE]
                 ?.takeIf { it == "DESKTOP_OWN" || it == "SHARED_WITH_MOBILE" }
                 ?: "SHARED_WITH_MOBILE"
-            val lanServingEnabled = prefsRepo.getString(KEY_LAN_SERVING_ENABLED)?.toBooleanStrictOrNull() ?: false
-            val lanServingBindToLan = prefsRepo.getString(KEY_LAN_SERVING_BIND)?.equals("lan", ignoreCase = true) == true
-            val lanPlaybackWifiOnly = prefsRepo.getString(KEY_LAN_PLAYBACK_WIFI_ONLY)?.toBooleanStrictOrNull() ?: true
+            val lanServingEnabled = savedPlaybackPreferences[KEY_LAN_SERVING_ENABLED]?.toBooleanStrictOrNull() ?: false
+            val lanServingBindToLan = savedPlaybackPreferences[KEY_LAN_SERVING_BIND]?.equals("lan", ignoreCase = true) == true
+            val lanPlaybackWifiOnly = savedPlaybackPreferences[KEY_LAN_PLAYBACK_WIFI_ONLY]?.toBooleanStrictOrNull() ?: true
 
-            val autoPlayEnabled = prefsRepo.getString(KEY_AUTO_PLAY_ENABLED)?.toBooleanStrictOrNull() ?: true
-            val autoPlayNextEpisodeEnabled = prefsRepo.getString(KEY_AUTO_PLAY_NEXT_EPISODE)?.toBooleanStrictOrNull() ?: true
-            val autoSourceMode = prefsRepo.getString(KEY_AUTO_SOURCE_MODE)?.let {
+            val autoPlayEnabled = savedPlaybackPreferences[KEY_AUTO_PLAY_ENABLED]?.toBooleanStrictOrNull() ?: true
+            val autoPlayNextEpisodeEnabled = savedPlaybackPreferences[KEY_AUTO_PLAY_NEXT_EPISODE]?.toBooleanStrictOrNull() ?: true
+            val smartPlayback = loadSmartPlaybackSettings(autoPlayNextEpisodeEnabled)
+            val skipIntroMode = readSegmentActionMode(KEY_SKIP_INTRO_MODE, SegmentActionMode.SHOW_BUTTON)
+            val skipRecapMode = readSegmentActionMode(KEY_SKIP_RECAP_MODE, SegmentActionMode.SHOW_BUTTON)
+            val playNextCreditsMode = readSegmentActionMode(KEY_PLAY_NEXT_CREDITS_MODE, SegmentActionMode.SHOW_BUTTON)
+            val protectPostCredit = savedPlaybackPreferences[KEY_PROTECT_POST_CREDIT]?.toBooleanStrictOrNull() ?: true
+            val smartSegmentDetection = savedPlaybackPreferences[KEY_SMART_SEGMENT_DETECTION]?.toBooleanStrictOrNull() ?: true
+            val autoSourceMode = savedPlaybackPreferences[KEY_AUTO_SOURCE_MODE]?.let {
                 try { AutoSourceMode.valueOf(it) } catch (_: Exception) { null }
             } ?: AutoSourceMode.BALANCED
-            val allow4kAuto = prefsRepo.getString(KEY_ALLOW_4K_AUTO)?.toBooleanStrictOrNull() ?: false
-            val preferCompatibleCodecs = prefsRepo.getString(KEY_PREFER_COMPATIBLE_CODECS)?.toBooleanStrictOrNull() ?: true
+            val allow4kAuto = savedPlaybackPreferences[KEY_ALLOW_4K_AUTO]?.toBooleanStrictOrNull() ?: false
+            val preferCompatibleCodecs = savedPlaybackPreferences[KEY_PREFER_COMPATIBLE_CODECS]?.toBooleanStrictOrNull() ?: true
             val tvTransportSkipEnabled =
-                prefsRepo.getString(KEY_TV_TRANSPORT_SKIP_ENABLED)?.toBooleanStrictOrNull() ?: true
+                savedPlaybackPreferences[KEY_TV_TRANSPORT_SKIP_ENABLED]?.toBooleanStrictOrNull() ?: true
             val tvProgressiveSkipEnabled =
-                prefsRepo.getString(KEY_TV_PROGRESSIVE_SKIP_ENABLED)?.toBooleanStrictOrNull() ?: true
-            val tvSkipResetWindowMs = prefsRepo.getString(KEY_TV_SKIP_RESET_WINDOW_MS)
+                savedPlaybackPreferences[KEY_TV_PROGRESSIVE_SKIP_ENABLED]?.toBooleanStrictOrNull() ?: true
+            val tvSkipResetWindowMs = savedPlaybackPreferences[KEY_TV_SKIP_RESET_WINDOW_MS]
                 ?.toIntOrNull()
                 ?.coerceIn(600, 4_000)
                 ?: 1_500
             val tvExplicitTimelineScrubEnabled =
-                prefsRepo.getString(KEY_TV_EXPLICIT_TIMELINE_SCRUB_ENABLED)?.toBooleanStrictOrNull() ?: true
-            val seekStepSeconds = prefsRepo.getString(KEY_SEEK_STEP_SECONDS)
+                savedPlaybackPreferences[KEY_TV_EXPLICIT_TIMELINE_SCRUB_ENABLED]?.toBooleanStrictOrNull() ?: true
+            val seekStepSeconds = savedPlaybackPreferences[KEY_SEEK_STEP_SECONDS]
                 ?.toIntOrNull()?.coerceIn(5, 60) ?: 10
             val subtitlesEnabledByDefault =
-                prefsRepo.getString(KEY_SUBTITLES_ENABLED_DEFAULT)?.toBooleanStrictOrNull() ?: false
+                savedPlaybackPreferences[KEY_SUBTITLES_ENABLED_DEFAULT]?.toBooleanStrictOrNull() ?: false
             val preferredSubtitleLanguage =
-                prefsRepo.getString(KEY_PREFERRED_SUBTITLE_LANGUAGE) ?: ""
+                savedPlaybackPreferences[KEY_PREFERRED_SUBTITLE_LANGUAGE] ?: ""
             val preferredAudioLanguage =
-                prefsRepo.getString(KEY_PREFERRED_AUDIO_LANGUAGE) ?: ""
+                savedPlaybackPreferences[KEY_PREFERRED_AUDIO_LANGUAGE] ?: ""
+            val allowSubtitleLanguageFallback =
+                savedPlaybackPreferences[KEY_ALLOW_SUBTITLE_LANGUAGE_FALLBACK]?.toBooleanStrictOrNull() ?: false
             val rememberVolume =
-                prefsRepo.getString(KEY_REMEMBER_VOLUME)?.toBooleanStrictOrNull() ?: true
-            val lastVolume = prefsRepo.getString(KEY_LAST_VOLUME)
+                savedPlaybackPreferences[KEY_REMEMBER_VOLUME]?.toBooleanStrictOrNull() ?: true
+            val lastVolume = savedPlaybackPreferences[KEY_LAST_VOLUME]
                 ?.toIntOrNull()?.coerceIn(0, 100) ?: 100
-            val desktopPlaybackHotkeys = prefsRepo.getString(KEY_DESKTOP_PLAYBACK_HOTKEYS)?.let {
+            val desktopPlaybackHotkeys = savedPlaybackPreferences[KEY_DESKTOP_PLAYBACK_HOTKEYS]?.let {
                 try { jsonParser.decodeFromString<DesktopPlaybackHotkeys>(it).sanitized() } catch (_: Exception) { null }
             } ?: DesktopPlaybackHotkeys()
-            val movieDownloadPath = prefsRepo.getString(KEY_MOVIE_DOWNLOAD_PATH) ?: ""
-            val showDownloadPath = prefsRepo.getString(KEY_SHOW_DOWNLOAD_PATH) ?: ""
-            val adultDownloadPath = prefsRepo.getString(KEY_ADULT_DOWNLOAD_PATH) ?: ""
-            val sportsDownloadPath = prefsRepo.getString(KEY_SPORTS_DOWNLOAD_PATH) ?: ""
-            val recordingDownloadPath = prefsRepo.getString(KEY_RECORDING_DOWNLOAD_PATH) ?: ""
-            val downloadScanFolders = prefsRepo.getString(KEY_DOWNLOAD_SCAN_FOLDERS)?.let {
+            val movieDownloadPath = savedPlaybackPreferences[KEY_MOVIE_DOWNLOAD_PATH] ?: ""
+            val showDownloadPath = savedPlaybackPreferences[KEY_SHOW_DOWNLOAD_PATH] ?: ""
+            val adultDownloadPath = savedPlaybackPreferences[KEY_ADULT_DOWNLOAD_PATH] ?: ""
+            val sportsDownloadPath = savedPlaybackPreferences[KEY_SPORTS_DOWNLOAD_PATH] ?: ""
+            val recordingDownloadPath = savedPlaybackPreferences[KEY_RECORDING_DOWNLOAD_PATH] ?: ""
+            val downloadScanFolders = savedPlaybackPreferences[KEY_DOWNLOAD_SCAN_FOLDERS]?.let {
                 try { jsonParser.decodeFromString<List<String>>(it) } catch (_: Exception) { emptyList() }
             } ?: emptyList()
-            val lastSyncTime = prefsRepo.getString(KEY_LAST_SYNC_TIME)?.toLongOrNull()
-            val traktLastSyncTime = prefsRepo.getString(KEY_TRAKT_LAST_SYNC_TIME)?.toLongOrNull()
-            val availabilityLastSyncTime = prefsRepo.getString(KEY_AVAILABILITY_LAST_SYNC_TIME)?.toLongOrNull()
-            val libraryOverlayLastSyncTime = prefsRepo.getString(KEY_LIBRARY_OVERLAY_LAST_SYNC_TIME)?.toLongOrNull()
-            val codecPreference = prefsRepo.getString(KEY_CODEC_PREFERENCE)?.let {
+            val lastSyncTime = savedPlaybackPreferences[KEY_LAST_SYNC_TIME]?.toLongOrNull()
+            val traktLastSyncTime = savedPlaybackPreferences[KEY_TRAKT_LAST_SYNC_TIME]?.toLongOrNull()
+            val traktPendingWrites = withContext(ioDispatcher) { traktSyncRepo.pendingWriteCount() }
+            val availabilityLastSyncTime = savedPlaybackPreferences[KEY_AVAILABILITY_LAST_SYNC_TIME]?.toLongOrNull()
+            val libraryOverlayLastSyncTime = savedPlaybackPreferences[KEY_LIBRARY_OVERLAY_LAST_SYNC_TIME]?.toLongOrNull()
+            val codecPreference = savedPlaybackPreferences[KEY_CODEC_PREFERENCE]?.let {
                 try { CodecPreference.valueOf(it) } catch (_: Exception) { null }
             } ?: CodecPreference.HEVC_PREFERRED
-            val hdrMode = prefsRepo.getString(KEY_HDR_MODE)?.let {
+            val hdrMode = savedPlaybackPreferences[KEY_HDR_MODE]?.let {
                 try { HdrMode.valueOf(it) } catch (_: Exception) { null }
             } ?: HdrMode.AUTO
 
-            val loadedRegexPatterns = prefsRepo.getString(KEY_REGEX_PATTERNS)?.let {
+            val loadedRegexPatterns = savedPlaybackPreferences[KEY_REGEX_PATTERNS]?.let {
                 try { jsonParser.decodeFromString<List<RegexPattern>>(it) } catch (_: Exception) { emptyList() }
             } ?: emptyList()
             val regexPatterns = loadedRegexPatterns.map(StreamRulePatternValidator::sanitize)
             if (regexPatterns != loadedRegexPatterns) {
                 prefsRepo.setString(KEY_REGEX_PATTERNS, jsonParser.encodeToString(regexPatterns))
             }
-            val loadedStreamGroups = prefsRepo.getString(KEY_STREAM_GROUPS)?.let {
+            val loadedStreamGroups = savedPlaybackPreferences[KEY_STREAM_GROUPS]?.let {
                 try { jsonParser.decodeFromString<List<StreamGroup>>(it) } catch (_: Exception) { DEFAULT_STREAM_GROUPS }
             } ?: DEFAULT_STREAM_GROUPS
             val streamGroups = loadedStreamGroups.map(StreamRulePatternValidator::sanitize)
             if (streamGroups != loadedStreamGroups) {
                 prefsRepo.setString(KEY_STREAM_GROUPS, jsonParser.encodeToString(streamGroups))
             }
-            val dedupeResults = prefsRepo.getString(KEY_DEDUPE_RESULTS)?.toBooleanStrictOrNull() ?: true
-
-            // All integration secrets: secure store is the ONLY source of truth.
-            // Legacy pref keys are migrated once on first read, then deleted.
-            // This prevents stale credentials from surviving logout.
-            migrateSecretPref(KEY_CLAUDE_API_KEY, IntegrationSecretKey.CLAUDE_API_KEY)
-            migrateSecretPref(KEY_CHATGPT_API_KEY, IntegrationSecretKey.CHATGPT_API_KEY)
-            migrateSecretPref(KEY_GEMINI_API_KEY, IntegrationSecretKey.GEMINI_API_KEY)
-            migrateSecretPref(KEY_PERPLEXITY_API_KEY, IntegrationSecretKey.PERPLEXITY_API_KEY)
-            migrateSecretPref(KEY_DEEPSEEK_API_KEY, IntegrationSecretKey.DEEPSEEK_API_KEY)
-            migrateSecretPref(KEY_OMDB_API_KEY, IntegrationSecretKey.OMDB_API_KEY)
-            migrateSecretPref(KEY_MDBLIST_API_KEY, IntegrationSecretKey.MDBLIST_API_KEY)
-            migrateSecretPref("jellyfin_api_key", IntegrationSecretKey.JELLYFIN_API_KEY)
-
-            val aiProvider = prefsRepo.getString(KEY_AI_PROVIDER)?.let {
-                try { AiProvider.valueOf(it) } catch (_: Exception) { null }
-            } ?: AiProvider.CLAUDE
-            val claudeApiKey = integrationSecretStore.get(IntegrationSecretKey.CLAUDE_API_KEY) ?: ""
-            val chatGptApiKey = integrationSecretStore.get(IntegrationSecretKey.CHATGPT_API_KEY) ?: ""
-            val geminiApiKey = integrationSecretStore.get(IntegrationSecretKey.GEMINI_API_KEY) ?: ""
-            val perplexityApiKey = integrationSecretStore.get(IntegrationSecretKey.PERPLEXITY_API_KEY) ?: ""
-            val deepSeekApiKey = integrationSecretStore.get(IntegrationSecretKey.DEEPSEEK_API_KEY) ?: ""
-            val opensubtitlesApiKey = integrationSecretStore.get(IntegrationSecretKey.OPENSUBTITLES_API_KEY) ?: ""
-            val omdbApiKey = integrationSecretStore.get(IntegrationSecretKey.OMDB_API_KEY) ?: ""
-            val mdblistApiKey = integrationSecretStore.get(IntegrationSecretKey.MDBLIST_API_KEY) ?: ""
-            val jellyfinServerUrl = prefsRepo.getString(KEY_JELLYFIN_SERVER_URL) ?: ""
-            val jellyfinApiKey = integrationSecretStore.get(IntegrationSecretKey.JELLYFIN_API_KEY) ?: ""
-            val plexServerUrl = prefsRepo.getString(KEY_PLEX_SERVER_URL) ?: ""
-            val plexAccessToken = integrationSecretStore.get(IntegrationSecretKey.PLEX_ACCESS_TOKEN) ?: ""
-            val regionCode = prefsRepo.getString(KEY_REGION_CODE)?.uppercase()?.takeIf { it.length == 2 } ?: "US"
-            val ratingPrefs = prefsRepo.getString(KEY_RATING_PREFS)?.let {
-                try { jsonParser.decodeFromString<RatingDisplayPrefs>(it) } catch (_: Exception) { null }
-            }?.let(::sanitizeRatingPrefs) ?: RatingDisplayPrefs()
-            val legacyCardPrefs = prefsRepo.getString(KEY_CARD_PREFS)?.let {
-                try { jsonParser.decodeFromString<CardPrefs>(it) } catch (_: Exception) { null }
-            } ?: CardPrefs()
-
-            val (cardStylePresets, globalDefaultPresetId) = loadCardStylePresets(
-                legacyCardPrefs = legacyCardPrefs,
-                ratingPrefs = ratingPrefs,
-            )
+            val dedupeResults = savedPlaybackPreferences[KEY_DEDUPE_RESULTS]?.toBooleanStrictOrNull() ?: true
 
             // Derive whether any enabled addon can produce streams — the
             // "stream" resource is the Stremio-addon contract for /stream/…
             // endpoints. Empty resources list is treated as a full-service
             // addon (mirrors StreamAggregator.supportsStreamResolution).
             val hasStreamAddon = runCatching {
-                addonRepo.getEnabledAddons().any { addon ->
-                    val resources = addon.manifest.resources
-                    resources.isEmpty() || resources.any { it.equals("stream", ignoreCase = true) }
-                }
+                addonRepo.getEnabledAddons().any { addon -> addon.canResolveStreams() } ||
+                    configuredUsenet?.hasSources() == true
             }.getOrDefault(false)
 
             _state.update {
                 it.copy(
+                    personalDataUserId = person,
+                    playbackSettingsLoaded = true,
                     debridProvider = provider,
                     debridApiKey = apiKey,
                     debridConnected = apiKey.isNotBlank(),
                     hasStreamAddon = hasStreamAddon,
-                    connectedDebridProviders = allDebridKeys,
+                    configuredDebridProviders = allDebridKeys.toMap(),
+                    connectedDebridProviders = enabledDebridKeys.toMap(),
                     // Clear runtime-only account-linked state that isn't re-read from stores.
                     // After logout, secrets are empty → connected=false → profiles/users gone.
                     debridUser = if (apiKey.isNotBlank()) it.debridUser else null,
                     debridLoading = false,
+                    traktClientId = traktClientId,
                     traktAccessToken = traktAccessToken,
                     traktRefreshToken = traktRefreshToken,
                     traktConnected = traktAccessToken.isNotBlank(),
@@ -534,6 +666,7 @@ class SettingsViewModel(
                     traktStats = if (traktAccessToken.isNotBlank()) it.traktStats else null,
                     traktScrobbleEnabled = scrobbleEnabled,
                     traktLastSyncTime = traktLastSyncTime,
+                    traktPendingWrites = traktPendingWrites,
                     availabilityLastSyncTime = availabilityLastSyncTime,
                     libraryOverlayLastSyncTime = libraryOverlayLastSyncTime,
                     simklClientId = simklClientId,
@@ -543,17 +676,40 @@ class SettingsViewModel(
                     maxQuality = maxQuality,
                     minQuality = minQuality,
                     maxFileSizeMb = maxFileSizeMb,
+                    minSourceSizePerHourMb = smartPlayback.minSourceSizePerHourMb,
+                    hideWatched = hideWatched,
+                    excludeSeasonPacks = excludeSeasonPacks,
+                    matchFrameRate = matchFrameRate,
+                    keepSubtitlesAboveControls = keepSubtitlesAboveControls,
                     cachedOnly = cachedOnly,
                     hdrEnabled = hdrEnabled,
                     kodiHosts = kodiHosts,
                     themeMode = themeMode,
+                    railSpacingDp = railSpacingDp,
+                    showRemainingEpisodes = showRemainingEpisodes,
                     appLanguage = appLanguage,
                     homeLayoutSource = homeLayoutSource,
+                    moviesHeroEnabled = moviesHeroEnabled,
+                    showsHeroEnabled = showsHeroEnabled,
                     lanServingEnabled = lanServingEnabled,
                     lanServingBindToLan = lanServingBindToLan,
                     lanPlaybackWifiOnly = lanPlaybackWifiOnly,
                     autoPlayEnabled = autoPlayEnabled,
                     autoPlayNextEpisodeEnabled = autoPlayNextEpisodeEnabled,
+                    nextEpisodeMode = smartPlayback.nextEpisodeMode,
+                    skipIntroMode = skipIntroMode,
+                    skipRecapMode = skipRecapMode,
+                    playNextDuringCreditsMode = playNextCreditsMode,
+                    protectPostCreditScenes = protectPostCredit,
+                    smartSegmentDetectionEnabled = smartSegmentDetection,
+                    nextEpisodePreparationMode = smartPlayback.preparationMode,
+                    nextEpisodePreloadBufferSeconds = smartPlayback.preloadBufferSeconds,
+                    nextEpisodePreloadMaxMb = smartPlayback.preloadMaxMb,
+                    nextEpisodePreloadWifiOnly = smartPlayback.preloadWifiOnly,
+                    sourceLanguageMatchMode = smartPlayback.languageMatchMode,
+                    unknownSourceSizePolicy = smartPlayback.unknownSizePolicy,
+                    unknownSourceLanguagePolicy = smartPlayback.unknownLanguagePolicy,
+                    sourceFallbackPolicy = smartPlayback.fallbackPolicy,
                     autoSourceMode = autoSourceMode,
                     allow4kAuto = allow4kAuto,
                     preferCompatibleCodecs = preferCompatibleCodecs,
@@ -565,6 +721,7 @@ class SettingsViewModel(
                     subtitlesEnabledByDefault = subtitlesEnabledByDefault,
                     preferredSubtitleLanguage = preferredSubtitleLanguage,
                     preferredAudioLanguage = preferredAudioLanguage,
+                    allowSubtitleLanguageFallback = allowSubtitleLanguageFallback,
                     rememberVolume = rememberVolume,
                     lastVolume = lastVolume,
                     desktopPlaybackHotkeys = desktopPlaybackHotkeys,
@@ -580,48 +737,263 @@ class SettingsViewModel(
                     regexPatterns = regexPatterns,
                     streamGroups = streamGroups,
                     dedupeResults = dedupeResults,
-                    aiProvider = aiProvider,
-                    claudeApiKey = claudeApiKey,
-                    chatGptApiKey = chatGptApiKey,
-                    geminiApiKey = geminiApiKey,
-                    perplexityApiKey = perplexityApiKey,
-                    deepSeekApiKey = deepSeekApiKey,
-                    opensubtitlesApiKey = opensubtitlesApiKey,
-                    omdbApiKey = omdbApiKey,
-                    omdbValidationResult = null,
-                    aiKeyValidationResult = null,
-                    mdblistApiKey = mdblistApiKey,
-                    jellyfinServerUrl = jellyfinServerUrl,
-                    jellyfinApiKey = jellyfinApiKey,
-                    jellyfinProfiles = if (jellyfinApiKey.isNotBlank()) it.jellyfinProfiles else emptyList(),
-                    selectedJellyfinUserId = if (jellyfinApiKey.isNotBlank()) it.selectedJellyfinUserId else null,
-                    jellyfinStatusMessage = null,
-                    plexServerUrl = plexServerUrl,
-                    plexAccessToken = plexAccessToken,
-                    plexConnected = plexAccessToken.isNotBlank(),
-                    plexError = null,
-                    regionCode = regionCode,
-                    ratingPrefs = ratingPrefs,
-                    cardStylePresets = cardStylePresets,
-                    globalDefaultPresetId = globalDefaultPresetId,
                 )
             }
+
+            refreshStartupRealDebridToken(provider, activation.disconnectedProviderIds, person)
+
+            loadSavedIntegrationSettings()
 
             // Legacy migration block removed — migrateSecretPref() handles all
             // one-time imports from plaintext prefs → secure store above.
 
-            torveVerboseLog { "[SettingsLoad] debridConnected=${apiKey.isNotBlank()} traktConnected=${traktAccessToken.isNotBlank()} simklConnected=${simklAccessToken.isNotBlank()} ratingPrefs.enabled=${ratingPrefs.enabledProviders} maxRatingsOnCard=${ratingPrefs.maxRatingsOnCard} pillPosition=${ratingPrefs.pillPosition}" }
+            torveVerboseLog { "[SettingsLoad] debridConnected=${apiKey.isNotBlank()} traktConnected=${traktAccessToken.isNotBlank()} simklConnected=${simklAccessToken.isNotBlank()}" }
             if (apiKey.isNotBlank()) {
                 verifyDebridConnection()
             }
             if (traktAccessToken.isNotBlank()) {
-                ensureTraktSessionReady(syncOnSuccess = true)
+                if (traktAuthRequestJob?.isActive != true && !_state.value.isPollingTrakt) {
+                    traktSyncCoordinator.syncAutomatically()
+                }
+            } else {
+                traktSyncCoordinator.cancel()
             }
             if (simklAccessToken.isNotBlank()) {
                 ensureSimklSessionReady()
+                simklSyncService?.sync()
             }
+    }
+
+    // Read in one bounded coroutine loop instead of generating a giant JVM
+    // state machine that spills every previous setting at each preference read.
+    private suspend fun readSavedPlaybackPreferences(): Map<String, String?> {
+        val values = mutableMapOf<String, String?>()
+        for (key in listOf(
+            KEY_MAX_QUALITY,
+            KEY_MIN_QUALITY,
+            KEY_MAX_FILE_SIZE_MB,
+            KEY_HIDE_WATCHED,
+            KEY_EXCLUDE_SEASON_PACKS,
+            KEY_MATCH_FRAME_RATE,
+            KEY_KEEP_SUBTITLES_ABOVE_CONTROLS,
+            KEY_CACHED_ONLY,
+            KEY_HDR_ENABLED,
+            KEY_TRAKT_SCROBBLE,
+            KEY_SIMKL_CLIENT_ID,
+            KEY_KODI_HOSTS,
+            KEY_THEME_MODE,
+            KEY_APP_LANGUAGE,
+            KEY_MOVIES_HERO,
+            KEY_SHOWS_HERO,
+            KEY_HOME_LAYOUT_SOURCE,
+            KEY_LAN_SERVING_ENABLED,
+            KEY_LAN_SERVING_BIND,
+            KEY_LAN_PLAYBACK_WIFI_ONLY,
+            KEY_AUTO_PLAY_ENABLED,
+            KEY_AUTO_PLAY_NEXT_EPISODE,
+            KEY_PROTECT_POST_CREDIT,
+            KEY_SMART_SEGMENT_DETECTION,
+            KEY_AUTO_SOURCE_MODE,
+            KEY_ALLOW_4K_AUTO,
+            KEY_PREFER_COMPATIBLE_CODECS,
+            KEY_TV_TRANSPORT_SKIP_ENABLED,
+            KEY_TV_PROGRESSIVE_SKIP_ENABLED,
+            KEY_TV_SKIP_RESET_WINDOW_MS,
+            KEY_TV_EXPLICIT_TIMELINE_SCRUB_ENABLED,
+            KEY_SEEK_STEP_SECONDS,
+            KEY_SUBTITLES_ENABLED_DEFAULT,
+            KEY_PREFERRED_SUBTITLE_LANGUAGE,
+            KEY_PREFERRED_AUDIO_LANGUAGE,
+            KEY_ALLOW_SUBTITLE_LANGUAGE_FALLBACK,
+            KEY_REMEMBER_VOLUME,
+            KEY_LAST_VOLUME,
+            KEY_DESKTOP_PLAYBACK_HOTKEYS,
+            KEY_MOVIE_DOWNLOAD_PATH,
+            KEY_SHOW_DOWNLOAD_PATH,
+            KEY_ADULT_DOWNLOAD_PATH,
+            KEY_SPORTS_DOWNLOAD_PATH,
+            KEY_RECORDING_DOWNLOAD_PATH,
+            KEY_DOWNLOAD_SCAN_FOLDERS,
+            KEY_LAST_SYNC_TIME,
+            KEY_TRAKT_LAST_SYNC_TIME,
+            KEY_AVAILABILITY_LAST_SYNC_TIME,
+            KEY_LIBRARY_OVERLAY_LAST_SYNC_TIME,
+            KEY_CODEC_PREFERENCE,
+            KEY_HDR_MODE,
+            KEY_REGEX_PATTERNS,
+            KEY_STREAM_GROUPS,
+            KEY_DEDUPE_RESULTS,
+        )) values[key] = prefsRepo.getString(key)
+        return values
+    }
+
+    private suspend fun refreshStartupRealDebridToken(provider: DebridServiceType,
+        disconnectedProviderIds: Set<String>, person: String) {
+            // One-shot startup refresh: if we have RD OAuth credentials and haven't
+            // refreshed yet this session, get a fresh access token now so the first
+            // play attempt never hits a bad_token 401.
+            if (
+                !rdStartupRefreshDone &&
+                provider == DebridServiceType.REAL_DEBRID &&
+                provider.pandaProviderId() !in disconnectedProviderIds
+            ) {
+                rdStartupRefreshDone = true
+                val refreshToken = integrationSecretStore.get(IntegrationSecretKey.DEBRID_RD_REFRESH_TOKEN)
+                val clientId = integrationSecretStore.get(IntegrationSecretKey.DEBRID_RD_CLIENT_ID)
+                val clientSecret = integrationSecretStore.get(IntegrationSecretKey.DEBRID_RD_CLIENT_SECRET)
+                torveVerboseLog { "TORVE_RD: startup refresh check hasRefreshCredential=${refreshToken != null} hasClientId=${clientId != null} hasClientSecret=${clientSecret != null}" }
+                if (refreshToken != null && clientId != null && clientSecret != null) {
+                    try {
+                        val tokens = debridClient.rdRefreshAccessToken(refreshToken, clientId, clientSecret)
+                        val activation = prefsRepo.readPandaDebridActivationSnapshot()
+                        if (userIdProvider.currentDataUserId() != person ||
+                            DebridServiceType.REAL_DEBRID.pandaProviderId() in activation.disconnectedProviderIds
+                        ) {
+                            return
+                        }
+                        integrationSecretStore.put(IntegrationSecretKey.DEBRID_API_KEY_REAL_DEBRID, tokens.accessToken)
+                        integrationSecretStore.put(IntegrationSecretKey.DEBRID_RD_REFRESH_TOKEN, tokens.refreshToken)
+                        prefsRepo.setString(KEY_DEBRID_RD_EXPIRES_AT, tokens.expiresAt.toString())
+                        _state.update { current -> current.copy(
+                            debridApiKey = if (current.debridProvider == provider) tokens.accessToken else current.debridApiKey,
+                            configuredDebridProviders = current.configuredDebridProviders + (provider to tokens.accessToken),
+                            connectedDebridProviders = if (activation.isEnabled(provider.pandaProviderId()))
+                                current.connectedDebridProviders + (provider to tokens.accessToken) else current.connectedDebridProviders,
+                        ) }
+                        torveVerboseLog { "TORVE_RD: startup refresh OK" }
+                    } catch (cancelled: CancellationException) { throw cancelled }
+                    catch (e: Exception) {
+                        torveVerboseLog { "TORVE_RD: startup refresh failed ${e::class.simpleName} ${DiagnosticsRedactor.redact(e.message)}" }
+                    }
+                }
+            }
+
+
+    }
+
+    fun refreshForProfile() {
+        savedSettingsJob?.cancel()
+        savedSettingsJob = null
+        savedSettingsOwner = null
+        savedSettingsRefreshPending = false
+        traktSyncCoordinator.cancel()
+        rdStartupRefreshDone = false
+        _state.value = SettingsUiState()
+        refreshSettings()
+    }
+
+    private suspend fun loadSavedIntegrationSettings() {
+        // The encrypted store is authoritative. Plaintext keys are migrated
+        // once and removed immediately.
+        migrateSecretPref(KEY_CLAUDE_API_KEY, IntegrationSecretKey.CLAUDE_API_KEY)
+        migrateSecretPref(KEY_CHATGPT_API_KEY, IntegrationSecretKey.CHATGPT_API_KEY)
+        migrateSecretPref(KEY_GEMINI_API_KEY, IntegrationSecretKey.GEMINI_API_KEY)
+        migrateSecretPref(KEY_PERPLEXITY_API_KEY, IntegrationSecretKey.PERPLEXITY_API_KEY)
+        migrateSecretPref(KEY_DEEPSEEK_API_KEY, IntegrationSecretKey.DEEPSEEK_API_KEY)
+        migrateSecretPref(KEY_OMDB_API_KEY, IntegrationSecretKey.OMDB_API_KEY)
+        migrateSecretPref(KEY_MDBLIST_API_KEY, IntegrationSecretKey.MDBLIST_API_KEY)
+        migrateSecretPref("jellyfin_api_key", IntegrationSecretKey.JELLYFIN_API_KEY)
+
+        val aiProvider = prefsRepo.getString(KEY_AI_PROVIDER)?.let {
+            runCatching { AiProvider.valueOf(it) }.getOrNull()
+        } ?: AiProvider.CLAUDE
+        val claudeApiKey = integrationSecretStore.get(IntegrationSecretKey.CLAUDE_API_KEY).orEmpty()
+        val chatGptApiKey = integrationSecretStore.get(IntegrationSecretKey.CHATGPT_API_KEY).orEmpty()
+        val geminiApiKey = integrationSecretStore.get(IntegrationSecretKey.GEMINI_API_KEY).orEmpty()
+        val perplexityApiKey = integrationSecretStore.get(IntegrationSecretKey.PERPLEXITY_API_KEY).orEmpty()
+        val deepSeekApiKey = integrationSecretStore.get(IntegrationSecretKey.DEEPSEEK_API_KEY).orEmpty()
+        val opensubtitlesApiKey = integrationSecretStore.get(IntegrationSecretKey.OPENSUBTITLES_API_KEY).orEmpty()
+        val omdbApiKey = integrationSecretStore.get(IntegrationSecretKey.OMDB_API_KEY).orEmpty()
+        val mdblistApiKey = integrationSecretStore.get(IntegrationSecretKey.MDBLIST_API_KEY).orEmpty()
+        val jellyfinServerUrl = prefsRepo.getString(KEY_JELLYFIN_SERVER_URL).orEmpty()
+        val jellyfinApiKey = integrationSecretStore.get(IntegrationSecretKey.JELLYFIN_API_KEY).orEmpty()
+        val plexServerUrl = prefsRepo.getString(KEY_PLEX_SERVER_URL).orEmpty()
+        val plexAccessToken = integrationSecretStore.get(IntegrationSecretKey.PLEX_ACCESS_TOKEN).orEmpty()
+        val seerrServerUrl = prefsRepo.getString(KEY_SEERR_SERVER_URL).orEmpty()
+        val seerrApiKey = integrationSecretStore.get(IntegrationSecretKey.SEERR_API_KEY).orEmpty()
+        val regionCode = prefsRepo.getString(KEY_REGION_CODE)?.uppercase()?.takeIf { it.length == 2 } ?: "US"
+        val ratingPrefs = prefsRepo.getString(KEY_RATING_PREFS)?.let {
+            runCatching { jsonParser.decodeFromString<RatingDisplayPrefs>(it) }.getOrNull()
+        }?.let(::sanitizeRatingPrefs) ?: RatingDisplayPrefs()
+        val legacyCardPrefs = prefsRepo.getString(KEY_CARD_PREFS)?.let {
+            runCatching { jsonParser.decodeFromString<CardPrefs>(it) }.getOrNull()
+        } ?: CardPrefs()
+        val (cardStylePresets, globalDefaultPresetId) = loadCardStylePresets(legacyCardPrefs, ratingPrefs)
+
+        _state.update {
+            it.copy(
+                aiProvider = aiProvider,
+                claudeApiKey = claudeApiKey,
+                chatGptApiKey = chatGptApiKey,
+                geminiApiKey = geminiApiKey,
+                perplexityApiKey = perplexityApiKey,
+                deepSeekApiKey = deepSeekApiKey,
+                opensubtitlesApiKey = opensubtitlesApiKey,
+                omdbApiKey = omdbApiKey,
+                omdbValidationResult = null,
+                aiKeyValidationResult = null,
+                mdblistApiKey = mdblistApiKey,
+                jellyfinServerUrl = jellyfinServerUrl,
+                jellyfinApiKey = jellyfinApiKey,
+                // Account-backed Jellyfin payloads are stored atomically only after
+                // validation. A complete restored payload is therefore configured,
+                // even though transient presentation messages do not survive restart.
+                jellyfinConnected = jellyfinServerUrl.isNotBlank() && jellyfinApiKey.isNotBlank(),
+                jellyfinProfiles = if (jellyfinApiKey.isNotBlank()) it.jellyfinProfiles else emptyList(),
+                selectedJellyfinUserId = if (jellyfinApiKey.isNotBlank()) it.selectedJellyfinUserId else null,
+                jellyfinStatusMessage = null,
+                plexServerUrl = plexServerUrl,
+                plexAccessToken = plexAccessToken,
+                plexConnected = plexAccessToken.isNotBlank(),
+                plexError = null,
+                seerrServerUrl = seerrServerUrl,
+                seerrApiKey = seerrApiKey,
+                seerrConnected = seerrServerUrl.isNotBlank() && seerrApiKey.isNotBlank(),
+                seerrStatusMessage = null,
+                regionCode = regionCode,
+                ratingPrefs = ratingPrefs,
+                cardStylePresets = cardStylePresets,
+                globalDefaultPresetId = globalDefaultPresetId,
+            )
+        }
+        torveVerboseLog {
+            "[SettingsLoad] ratingPrefs.enabled=${ratingPrefs.enabledProviders} " +
+                "maxRatingsOnCard=${ratingPrefs.maxRatingsOnCard} pillPosition=${ratingPrefs.pillPosition}"
         }
     }
+
+    private suspend fun loadSmartPlaybackSettings(legacyAutoPlayNext: Boolean): SmartPlaybackSavedSettings =
+        SmartPlaybackSavedSettings(
+            minSourceSizePerHourMb = prefsRepo.getString(KEY_MIN_SOURCE_SIZE_PER_HOUR_MB)
+                ?.toIntOrNull()?.coerceIn(0, 64 * 1024) ?: 0,
+            nextEpisodeMode = prefsRepo.getString(KEY_NEXT_EPISODE_MODE)?.let {
+                runCatching { NextEpisodeMode.valueOf(it) }.getOrNull()
+            } ?: if (legacyAutoPlayNext) NextEpisodeMode.AT_END else NextEpisodeMode.OFF,
+            preparationMode = prefsRepo.getString(KEY_NEXT_EPISODE_PREPARATION_MODE)?.let {
+                runCatching { NextEpisodePreparationMode.valueOf(it) }.getOrNull()
+            } ?: NextEpisodePreparationMode.RESOLVE_ONLY,
+            preloadBufferSeconds = prefsRepo.getString(KEY_NEXT_EPISODE_PRELOAD_BUFFER_SECONDS)
+                ?.toIntOrNull()?.coerceIn(0, 120) ?: 30,
+            preloadMaxMb = prefsRepo.getString(KEY_NEXT_EPISODE_PRELOAD_MAX_MB)
+                ?.toIntOrNull()?.coerceIn(16, 1024) ?: 128,
+            preloadWifiOnly = prefsRepo.getString(KEY_NEXT_EPISODE_PRELOAD_WIFI_ONLY)
+                ?.toBooleanStrictOrNull() ?: true,
+            languageMatchMode = prefsRepo.getString(KEY_SOURCE_LANGUAGE_MATCH_MODE)?.let {
+                runCatching { SourceLanguageMatchMode.valueOf(it) }.getOrNull()
+            } ?: SourceLanguageMatchMode.PREFER,
+            unknownSizePolicy = prefsRepo.getString(KEY_UNKNOWN_SOURCE_SIZE_POLICY)?.let {
+                runCatching { UnknownSourceMetadataPolicy.valueOf(it) }.getOrNull()
+            } ?: UnknownSourceMetadataPolicy.ALLOW_WITH_PENALTY,
+            unknownLanguagePolicy = prefsRepo.getString(KEY_UNKNOWN_SOURCE_LANGUAGE_POLICY)?.let {
+                runCatching { UnknownSourceMetadataPolicy.valueOf(it) }.getOrNull()
+            } ?: UnknownSourceMetadataPolicy.ALLOW_WITH_PENALTY,
+            fallbackPolicy = prefsRepo.getString(KEY_SOURCE_FALLBACK_POLICY)?.let {
+                runCatching { SourceFallbackPolicy.valueOf(it) }.getOrNull()
+            } ?: SourceFallbackPolicy.ASK,
+        )
+
+    private suspend fun readSegmentActionMode(key: String, fallback: SegmentActionMode): SegmentActionMode =
+        prefsRepo.getString(key)?.let { runCatching { SegmentActionMode.valueOf(it) }.getOrNull() } ?: fallback
 
     // -------------------------------------------------------------------------
     // Debrid
@@ -630,22 +1002,31 @@ class SettingsViewModel(
     fun setDebridProvider(provider: DebridServiceType) {
         debridPollJob?.cancel()
         scope.launch {
-            prefsRepo.setString(KEY_DEBRID_PROVIDER, provider.name)
-            // Load the target provider's stored key
-            val storedKey = integrationSecretStore.get(debridSecretKey(provider)) ?: ""
-            _state.update {
-                it.copy(
-                    debridProvider = provider,
-                    debridApiKey = storedKey,
-                    debridConnected = storedKey.isNotBlank(),
-                    debridUser = null,
-                    debridDeviceCode = null,
-                    isPollingDebrid = false,
-                    debridError = null,
-                )
-            }
-            if (storedKey.isNotBlank()) verifyDebridConnection()
+            selectDebridProvider(provider, verifyStoredKey = true)
         }
+    }
+
+    /** Select and apply a newly entered key in order, including when the provider is unchanged. */
+    fun connectDebridProviderWithApiKey(provider: DebridServiceType, apiKey: String) {
+        if (apiKey.isBlank()) return
+        debridPollJob?.cancel()
+        val person = userIdProvider.currentDataUserId()
+        scope.launch(com.torve.data.auth.PersonalDataScope(userIdProvider.currentUserId(), userIdProvider.currentProfileId())) {
+            selectDebridProvider(provider, verifyStoredKey = false)
+            if (person != userIdProvider.currentDataUserId()) return@launch
+            setDebridApiKey(apiKey)
+            connectDebridWithApiKey()
+        }
+    }
+
+    private suspend fun selectDebridProvider(provider: DebridServiceType, verifyStoredKey: Boolean) {
+        prefsRepo.setString(KEY_DEBRID_PROVIDER, provider.name)
+        val storedKey = integrationSecretStore.get(debridSecretKey(provider)) ?: ""
+        _state.update {
+            it.copy(debridProvider = provider, debridApiKey = storedKey, debridConnected = storedKey.isNotBlank(),
+                debridUser = null, debridDeviceCode = null, isPollingDebrid = false, debridError = null)
+        }
+        if (verifyStoredKey && storedKey.isNotBlank()) verifyDebridConnection()
     }
 
     fun setDebridApiKey(apiKey: String) {
@@ -656,22 +1037,38 @@ class SettingsViewModel(
         val apiKey = _state.value.debridApiKey
         if (apiKey.isBlank()) return
         val provider = _state.value.debridProvider
+        val person = userIdProvider.currentDataUserId()
 
-        scope.launch {
+        scope.launch(com.torve.data.auth.PersonalDataScope(userIdProvider.currentUserId(), userIdProvider.currentProfileId())) {
             _state.update { it.copy(debridLoading = true, debridError = null) }
             val result = debridClient.verifyApiKey(provider, apiKey)
+            if (person != userIdProvider.currentDataUserId() || provider != _state.value.debridProvider) return@launch
             if (result.success) {
+                val providerId = provider.pandaProviderId()
+                prefsRepo.writePandaDebridActivationSnapshot(
+                    prefsRepo.readPandaDebridActivationSnapshot()
+                        .withExplicitMutation(providerId, enabled = true),
+                )
                 integrationSecretStore.put(debridSecretKey(provider), apiKey)
                 if (provider == DebridServiceType.TORBOX) {
                     integrationSecretStore.syncTorBoxCredentialPair(apiKey)
                 }
+                val activation = prefsRepo.readPandaDebridActivationSnapshot()
                 val updated = _state.value.connectedDebridProviders.toMutableMap()
-                updated[provider] = apiKey
+                if (activation.isEnabled(provider.pandaProviderId())) {
+                    updated[provider] = apiKey
+                } else {
+                    updated.remove(provider)
+                }
+                val configured = _state.value.configuredDebridProviders.toMutableMap()
+                configured[provider] = apiKey
+                if (person != userIdProvider.currentDataUserId()) return@launch
                 _state.update {
                     it.copy(
                         debridConnected = true,
                         debridUser = result.user,
                         debridLoading = false,
+                        configuredDebridProviders = configured,
                         connectedDebridProviders = updated,
                     )
                 }
@@ -681,6 +1078,7 @@ class SettingsViewModel(
                         "DEBRID_API_KEY_${provider.name}",
                         buildDebridSyncCredentials(provider, apiKey),
                         provider.name,
+                        emptyMap(),
                     )
                 }
             } else {
@@ -723,6 +1121,11 @@ class SettingsViewModel(
                     code.userCode,
                 )
                 if (result.done && result.apiKey != null) {
+                    val providerId = provider.pandaProviderId()
+                    prefsRepo.writePandaDebridActivationSnapshot(
+                        prefsRepo.readPandaDebridActivationSnapshot()
+                            .withExplicitMutation(providerId, enabled = true),
+                    )
                     integrationSecretStore.put(debridSecretKey(provider), result.apiKey)
                     if (provider == DebridServiceType.TORBOX) {
                         integrationSecretStore.syncTorBoxCredentialPair(result.apiKey)
@@ -733,14 +1136,22 @@ class SettingsViewModel(
                         integrationSecretStore.put(IntegrationSecretKey.DEBRID_RD_CLIENT_SECRET, tokens.clientSecret)
                         prefsRepo.setString(KEY_DEBRID_RD_EXPIRES_AT, tokens.expiresAt.toString())
                     }
+                    val activation = prefsRepo.readPandaDebridActivationSnapshot()
                     val updated = _state.value.connectedDebridProviders.toMutableMap()
-                    updated[provider] = result.apiKey
+                    if (activation.isEnabled(provider.pandaProviderId())) {
+                        updated[provider] = result.apiKey
+                    } else {
+                        updated.remove(provider)
+                    }
+                    val configured = _state.value.configuredDebridProviders.toMutableMap()
+                    configured[provider] = result.apiKey
                     _state.update {
                         it.copy(
                             debridApiKey = result.apiKey,
                             debridConnected = true,
                             debridDeviceCode = null,
                             isPollingDebrid = false,
+                            configuredDebridProviders = configured,
                             connectedDebridProviders = updated,
                         )
                     }
@@ -750,6 +1161,7 @@ class SettingsViewModel(
                             "DEBRID_API_KEY_${provider.name}",
                             buildDebridSyncCredentials(provider, result.apiKey),
                             provider.name,
+                            emptyMap(),
                         )
                     }
                     verifyDebridConnection()
@@ -799,16 +1211,39 @@ class SettingsViewModel(
         debridPollJob?.cancel()
         val provider = _state.value.debridProvider
         scope.launch {
+            val providerId = provider.pandaProviderId()
+            // Persist intent before touching credentials. A refresh, OAuth
+            // completion, or stale account restore can then no longer put the
+            // provider back into the usable resolution set.
+            prefsRepo.writePandaDebridActivationSnapshot(
+                prefsRepo.readPandaDebridActivationSnapshot()
+                    .withExplicitDisconnect(providerId),
+            )
             integrationSecretStore.remove(debridSecretKey(provider))
+            integrationSecretStore.remove(IntegrationSecretKey.DEBRID_API_KEY)
+            prefsRepo.remove(KEY_DEBRID_API_KEY)
             if (provider == DebridServiceType.REAL_DEBRID) {
                 integrationSecretStore.remove(IntegrationSecretKey.DEBRID_RD_REFRESH_TOKEN)
                 integrationSecretStore.remove(IntegrationSecretKey.DEBRID_RD_CLIENT_ID)
                 integrationSecretStore.remove(IntegrationSecretKey.DEBRID_RD_CLIENT_SECRET)
                 prefsRepo.remove(KEY_DEBRID_RD_EXPIRES_AT)
             }
+            val removedFromAccount = runCatching {
+                onIntegrationDeleted?.invoke("DEBRID_API_KEY_${provider.name}") ?: true
+            }.getOrDefault(false)
+            if (!removedFromAccount) {
+                _state.update {
+                    it.copy(
+                        debridError = "Disconnected on this device. Account removal will retry when Torve can sync.",
+                    )
+                }
+            }
+            settingsRefreshNotifier.notifyRefresh(Clock.System.now().toEpochMilliseconds())
         }
         val updated = _state.value.connectedDebridProviders.toMutableMap()
         updated.remove(provider)
+        val configured = _state.value.configuredDebridProviders.toMutableMap()
+        configured.remove(provider)
         _state.update {
             it.copy(
                 debridApiKey = "",
@@ -816,6 +1251,7 @@ class SettingsViewModel(
                 debridUser = null,
                 debridDeviceCode = null,
                 isPollingDebrid = false,
+                configuredDebridProviders = configured,
                 connectedDebridProviders = updated,
             )
         }
@@ -826,8 +1262,22 @@ class SettingsViewModel(
     // -------------------------------------------------------------------------
 
     fun startTraktDeviceAuth() {
-        scope.launch {
-            _state.update { it.copy(traktLoading = true, traktError = null) }
+        if (_state.value.traktLoading || _state.value.isPollingTrakt) return
+
+        traktAuthRequestJob?.cancel()
+        traktPollJob?.cancel()
+        traktSyncCoordinator.cancel()
+        val requestJob = scope.launch {
+            _state.update {
+                it.copy(
+                    traktLoading = true,
+                    traktSyncing = false,
+                    traktSyncSuccess = false,
+                    traktError = null,
+                    traktDeviceCode = null,
+                    isPollingTrakt = false,
+                )
+            }
             try {
                 val code = traktClient.getDeviceCode()
                 _state.update { it.copy(traktDeviceCode = code, traktLoading = false) }
@@ -837,6 +1287,12 @@ class SettingsViewModel(
                 val detail = e.message?.takeIf { it.isNotBlank() }
                     ?: com.torve.presentation.error.UserFacingError.INTEGRATION_CONNECT_FAILED.defaultMessage()
                 _state.update { it.copy(traktLoading = false, traktError = "Trakt: $detail") }
+            }
+        }
+        traktAuthRequestJob = requestJob
+        requestJob.invokeOnCompletion {
+            if (traktAuthRequestJob === requestJob) {
+                traktAuthRequestJob = null
             }
         }
     }
@@ -851,8 +1307,10 @@ class SettingsViewModel(
                 delay(interval * 1000L)
                 when (val result = traktClient.pollDeviceToken(code.deviceCode)) {
                     is com.torve.data.trakt.TraktPollResult.Success -> {
+                        traktSyncCoordinator.cancel()
                         traktAuthorizedApi.resetForAccountChange()
                         traktTokenStore.write(result.tokens)
+                        traktLastValidatedAt = 0L
                         prefsRepo.remove(KEY_TRAKT_ACCESS_TOKEN)
                         prefsRepo.remove(KEY_TRAKT_REFRESH_TOKEN)
                         _state.update {
@@ -860,23 +1318,34 @@ class SettingsViewModel(
                                 traktAccessToken = result.tokens.accessToken,
                                 traktRefreshToken = result.tokens.refreshToken,
                                 traktConnected = true,
+                                traktUser = null,
+                                traktStats = null,
+                                traktError = null,
+                                traktApiStatus = null,
+                                traktSyncSuccess = false,
                                 traktDeviceCode = null,
                                 isPollingTrakt = false,
                             )
                         }
-                        // Sync to backend — Trakt requires both tokens for restore
-                        runCatching {
-                            onIntegrationSaved?.invoke(
-                                "TRAKT_TOKENS",
-                                mapOf(
-                                    "access_token" to result.tokens.accessToken,
-                                    "refresh_token" to result.tokens.refreshToken,
-                                ),
-                                "Trakt",
-                            )
+                        // Start Trakt imports immediately; account backup runs independently.
+                        syncTraktNow()
+                        scope.launch {
+                            runCatching {
+                                onIntegrationSaved?.invoke(
+                                    "TRAKT_TOKENS",
+                                    mapOf(
+                                        "access_token" to result.tokens.accessToken,
+                                        "refresh_token" to result.tokens.refreshToken,
+                                        "expires_in" to result.tokens.expiresIn.toString(),
+                                        "created_at" to result.tokens.createdAt.toString(),
+                                        "client_id" to traktClient.clientId,
+                                        "client_secret" to traktClient.clientSecret,
+                                    ),
+                                    "Trakt",
+                                    emptyMap(),
+                                )
+                            }
                         }
-                        verifyTraktConnection()
-                        initialTraktImport()
                         return@launch
                     }
                     is com.torve.data.trakt.TraktPollResult.Pending -> { /* Keep polling */ }
@@ -934,11 +1403,7 @@ class SettingsViewModel(
     private val TRAKT_VALIDATION_COOLDOWN_MS = 30_000L
     private val SIMKL_VALIDATION_COOLDOWN_MS = 30_000L
 
-    private suspend fun verifyTraktConnection() {
-        ensureTraktSessionReady(syncOnSuccess = false)
-    }
-
-    private suspend fun ensureTraktSessionReady(syncOnSuccess: Boolean): Boolean {
+    private suspend fun ensureTraktSessionReady(): Boolean {
         val now = Clock.System.now().toEpochMilliseconds()
         if (traktValidationRunning) {
             torveVerboseLog { "[TraktInit] Validation skipped (already running)" }
@@ -951,22 +1416,13 @@ class SettingsViewModel(
         traktValidationRunning = true
         torveVerboseLog { "[TraktInit] Validation started" }
         try {
-            val activeAccessToken = resolveUsableTraktAccessToken()
-            if (activeAccessToken.isBlank()) {
-                _state.update {
-                    it.copy(
-                        traktConnected = false,
-                        traktUser = null,
-                        traktApiStatus = "Not connected",
-                    )
-                }
-                return false
-            }
-
-            val user = traktClient.getUser(activeAccessToken)
+            val user = traktAuthorizedApi.getUser()
+            val currentTokens = traktTokenStore.read()
+            val activeAccessToken = currentTokens?.accessToken.orEmpty()
             _state.update {
                 it.copy(
                     traktAccessToken = activeAccessToken,
+                    traktRefreshToken = currentTokens?.refreshToken.orEmpty(),
                     traktConnected = true,
                     traktUser = user,
                     traktError = null,
@@ -976,10 +1432,9 @@ class SettingsViewModel(
             traktLastValidatedAt = now
             torveVerboseLog { "[TraktInit] Validation success" }
             loadTraktStats()
-            if (syncOnSuccess) {
-                initialTraktImport()
-            }
             return true
+        } catch (cancelled: CancellationException) {
+            throw cancelled
         } catch (e: Exception) {
             val is429 = isRateLimitedTraktError(e)
             if (is429) {
@@ -993,51 +1448,9 @@ class SettingsViewModel(
                     )
                 }
                 torveVerboseLog { "[TraktInit] Rate limited, cooldown until ${now + TRAKT_VALIDATION_COOLDOWN_MS}" }
-                if (syncOnSuccess) {
-                    initialTraktImport()
-                }
                 return true
             } else {
                 val authFailure = isUnauthorizedTraktError(e)
-                if (authFailure) {
-                    val refreshedUser = try {
-                        refreshTraktSessionAndLoadUser()
-                    } catch (refreshError: Exception) {
-                        if (isRateLimitedTraktError(refreshError)) {
-                            traktLastValidatedAt = now
-                            _state.update {
-                                it.copy(
-                                    traktConnected = true,
-                                    traktError = null,
-                                    traktApiStatus = com.torve.presentation.error.UserFacingError.INTEGRATION_RATE_LIMITED.defaultMessage(),
-                                )
-                            }
-                            torveVerboseLog { "[TraktInit] Refresh rate limited, keeping existing connection state" }
-                            if (syncOnSuccess) {
-                                initialTraktImport()
-                            }
-                            return true
-                        }
-                        null
-                    }
-                    if (refreshedUser != null) {
-                        traktLastValidatedAt = now
-                        _state.update {
-                            it.copy(
-                                traktConnected = true,
-                                traktUser = refreshedUser,
-                                traktError = null,
-                                traktApiStatus = "Online",
-                            )
-                        }
-                        torveVerboseLog { "[TraktInit] Validation recovered by refresh" }
-                        loadTraktStats()
-                        if (syncOnSuccess) {
-                            initialTraktImport()
-                        }
-                        return true
-                    }
-                }
                 _state.update {
                     it.copy(
                         traktConnected = !authFailure && _state.value.traktAccessToken.isNotBlank(),
@@ -1053,81 +1466,9 @@ class SettingsViewModel(
         }
     }
 
-    private suspend fun refreshTraktSessionAndLoadUser(): com.torve.data.trakt.TraktUser? {
-        val refreshToken = traktTokenStore.read()?.refreshToken
-            ?.takeIf { it.isNotBlank() }
-            ?: _state.value.traktRefreshToken.takeIf { it.isNotBlank() }
-            ?: integrationSecretStore.get(IntegrationSecretKey.TRAKT_REFRESH_TOKEN)
-                ?.takeIf { it.isNotBlank() }
-            ?: return null
-        return runCatching {
-            val refreshed = traktClient.refreshToken(refreshToken)
-            traktTokenStore.write(refreshed)
-            integrationSecretStore.put(IntegrationSecretKey.TRAKT_ACCESS_TOKEN, refreshed.accessToken)
-            integrationSecretStore.put(IntegrationSecretKey.TRAKT_REFRESH_TOKEN, refreshed.refreshToken)
-            prefsRepo.remove(KEY_TRAKT_ACCESS_TOKEN)
-            prefsRepo.remove(KEY_TRAKT_REFRESH_TOKEN)
-            _state.update {
-                it.copy(
-                    traktAccessToken = refreshed.accessToken,
-                    traktRefreshToken = refreshed.refreshToken,
-                    traktConnected = true,
-                    traktError = null,
-                )
-            }
-            traktClient.getUser(refreshed.accessToken)
-        }.getOrElse { error ->
-            torveVerboseLog { "[TraktInit] Refresh failed: ${DiagnosticsRedactor.redact(error.message)}" }
-            if (isRateLimitedTraktError(error)) {
-                throw error
-            }
-            null
-        }
-    }
-
-    private suspend fun resolveUsableTraktAccessToken(): String {
-        val storedTokens = traktTokenStore.read()
-        if (storedTokens?.accessToken?.isNotBlank() == true) {
-            return storedTokens.accessToken
-        }
-
-        val stateAccessToken = _state.value.traktAccessToken
-        if (stateAccessToken.isBlank()) return ""
-
-        val refreshToken = listOfNotNull(
-            storedTokens?.refreshToken,
-            _state.value.traktRefreshToken,
-            integrationSecretStore.get(IntegrationSecretKey.TRAKT_REFRESH_TOKEN),
-        ).firstOrNull { it.isNotBlank() }.orEmpty()
-        if (refreshToken.isBlank()) {
-            return stateAccessToken
-        }
-
-        return runCatching {
-            val refreshed = traktClient.refreshToken(refreshToken)
-            traktTokenStore.write(refreshed)
-            prefsRepo.remove(KEY_TRAKT_ACCESS_TOKEN)
-            prefsRepo.remove(KEY_TRAKT_REFRESH_TOKEN)
-            _state.update {
-                it.copy(
-                    traktAccessToken = refreshed.accessToken,
-                    traktRefreshToken = refreshed.refreshToken,
-                    traktConnected = true,
-                    traktError = null,
-                )
-            }
-            refreshed.accessToken
-        }.getOrElse { error ->
-            if (isRateLimitedTraktError(error)) {
-                throw error
-            }
-            stateAccessToken
-        }
-    }
-
     private fun isUnauthorizedTraktError(error: Throwable): Boolean {
         val message = error.message.orEmpty()
-        return "401" in message || "Unauthorized" in message
+        return error is com.torve.data.trakt.api.TraktAuthorizationRequiredException || "401" in message || "Unauthorized" in message
     }
 
     private fun isRateLimitedTraktError(error: Throwable): Boolean {
@@ -1150,7 +1491,7 @@ class SettingsViewModel(
                     _state.update { it.copy(traktApiStatus = "Not connected") }
                     return@launch
                 }
-                traktClient.getUser(token)
+                traktAuthorizedApi.getUser()
                 _state.update { it.copy(traktApiStatus = "Online") }
             } catch (e: Exception) {
                 _state.update { it.copy(traktApiStatus = "Error: ${e.message}") }
@@ -1163,7 +1504,7 @@ class SettingsViewModel(
             try {
                 val token = _state.value.traktAccessToken
                 if (token.isBlank()) return@launch
-                val stats = traktClient.getStats(token)
+                val stats = traktAuthorizedApi.getStats()
                 _state.update { it.copy(traktStats = stats) }
             } catch (_: Exception) {
                 // Stats are optional
@@ -1172,7 +1513,9 @@ class SettingsViewModel(
     }
 
     fun disconnectTrakt() {
+        traktAuthRequestJob?.cancel()
         traktPollJob?.cancel()
+        traktSyncCoordinator.cancel()
         val token = _state.value.traktAccessToken
         scope.launch {
             if (token.isNotBlank()) runCatching { traktClient.revokeToken(token) }
@@ -1190,57 +1533,46 @@ class SettingsViewModel(
                 traktConnected = false,
                 traktUser = null,
                 traktDeviceCode = null,
+                traktLoading = false,
+                traktSyncing = false,
+                traktSyncSuccess = false,
                 isPollingTrakt = false,
                 traktError = null,
                 traktApiStatus = "Not connected",
+                traktPendingWrites = 0,
             )
         }
     }
 
     fun syncTraktNow() {
-        scope.launch {
-            _state.update { it.copy(traktSyncing = true, traktSyncSuccess = false) }
-            try {
-                val tokenSnapshot = traktTokenStore.read()
-                torveVerboseLog {
-                    "[TraktInit] Manual sync requested " +
-                        "hasAccess=${tokenSnapshot?.accessToken?.isNotBlank() == true || _state.value.traktAccessToken.isNotBlank()} " +
-                        "hasRefresh=${tokenSnapshot?.refreshToken?.isNotBlank() == true || _state.value.traktRefreshToken.isNotBlank()}"
-                }
-                if (!ensureTraktSessionReady(syncOnSuccess = false)) {
-                    torveVerboseLog { "[TraktInit] Manual sync aborted: session not ready" }
-                    _state.update {
-                        it.copy(
-                            traktSyncing = false,
-                            traktSyncSuccess = false,
-                            traktConnected = false,
-                            traktApiStatus = "Not connected",
-                        )
-                    }
-                    return@launch
-                }
-                torveVerboseLog { "[TraktInit] Manual sync session ready" }
-                initialTraktImport()
-                _state.update { it.copy(traktSyncing = false, traktSyncSuccess = true) }
-                delay(3000)
-                _state.update { it.copy(traktSyncSuccess = false) }
-            } catch (_: Exception) {
-                _state.update { it.copy(traktSyncing = false) }
-            }
-        }
+        traktSyncCoordinator.sync()
     }
 
-    private suspend fun initialTraktImport() {
-        retryTraktStartupSync("watchlist") { watchlistRepo.syncFromTrakt() }
-        retryTraktStartupSync("progress") { watchProgressRepo.syncFromTrakt() }
-        retryTraktStartupSync("history") { watchHistoryRepo.syncFromTrakt() }
-        retryTraktStartupSync("ratings") { traktSyncRepo.syncRatingsFromTrakt() }
-        retryTraktStartupSync("queue_flush") { traktSyncRepo.flushPendingWrites() }
+    private suspend fun refreshTraktPendingWrites() {
+        val userId = userIdProvider.currentUserId()
+        val pending = withContext(ioDispatcher) { traktSyncRepo.pendingWriteCount() }
+        if (userIdProvider.currentUserId() != userId) return
+        _state.update { it.copy(traktPendingWrites = pending) }
+    }
+
+    private suspend fun initialTraktImport(): Boolean {
+        val complete = withContext(ioDispatcher) {
+            // Import every category, but do not report a partial sync as complete.
+            listOf(
+                retryTraktStartupSync("watchlist") { watchlistRepo.syncFromTrakt(); true },
+                retryTraktStartupSync("progress") { watchProgressRepo.syncFromTrakt(); true },
+                retryTraktStartupSync("history") { watchHistoryRepo.syncFromTrakt(); true },
+                retryTraktStartupSync("ratings") { traktSyncRepo.syncRatingsFromTrakt(); true },
+                retryTraktStartupSync("queue_flush") { traktSyncRepo.flushPendingWrites(); true },
+            ).all { it == true }
+        }
         syncTraktTokensFromStore()
+        if (!complete) return false
         val now = Clock.System.now().toEpochMilliseconds()
         prefsRepo.setString(KEY_TRAKT_LAST_SYNC_TIME, now.toString())
         _state.update { it.copy(traktLastSyncTime = now) }
         settingsRefreshNotifier.notifyRefresh(now)
+        return true
     }
 
     private suspend fun syncTraktTokensFromStore() {
@@ -1263,6 +1595,8 @@ class SettingsViewModel(
         repeat(attempts) { attempt ->
             try {
                 return block()
+            } catch (cancelled: CancellationException) {
+                throw cancelled
             } catch (error: Throwable) {
                 lastError = error
                 val finalAttempt = attempt == attempts - 1
@@ -1294,7 +1628,7 @@ class SettingsViewModel(
         }
         runCatching { traktSyncRepo.clearLocalData() }
         prefsRepo.remove(KEY_TRAKT_LAST_SYNC_TIME)
-        _state.update { it.copy(traktLastSyncTime = null) }
+        _state.update { it.copy(traktLastSyncTime = null, traktPendingWrites = 0) }
     }
 
     // -------------------------------------------------------------------------
@@ -1399,10 +1733,95 @@ class SettingsViewModel(
         _state.update { it.copy(jellyfinApiKey = key) }
     }
 
-    /** Save Jellyfin credentials to secure store, then test connection. */
-    fun saveAndTestJellyfinConnection() {
-        setJellyfinApiKey(_state.value.jellyfinApiKey)
-        testJellyfinConnection()
+    /**
+     * Validate first, then atomically persist the complete Jellyfin connection.
+     * Account mode is the TV/desktop default so a working setup follows the user.
+     */
+    fun saveAndTestJellyfinConnection(
+        storageMode: IntegrationStorageMode = IntegrationStorageMode.ACCOUNT,
+    ) {
+        val service = jellyfinService
+        if (service == null) {
+            _state.update { it.copy(jellyfinStatusMessage = "Jellyfin service is unavailable") }
+            return
+        }
+        val serverUrl = _state.value.jellyfinServerUrl.trim()
+        val apiKey = _state.value.jellyfinApiKey.trim()
+        val payload = buildJellyfinAccountPayload(
+            serverUrl = serverUrl,
+            apiKey = apiKey,
+            selectedUserId = _state.value.selectedJellyfinUserId,
+        )
+        if (payload == null) {
+            _state.update {
+                it.copy(jellyfinStatusMessage = "Enter a valid Jellyfin URL and API key")
+            }
+            return
+        }
+
+        _state.update { it.copy(jellyfinStatusMessage = "Testing connection...") }
+        scope.launch {
+            val hadWorkingConfiguration = _state.value.jellyfinConnected
+            val connected = service.testConnection(
+                serverUrl = payload.config.getValue("server_url"),
+                apiKey = payload.credentials.getValue("api_key"),
+            )
+            if (!connected) {
+                _state.update {
+                    it.copy(
+                        jellyfinConnected = hadWorkingConfiguration,
+                        jellyfinStatusMessage = if (hadWorkingConfiguration) {
+                            "New details failed. Your existing Jellyfin connection was kept."
+                        } else {
+                            "Connection failed"
+                        },
+                    )
+                }
+                return@launch
+            }
+
+            val normalizedUrl = payload.config.getValue("server_url")
+            val normalizedApiKey = payload.credentials.getValue("api_key")
+            prefsRepo.setString(KEY_JELLYFIN_SERVER_URL, normalizedUrl)
+            integrationSecretStore.put(IntegrationSecretKey.JELLYFIN_API_KEY, normalizedApiKey)
+            integrationSecretStore.setStorageMode(IntegrationSecretKey.JELLYFIN_API_KEY, storageMode)
+
+            val accountSynced = if (storageMode == IntegrationStorageMode.ACCOUNT) {
+                runCatching {
+                    onIntegrationSaved?.invoke(
+                        "JELLYFIN_API_KEY",
+                        payload.credentials,
+                        "Jellyfin",
+                        payload.config,
+                    ) ?: false
+                }.getOrDefault(false)
+            } else {
+                true
+            }
+
+            val profiles = service.getUserProfiles()
+            val selectedUserId = service.getSelectedUserId()
+            val syncedAt = Clock.System.now().toEpochMilliseconds()
+            prefsRepo.setString(KEY_LIBRARY_OVERLAY_LAST_SYNC_TIME, syncedAt.toString())
+            _state.update {
+                it.copy(
+                    jellyfinServerUrl = normalizedUrl,
+                    jellyfinApiKey = normalizedApiKey,
+                    jellyfinConnected = true,
+                    jellyfinProfiles = profiles,
+                    selectedJellyfinUserId = selectedUserId,
+                    libraryOverlayLastSyncTime = syncedAt,
+                    jellyfinStatusMessage = when {
+                        storageMode == IntegrationStorageMode.DEVICE_ONLY ->
+                            "Connection successful - saved on this device"
+                        accountSynced ->
+                            "Connection successful - saved to your Torve account"
+                        else ->
+                            "Connection successful on this device, but Torve account sync failed. Select Test connection to retry."
+                    },
+                )
+            }
+        }
     }
 
     /** Update Plex access token input — UI state only, does NOT persist. */
@@ -1455,7 +1874,8 @@ class SettingsViewModel(
         scope.launch {
             integrationSecretStore.put(IntegrationSecretKey.OMDB_API_KEY, key)
             prefsRepo.remove(KEY_OMDB_API_KEY)
-            prefsRepo.setString(OmdbClient.KEY_OMDB_API_KEY, key)
+            onIntegrationSaved?.invoke("OMDB_API_KEY", mapOf("api_key" to key.trim()), "OMDb",
+                buildMap { prefsRepo.getString(KEY_RATING_PREFS)?.let { put(KEY_RATING_PREFS, it) } })
         }
     }
 
@@ -1490,20 +1910,14 @@ class SettingsViewModel(
         }
     }
 
+    /** Update the draft only. The complete connection is persisted after a successful test. */
     fun setJellyfinServerUrl(url: String) {
-        _state.update { it.copy(jellyfinServerUrl = url) }
-        scope.launch { prefsRepo.setString(KEY_JELLYFIN_SERVER_URL, url) }
+        _state.update { it.copy(jellyfinServerUrl = url, jellyfinStatusMessage = null) }
     }
 
+    /** Update the draft only. The complete connection is persisted after a successful test. */
     fun setJellyfinApiKey(key: String) {
-        _state.update { it.copy(jellyfinApiKey = key) }
-        scope.launch {
-            if (key.isBlank()) {
-                integrationSecretStore.remove(IntegrationSecretKey.JELLYFIN_API_KEY)
-            } else {
-                integrationSecretStore.put(IntegrationSecretKey.JELLYFIN_API_KEY, key)
-            }
-        }
+        _state.update { it.copy(jellyfinApiKey = key, jellyfinStatusMessage = null) }
     }
 
     private val jellyfinService: com.torve.data.integrations.JellyfinLibraryOverlayService?
@@ -1518,6 +1932,7 @@ class SettingsViewModel(
             val ok = service.testConnection(serverUrl = server, apiKey = key)
             _state.update {
                 it.copy(
+                    jellyfinConnected = ok,
                     jellyfinStatusMessage = if (ok) "Connection successful" else "Connection failed",
                 )
             }
@@ -1541,7 +1956,36 @@ class SettingsViewModel(
     fun selectJellyfinProfile(userId: String?) {
         val service = jellyfinService ?: return
         _state.update { it.copy(selectedJellyfinUserId = userId) }
-        scope.launch { service.setSelectedUserId(userId) }
+        scope.launch {
+            service.setSelectedUserId(userId)
+            if (
+                integrationSecretStore.getStorageMode(IntegrationSecretKey.JELLYFIN_API_KEY) !=
+                IntegrationStorageMode.ACCOUNT
+            ) {
+                return@launch
+            }
+            val payload = buildJellyfinAccountPayload(
+                serverUrl = prefsRepo.getString(KEY_JELLYFIN_SERVER_URL).orEmpty(),
+                apiKey = integrationSecretStore.get(IntegrationSecretKey.JELLYFIN_API_KEY).orEmpty(),
+                selectedUserId = userId,
+            ) ?: return@launch
+            val accountSynced = runCatching {
+                onIntegrationSaved?.invoke(
+                    "JELLYFIN_API_KEY",
+                    payload.credentials,
+                    "Jellyfin",
+                    payload.config,
+                ) ?: false
+            }.getOrDefault(false)
+            if (!accountSynced) {
+                _state.update {
+                    it.copy(
+                        jellyfinStatusMessage =
+                            "Profile saved on this device, but Torve account sync failed. Select it again to retry.",
+                    )
+                }
+            }
+        }
     }
 
     // -------------------------------------------------------------------------
@@ -1773,14 +2217,106 @@ class SettingsViewModel(
                             "SIMKL_ACCESS_TOKEN",
                             mapOf("access_token" to tokens.accessToken),
                             "Simkl",
+                            emptyMap(),
                         )
                     }
                     // Verify by fetching user
                     ensureSimklSessionReady()
+                    simklSyncService?.sync(force = true)
                     return@launch
                 }
             }
             _state.update { it.copy(isPollingSimkl = false, simklError = com.torve.presentation.error.UserFacingError.INTEGRATION_AUTH_TIMEOUT.defaultMessage()) }
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Seerr household request gateway
+    // -------------------------------------------------------------------------
+
+    fun setSeerrServerUrl(url: String) {
+        _state.update { it.copy(seerrServerUrl = url, seerrStatusMessage = null) }
+    }
+
+    /** UI input only. The key is persisted only when Save and test is pressed. */
+    fun updateSeerrApiKeyInput(apiKey: String) {
+        _state.update { it.copy(seerrApiKey = apiKey, seerrStatusMessage = null) }
+    }
+
+    fun saveAndTestSeerrConnection(
+        storageMode: com.torve.domain.integrations.IntegrationStorageMode =
+            com.torve.domain.integrations.IntegrationStorageMode.DEVICE_ONLY,
+    ) {
+        if (_state.value.seerrLoading) return
+        val service = mediaLifecycleService ?: run {
+            _state.update { it.copy(seerrStatusMessage = "Seerr integration is unavailable in this build") }
+            return
+        }
+        val url = _state.value.seerrServerUrl.trim()
+        val apiKey = _state.value.seerrApiKey.trim()
+        if (url.isBlank() || apiKey.isBlank()) {
+            _state.update { it.copy(seerrStatusMessage = "Enter the Seerr URL and API key") }
+            return
+        }
+        _state.update { it.copy(seerrLoading = true, seerrStatusMessage = null) }
+        scope.launch {
+            val savedUrl = prefsRepo.getString(KEY_SEERR_SERVER_URL).orEmpty()
+            val savedApiKey = integrationSecretStore.get(IntegrationSecretKey.SEERR_API_KEY).orEmpty()
+            val hadWorkingConfiguration = savedUrl.isNotBlank() && savedApiKey.isNotBlank()
+            val ok = service.testConnection(url, apiKey)
+            var accountSynced = storageMode != com.torve.domain.integrations.IntegrationStorageMode.ACCOUNT
+            if (ok) {
+                val normalizedUrl = url.trimEnd('/')
+                prefsRepo.setString(KEY_SEERR_SERVER_URL, normalizedUrl)
+                integrationSecretStore.put(IntegrationSecretKey.SEERR_API_KEY, apiKey)
+                integrationSecretStore.setStorageMode(IntegrationSecretKey.SEERR_API_KEY, storageMode)
+                if (storageMode == com.torve.domain.integrations.IntegrationStorageMode.ACCOUNT) {
+                    accountSynced = runCatching {
+                        onIntegrationSaved?.invoke(
+                            "SEERR_API_KEY",
+                            mapOf("api_key" to apiKey, "server_url" to normalizedUrl),
+                            "Seerr",
+                            mapOf("server_url" to normalizedUrl),
+                        ) ?: false
+                    }.getOrDefault(false)
+                }
+            }
+            _state.update {
+                it.copy(
+                    seerrLoading = false,
+                    seerrConnected = ok || hadWorkingConfiguration,
+                    seerrServerUrl = when {
+                        ok -> url.trimEnd('/')
+                        hadWorkingConfiguration -> savedUrl
+                        else -> it.seerrServerUrl
+                    },
+                    seerrApiKey = if (!ok && hadWorkingConfiguration) savedApiKey else it.seerrApiKey,
+                    seerrStatusMessage = when {
+                        ok && storageMode == com.torve.domain.integrations.IntegrationStorageMode.DEVICE_ONLY ->
+                            "Connection successful; stored only on this device"
+                        ok && accountSynced -> "Connection successful and synced with your account"
+                        ok -> "Connection successful; account sync could not finish. Save and test again to retry."
+                        hadWorkingConfiguration -> "Connection failed; existing configuration kept"
+                        else -> "Connection failed"
+                    },
+                )
+            }
+        }
+    }
+
+    fun disconnectSeerr() {
+        scope.launch {
+            integrationSecretStore.remove(IntegrationSecretKey.SEERR_API_KEY)
+            prefsRepo.remove(KEY_SEERR_SERVER_URL)
+        }
+        _state.update {
+            it.copy(
+                seerrServerUrl = "",
+                seerrApiKey = "",
+                seerrConnected = false,
+                seerrLoading = false,
+                seerrStatusMessage = null,
+            )
         }
     }
 
@@ -1837,10 +2373,15 @@ class SettingsViewModel(
     }
 
     fun checkSimklConnection() {
-        scope.launch {
-            _state.update { it.copy(simklLoading = true, simklError = null) }
-            ensureSimklSessionReady()
-            _state.update { it.copy(simklLoading = false) }
+        if (_state.value.simklLoading) return
+        val person = userIdProvider.currentDataUserId()
+        _state.update { it.copy(simklLoading = true, simklError = null) }
+        scope.launch(com.torve.data.auth.PersonalDataScope(userIdProvider.currentUserId(), userIdProvider.currentProfileId())) {
+            try {
+                if (ensureSimklSessionReady() && person == userIdProvider.currentDataUserId()) simklSyncService?.sync(force = true)
+            } finally {
+                if (person == userIdProvider.currentDataUserId()) _state.update { it.copy(simklLoading = false) }
+            }
         }
     }
 
@@ -1848,6 +2389,8 @@ class SettingsViewModel(
         scope.launch {
             integrationSecretStore.remove(IntegrationSecretKey.SIMKL_ACCESS_TOKEN)
             prefsRepo.remove(KEY_SIMKL_ACCESS_TOKEN)
+            prefsRepo.remove(com.torve.data.simkl.SimklSyncService.CACHE_KEY)
+            integrationSecretStore.remove(IntegrationSecretKey.SIMKL_ACCESS_TOKEN, "library_sync_owner")
             settingsRefreshNotifier.notifyRefresh(Clock.System.now().toEpochMilliseconds())
         }
         _state.update {
@@ -1865,6 +2408,40 @@ class SettingsViewModel(
     // -------------------------------------------------------------------------
     // Stream Quality & Size Restrictions
     // -------------------------------------------------------------------------
+
+    fun applyPlaybackPreset(preset: com.torve.domain.model.PlaybackPreset) {
+        val current = buildStreamPreferences()
+        if (preset == com.torve.domain.model.PlaybackPreset.CUSTOM || !preset.isAvailable(current)) return
+        val selected = preset.apply(current)
+        _state.update { it.copy(
+            maxQuality = selected.maxQuality, minQuality = selected.minQuality,
+            maxFileSizeMb = selected.maxFileSizeBytes?.div(1024L * 1024L)?.toInt(),
+            minSourceSizePerHourMb = (selected.minSourceSizePerHourBytes / (1024L * 1024L)).toInt(),
+            cachedOnly = selected.cachedOnly, codecPreference = selected.codecPreference,
+            hdrMode = selected.hdrMode, autoSourceMode = selected.autoSourceMode,
+            allow4kAuto = selected.allow4kAuto, preferCompatibleCodecs = selected.preferCompatibleCodecs,
+            sourceLanguageMatchMode = selected.sourceLanguageMatchMode,
+            unknownSourceSizePolicy = selected.unknownSourceSizePolicy,
+            unknownSourceLanguagePolicy = selected.unknownSourceLanguagePolicy,
+            sourceFallbackPolicy = selected.sourceFallbackPolicy,
+        ) }
+        scope.launch {
+            val values = mapOf(
+                KEY_MAX_QUALITY to selected.maxQuality.name, KEY_MIN_QUALITY to selected.minQuality.name,
+                KEY_MIN_SOURCE_SIZE_PER_HOUR_MB to (selected.minSourceSizePerHourBytes / (1024L * 1024L)).toString(),
+                KEY_CACHED_ONLY to selected.cachedOnly.toString(), KEY_CODEC_PREFERENCE to selected.codecPreference.name,
+                KEY_HDR_MODE to selected.hdrMode.name, KEY_AUTO_SOURCE_MODE to selected.autoSourceMode.name,
+                KEY_ALLOW_4K_AUTO to selected.allow4kAuto.toString(),
+                KEY_PREFER_COMPATIBLE_CODECS to selected.preferCompatibleCodecs.toString(),
+                KEY_SOURCE_LANGUAGE_MATCH_MODE to selected.sourceLanguageMatchMode.name,
+                KEY_UNKNOWN_SOURCE_SIZE_POLICY to selected.unknownSourceSizePolicy.name,
+                KEY_UNKNOWN_SOURCE_LANGUAGE_POLICY to selected.unknownSourceLanguagePolicy.name,
+                KEY_SOURCE_FALLBACK_POLICY to selected.sourceFallbackPolicy.name,
+            )
+            values.forEach { (key, value) -> prefsRepo.setString(key, value) }
+            prefsRepo.remove(KEY_MAX_FILE_SIZE_MB)
+        }
+    }
 
     fun setMaxQuality(quality: StreamQuality) {
         _state.update { it.copy(maxQuality = quality) }
@@ -1884,6 +2461,38 @@ class SettingsViewModel(
             } else {
                 prefsRepo.remove(KEY_MAX_FILE_SIZE_MB)
             }
+        }
+    }
+
+    fun setHideWatched(enabled: Boolean) {
+        _state.update { it.copy(hideWatched = enabled) }
+        scope.launch {
+            prefsRepo.setString(KEY_HIDE_WATCHED, enabled.toString())
+            settingsRefreshNotifier.notifyRefresh(kotlinx.datetime.Clock.System.now().toEpochMilliseconds())
+        }
+    }
+
+    fun setExcludeSeasonPacks(enabled: Boolean) {
+        _state.update { it.copy(excludeSeasonPacks = enabled) }
+        scope.launch {
+            prefsRepo.setString(KEY_EXCLUDE_SEASON_PACKS, enabled.toString())
+            settingsRefreshNotifier.notifyRefresh(kotlinx.datetime.Clock.System.now().toEpochMilliseconds())
+        }
+    }
+
+    fun setMatchFrameRate(enabled: Boolean) {
+        _state.update { it.copy(matchFrameRate = enabled) }
+        scope.launch {
+            prefsRepo.setString(KEY_MATCH_FRAME_RATE, enabled.toString())
+            settingsRefreshNotifier.notifyRefresh(kotlinx.datetime.Clock.System.now().toEpochMilliseconds())
+        }
+    }
+
+    fun setKeepSubtitlesAboveControls(enabled: Boolean) {
+        _state.update { it.copy(keepSubtitlesAboveControls = enabled) }
+        scope.launch {
+            prefsRepo.setString(KEY_KEEP_SUBTITLES_ABOVE_CONTROLS, enabled.toString())
+            settingsRefreshNotifier.notifyRefresh(kotlinx.datetime.Clock.System.now().toEpochMilliseconds())
         }
     }
 
@@ -1913,8 +2522,84 @@ class SettingsViewModel(
     }
 
     fun setAutoPlayNextEpisodeEnabled(enabled: Boolean) {
-        _state.update { it.copy(autoPlayNextEpisodeEnabled = enabled) }
-        scope.launch { prefsRepo.setString(KEY_AUTO_PLAY_NEXT_EPISODE, enabled.toString()) }
+        setNextEpisodeMode(if (enabled) NextEpisodeMode.AT_END else NextEpisodeMode.OFF)
+    }
+
+    fun setNextEpisodeMode(mode: NextEpisodeMode) {
+        _state.update {
+            it.copy(nextEpisodeMode = mode, autoPlayNextEpisodeEnabled = mode != NextEpisodeMode.OFF)
+        }
+        scope.launch {
+            prefsRepo.setString(KEY_NEXT_EPISODE_MODE, mode.name)
+            prefsRepo.setString(KEY_AUTO_PLAY_NEXT_EPISODE, (mode != NextEpisodeMode.OFF).toString())
+        }
+    }
+
+    fun setSkipIntroMode(mode: SegmentActionMode) {
+        _state.update { it.copy(skipIntroMode = mode) }
+        scope.launch { prefsRepo.setString(KEY_SKIP_INTRO_MODE, mode.name) }
+    }
+
+    fun setSkipRecapMode(mode: SegmentActionMode) {
+        _state.update { it.copy(skipRecapMode = mode) }
+        scope.launch { prefsRepo.setString(KEY_SKIP_RECAP_MODE, mode.name) }
+    }
+
+    fun setPlayNextDuringCreditsMode(mode: SegmentActionMode) {
+        _state.update { it.copy(playNextDuringCreditsMode = mode) }
+        scope.launch { prefsRepo.setString(KEY_PLAY_NEXT_CREDITS_MODE, mode.name) }
+    }
+
+    fun setProtectPostCreditScenes(enabled: Boolean) {
+        _state.update { it.copy(protectPostCreditScenes = enabled) }
+        scope.launch { prefsRepo.setString(KEY_PROTECT_POST_CREDIT, enabled.toString()) }
+    }
+
+    fun setSmartSegmentDetectionEnabled(enabled: Boolean) {
+        _state.update { it.copy(smartSegmentDetectionEnabled = enabled) }
+        scope.launch { prefsRepo.setString(KEY_SMART_SEGMENT_DETECTION, enabled.toString()) }
+    }
+
+    fun setNextEpisodePreparationMode(mode: NextEpisodePreparationMode) {
+        _state.update { it.copy(nextEpisodePreparationMode = mode) }
+        scope.launch { prefsRepo.setString(KEY_NEXT_EPISODE_PREPARATION_MODE, mode.name) }
+    }
+
+    fun setNextEpisodePreloadBufferSeconds(seconds: Int) {
+        val sanitized = seconds.coerceIn(0, 120)
+        _state.update { it.copy(nextEpisodePreloadBufferSeconds = sanitized) }
+        scope.launch { prefsRepo.setString(KEY_NEXT_EPISODE_PRELOAD_BUFFER_SECONDS, sanitized.toString()) }
+    }
+
+    fun setNextEpisodePreloadMaxMb(sizeMb: Int) {
+        val sanitized = sizeMb.coerceIn(16, 1024)
+        _state.update { it.copy(nextEpisodePreloadMaxMb = sanitized) }
+        scope.launch { prefsRepo.setString(KEY_NEXT_EPISODE_PRELOAD_MAX_MB, sanitized.toString()) }
+    }
+
+    fun setNextEpisodePreloadWifiOnly(enabled: Boolean) {
+        _state.update { it.copy(nextEpisodePreloadWifiOnly = enabled) }
+        scope.launch { prefsRepo.setString(KEY_NEXT_EPISODE_PRELOAD_WIFI_ONLY, enabled.toString()) }
+    }
+
+    fun setSourceLanguageMatchMode(mode: SourceLanguageMatchMode) {
+        _state.update { it.copy(sourceLanguageMatchMode = mode) }
+        scope.launch { prefsRepo.setString(KEY_SOURCE_LANGUAGE_MATCH_MODE, mode.name) }
+    }
+
+    fun setUnknownSourceSizePolicy(policy: UnknownSourceMetadataPolicy) {
+        _state.update { it.copy(unknownSourceSizePolicy = policy) }
+        scope.launch { prefsRepo.setString(KEY_UNKNOWN_SOURCE_SIZE_POLICY, policy.name) }
+    }
+
+    fun setUnknownSourceLanguagePolicy(policy: UnknownSourceMetadataPolicy) {
+        _state.update { it.copy(unknownSourceLanguagePolicy = policy) }
+        scope.launch { prefsRepo.setString(KEY_UNKNOWN_SOURCE_LANGUAGE_POLICY, policy.name) }
+    }
+
+    fun setSourceFallbackPolicy(policy: SourceFallbackPolicy) {
+        _state.update { it.copy(sourceFallbackPolicy = policy) }
+        scope.launch { prefsRepo.setString(KEY_SOURCE_FALLBACK_POLICY, policy.name) }
     }
 
     fun setAutoSourceMode(mode: AutoSourceMode) {
@@ -1972,6 +2657,11 @@ class SettingsViewModel(
     fun setPreferredAudioLanguage(language: String) {
         _state.update { it.copy(preferredAudioLanguage = language) }
         scope.launch { prefsRepo.setString(KEY_PREFERRED_AUDIO_LANGUAGE, language) }
+    }
+
+    fun setAllowSubtitleLanguageFallback(enabled: Boolean) {
+        _state.update { it.copy(allowSubtitleLanguageFallback = enabled) }
+        scope.launch { prefsRepo.setString(KEY_ALLOW_SUBTITLE_LANGUAGE_FALLBACK, enabled.toString()) }
     }
 
     fun setRememberVolume(enabled: Boolean) {
@@ -2053,21 +2743,38 @@ class SettingsViewModel(
         val s = _state.value
         // Network-aware: cap quality on cellular
         val effectiveMaxQuality = networkMonitor.recommendedMaxQuality(s.maxQuality)
-        return StreamPreferences(
+        val preferences = StreamPreferences(
             preferredQuality = effectiveMaxQuality,
             maxQuality = effectiveMaxQuality,
             minQuality = s.minQuality,
             hdrEnabled = s.hdrEnabled,
+            excludeSeasonPacks = s.excludeSeasonPacks,
             cachedOnly = s.cachedOnly,
             maxFileSizeBytes = s.maxFileSizeMb?.let { it.toLong() * 1024 * 1024 },
+            minSourceSizePerHourBytes = s.minSourceSizePerHourMb.toLong() * 1024L * 1024L,
             autoPlayEnabled = s.autoPlayEnabled,
             autoPlayNextEpisodeEnabled = s.autoPlayNextEpisodeEnabled,
+            preferredAudioLanguages = s.preferredAudioLanguage
+                .split(',', ';')
+                .map(String::trim)
+                .filter(String::isNotBlank),
+            sourceLanguageMatchMode = s.sourceLanguageMatchMode,
+            unknownSourceSizePolicy = s.unknownSourceSizePolicy,
+            unknownSourceLanguagePolicy = s.unknownSourceLanguagePolicy,
+            sourceFallbackPolicy = s.sourceFallbackPolicy,
+            nextEpisodeMode = s.nextEpisodeMode,
+            nextEpisodePreparationMode = s.nextEpisodePreparationMode,
+            nextEpisodePreloadBufferSeconds = s.nextEpisodePreloadBufferSeconds,
+            nextEpisodePreloadMaxBytes = s.nextEpisodePreloadMaxMb.toLong() * 1024L * 1024L,
+            nextEpisodePreloadWifiOnly = s.nextEpisodePreloadWifiOnly,
             codecPreference = s.codecPreference,
             hdrMode = s.hdrMode,
             autoSourceMode = s.autoSourceMode,
             allow4kAuto = s.allow4kAuto,
             preferCompatibleCodecs = s.preferCompatibleCodecs,
         )
+        return com.torve.domain.player.PlaybackLanguagePolicy.sourcePreferences(preferences,
+            s.preferredAudioLanguage, s.appLanguage.code, s.allowSubtitleLanguageFallback)
     }
 
     fun getCurrentNetworkType(): com.torve.platform.NetworkType {
@@ -2079,22 +2786,20 @@ class SettingsViewModel(
     // -------------------------------------------------------------------------
 
     fun getDebridProvider(): DebridServiceType = _state.value.debridProvider
-    fun getDebridApiKey(): String = _state.value.debridApiKey
+    fun getDebridApiKey(): String =
+        _state.value.connectedDebridProviders[_state.value.debridProvider].orEmpty()
     fun isDebridConnected(): Boolean = _state.value.debridConnected
     fun getTraktAccessToken(): String = _state.value.traktAccessToken
     fun isTraktConnected(): Boolean = _state.value.traktConnected
 
     fun getDebridAccounts(): Map<DebridServiceType, String> {
-        val providers = _state.value.connectedDebridProviders
-            .filterValues { it.isNotBlank() }
-        if (providers.isNotEmpty()) return providers
+        return _state.value.connectedDebridProviders.filterValues { it.isNotBlank() }
+    }
 
-        val legacyKey = _state.value.debridApiKey.trim()
-        return if (legacyKey.isNotBlank()) {
-            mapOf(_state.value.debridProvider to legacyKey)
-        } else {
-            emptyMap()
-        }
+    fun setMinSourceSizePerHourMb(sizeMb: Int) {
+        val sanitized = sizeMb.coerceIn(0, 64 * 1024)
+        _state.update { it.copy(minSourceSizePerHourMb = sanitized) }
+        scope.launch { prefsRepo.setString(KEY_MIN_SOURCE_SIZE_PER_HOUR_MB, sanitized.toString()) }
     }
 
     // -------------------------------------------------------------------------
@@ -2136,7 +2841,35 @@ class SettingsViewModel(
 
     fun setThemeMode(mode: ThemeMode) {
         _state.update { it.copy(themeMode = mode) }
-        scope.launch { prefsRepo.setString(KEY_THEME_MODE, mode.name) }
+        val owner = userIdProvider.currentDataUserId()
+        scope.launch(com.torve.data.auth.PersonalDataScope(userIdProvider.currentUserId(), userIdProvider.currentProfileId())) {
+            prefsRepo.setString(KEY_THEME_MODE, mode.name)
+            if (owner == userIdProvider.currentDataUserId()) settingsRefreshNotifier.notifyRefresh(Clock.System.now().toEpochMilliseconds())
+        }
+    }
+
+    fun setShowRemainingEpisodes(enabled: Boolean) {
+        _state.update { it.copy(showRemainingEpisodes = enabled) }
+        val owner = userIdProvider.currentDataUserId()
+        scope.launch(com.torve.data.auth.PersonalDataScope(userIdProvider.currentUserId(), userIdProvider.currentProfileId())) {
+            prefsRepo.setString(KEY_SHOW_REMAINING_EPISODES, enabled.toString())
+            if (owner == userIdProvider.currentDataUserId()) settingsRefreshNotifier.notifyRefresh(Clock.System.now().toEpochMilliseconds())
+        }
+    }
+
+    fun setRailSpacingDp(points: Int) {
+        val value = points.coerceIn(0, 64)
+        _state.update { it.copy(railSpacingDp = value) }
+        scope.launch(com.torve.data.auth.PersonalDataScope(userIdProvider.currentUserId(), userIdProvider.currentProfileId())) {
+            prefsRepo.setString(KEY_RAIL_SPACING_DP, value.toString())
+        }
+    }
+
+    fun resetRailSpacing() {
+        _state.update { it.copy(railSpacingDp = null) }
+        scope.launch(com.torve.data.auth.PersonalDataScope(userIdProvider.currentUserId(), userIdProvider.currentProfileId())) {
+            prefsRepo.remove(KEY_RAIL_SPACING_DP)
+        }
     }
 
     fun setAppLanguage(language: AppLanguage) {
@@ -2190,6 +2923,16 @@ class SettingsViewModel(
         scope.launch {
             prefsRepo.setString(KEY_LAN_PLAYBACK_WIFI_ONLY, wifiOnly.toString())
             settingsRefreshNotifier.notifyRefresh(kotlinx.datetime.Clock.System.now().toEpochMilliseconds())
+        }
+    }
+
+    fun setCatalogueHeroEnabled(mediaType: String, enabled: Boolean) {
+        require(mediaType == "movie" || mediaType == "tv")
+        val owner = userIdProvider.currentDataUserId()
+        _state.update { if (mediaType == "movie") it.copy(moviesHeroEnabled = enabled) else it.copy(showsHeroEnabled = enabled) }
+        scope.launch(com.torve.data.auth.PersonalDataScope(userIdProvider.currentUserId(), userIdProvider.currentProfileId())) {
+            prefsRepo.setString(if (mediaType == "movie") KEY_MOVIES_HERO else KEY_SHOWS_HERO, enabled.toString())
+            if (owner == userIdProvider.currentDataUserId()) settingsRefreshNotifier.notifyRefresh(Clock.System.now().toEpochMilliseconds())
         }
     }
 

@@ -1,9 +1,12 @@
 package com.torve.presentation.providerhealth
 
 import com.torve.domain.integrations.LibraryOverlayService
+import com.torve.domain.integrations.ConnectionProbeResult
+import com.torve.domain.providerhealth.ProviderHealthFailure
 import com.torve.domain.providerhealth.ProviderHealthCategory
 import com.torve.domain.providerhealth.ProviderHealthEntry
 import com.torve.domain.providerhealth.ProviderHealthStatus
+import kotlinx.coroutines.CancellationException
 
 /**
  * Probes the user's Plex or Jellyfin server via
@@ -27,19 +30,17 @@ class PlexJellyfinProviderHealthChecker(
         val token = tokenSource()?.trim().orEmpty()
         if (url.isBlank() || token.isBlank()) {
             return base().copy(
-                status = ProviderHealthStatus.UNCONFIGURED,
+                status = if (url.isBlank() && token.isBlank()) ProviderHealthStatus.UNCONFIGURED else ProviderHealthStatus.YELLOW,
                 message = "Not connected. Add your $productLabel server URL and token.",
                 nextAction = "Connect $productLabel",
+                failure = ProviderHealthFailure.SETUP_INCOMPLETE,
             )
         }
-        val ok = runCatching { service.testConnection(url, token) }.getOrElse { t ->
-            return base().copy(
-                status = ProviderHealthStatus.RED,
-                message = "Couldn't reach the server: ${t.message ?: t::class.simpleName}",
-                nextAction = "Check server URL",
-            )
+        val result = runCatching { service.probeConnection(url, token) }.getOrElse { t ->
+            if (t is CancellationException) throw t
+            ConnectionProbeResult.UNKNOWN_FAILURE
         }
-        return if (ok) {
+        return if (result == ConnectionProbeResult.CONNECTED) {
             base().copy(
                 status = ProviderHealthStatus.GREEN,
                 message = "$productLabel is reachable.",
@@ -48,8 +49,9 @@ class PlexJellyfinProviderHealthChecker(
         } else {
             base().copy(
                 status = ProviderHealthStatus.RED,
-                message = "Server rejected the credentials.",
-                nextAction = "Re-enter token",
+                message = result.failureMessage(productLabel),
+                nextAction = if (result == ConnectionProbeResult.AUTH_REJECTED) "Update credentials" else "Check connection",
+                failure = result.healthFailure,
             )
         }
     }

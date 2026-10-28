@@ -1,5 +1,7 @@
 package com.torve.android.ui.settings
 
+import com.torve.android.ui.community.parityLabel as localizedUiText
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -156,7 +158,7 @@ fun AddonManagerSection(
                             value = state.installUrl,
                             onValueChange = { viewModel.setInstallUrl(it) },
                             modifier = Modifier.fillMaxWidth(),
-                            textStyle = MaterialTheme.typography.bodyMedium.copy(color = Snow),
+                            textStyle = MaterialTheme.typography.bodyMedium.copy(color = MaterialTheme.colorScheme.onSurface),
                             singleLine = true,
                             cursorBrush = SolidColor(Amber),
                             decorationBox = { innerTextField ->
@@ -201,7 +203,7 @@ fun AddonManagerSection(
                 state.installError?.let { error ->
                     Spacer(Modifier.height(4.dp))
                     Text(
-                        text = error,
+                        text = localizedUiText(error),
                         style = MaterialTheme.typography.bodySmall,
                         color = Ruby,
                     )
@@ -210,7 +212,7 @@ fun AddonManagerSection(
                 state.error?.let { error ->
                     Spacer(Modifier.height(4.dp))
                     Text(
-                        text = error,
+                        text = localizedUiText(error),
                         style = MaterialTheme.typography.bodySmall,
                         color = Ruby,
                     )

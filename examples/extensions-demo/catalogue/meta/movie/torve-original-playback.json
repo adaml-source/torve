@@ -1,0 +1,13 @@
+{
+  "meta": {
+    "id": "torve-original-playback",
+    "type": "movie",
+    "name": "Original Torve playback test",
+    "description": "An original synthetic video with silent English/German audio tracks and an embedded English subtitle. No film or television programme is included.",
+    "releaseInfo": "2026",
+    "genres": [
+      "Test media"
+    ],
+    "runtime": "150 seconds"
+  }
+}

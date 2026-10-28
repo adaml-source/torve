@@ -1,0 +1,29 @@
+{
+  "reviewed": "2026-10-12",
+  "assets": [
+    {
+      "file": "tears-of-steel-city-1280.jpg",
+      "author": "Blender Foundation | Project Mango",
+      "source": "https://commons.wikimedia.org/wiki/File:Tears_of_Steel_frame_00_1c.jpg",
+      "license": "CC-BY-3.0",
+      "sha256": "de02da067ad87099c3ca7810295f49f8f55a7067db039d9cd3bcc697a6f3f40a",
+      "changes": "Unmodified image file; CSS crop and overlay where displayed."
+    },
+    {
+      "file": "a-trip-to-the-moon.jpg",
+      "author": "Georges Méliès",
+      "source": "https://commons.wikimedia.org/wiki/File:Melies_color_Voyage_dans_la_lune.jpg",
+      "license": "Public domain: source country, life+80 territories, US",
+      "sha256": "ea5df3015857a47cf81a03f5a1149243bf4e1e515c40d6311e19213fecab18a8",
+      "changes": "Unmodified image file; CSS crop and overlay where displayed."
+    },
+    {
+      "file": "the-great-train-robbery.jpg",
+      "author": "Edwin S. Porter",
+      "source": "https://commons.wikimedia.org/wiki/File:Great_train_robbery_Barnes.jpg",
+      "license": "Public domain: source country, life+80 territories, US",
+      "sha256": "833cf904b32aa2f8dff77262a9147111418836de23bdf28e05b340e62b2e0b29",
+      "changes": "Unmodified image file; CSS crop and overlay where displayed."
+    }
+  ]
+}

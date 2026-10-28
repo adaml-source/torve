@@ -1,5 +1,7 @@
 ﻿package com.torve.android.ui.detail
 
+import com.torve.android.ui.community.parityLabel as localizedUiText
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
@@ -12,6 +14,19 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Info
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.size
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.testTag
 import androidx.compose.runtime.Composable
 import androidx.annotation.StringRes
 import androidx.compose.ui.Modifier
@@ -27,6 +42,7 @@ import com.torve.android.ui.theme.Emerald
 import com.torve.android.ui.theme.Graphite
 import com.torve.android.ui.theme.Gunmetal
 import com.torve.android.ui.theme.Snow
+import com.torve.android.ui.theme.Torve
 import com.torve.data.addon.ParsedStream
 import com.torve.domain.model.CandidateProvenanceKind
 import com.torve.domain.model.MediaRatings
@@ -214,13 +230,14 @@ internal fun DetailRatingsAttribution(
         .filter { hasRatingValue(it, ratings) }
     if (activeProviders.isEmpty() && (!prefs.showTorveScoreOnDetailPage || torveInputs.isEmpty())) return
 
-    Column(
-        modifier = modifier
-            .fillMaxWidth()
-            .background(Charcoal.copy(alpha = 0.72f), RoundedCornerShape(12.dp))
-            .padding(horizontal = 12.dp, vertical = 10.dp),
-        verticalArrangement = Arrangement.spacedBy(4.dp),
-    ) {
+    var expanded by remember { mutableStateOf(false) }
+    IconButton(onClick = { expanded = true }, modifier = modifier.size(48.dp).testTag("ratings_about")) {
+        Icon(Icons.Rounded.Info, stringResource(R.string.flow_about_ratings), Modifier.size(18.dp),
+            tint = Torve.colors.textTertiary)
+    }
+    if (expanded) AlertDialog(onDismissRequest = { expanded = false },
+        title = { Text(stringResource(R.string.flow_about_ratings)) }, text = {
+        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         if (activeProviders.isNotEmpty()) {
             Text(
                 text = stringResource(
@@ -242,7 +259,8 @@ internal fun DetailRatingsAttribution(
                 fontWeight = FontWeight.Medium,
             )
         }
-    }
+        }
+    }, confirmButton = { TextButton(onClick = { expanded = false }, modifier = Modifier.heightIn(min = 48.dp)) { Text(stringResource(R.string.common_close)) } })
 }
 
 @OptIn(ExperimentalLayoutApi::class)
@@ -311,7 +329,7 @@ private fun DetailExperienceBadge(
     tone: Color,
 ) {
     Text(
-        text = label,
+        text = localizedUiText(label),
         style = MaterialTheme.typography.labelSmall,
         color = tone,
         modifier = Modifier

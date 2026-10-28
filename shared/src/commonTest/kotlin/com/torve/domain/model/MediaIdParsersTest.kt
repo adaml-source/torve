@@ -20,5 +20,6 @@ class MediaIdParsersTest {
         assertNull("".extractTmdbIdOrNull())
         assertNull("tt12345".extractTmdbIdOrNull())
         assertNull("series:imdb:tt12345".extractTmdbIdOrNull())
+        assertNull("jf_12345".extractTmdbIdOrNull())
     }
 }

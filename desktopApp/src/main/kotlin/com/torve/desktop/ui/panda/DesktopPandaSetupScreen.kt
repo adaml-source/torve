@@ -78,6 +78,7 @@ fun DesktopPandaSetupScreen(
     onComplete: () -> Unit,
 ) {
     val state by viewModel.state.collectAsState()
+    LaunchedEffect(viewModel) { viewModel.openSetup() }
 
     // Close wizard automatically once the addon is installed and the user clicks done
     LaunchedEffect(state.addonInstalled) {
@@ -107,11 +108,11 @@ fun DesktopPandaSetupScreen(
         ) {
             Box(modifier = Modifier.weight(1f)) {
                 TorvePageHeader(
-                    title = ds("Panda guided setup"),
+                    title = ds("Streaming source setup"),
                     subtitle = if (state.isEditMode) {
-                        ds("Reconfiguring existing Panda setup")
+                        ds("Editing connected streaming sources")
                     } else {
-                        ds("Choose Debrid or Usenet only, then Panda installs itself as a Torve add-on.")
+                        ds("Connect Debrid or Usenet. Torve adds and checks the configured source automatically.")
                     },
                 )
             }
@@ -132,7 +133,10 @@ fun DesktopPandaSetupScreen(
         when (state.currentStep) {
             PandaSetupStep.SETUP_TYPE -> SetupTypeStep(state, viewModel)
             PandaSetupStep.PROVIDER -> ProviderStep(state, viewModel)
-            PandaSetupStep.AUTH -> AuthStep(state, viewModel)
+            PandaSetupStep.AUTH -> {
+                TorvePrimaryButton(text = ds("Usenet only"), onClick = { viewModel.selectSetupMode(PandaSetupMode.USENET_ONLY) })
+                AuthStep(state, viewModel)
+            }
             PandaSetupStep.SOURCES -> SourcesStep(state, viewModel)
             PandaSetupStep.USENET -> UsenetStep(state, viewModel)
             PandaSetupStep.QUALITY -> QualityStep(state, viewModel)
@@ -148,7 +152,7 @@ fun DesktopPandaSetupScreen(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            if (state.currentStep == PandaSetupStep.SETUP_TYPE) {
+            if (state.currentStep == PandaSetupStep.AUTH) {
                 TorveGhostButton(text = ds("Close"), onClick = onBack)
             } else {
                 TorveGhostButton(text = ds("Back"), onClick = { viewModel.previousStep() })
@@ -177,7 +181,7 @@ private fun SetupTypeStep(state: PandaSetupUiState, viewModel: PandaSetupViewMod
         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
             SetupTypeRow(
                 title = ds("Debrid"),
-                subtitle = ds("Use Real-Debrid, AllDebrid, Premiumize, TorBox, or another supported Panda debrid service."),
+                subtitle = ds("Use Real-Debrid, AllDebrid, Premiumize, TorBox, or another supported debrid service."),
                 badge = "D",
                 selected = state.setupMode == PandaSetupMode.DEBRID,
                 onClick = { viewModel.selectSetupMode(PandaSetupMode.DEBRID) },
@@ -247,7 +251,7 @@ private fun SetupTypeRow(
 private fun ProviderStep(state: PandaSetupUiState, viewModel: PandaSetupViewModel) {
     TorveSectionCard(
         title = ds("Choose debrid provider"),
-        supportingText = ds("Panda will route streams through your selected debrid service."),
+        supportingText = ds("Torve will route streams through your selected debrid service."),
     ) {
         if (state.providersLoading) {
             Box(Modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) {
@@ -378,7 +382,7 @@ private fun AuthStep(state: PandaSetupUiState, viewModel: PandaSetupViewModel) {
                 if (providerConnected) {
                     TorveBanner(
                         title = ds("Credential saved"),
-                        description = ds("This provider is available to Panda and Torve clients. Verify again to replace the key."),
+                        description = ds("This provider is available to your Torve devices. Verify again to replace the key."),
                         tone = TorveBannerTone.Success,
                     )
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -501,7 +505,7 @@ private fun SourcesStep(state: PandaSetupUiState, viewModel: PandaSetupViewModel
     Column(verticalArrangement = Arrangement.spacedBy(20.dp)) {
         TorveSectionCard(
             title = ds("Torrent sources"),
-            supportingText = ds("Panda will search these indexers. Toggle any you want disabled."),
+            supportingText = ds("Torve will search these indexers. Toggle any you want disabled."),
         ) {
             FlowRow(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -829,7 +833,7 @@ private fun desktopLabelForUsenetProvider(id: String): String = when (id) {
 private fun desktopLabelForNzbIndexer(id: String): String = when (id) {
     "none" -> ds("None")
     "nzbgeek" -> "NZBgeek"
-    "scenenzbs" -> "SceneNZBs"
+    "scenenzbs" -> "Treasure Maps"
     "dognzb" -> "DogNZB"
     "nzbplanet" -> "NZBPlanet"
     "custom" -> ds("Custom URL")
@@ -973,7 +977,7 @@ private fun ReviewStep(
         // will close the screen ~1.2s later.
         if (saveJustCompleted) {
             TorveBanner(
-                title = if (state.isEditMode) ds("Panda updated") else ds("Panda installed"),
+                title = if (state.isEditMode) ds("Streaming sources updated") else ds("Streaming sources ready"),
                 description = ds("Saved. Closing setup..."),
                 tone = TorveBannerTone.Success,
             )
@@ -988,8 +992,8 @@ private fun ReviewStep(
                 TorvePrimaryButton(
                     text = when {
                         state.isSaving -> ds("Saving...")
-                        state.isEditMode -> ds("Update Panda")
-                        else -> ds("Install Panda")
+                        state.isEditMode -> ds("Save connections")
+                        else -> ds("Finish setup")
                     },
                     onClick = { viewModel.saveConfigAndInstall() },
                     enabled = !state.isSaving && state.selectedProvider != null && state.authConnected,

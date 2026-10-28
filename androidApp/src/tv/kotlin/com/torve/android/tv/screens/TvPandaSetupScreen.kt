@@ -38,12 +38,20 @@ import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusDirection
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.torve.android.R
+import com.torve.android.ui.panda.PandaButton
 import com.torve.android.ui.panda.PandaAuthStep
 import com.torve.android.ui.panda.LocalPandaTvClickToEditFields
 import com.torve.android.ui.panda.PandaProviderStep
@@ -69,9 +77,16 @@ fun TvPandaSetupScreen(
     viewModel: PandaSetupViewModel = koinInject(),
 ) {
     val state by viewModel.state.collectAsState()
+    val focusManager = LocalFocusManager.current
+    LaunchedEffect(viewModel) { viewModel.openSetup() }
 
-    BackHandler(enabled = state.currentStep != PandaSetupStep.SETUP_TYPE) {
-        viewModel.previousStep()
+    BackHandler(enabled = true) {
+        when {
+            state.currentStep == PandaSetupStep.AUTH &&
+                (state.deviceCode != null || state.authLoading) -> viewModel.cancelOAuth()
+            state.currentStep != PandaSetupStep.AUTH -> viewModel.previousStep()
+            else -> onBack()
+        }
     }
 
     val stepNumber = state.progressStepNumber()
@@ -91,7 +106,7 @@ fun TvPandaSetupScreen(
         PandaSetupStep.REVIEW -> false
     }
 
-    LaunchedEffect(state.currentStep, canAdvance, state.addonInstalled, state.isSaving) {
+    LaunchedEffect(state.currentStep, state.addonInstalled) {
         // Focus must land on an actual focus target. The old implementation
         // requested focus on the content container, which is not itself a TV
         // control and could leave the setup flow without a usable focus owner.
@@ -118,6 +133,28 @@ fun TvPandaSetupScreen(
     Box(
         modifier = Modifier
             .fillMaxSize()
+            .onKeyEvent { event ->
+                if (event.type != KeyEventType.KeyDown) return@onKeyEvent false
+                when (event.key) {
+                    Key.DirectionRight -> when {
+                        focusManager.moveFocus(FocusDirection.Right) -> true
+                        canAdvance -> {
+                            viewModel.nextStep()
+                            true
+                        }
+                        else -> false
+                    }
+                    Key.DirectionLeft -> when {
+                        focusManager.moveFocus(FocusDirection.Left) -> true
+                        state.currentStep != PandaSetupStep.AUTH -> {
+                            viewModel.previousStep()
+                            true
+                        }
+                        else -> false
+                    }
+                    else -> false
+                }
+            }
             .background(Obsidian),
     ) {
         Column(
@@ -146,7 +183,7 @@ fun TvPandaSetupScreen(
                 // back button only walks one step at a time and the
                 // user previously had no obvious way to bail without
                 // pressing the system back button repeatedly.
-                OutlinedButton(
+                PandaButton(
                     onClick = onBack,
                     modifier = Modifier.focusRequester(closeButtonFocusRequester),
                 ) {
@@ -179,12 +216,12 @@ fun TvPandaSetupScreen(
             ) {
                 CompositionLocalProvider(LocalPandaTvClickToEditFields provides true) {
                     when (state.currentStep) {
-                        PandaSetupStep.SETUP_TYPE -> PandaSetupTypeStep(
+                        PandaSetupStep.SETUP_TYPE -> PandaAuthStep(
                             state = state,
                             viewModel = viewModel,
                             entryFocusRequester = stepEntryFocusRequester,
                         )
-                        PandaSetupStep.PROVIDER -> PandaProviderStep(
+                        PandaSetupStep.PROVIDER -> PandaAuthStep(
                             state = state,
                             viewModel = viewModel,
                             entryFocusRequester = stepEntryFocusRequester,
@@ -226,16 +263,12 @@ fun TvPandaSetupScreen(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                TvPandaOutlinedNavButton(
-                    text = stringResource(R.string.common_back),
+                com.torve.android.ui.components.BackButton(
                     onClick = {
-                        if (state.currentStep == PandaSetupStep.SETUP_TYPE) onBack()
+                        if (state.currentStep == PandaSetupStep.AUTH) onBack()
                         else viewModel.previousStep()
                     },
-                    focusRequester = backButtonFocusRequester,
-                    leadingIcon = {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, null, Modifier.size(20.dp))
-                    },
+                    modifier = Modifier.focusRequester(backButtonFocusRequester),
                 )
 
                 when {
@@ -250,7 +283,7 @@ fun TvPandaSetupScreen(
                         )
                     }
                     state.currentStep == PandaSetupStep.REVIEW -> {
-                        TvPandaOutlinedNavButton(
+                        TvPandaNavButton(
                             text = stringResource(R.string.tv_panda_exit_setup),
                             onClick = onBack,
                             focusRequester = bottomExitButtonFocusRequester,
@@ -267,68 +300,22 @@ fun TvPandaSetupScreen(
 
 @Composable
 private fun TvPandaPrimaryNavButton(
-    text: String,
-    onClick: () -> Unit,
-    focusRequester: FocusRequester,
+    text: String, onClick: () -> Unit, focusRequester: FocusRequester,
     trailingIcon: @Composable (() -> Unit)? = null,
 ) {
-    val interactionSource = remember { MutableInteractionSource() }
-    val focused by interactionSource.collectIsFocusedAsState()
-    val shape = RoundedCornerShape(12.dp)
-    Button(
-        onClick = onClick,
-        colors = ButtonDefaults.buttonColors(containerColor = Amber, contentColor = Obsidian),
-        shape = shape,
-        interactionSource = interactionSource,
-        modifier = Modifier
-            .focusRequester(focusRequester)
-            .clip(shape)
-            .border(
-                width = if (focused) 2.dp else 1.dp,
-                color = if (focused) Snow else Amber.copy(alpha = 0.35f),
-                shape = shape,
-            ),
-    ) {
+    PandaButton(onClick, Modifier.focusRequester(focusRequester)) {
         Text(text, fontWeight = FontWeight.SemiBold)
-        trailingIcon?.let {
-            Spacer(Modifier.width(8.dp))
-            it()
-        }
+        trailingIcon?.let { Spacer(Modifier.width(8.dp)); it() }
     }
 }
 
 @Composable
-private fun TvPandaOutlinedNavButton(
-    text: String,
-    onClick: () -> Unit,
-    focusRequester: FocusRequester,
+private fun TvPandaNavButton(
+    text: String, onClick: () -> Unit, focusRequester: FocusRequester,
     leadingIcon: @Composable (() -> Unit)? = null,
 ) {
-    val interactionSource = remember { MutableInteractionSource() }
-    val focused by interactionSource.collectIsFocusedAsState()
-    val shape = RoundedCornerShape(12.dp)
-    OutlinedButton(
-        onClick = onClick,
-        shape = shape,
-        border = null,
-        interactionSource = interactionSource,
-        modifier = Modifier
-            .focusRequester(focusRequester)
-            .clip(shape)
-            .background(
-                color = if (focused) Gunmetal else Obsidian,
-                shape = shape,
-            )
-            .border(
-                width = if (focused) 2.dp else 1.dp,
-                color = if (focused) Snow else Amber.copy(alpha = 0.45f),
-                shape = shape,
-            ),
-    ) {
-        leadingIcon?.let {
-            it()
-            Spacer(Modifier.width(8.dp))
-        }
-        Text(text, color = if (focused) Snow else Amber, fontWeight = FontWeight.SemiBold)
+    PandaButton(onClick, Modifier.focusRequester(focusRequester)) {
+        leadingIcon?.let { it(); Spacer(Modifier.width(8.dp)) }
+        Text(text, fontWeight = FontWeight.SemiBold)
     }
 }

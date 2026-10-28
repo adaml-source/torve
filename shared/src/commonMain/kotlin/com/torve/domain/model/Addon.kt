@@ -49,3 +49,16 @@ data class InstalledAddon(
      */
     val configId: String? = null,
 )
+
+/**
+ * Whether this installed addon can participate in stream resolution.
+ *
+ * Stremio addons normally declare the `stream` resource explicitly. Older
+ * full-service manifests may omit the resources list, so an empty list keeps
+ * the same permissive behavior used by the stream aggregator.
+ */
+fun InstalledAddon.canResolveStreams(): Boolean =
+    isEnabled && (
+        manifest.resources.isEmpty() ||
+            manifest.resources.any { resource -> resource.equals("stream", ignoreCase = true) }
+        )

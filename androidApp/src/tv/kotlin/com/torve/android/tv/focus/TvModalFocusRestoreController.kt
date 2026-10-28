@@ -45,6 +45,7 @@ internal data class TvFocusOrigin(
 internal data class TvScreenFocusHandle(
     val captureFocusedOrigin: () -> TvFocusOrigin?,
     val requestRestore: (TvFocusOrigin, String) -> Unit,
+    val isOriginFocused: (TvFocusOrigin) -> Boolean = { false },
 )
 
 internal class TvModalFocusRestoreController {
@@ -61,6 +62,17 @@ internal class TvModalFocusRestoreController {
 
     fun requesterFor(target: TvFocusTargetId): FocusRequester {
         return requesterByTarget.getOrPut(target) { FocusRequester() }
+    }
+
+    /**
+     * Returns a requester only while its focus target is actually composed.
+     * Lazy-list requesters deliberately remain cached for restoration, but a
+     * cached requester must never be installed as a directional focus edge
+     * after its node has left composition.
+     */
+    fun activeRequesterFor(target: TvFocusTargetId): FocusRequester? {
+        val registrations = activeTargets[target] ?: 0
+        return requesterByTarget[target]?.takeIf { registrations > 0 }
     }
 
     fun registerTarget(
@@ -84,6 +96,24 @@ internal class TvModalFocusRestoreController {
         }
     }
 
+    /**
+     * Drops cached requesters that no longer belong to the current content model.
+     * Active targets are deliberately retained until their DisposableEffect has
+     * unregistered them, avoiding a race between lazy-list recomposition and focus
+     * restoration.
+     */
+    fun pruneInactiveTargets(validTargets: Set<TvFocusTargetId>) {
+        val staleTargets = requesterByTarget.keys.filter { target ->
+            target !in validTargets && target !in activeTargets
+        }
+        staleTargets.forEach(requesterByTarget::remove)
+        focusedTarget?.let { target ->
+            if (target !in validTargets && target !in activeTargets) {
+                focusedTarget = null
+            }
+        }
+    }
+
     fun markFocused(target: TvFocusTargetId) {
         focusedTarget = target
         debugLog(
@@ -91,6 +121,14 @@ internal class TvModalFocusRestoreController {
                 "item=${target.itemKey} itemIndex=${target.itemIndex} type=${target.targetType} " +
                 "pendingToken=${pendingRestore?.restoreToken ?: -1L}",
         )
+    }
+
+    fun isOriginFocused(origin: TvFocusOrigin): Boolean {
+        val target = focusedTarget ?: return false
+        return target.screenId == origin.screenId &&
+            target.rowKey == origin.rowKey &&
+            target.itemKey == origin.itemKey &&
+            target.targetType == origin.focusTargetType
     }
 
     fun captureOrigin(
@@ -226,13 +264,26 @@ internal class TvModalFocusRestoreController {
         )
 
         origin.outerListSnapshot?.let { snapshot ->
-            outerListState?.scrollToItem(snapshot.firstVisibleItemIndex, snapshot.firstVisibleItemScrollOffset)
+            outerListState?.let { state ->
+                val lastIndex = (state.layoutInfo.totalItemsCount - 1).coerceAtLeast(0)
+                runCatching {
+                    state.scrollToItem(
+                        snapshot.firstVisibleItemIndex.coerceIn(0, lastIndex),
+                        snapshot.firstVisibleItemScrollOffset,
+                    )
+                }
+            }
         }
         origin.innerListSnapshot?.let { snapshot ->
-            innerListStateForRowKey(origin.rowKey)?.scrollToItem(
-                snapshot.firstVisibleItemIndex,
-                snapshot.firstVisibleItemScrollOffset,
-            )
+            innerListStateForRowKey(origin.rowKey)?.let { state ->
+                val lastIndex = (state.layoutInfo.totalItemsCount - 1).coerceAtLeast(0)
+                runCatching {
+                    state.scrollToItem(
+                        snapshot.firstVisibleItemIndex.coerceIn(0, lastIndex),
+                        snapshot.firstVisibleItemScrollOffset,
+                    )
+                }
+            }
         }
 
         repeat(maxAttempts) {

@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="tv_grouped_ai_search">Ricerca IA</string>
+    <string name="tv_grouped_library_sync">Libreria e sincronizzazione</string>
+    <string name="tv_grouped_help_advanced">Aiuto e opzioni avanzate</string>
+    <string name="tv_grouped_theme_language">Tema e lingua</string>
+    <string name="tv_grouped_hide_watched">Nascondi i titoli visti durante la scoperta</string>
+    <string name="tv_grouped_account_devices">Account e dispositivi</string>
+    <string name="tv_grouped_account_summary">Accesso, profili e dispositivi</string>
+    <string name="tv_grouped_sources_summary">Riproduzione, monitoraggio e librerie collegate</string>
+    <string name="tv_grouped_playback_summary">Video, audio, sottotitoli ed episodi</string>
+    <string name="tv_grouped_appearance_summary">Schermo, schede e layout della home</string>
+    <string name="tv_grouped_library_summary">Liste, raccolte e backup</string>
+    <string name="tv_grouped_help_summary">Test di connessione, ricerca IA e assistenza</string>
+    <string name="tv_grouped_devices_summary">Accesso e dispositivi associati</string>
+    <string name="tv_grouped_profiles_summary">Gestisci il tuo nucleo familiare</string>
+    <string name="tv_grouped_display_summary">Modalità schermo e lingua dell’app</string>
+    <string name="tv_grouped_system_theme">Sistema</string>
+    <string name="tv_grouped_sources">Sorgenti</string>
+    <string name="tv_nav_shows_compact">Serie</string>
+    <string name="tv_nav_channels_compact">Canali</string>
+    <string name="tv_nav_library_compact">Libreria</string>
+    <string name="tv_nav_settings_compact">Impost.</string>
+    <string name="tv_grouped_menu_streaming_extensions">Streaming ed estensioni</string>
+    <string name="tv_grouped_menu_sports_replays">"Replay sportivi"</string>
+    <string name="tv_grouped_menu_streaming_services">Servizi di streaming</string>
+    <string name="tv_grouped_menu_tracking_accounts">Account di monitoraggio</string>
+    <string name="tv_grouped_menu_servers_requests">Server e richieste</string>
+    <string name="tv_grouped_menu_saved_collections">Raccolte</string>
+    <string name="tv_grouped_menu_app_features">Funzioni dell’app</string>
+    <string name="tv_grouped_menu_connection_tests">Test di connessione</string>
+    <string name="tv_grouped_menu_about_help">Informazioni e aiuto</string>
+    <string name="tv_grouped_menu_additional_sources">Altre sorgenti</string>
+    <string name="tv_grouped_menu_kodi_devices">Dispositivi Kodi</string>
+    <string name="tv_grouped_menu_video_sources">Video e sorgenti</string>
+    <string name="tv_grouped_menu_audio_subtitles">Audio e sottotitoli</string>
+    <string name="tv_grouped_menu_advanced_playback">Riproduzione avanzata</string>
+    <string name="tv_grouped_menu_background_spacing">Sfondo e spaziatura</string>
+    <string name="tv_grouped_menu_home_cards">Home e schede</string>
+    <string name="tv_grouped_menu_browsing_style">Visualizzazione</string>
+    <string name="tv_grouped_menu_episode_badges">Indicatori episodi</string>
+</resources>

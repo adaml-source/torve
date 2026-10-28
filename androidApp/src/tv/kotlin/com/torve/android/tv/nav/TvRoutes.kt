@@ -11,6 +11,7 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.SportsSoccer
 import androidx.compose.material.icons.filled.Tv
+import androidx.compose.material.icons.filled.VideoLibrary
 import androidx.compose.ui.graphics.vector.ImageVector
 import com.torve.android.R
 
@@ -30,13 +31,25 @@ object TvRoutes {
     const val IPTV = "tv_iptv"
     const val SPORTS = "tv_sports"
     const val LIBRARY = "tv_library"
+    const val JELLYFIN = "tv_jellyfin"
     const val SETTINGS = "tv_settings"
     const val HOME_LAYOUT = "tv_home_layout"
     const val RATINGS_SETTINGS = "tv_ratings_settings"
     const val WATCH_STATS = "tv_watch_stats"
-    const val BETA_PROGRAM = "tv_beta_program"
+    const val WATCHING_HUB = "tv_watching_hub"
+    const val FILES = "tv_files"
+    const val PROFILES = "tv_profiles"
+    const val CATALOG_GROUPS = "tv_catalog_groups"
+    const val CATALOG_GROUP = "tv_catalog_group/{groupId}"
+    fun catalogGroup(id: String) = "tv_catalog_group/${Uri.encode(id)}"
+    const val TRAKT_LISTS = "tv_trakt_lists?type={type}&id={id}"
+    fun traktLists(type: String = "", id: Int = 0) = "tv_trakt_lists?type=$type&id=$id"
     const val DEVICE_LIMIT_REACHED = "tv_device_limit_reached"
     const val PANDA_SETUP = "tv_panda_setup"
+    const val AUTOMATION_ADMIN = "tv_automation_admin"
+    const val AUTOMATION_CONNECTIONS = "tv_automation_connections"
+    fun automationConnections(attentionTarget: String): String =
+        "$AUTOMATION_CONNECTIONS?attention=${Uri.encode(attentionTarget)}"
 
     const val SEE_ALL = "tv_see_all/{railKey}/{mediaType}/{title}"
     fun seeAll(railKey: String, mediaType: String, title: String): String {
@@ -48,22 +61,38 @@ object TvRoutes {
         return "tv_vod_series_details/${Uri.encode(cacheKey)}"
     }
 
-    const val DETAILS = "tv_details/{type}/{id}?autoPlay={autoPlay}&handoffPositionMs={handoffPositionMs}&focusEpisodes={focusEpisodes}"
+    const val DETAILS = "tv_details/{type}/{id}?autoPlay={autoPlay}&handoffPositionMs={handoffPositionMs}&focusEpisodes={focusEpisodes}&season={season}&episode={episode}&extension={extension}"
     fun details(
         type: String,
         id: Int,
         autoPlay: Boolean = false,
         handoffPositionMs: Long = 0L,
         focusEpisodes: Boolean = false,
+        season: Int = -1,
+        episode: Int = -1,
     ): String {
-        return "tv_details/$type/$id?autoPlay=$autoPlay&handoffPositionMs=$handoffPositionMs&focusEpisodes=$focusEpisodes"
+        return "tv_details/$type/$id?autoPlay=$autoPlay&handoffPositionMs=$handoffPositionMs&focusEpisodes=$focusEpisodes&season=$season&episode=$episode"
     }
 
-    const val LIVE_PLAYER = "tv_live_player?channelUrl={channelUrl}&channelName={channelName}&groupName={groupName}"
-    fun livePlayer(channelUrl: String, channelName: String, groupName: String): String {
+    const val LIVE_PLAYER =
+        "tv_live_player?channelUrl={channelUrl}&channelName={channelName}&groupName={groupName}" +
+            "&replayUrl={replayUrl}&replayStartMs={replayStartMs}&replayEndMs={replayEndMs}&replayTitle={replayTitle}"
+    fun livePlayer(
+        channelUrl: String,
+        channelName: String,
+        groupName: String,
+        replayUrl: String = "",
+        replayStartMs: Long = -1L,
+        replayEndMs: Long = -1L,
+        replayTitle: String = "",
+    ): String {
         return "tv_live_player?channelUrl=${Uri.encode(channelUrl)}" +
             "&channelName=${Uri.encode(channelName)}" +
-            "&groupName=${Uri.encode(groupName)}"
+            "&groupName=${Uri.encode(groupName)}" +
+            "&replayUrl=${Uri.encode(replayUrl)}" +
+            "&replayStartMs=$replayStartMs" +
+            "&replayEndMs=$replayEndMs" +
+            "&replayTitle=${Uri.encode(replayTitle)}"
     }
 
     const val PLAYER =
@@ -113,7 +142,7 @@ val tvTopDestinations = listOf(
     TvTopDestination(TvRoutes.SHOWS, R.string.nav_tv_shows, Icons.Filled.Tv),
     TvTopDestination(TvRoutes.SEARCH, R.string.tv_nav_search, Icons.Filled.Search),
     TvTopDestination(TvRoutes.IPTV, R.string.tv_nav_iptv, Icons.Filled.LiveTv),
-    TvTopDestination(TvRoutes.SPORTS, R.string.tv_nav_sports, Icons.Filled.SportsSoccer),
+    TvTopDestination(TvRoutes.JELLYFIN, R.string.watchlist_jellyfin, Icons.Filled.VideoLibrary),
     TvTopDestination(TvRoutes.LIBRARY, R.string.tv_nav_library, Icons.Filled.Bookmark),
     TvTopDestination(TvRoutes.SETTINGS, R.string.tv_nav_settings, Icons.Filled.Settings),
 )

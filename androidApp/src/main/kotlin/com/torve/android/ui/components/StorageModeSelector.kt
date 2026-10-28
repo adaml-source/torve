@@ -1,5 +1,7 @@
 package com.torve.android.ui.components
 
+import com.torve.android.ui.community.parityLabel as localizedUiText
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -51,7 +53,7 @@ fun StorageModeExplainer(modifier: Modifier = Modifier) {
         modifier = modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(10.dp))
-            .background(Gunmetal.copy(alpha = 0.6f))
+            .background(MaterialTheme.colorScheme.surfaceVariant)
             .padding(12.dp),
     ) {
         Text(
@@ -137,7 +139,7 @@ private fun StorageModeOption(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(8.dp))
-            .background(if (selected) Gunmetal else Gunmetal.copy(alpha = 0.5f))
+            .background(if (selected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant)
             .clickable(enabled = enabled, onClick = onClick)
             .padding(horizontal = 10.dp, vertical = 8.dp),
         verticalAlignment = Alignment.Top,
@@ -154,12 +156,12 @@ private fun StorageModeOption(
         Spacer(Modifier.width(10.dp))
         Column(modifier = Modifier.weight(1f)) {
             Text(
-                text = label,
+                text = localizedUiText(label),
                 style = MaterialTheme.typography.bodyMedium,
                 color = if (enabled) Torve.colors.textPrimary else Torve.colors.textHint,
             )
             Text(
-                text = description,
+                text = localizedUiText(description),
                 style = MaterialTheme.typography.labelSmall,
                 color = Torve.colors.textHint,
             )
@@ -251,7 +253,7 @@ fun MissingCredentialsCard(
             .padding(12.dp),
     ) {
         Text(
-            text = title,
+            text = localizedUiText(title),
             style = MaterialTheme.typography.titleSmall,
             color = Ruby,
             fontWeight = FontWeight.SemiBold,
@@ -326,7 +328,7 @@ fun ChangeStorageModeDialog(
     }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(title) },
+        title = { Text(localizedUiText(title)) },
         text = { Text(body) },
         confirmButton = {
             TextButton(onClick = onConfirm) {

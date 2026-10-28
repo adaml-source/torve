@@ -90,7 +90,7 @@ class ParsedStreamRuntimeFilter(
             hasRecentSuccess = recentSuccessCount > 0,
             lastSuccessfulResolveAt = lastSuccessfulResolveAt ?: 0L,
             recentSuccessCount = recentSuccessCount,
-            instantPlayback = isCached || directUrl != null,
+            instantPlayback = isCached || (directUrl != null && configuredNzb == null),
             accelerationScore = accelerationScore,
             accelerationSourceKey = accelerationSourceKey,
         )

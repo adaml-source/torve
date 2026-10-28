@@ -14,7 +14,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
@@ -38,6 +37,7 @@ import com.torve.android.ui.theme.Gunmetal
 import com.torve.android.ui.theme.Silver
 import com.torve.android.ui.theme.Snow
 import com.torve.presentation.detail.PreparingStreamState
+import com.torve.domain.model.MediaItem
 import kotlinx.coroutines.delay
 
 /**
@@ -51,6 +51,7 @@ import kotlinx.coroutines.delay
 @Composable
 fun StreamPreparingOverlay(
     state: PreparingStreamState,
+    mediaItem: MediaItem?,
     onCancel: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -64,22 +65,25 @@ fun StreamPreparingOverlay(
             .clickable(interactionSource = noRipple, indication = null) { },
         contentAlignment = Alignment.Center,
     ) {
+        com.torve.android.ui.components.CinematicContentLoading(
+            title = mediaItem?.title.orEmpty(),
+            backdropUrl = mediaItem?.backdropUrl,
+            posterUrl = mediaItem?.posterUrl,
+            logoUrl = mediaItem?.logoUrl,
+            tmdbId = mediaItem?.tmdbId,
+            mediaType = mediaItem?.type,
+        )
         Column(
             modifier = Modifier
+                .align(Alignment.BottomCenter)
                 .widthIn(max = 420.dp)
                 .fillMaxWidth()
-                .padding(horizontal = 24.dp)
+                .padding(horizontal = 24.dp, vertical = 28.dp)
                 .clip(RoundedCornerShape(18.dp))
-                .background(Gunmetal)
+                .background(Gunmetal.copy(alpha = 0.92f))
                 .padding(horizontal = 22.dp, vertical = 24.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            CircularProgressIndicator(
-                modifier = Modifier.size(48.dp),
-                color = Amber,
-                strokeWidth = 3.dp,
-            )
-            Spacer(Modifier.height(18.dp))
             Text(
                 stringResource(R.string.stream_preparing_title),
                 style = MaterialTheme.typography.headlineSmall,

@@ -16,7 +16,9 @@ data class SearchFilter(
     val yearFrom: Int? = null,
     val yearTo: Int? = null,
     val runtimeFilter: RuntimeFilter? = null,
-    val sortBy: SortOption = SortOption.POPULARITY_DESC,
+    val certification: String? = null,
+    val certificationCountry: String = "US",
+    val sortBy: SortOption = SortOption.RELEVANCE,
 ) {
     // Keep backward compat for single-genre access
     val genreId: Int? get() = genreIds.firstOrNull()
@@ -24,8 +26,8 @@ data class SearchFilter(
     val isActive: Boolean
         get() = mediaType != null || providersAvailabilityOnly || genreIds.isNotEmpty() || minRating != null ||
             minImdbScore != null || minTmdbScore != null || minTorveScore != null ||
-            yearFrom != null || yearTo != null || runtimeFilter != null ||
-            sortBy != SortOption.POPULARITY_DESC
+            yearFrom != null || yearTo != null || runtimeFilter != null || certification != null ||
+            sortBy != SortOption.RELEVANCE
 
     val activeCount: Int
         get() {
@@ -39,7 +41,8 @@ data class SearchFilter(
             if (minTorveScore != null) count++
             if (yearFrom != null || yearTo != null) count++
             if (runtimeFilter != null) count++
-            if (sortBy != SortOption.POPULARITY_DESC) count++
+            if (certification != null) count++
+            if (sortBy != SortOption.RELEVANCE) count++
             return count
         }
 }
@@ -116,7 +119,13 @@ data class CommittedSearchSlice(
 }
 
 data class SearchUiState(
+    val category: String = "all",
+    val peoplePage: Int = 1,
+    val peopleHasMore: Boolean = false,
     val query: String = "",
+    val aiSearchEnabled: Boolean = false,
+    val awaitingAiSubmission: Boolean = false,
+    val aiSearchTitle: String? = null,
     /**
      * Committed visible search-result list for the current policy. The UI
      * grid renders only from this. SENSITIVE items are NOT mixed in while
@@ -144,6 +153,13 @@ data class SearchUiState(
     val peopleResults: List<PersonSummary> = emptyList(),
     val userLists: List<String> = emptyList(),
     val isDiscovering: Boolean = false,
+    val discoveryLoaded: Boolean = false,
+    val peopleLoaded: Boolean = false,
+    val isLoadingMore: Boolean = false,
+    val searchPage: Int = 1,
+    val searchHasMore: Boolean = false,
+    val discoverPage: Int = 1,
+    val discoverHasMore: Boolean = false,
     val hasActiveSearch: Boolean = false,
     /**
      * Monotonic id of the search that produced [results] / [discoverResults].
@@ -173,7 +189,7 @@ data class SearchUiState(
 ) {
     /** List the UI should render. Already a committed visible projection. */
     val displayItems: List<MediaItem>
-        get() = if (query.length >= 2 || hasActiveSearch) results else discoverResults
+        get() = if (query.length >= 2) results else discoverResults
 
     /**
      * SENSITIVE items committed for the active text-search slice that are

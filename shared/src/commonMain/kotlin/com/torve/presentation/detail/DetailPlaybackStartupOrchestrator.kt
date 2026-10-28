@@ -1,6 +1,10 @@
 package com.torve.presentation.detail
 
 import com.torve.data.addon.ParsedStream
+import com.torve.data.addon.isAddonHostedUrl
+import com.torve.domain.model.DebridServiceType
+import com.torve.domain.model.ResolvedStream
+import io.ktor.http.Url
 
 enum class PlaybackStartupPhase {
     IDLE,
@@ -27,7 +31,39 @@ sealed interface PlaybackStartupEvent {
     data class FullResultsAvailable(val mergedResultCount: Int) : PlaybackStartupEvent
 }
 
+enum class ResolvedStreamDispatch {
+    REJECT_EMPTY,
+    PLAY_IMMEDIATELY,
+    PROBE_READINESS,
+}
+
 object DetailPlaybackStartupOrchestrator {
+    /** A native provider client may recover an already-prepared, exact file.
+     * Keep its original source identity and run the usual readiness/continuation
+     * path. Never accept the credential-bearing TorBox requestdl API URL here.
+     */
+    fun preparedTorBoxStream(stream: ParsedStream, url: String, fileName: String, fileSize: Long): ResolvedStream? {
+        if (!stream.isAddonHostedUrl() || fileName.isBlank() || fileSize <= 0) return null
+        val address = runCatching { Url(url) }.getOrNull() ?: return null
+        if (address.protocol.name != "https" || !address.host.lowercase().endsWith(".tb-cdn.st") ||
+            address.port != 443 || address.user != null || address.password != null) return null
+        return ResolvedStream(url = url, service = DebridServiceType.TORBOX, fileName = fileName, fileSize = fileSize)
+    }
+    /**
+     * One source of truth for every normal, progressive, manual, and codec
+     * fallback path. A resolver result is never playable merely because the
+     * resolver call completed: it must contain a URL, and addon-hosted URLs
+     * must pass the readiness probe before reaching a player.
+     */
+    fun classifyResolvedStream(
+        url: String?,
+        addonHosted: Boolean,
+    ): ResolvedStreamDispatch = when {
+        url.isNullOrBlank() -> ResolvedStreamDispatch.REJECT_EMPTY
+        addonHosted -> ResolvedStreamDispatch.PROBE_READINESS
+        else -> ResolvedStreamDispatch.PLAY_IMMEDIATELY
+    }
+
     fun reduce(
         current: PlaybackStartupStatus,
         event: PlaybackStartupEvent,

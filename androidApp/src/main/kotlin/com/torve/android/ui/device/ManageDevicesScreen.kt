@@ -1,5 +1,7 @@
 package com.torve.android.ui.device
 
+import com.torve.android.ui.community.parityLabel as localizedUiText
+
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -70,9 +72,7 @@ fun ManageDevicesScreen(
         TopAppBar(
             title = { Text(stringResource(R.string.manage_devices_title)) },
             navigationIcon = {
-                IconButton(onClick = onBack) {
-                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.common_back_cd))
-                }
+                com.torve.android.ui.components.BackButton(onClick = onBack)
             },
         )
 
@@ -149,7 +149,7 @@ fun ManageDevicesScreen(
                     resolveErrorKey(context, key)?.let { message ->
                         item {
                             Text(
-                                text = message,
+                                text = localizedUiText(message),
                                 color = MaterialTheme.colorScheme.error,
                                 style = MaterialTheme.typography.bodySmall,
                             )

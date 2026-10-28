@@ -1,0 +1,9 @@
+{
+  "streams": [
+    {
+      "name": "Torve original test media",
+      "title": "Play original test video · H.264 / AAC",
+      "url": "https://raw.githubusercontent.com/adaml-source/torve-demo-extensions/main/media/original-playback.mp4"
+    }
+  ]
+}

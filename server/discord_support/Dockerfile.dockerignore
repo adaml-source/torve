@@ -1,0 +1,13 @@
+**
+!discord_support/
+!discord_support/requirements.txt
+!discord_support/__init__.py
+!discord_support/service.py
+!discord_support/conversation.py
+!discord_support/gateway.py
+!discord_support/builds.py
+!discord_support/repairs.py
+!discord_support/tags.py
+!discord_support/commands.py
+!discord_support/knowledge.json
+!discord_support/playbooks.json

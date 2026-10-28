@@ -18,7 +18,13 @@ import com.torve.domain.model.RatingDisplayPrefs
 import com.torve.domain.model.RegexPattern
 import com.torve.domain.model.StreamGroup
 import com.torve.domain.model.StreamQuality
+import com.torve.domain.model.NextEpisodeMode
+import com.torve.domain.model.NextEpisodePreparationMode
+import com.torve.domain.model.SourceFallbackPolicy
+import com.torve.domain.model.SourceLanguageMatchMode
+import com.torve.domain.model.UnknownSourceMetadataPolicy
 import com.torve.domain.player.DesktopPlaybackHotkeys
+import com.torve.domain.player.SegmentActionMode
 
 enum class ThemeMode { SYSTEM, LIGHT, DARK }
 
@@ -33,6 +39,13 @@ enum class AppLanguage(val code: String, val displayName: String) {
 }
 
 data class SettingsUiState(
+    val personalDataUserId: String? = null,
+    val playbackSettingsLoaded: Boolean = false,
+    val optionalAppFeatures: OptionalAppFeatures = OptionalAppFeatures(),
+    val optionalAppFeaturesLoaded: Boolean = false,
+    val tmdbCatalogueEnabled: Boolean = false,
+    val tmdbEnrichmentEnabled: Boolean = false,
+    val tmdbExtensionsLoaded: Boolean = false,
     // Debrid
     val debridProvider: DebridServiceType = DebridServiceType.REAL_DEBRID,
     val debridApiKey: String = "",
@@ -49,7 +62,9 @@ data class SettingsUiState(
     // Debrid device auth
     val debridDeviceCode: DeviceCodeInfo? = null,
     val isPollingDebrid: Boolean = false,
-    // All connected debrid providers (provider → apiKey)
+    // Configured/authenticated providers, including explicitly disabled ones.
+    val configuredDebridProviders: Map<DebridServiceType, String> = emptyMap(),
+    // Providers explicitly enabled for use (provider → apiKey).
     val connectedDebridProviders: Map<DebridServiceType, String> = emptyMap(),
     // Trakt
     val traktClientId: String = "",
@@ -70,6 +85,7 @@ data class SettingsUiState(
     val traktScrobbleEnabled: Boolean = true,
     val traktApiStatus: String? = null,
     val traktLastSyncTime: Long? = null,
+    val traktPendingWrites: Int = 0,
     val availabilityLastSyncTime: Long? = null,
     val libraryOverlayLastSyncTime: Long? = null,
     // SIMKL
@@ -94,6 +110,11 @@ data class SettingsUiState(
     val maxQuality: StreamQuality = StreamQuality.REMUX_4K,
     val minQuality: StreamQuality = StreamQuality.SD_480P,
     val maxFileSizeMb: Int? = null,
+    val minSourceSizePerHourMb: Int = 0,
+    val hideWatched: Boolean = false,
+    val excludeSeasonPacks: Boolean = false,
+    val matchFrameRate: Boolean = false,
+    val keepSubtitlesAboveControls: Boolean = true,
     val cachedOnly: Boolean = true,
     val hdrEnabled: Boolean = false,
     // Playback
@@ -101,6 +122,20 @@ data class SettingsUiState(
     val codecPreference: CodecPreference = CodecPreference.HEVC_PREFERRED,
     val hdrMode: HdrMode = HdrMode.AUTO,
     val autoPlayNextEpisodeEnabled: Boolean = true,
+    val nextEpisodeMode: NextEpisodeMode = NextEpisodeMode.AT_END,
+    val skipIntroMode: SegmentActionMode = SegmentActionMode.SHOW_BUTTON,
+    val skipRecapMode: SegmentActionMode = SegmentActionMode.SHOW_BUTTON,
+    val playNextDuringCreditsMode: SegmentActionMode = SegmentActionMode.SHOW_BUTTON,
+    val protectPostCreditScenes: Boolean = true,
+    val smartSegmentDetectionEnabled: Boolean = true,
+    val nextEpisodePreparationMode: NextEpisodePreparationMode = NextEpisodePreparationMode.RESOLVE_ONLY,
+    val nextEpisodePreloadBufferSeconds: Int = 30,
+    val nextEpisodePreloadMaxMb: Int = 128,
+    val nextEpisodePreloadWifiOnly: Boolean = true,
+    val sourceLanguageMatchMode: SourceLanguageMatchMode = SourceLanguageMatchMode.PREFER,
+    val unknownSourceSizePolicy: UnknownSourceMetadataPolicy = UnknownSourceMetadataPolicy.ALLOW_WITH_PENALTY,
+    val unknownSourceLanguagePolicy: UnknownSourceMetadataPolicy = UnknownSourceMetadataPolicy.ALLOW_WITH_PENALTY,
+    val sourceFallbackPolicy: SourceFallbackPolicy = SourceFallbackPolicy.ASK,
     val autoSourceMode: AutoSourceMode = AutoSourceMode.BALANCED,
     val allow4kAuto: Boolean = false,
     val preferCompatibleCodecs: Boolean = true,
@@ -113,6 +148,7 @@ data class SettingsUiState(
     val subtitlesEnabledByDefault: Boolean = false,
     val preferredSubtitleLanguage: String = "",
     val preferredAudioLanguage: String = "",
+    val allowSubtitleLanguageFallback: Boolean = false,
     val rememberVolume: Boolean = true,
     val lastVolume: Int = 100,
     val desktopPlaybackHotkeys: DesktopPlaybackHotkeys = DesktopPlaybackHotkeys(),
@@ -136,9 +172,14 @@ data class SettingsUiState(
     val kodiTestResult: Map<String, Boolean?> = emptyMap(),
     // Theme & Language
     val themeMode: ThemeMode = ThemeMode.SYSTEM,
+    /** Vertical gap between Apple browsing rails; null preserves each platform's default. */
+    val railSpacingDp: Int? = null,
+    val showRemainingEpisodes: Boolean = true,
     val appLanguage: AppLanguage = AppLanguage.ENGLISH,
     // Home layout source ("SHARED_WITH_MOBILE" | "DESKTOP_OWN") — desktop-only toggle.
     val homeLayoutSource: String = "SHARED_WITH_MOBILE",
+    val moviesHeroEnabled: Boolean = true,
+    val showsHeroEnabled: Boolean = true,
     // LAN library serving (desktop-only). Off by default — server stays
     // unbound until the user opts in. When `lanServingBindToLan` is also
     // true the server binds to the wildcard address so peer devices on
@@ -175,6 +216,8 @@ data class SettingsUiState(
     // Integrations — Jellyfin
     val jellyfinServerUrl: String = "",
     val jellyfinApiKey: String = "",
+    /** True only when a complete Jellyfin connection has been restored or tested successfully. */
+    val jellyfinConnected: Boolean = false,
     val jellyfinStatusMessage: String? = null,
     val jellyfinProfiles: List<com.torve.data.integrations.JellyfinProfile> = emptyList(),
     val selectedJellyfinUserId: String? = null,
@@ -184,6 +227,12 @@ data class SettingsUiState(
     val plexConnected: Boolean = false,
     val plexLoading: Boolean = false,
     val plexError: String? = null,
+    // Integrations - Seerr household request gateway
+    val seerrServerUrl: String = "",
+    val seerrApiKey: String = "",
+    val seerrConnected: Boolean = false,
+    val seerrLoading: Boolean = false,
+    val seerrStatusMessage: String? = null,
     // Region / availability
     val regionCode: String = "US",
     // Ratings
@@ -205,8 +254,8 @@ data class SettingsUiState(
      * key (torrent/hoster unrestrict path) or at least one installed addon
      * that produces streams (Panda serving direct / cloud-debrid URLs).
      *
-     * Use this to gate play buttons. Use [debridConnected] when specifically
-     * checking whether the local unrestrict / bulk-download path is available.
+     * Use this to gate play buttons. Use [connectedDebridProviders] when
+     * specifically checking whether local unrestrict / bulk download is available.
      */
-    val canPlayStreams: Boolean get() = debridConnected || hasStreamAddon
+    val canPlayStreams: Boolean get() = connectedDebridProviders.isNotEmpty() || hasStreamAddon
 }

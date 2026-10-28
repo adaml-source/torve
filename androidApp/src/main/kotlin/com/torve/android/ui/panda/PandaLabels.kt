@@ -16,7 +16,7 @@ import com.torve.android.R
 fun labelForNzbIndexer(id: String): String = when (id) {
     "none" -> stringResource(R.string.panda_setup_usenet_indexer_none)
     "nzbgeek" -> "NZBgeek"
-    "scenenzbs" -> "SceneNZBs"
+    "scenenzbs" -> "Treasure Maps"
     "dognzb" -> "DogNZB"
     "nzbplanet" -> "NZBPlanet"
     "custom" -> stringResource(R.string.panda_setup_usenet_indexer_custom)

@@ -1,5 +1,7 @@
 package com.torve.android.ui.seeall
 
+import com.torve.android.ui.community.parityLabel as localizedUiText
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -13,6 +15,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import com.torve.android.ui.community.adaptiveColumns
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.itemsIndexed
@@ -74,6 +77,7 @@ fun SeeAllScreen(
         presetId = null,
         globalDefaultPresetId = settingsState.globalDefaultPresetId,
     )
+    val density = com.torve.android.ui.community.rememberPageGrid("seeall_$sectionId")
     val gridState = rememberLazyGridState()
 
     LaunchedEffect(sectionId) { viewModel.loadSection(sectionId) }
@@ -102,7 +106,7 @@ fun SeeAllScreen(
         Row(
             Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 12.dp, vertical = 8.dp),
+                .padding(horizontal = 12.dp, vertical = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             BackButton(onClick = onBack)
@@ -113,8 +117,10 @@ fun SeeAllScreen(
                 overflow = TextOverflow.Ellipsis,
                 style = MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.Bold,
-                color = Snow,
+                color = MaterialTheme.colorScheme.onSurface,
+                modifier = Modifier.weight(1f),
             )
+            com.torve.android.ui.community.PageGridMenu(density)
         }
 
         // Sort + filter strip — only show once items have loaded so genres/year
@@ -135,6 +141,16 @@ fun SeeAllScreen(
                 selectedYearTo = state.filterYearTo,
                 onYearRangeChanged = viewModel::setYearRange,
                 onClearFilters = viewModel::clearFilters,
+                compact = true,
+                additionalFilterCount = if (state.filterMinImdb != null) 1 else 0,
+                additionalFilters = {
+                    Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp)) {
+                        Text(localizedUiText("Minimum IMDb · ${state.filterMinImdb?.let { "%.1f".format(it) } ?: "Any"}"))
+                        androidx.compose.material3.Slider(value = state.filterMinImdb ?: 0f,
+                            onValueChange = { viewModel.setMinimumImdb(it.takeIf { value -> value > 0f }) },
+                            valueRange = 0f..10f, steps = 19)
+                    }
+                },
             )
         }
 
@@ -145,7 +161,7 @@ fun SeeAllScreen(
             }
         } else {
             LazyVerticalGrid(
-                columns = GridCells.Adaptive(minSize = 110.dp),
+                columns = GridCells.Fixed(density.adaptiveColumns()),
                 state = gridState,
                 contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp),

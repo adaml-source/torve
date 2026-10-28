@@ -1,5 +1,7 @@
 package com.torve.data.history
 
+import app.cash.sqldelight.coroutines.asFlow
+import app.cash.sqldelight.coroutines.mapToList
 import com.torve.data.auth.UserIdProvider
 import com.torve.data.metadata.TmdbApiClient
 import com.torve.data.metadata.TmdbMappers
@@ -9,22 +11,34 @@ import com.torve.data.simkl.SimklSyncBody
 import com.torve.data.simkl.SimklSyncItem
 import com.torve.data.stats.WatchSessionMediaIdentity
 import com.torve.data.stats.WatchSessionRecorder
-import com.torve.data.trakt.TraktHistoryBody
-import com.torve.data.trakt.TraktHistoryEpisodeEntry
-import com.torve.data.trakt.TraktHistorySeasonEntry
-import com.torve.data.trakt.TraktHistoryShow
-import com.torve.data.trakt.TraktIds
+import com.torve.data.trakt.TraktWatchedShowResponse
+import com.torve.data.trakt.episodeMarkers
+import com.torve.data.trakt.latestEpisodeMarker
+import com.torve.data.trakt.shouldApplyRemoteProgress
+import com.torve.data.trakt.traktWatchedHistoryId
 import com.torve.data.trakt.api.TraktAuthorizedApi
 import com.torve.data.trakt.repo.TraktSyncRepository
 import com.torve.db.TorveDatabase
 import com.torve.domain.integrations.IntegrationSecretKey
 import com.torve.domain.integrations.IntegrationSecretStore
 import com.torve.domain.model.MediaType
+import com.torve.domain.model.MediaItem
 import com.torve.domain.model.WatchHistoryEntry
 import com.torve.domain.model.extractImdbIdOrNull
 import com.torve.domain.model.extractTmdbIdOrNull
 import com.torve.domain.repository.WatchHistoryRepository
 import com.torve.domain.stats.WatchSessionSource
+import com.torve.util.ioDispatcher
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.emitAll
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.datetime.Clock
 import kotlinx.datetime.Instant
 
 class WatchHistoryRepositoryImpl(
@@ -36,39 +50,130 @@ class WatchHistoryRepositoryImpl(
     private val integrationSecretStore: IntegrationSecretStore,
     private val userIdProvider: UserIdProvider,
     private val watchSessionRecorder: WatchSessionRecorder? = null,
+    private val clock: Clock = Clock.System,
 ) : WatchHistoryRepository {
     private val queries get() = database.torveQueries
+    private val seriesRefreshMutex = Mutex()
+    private val lastSeriesRefreshAttempt = mutableMapOf<Triple<String, String, String>, Long>()
 
-    override suspend fun getRecent(limit: Int): List<WatchHistoryEntry> {
-        return queries.getRecentHistory(
-            userId = userIdProvider.currentUserId(),
+    override suspend fun getRecent(limit: Int): List<WatchHistoryEntry> = withContext(ioDispatcher) {
+        queries.getRecentHistory(
+            userId = userIdProvider.currentDataUserId(),
             limit = limit.toLong(),
         ).executeAsList().map { it.toDomain() }
     }
 
-    override suspend fun getByDateRange(startMs: Long, endMs: Long): List<WatchHistoryEntry> {
-        return queries.getHistoryByDate(
-            userId = userIdProvider.currentUserId(),
+    override suspend fun getByDateRange(startMs: Long, endMs: Long): List<WatchHistoryEntry> = withContext(ioDispatcher) {
+        queries.getHistoryByDate(
+            userId = userIdProvider.currentDataUserId(),
             startMs = startMs,
             endMs = endMs,
         ).executeAsList().map { it.toDomain() }
     }
 
-    override suspend fun getAll(): List<WatchHistoryEntry> {
-        return queries.getAllHistory(userId = userIdProvider.currentUserId())
+    override suspend fun getAll(): List<WatchHistoryEntry> = withContext(ioDispatcher) {
+        queries.getAllHistory(userId = userIdProvider.currentDataUserId())
             .executeAsList().map { it.toDomain() }
     }
 
-    override suspend fun getForMedia(mediaId: String): List<WatchHistoryEntry> {
-        return queries.getHistoryForMedia(
-            userId = userIdProvider.currentUserId(),
+    override suspend fun getForMedia(mediaId: String): List<WatchHistoryEntry> = withContext(ioDispatcher) {
+        queries.getHistoryForMedia(
+            userId = userIdProvider.currentDataUserId(),
             mediaId = mediaId,
         ).executeAsList().map { it.toDomain() }
     }
 
-    override suspend fun record(entry: WatchHistoryEntry) {
+    override fun observeForMedia(mediaId: String): Flow<List<WatchHistoryEntry>> = flow {
+        val userId = userIdProvider.currentDataUserId()
+        emitAll(
+            queries.getHistoryForMedia(userId = userId, mediaId = mediaId)
+                .asFlow().mapToList(ioDispatcher).map { rows ->
+                    if (userId == userIdProvider.currentDataUserId()) rows.map { it.toDomain() } else emptyList()
+                }.distinctUntilChanged(),
+        )
+    }
+
+    override suspend fun refreshSeries(item: MediaItem) = withContext(ioDispatcher) {
+        if (item.type != MediaType.SERIES) return@withContext
+        val userId = userIdProvider.currentDataUserId()
+        val connection = traktApi.watchedRefreshScope() ?: run {
+            println("EpisodeWatchSync result=not_connected")
+            return@withContext
+        }
+        val tmdbId = item.tmdbId ?: item.id.extractTmdbIdOrNull() ?: return@withContext
+        seriesRefreshMutex.withLock {
+            val key = Triple(userId, connection, item.id)
+            val now = clock.now().toEpochMilliseconds()
+            val lastAttempt = lastSeriesRefreshAttempt[key]
+            if (lastAttempt != null && now - lastAttempt < SERIES_REFRESH_INTERVAL_MS) return@withLock
+            if (userId != userIdProvider.currentDataUserId() || connection != traktApi.watchedRefreshScope()) return@withLock
+            if (lastSeriesRefreshAttempt.size >= 128) lastSeriesRefreshAttempt.clear()
+            lastSeriesRefreshAttempt[key] = now
+            val imdbId = item.imdbId?.extractImdbIdOrNull()
+                ?: resolveImdbId(item.id, isMovie = false, tmdbId = tmdbId)
+                ?: return@withLock
+
+            // Push durable local changes before reading the other devices' state.
+            traktSyncRepo.flushPendingWrites()
+            val localBeforeFetch = queries.getHistoryForMedia(userId = userId, mediaId = item.id).executeAsList()
+            val progress = traktApi.getShowWatchedProgress(imdbId)
+            if (userId != userIdProvider.currentDataUserId() || connection != traktApi.watchedRefreshScope()) return@withLock
+            val pending = traktSyncRepo.pendingEpisodeHistoryChanges(tmdbId)
+            val markers = progress.episodeMarkers().filter { pending[it.season to it.episode] != false }
+            queries.transaction {
+                // A user action or another sync during the request wins over
+                // this older snapshot. Retry on the next bounded refresh.
+                if (queries.getHistoryForMedia(userId = userId, mediaId = item.id).executeAsList() != localBeforeFetch) {
+                    return@transaction
+                }
+                queries.clearImportedTraktSeriesHistoryForMedia(userId = userId, mediaId = item.id)
+                for (marker in markers) {
+                    queries.insertHistory(
+                        user_id = userId,
+                        id = traktWatchedHistoryId(item.id, marker.season, marker.episode),
+                        media_id = item.id,
+                        media_type = "series",
+                        title = item.title,
+                        poster_url = item.posterUrl,
+                        backdrop_url = item.backdropUrl,
+                        watched_at = marker.watchedAtMs,
+                        duration_watched_ms = 0,
+                        season_number = marker.season.toLong(),
+                        episode_number = marker.episode.toLong(),
+                        show_title = item.title,
+                    )
+                }
+                println("EpisodeWatchSync media=$tmdbId result=applied watched=${markers.size} pending=${pending.size}")
+            }
+        }
+    }
+
+    override suspend fun record(entry: WatchHistoryEntry) = withContext(ioDispatcher +
+        com.torve.data.auth.capturePersonalDataScope(userIdProvider)) {
+        val tmdbId = entry.mediaId.extractTmdbIdOrNull()
+        val isMovie = entry.mediaType.equals("movie", ignoreCase = true)
+        val isEpisode = !isMovie && entry.seasonNumber != null && entry.episodeNumber != null
+        // Queue first, including offline writes. A process exit must not leave
+        // an accepted local episode marking with no durable cloud retry.
+        if (isEpisode && tmdbId != null) {
+            traktSyncRepo.enqueueEpisodeHistoryAdd(
+                tmdbId = tmdbId,
+                imdbId = entry.mediaId.extractImdbIdOrNull(),
+                season = entry.seasonNumber,
+                episode = entry.episodeNumber,
+            )
+        }
+        // This path records an explicit user marking. Clear only its matching resume item.
+        val person = userIdProvider.currentDataUserId()
+        val resume = queries.getProgress(person, entry.mediaId).executeAsOneOrNull()
+        if (resume != null && (isMovie || (resume.season_number == entry.seasonNumber?.toLong() &&
+                    resume.episode_number == entry.episodeNumber?.toLong()))) {
+            queries.deleteProgressByMediaId(person, entry.mediaId)
+        }
+        if (isEpisode) queries.deleteEpisodePlaybackCoverage(person, entry.mediaId, entry.seasonNumber!!.toLong(), entry.episodeNumber!!.toLong())
+        else queries.deletePlaybackCoverage(person, entry.mediaId)
         queries.insertHistory(
-            user_id = userIdProvider.currentUserId(),
+            user_id = person,
             id = entry.id,
             media_id = entry.mediaId,
             media_type = entry.mediaType,
@@ -81,27 +186,26 @@ class WatchHistoryRepositoryImpl(
             episode_number = entry.episodeNumber?.toLong(),
             show_title = entry.showTitle,
         )
-        val tmdbId = entry.mediaId.extractTmdbIdOrNull() ?: return
-        val isMovie = entry.mediaType.equals("movie", ignoreCase = true)
+        if (tmdbId == null) return@withContext
+        if (isEpisode) {
+            try {
+                traktSyncRepo.flushPendingWrites()
+            } catch (e: Exception) {
+                if (e is CancellationException) throw e
+            }
+            runCatching {
+                integrationSecretStore.get(IntegrationSecretKey.SIMKL_ACCESS_TOKEN)?.takeIf { it.isNotBlank() }?.let { token ->
+                    simklClient.addToHistory(token, com.torve.data.simkl.simklEpisodeBody(
+                        SimklIds(tmdb = tmdbId), entry.seasonNumber!!, entry.episodeNumber!!,
+                        Instant.fromEpochMilliseconds(entry.watchedAt).toString(),
+                    ))
+                }
+            }.onFailure { if (it is CancellationException) throw it }
+            return@withContext
+        }
         val imdbId = resolveImdbId(entry.mediaId, isMovie, tmdbId)
         runCatching {
-            if (!isMovie && entry.seasonNumber != null && entry.episodeNumber != null) {
-                traktApi.addToHistory(
-                    TraktHistoryBody(
-                        shows = listOf(
-                            TraktHistoryShow(
-                                ids = TraktIds(tmdb = tmdbId, imdb = imdbId),
-                                seasons = listOf(
-                                    TraktHistorySeasonEntry(
-                                        number = entry.seasonNumber,
-                                        episodes = listOf(TraktHistoryEpisodeEntry(number = entry.episodeNumber)),
-                                    ),
-                                ),
-                            ),
-                        ),
-                    ),
-                )
-            } else if (isMovie) {
+            if (isMovie) {
                 traktSyncRepo.enqueueHistoryAdd(
                     tmdbId = tmdbId,
                     mediaType = MediaType.MOVIE,
@@ -111,14 +215,7 @@ class WatchHistoryRepositoryImpl(
             }
         }.onFailure {
             runCatching {
-                if (!isMovie && entry.seasonNumber != null && entry.episodeNumber != null) {
-                    traktSyncRepo.enqueueEpisodeHistoryAdd(
-                        tmdbId = tmdbId,
-                        imdbId = imdbId,
-                        season = entry.seasonNumber,
-                        episode = entry.episodeNumber,
-                    )
-                } else if (isMovie) {
+                if (isMovie) {
                     traktSyncRepo.enqueueHistoryAdd(
                         tmdbId = tmdbId,
                         mediaType = MediaType.MOVIE,
@@ -135,35 +232,65 @@ class WatchHistoryRepositoryImpl(
                 simklClient.addToHistory(token, body)
             }
         }
+        Unit
     }
 
-    override suspend fun delete(id: String) {
+    override suspend fun delete(id: String) = withContext(ioDispatcher) {
         queries.deleteHistory(
-            userId = userIdProvider.currentUserId(),
+            userId = userIdProvider.currentDataUserId(),
             historyId = id,
         )
     }
 
-    override suspend fun clearAll() {
-        queries.clearAllHistory(userId = userIdProvider.currentUserId())
+    override suspend fun clearAll() = withContext(ioDispatcher) {
+        queries.clearAllHistory(userId = userIdProvider.currentDataUserId())
     }
 
-    override suspend fun getCount(): Long {
-        return queries.getHistoryCount(userId = userIdProvider.currentUserId()).executeAsOne()
+    override suspend fun getCount(): Long = withContext(ioDispatcher) {
+        queries.getHistoryCount(userId = userIdProvider.currentDataUserId()).executeAsOne()
     }
 
-    override suspend fun syncFromTrakt() {
-        try {
-            val historyItems = traktApi.getHistory(limit = 100)
-            if (historyItems.isEmpty()) return
+    override suspend fun deleteEpisode(mediaId: String, season: Int, episode: Int) = withContext(ioDispatcher +
+        com.torve.data.auth.capturePersonalDataScope(userIdProvider)) {
+        val person = userIdProvider.currentDataUserId()
+        queries.transaction {
+            queries.deleteEpisodePlaybackCoverage(person, mediaId, season.toLong(), episode.toLong())
+            queries.deleteEpisodeHistory(
+                userId = person,
+                mediaId = mediaId,
+                season = season.toLong(),
+                episode = episode.toLong(),
+            )
+            // Undo the estimated completion alongside its watched mark. Actual
+            // player sessions retain measured watch time and recoverable bookmarks.
+            queries.deleteEstimatedWatchSessionsForEpisode(
+                userId = person,
+                mediaId = mediaId,
+                season = season.toLong(),
+                episode = episode.toLong(),
+            )
+        }
+        val tmdb = mediaId.extractTmdbIdOrNull()
+        if (tmdb != null) runCatching {
+            integrationSecretStore.get(IntegrationSecretKey.SIMKL_ACCESS_TOKEN)?.takeIf { it.isNotBlank() }?.let { token ->
+                simklClient.removeFromHistory(token, com.torve.data.simkl.simklEpisodeBody(SimklIds(tmdb = tmdb), season, episode))
+            }
+        }.onFailure { if (it is CancellationException) throw it }
+        Unit
+    }
 
-            val userId = userIdProvider.currentUserId()
-            val localIds = queries.getAllHistory(userId = userId).executeAsList()
-                .map { it.id }
-                .toSet()
-            val episodeRuntimeCache = mutableMapOf<Pair<Int, Int>, Map<Int, Long>>()
+    override suspend fun syncFromTrakt() = withContext(ioDispatcher) {
+        val userId = userIdProvider.currentDataUserId()
+        val connection = traktApi.watchedRefreshScope() ?: return@withContext
+        traktSyncRepo.flushPendingWrites()
+        val historyItems = traktApi.getHistory(limit = 100)
+        if (userId != userIdProvider.currentDataUserId() || connection != traktApi.watchedRefreshScope()) return@withContext
+        val localIds = queries.getAllHistory(userId = userId).executeAsList()
+            .map { it.id }
+            .toSet()
+        val episodeRuntimeCache = mutableMapOf<Pair<Int, Int>, Map<Int, Long>>()
 
-            for (item in historyItems) {
+        for (item in historyItems) {
                 val traktId = "trakt_${item.id}"
                 val alreadyImported = traktId in localIds
 
@@ -244,9 +371,79 @@ class WatchHistoryRepositoryImpl(
                     importDiscriminator = item.id.takeIf { it > 0L }?.toString() ?: watchedAt.toString(),
                     runtimeMs = runtimeMs,
                 )
+        }
+
+        // `/sync/history` is event based and intentionally bounded above.
+        // It cannot rebuild a long-running show's complete watched state.
+        // The paginated watched endpoint supplies the authoritative set.
+        val watchedShows = traktApi.getWatchedShows()
+        if (userId != userIdProvider.currentDataUserId() || connection != traktApi.watchedRefreshScope()) return@withContext
+        val pending = watchedShows.mapNotNull { it.show?.ids?.tmdb }.distinct().associateWith { tmdbId ->
+            traktSyncRepo.pendingEpisodeHistoryChanges(tmdbId)
+        }
+        importWatchedSeriesState(userId, watchedShows, pending)
+    }
+
+    private fun importWatchedSeriesState(
+        userId: String,
+        watchedShows: List<TraktWatchedShowResponse>,
+        pending: Map<Int, Map<Pair<Int, Int>, Boolean>>,
+    ) {
+        queries.transaction {
+            // These rows are a materialized view of Trakt's authoritative
+            // watched set. Rebuild it after a complete successful fetch so
+            // removals and progress resets also propagate to this device.
+            queries.clearImportedTraktSeriesHistory(userId = userId)
+
+            for (watchedShow in watchedShows) {
+                val show = watchedShow.show ?: continue
+                val ids = show.ids ?: continue
+                val tmdbId = ids.tmdb ?: continue
+                val mediaId = tmdbId.toString()
+                val markers = watchedShow.episodeMarkers()
+                for (marker in markers) {
+                    if (pending[tmdbId]?.get(marker.season to marker.episode) == false) continue
+                    queries.insertHistory(
+                        user_id = userId,
+                        id = traktWatchedHistoryId(
+                            showIdentity = ids.trakt?.toString() ?: mediaId,
+                            season = marker.season,
+                            episode = marker.episode,
+                        ),
+                        media_id = mediaId,
+                        media_type = "series",
+                        title = show.title,
+                        poster_url = null,
+                        backdrop_url = null,
+                        watched_at = marker.watchedAtMs,
+                        duration_watched_ms = 0,
+                        season_number = marker.season.toLong(),
+                        episode_number = marker.episode.toLong(),
+                        show_title = show.title,
+                    )
+                }
+
+                val latest = watchedShow.latestEpisodeMarker() ?: continue
+                val local = queries.getProgress(userId = userId, mediaId = mediaId).executeAsOneOrNull()
+                if (!shouldApplyRemoteProgress(local?.updated_at, latest.watchedAtMs)) continue
+                val durationMs = local?.duration_ms?.takeIf { it > 0L }
+                    ?: show.runtime?.takeIf { it > 0 }?.toLong()?.times(60_000L)
+                    ?: DEFAULT_IMPORTED_EPISODE_DURATION_MS
+                queries.upsertProgress(
+                    user_id = userId,
+                    media_id = mediaId,
+                    media_type = "series",
+                    title = show.title.ifBlank { local?.title.orEmpty() },
+                    poster_url = local?.poster_url,
+                    backdrop_url = local?.backdrop_url,
+                    position_ms = durationMs,
+                    duration_ms = durationMs,
+                    season_number = latest.season.toLong(),
+                    episode_number = latest.episode.toLong(),
+                    show_title = show.title.ifBlank { local?.show_title },
+                    updated_at = latest.watchedAtMs,
+                )
             }
-        } catch (_: Exception) {
-            // Non-critical
         }
     }
 
@@ -306,5 +503,10 @@ class WatchHistoryRepositoryImpl(
             .firstOrNull { it > 0 }
             ?.toLong()
             ?.times(60_000L)
+    }
+
+    private companion object {
+        const val SERIES_REFRESH_INTERVAL_MS = 60_000L
+        const val DEFAULT_IMPORTED_EPISODE_DURATION_MS = 45L * 60L * 1_000L
     }
 }

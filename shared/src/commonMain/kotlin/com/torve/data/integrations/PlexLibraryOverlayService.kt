@@ -3,6 +3,7 @@ package com.torve.data.integrations
 import com.torve.domain.integrations.IntegrationSecretKey
 import com.torve.domain.integrations.IntegrationSecretStore
 import com.torve.domain.integrations.LibraryOverlayService
+import com.torve.domain.integrations.ConnectionProbeResult
 import com.torve.domain.model.MediaType
 import com.torve.domain.model.WatchProgress
 import com.torve.domain.repository.PreferencesRepository
@@ -21,16 +22,19 @@ class PlexLibraryOverlayService(
     private val secretStore: IntegrationSecretStore,
 ) : LibraryOverlayService {
 
-    override suspend fun testConnection(serverUrl: String, apiKey: String): Boolean {
+    override suspend fun testConnection(serverUrl: String, apiKey: String): Boolean =
+        probeConnection(serverUrl, apiKey) == ConnectionProbeResult.CONNECTED
+
+    override suspend fun probeConnection(serverUrl: String, apiKey: String): ConnectionProbeResult {
         val base = serverUrl.trim().trimEnd('/')
-        if (base.isBlank() || apiKey.isBlank()) return false
-        return runCatching {
-            val resp: PlexMediaContainer<PlexIdentity> = httpClient.get("$base/identity") {
+        if (base.isBlank() || apiKey.isBlank()) return ConnectionProbeResult.SETUP_INCOMPLETE
+        return authenticatedProbe {
+            // /identity may be public. Library sections verify the supplied token.
+            httpClient.get("$base/library/sections") {
                 header("X-Plex-Token", apiKey)
                 header("Accept", "application/json")
-            }.body()
-            resp.mediaContainer.machineIdentifier.isNotBlank()
-        }.getOrDefault(false)
+            }.status
+        }
     }
 
     override suspend fun isInLibrary(tmdbId: Int, mediaType: MediaType): Boolean {

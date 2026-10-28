@@ -1,4 +1,6 @@
 package com.torve.android.catalog
+import com.torve.presentation.settings.OptionalAppFeature
+import com.torve.presentation.settings.isAppFeatureEnabled
 
 import android.content.Context
 import androidx.work.Constraints
@@ -38,11 +40,11 @@ import com.torve.domain.repository.MetadataRepository
 import com.torve.domain.repository.PreferencesRepository
 import com.torve.domain.repository.VodCategoryTypeCount
 import com.torve.domain.usenet.UsenetIndexerCategoryMap
-import com.torve.domain.usenet.UsenetIndexerUrlResolver
 import com.torve.presentation.channels.CategoryNameCleaner
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import org.koin.java.KoinJavaComponent.getKoin
 import java.util.concurrent.TimeUnit
@@ -186,8 +188,6 @@ class CatalogWarmupWorker(
             if (!lightweight && !credentialImport) {
                 progress("Preparing Panda integrations", 0.78f)
                 runCatching { hydratePandaSecretsForWarmup(authClient) }
-                progress("Preparing sports", 0.82f)
-                runCatching { warmSportsBootstrap(userId) }
             } else if (credentialImport) {
                 progress("Preparing integrations", 0.82f)
                 runCatching { hydratePandaSecretsForWarmup(authClient) }
@@ -311,17 +311,36 @@ class CatalogWarmupWorker(
             }
         }
         if (rails.isEmpty()) return
+        val cacheKey = catalogRailsBootstrapKey(userId, mediaType)
+        val existingRails = localSettingsRepo.getString(cacheKey)
+            ?.let { encoded ->
+                runCatching {
+                    CatalogRailsBootstrapJson.decodeFromString<CatalogRailsBootstrapPayload>(encoded)
+                }.getOrNull()
+            }
+            ?.rails
+            .orEmpty()
+        val refreshedByKey = rails.associateByTo(linkedMapOf()) { it.key }
+        val mergedRails = buildList {
+            existingRails.forEach { existing ->
+                add(refreshedByKey.remove(existing.key) ?: existing)
+            }
+            addAll(refreshedByKey.values)
+        }
         localSettingsRepo.setString(
-            catalogRailsBootstrapKey(userId, mediaType),
+            cacheKey,
             CatalogRailsBootstrapJson.encodeToString(
                 CatalogRailsBootstrapPayload(
                     savedAtMs = System.currentTimeMillis(),
                     mediaType = mediaType,
-                    rails = rails,
+                    rails = mergedRails,
                 ),
             ),
         )
-        warmupLog { "CATALOG_WARMUP: catalog rails saved mediaType=$mediaType rails=${rails.size}" }
+        warmupLog {
+            "CATALOG_WARMUP: catalog rails saved mediaType=$mediaType " +
+                "refreshed=${rails.size} total=${mergedRails.size}"
+        }
     }
 
     private suspend fun publishProgress(label: String, progress: Float, blockNavigation: Boolean = true) {
@@ -633,23 +652,21 @@ class CatalogWarmupWorker(
         val secretStore: IntegrationSecretStore = getKoin().get()
         val prefs: PreferencesRepository = getKoin().get()
         val newznab: NewznabClient = getKoin().get()
+        if (!prefs.isAppFeatureEnabled(OptionalAppFeature.SPORTS)) return@withContext
 
-        val row = resolveFirstIndexer(secretStore, prefs) ?: return@withContext
-        val indexerUrl = UsenetIndexerUrlResolver.resolve(row.type, row.url)
-        val indexerKey = row.apiKey
-        if (indexerUrl.isBlank() || indexerKey.isBlank()) return@withContext
-
-        val categories = UsenetIndexerCategoryMap.sportsCategoriesFor(row.type)
-        val items = runCatching {
-            newznab.browseAllPages(indexerUrl, indexerKey, categories, maxItems = 200)
-        }.getOrDefault(emptyList())
+        val indexers = resolveSportsIndexers(null, readSavedSportsIndexers(secretStore, prefs))
+        if (indexers.isEmpty()) return@withContext
+        val items = fetchSportsIndexers(indexers) { indexer ->
+            newznab.browseAllPages(indexer.url, indexer.apiKey,
+                UsenetIndexerCategoryMap.sportsCategoriesFor(indexer.type), maxItems = 200, maxAgeDays = 7)
+        }.items
         if (items.isEmpty()) return@withContext
         val payload = SportsBootstrapPayload(
             savedAtMs = System.currentTimeMillis(),
             items = items,
         )
         localSettingsRepo.setString(
-            sportsBootstrapKey(userId, indexerUrl, indexerKey),
+            sportsBootstrapKey(userId, indexers),
             SportsBootstrapJson.encodeToString(payload),
         )
         warmupLog { "CATALOG_WARMUP: sports bootstrap saved items=${items.size}" }
@@ -699,8 +716,8 @@ class CatalogWarmupWorker(
             }
         }
         var cachedIndexerKeys = 0
-        rows.forEach { row ->
-            if (row.type == "none") return@forEach
+        rows.forEachIndexed { index, row ->
+            if (row.type == "none") return@forEachIndexed
             val apiKeyFromServer = secrets?.nzbIndexers
                 ?.firstOrNull { it.type == row.type && it.url == row.url }
                 ?.apiKey
@@ -708,9 +725,10 @@ class CatalogWarmupWorker(
             val apiKeyFromRow = row.apiKey
                 .takeUnless { isRedactedSecret(it) }
                 ?.takeIf { it.isNotBlank() }
-            val legacyApiKey = secrets?.nzbIndexerApiKey?.takeIf { it.isNotBlank() }
+            // The legacy key belongs only to the first row, never another provider.
+            val legacyApiKey = secrets?.nzbIndexerApiKey?.takeIf { index == 0 && it.isUsableSportsSecret() }
             val apiKey = apiKeyFromServer ?: apiKeyFromRow ?: legacyApiKey
-            if (apiKey.isNullOrBlank()) return@forEach
+            if (apiKey.isNullOrBlank()) return@forEachIndexed
             val subKey = "${row.type}|${row.url}"
             secretStore.put(IntegrationSecretKey.PANDA_INDEXER_API_KEY, apiKey, subKey)
             secretStore.put(IntegrationSecretKey.PANDA_INDEXER_API_KEY, apiKey, row.type)
@@ -734,34 +752,6 @@ class CatalogWarmupWorker(
         warmupLog { "CATALOG_WARMUP: Panda hydrated indexerRows=${rows.size} cachedIndexerCredentialCount=$cachedIndexerKeys" }
     }
 
-    private suspend fun resolveFirstIndexer(
-        secretStore: IntegrationSecretStore,
-        prefs: PreferencesRepository,
-    ): WarmIndexer? {
-        val fromSecrets = secretStore
-            .getSubKeys(IntegrationSecretKey.PANDA_INDEXER_API_KEY)
-            .filter { it.contains("|") }
-            .mapNotNull { subKey ->
-                val apiKey = secretStore.get(IntegrationSecretKey.PANDA_INDEXER_API_KEY, subKey)
-                    ?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
-                val (type, url) = subKey.split("|", limit = 2)
-                WarmIndexer(type = type, url = url, apiKey = apiKey)
-            }
-            .firstOrNull()
-        if (fromSecrets != null) return fromSecrets
-
-        val type = prefs.getString("panda_nzb_indexer")
-            ?: prefs.getString("nzb_indexer")
-            ?: return null
-        val apiKey = prefs.getString("panda_nzb_indexer_api_key")
-            ?: prefs.getString("nzb_indexer_api_key")
-            ?: return null
-        val url = prefs.getString("panda_nzb_indexer_url")
-            ?: prefs.getString("nzb_indexer_url")
-            ?: ""
-        return WarmIndexer(type = type, url = url, apiKey = apiKey)
-    }
-
     companion object {
         private const val LEGACY_WORK_NAME = "catalog_warmup_worker"
         private const val LEGACY_IMMEDIATE_WORK_NAME = "catalog_warmup_worker_immediate"
@@ -780,6 +770,7 @@ class CatalogWarmupWorker(
         private const val IMMEDIATE_VOD_PROVIDER_CATEGORIES = 8
         private const val FULL_VOD_PROVIDER_CATEGORIES = 16
         private const val WORK_YIELD_DELAY_MS = 35L
+        private const val STARTUP_LIGHTWEIGHT_DELAY_SECONDS = 15L
         private const val MAX_CATEGORY_ITEMS = 160
         private const val MAX_ALL_ITEMS = 180
         private const val LIGHTWEIGHT_WARMUP_FRESH_MS = 6L * 60L * 60L * 1000L
@@ -806,6 +797,9 @@ class CatalogWarmupWorker(
                 .build()
             val immediate = OneTimeWorkRequestBuilder<CatalogWarmupWorker>()
                 .setConstraints(immediateConstraints)
+                // Give the foreground Home request priority during first paint.
+                // Explicit user refreshes use refreshNow() and remain immediate.
+                .setInitialDelay(STARTUP_LIGHTWEIGHT_DELAY_SECONDS, TimeUnit.SECONDS)
                 .setInputData(
                     workDataOf(
                         KEY_LIGHTWEIGHT to true,
@@ -893,12 +887,6 @@ class CatalogWarmupWorker(
         }
     }
 }
-
-private data class WarmIndexer(
-    val type: String,
-    val url: String,
-    val apiKey: String,
-)
 
 private fun isRedactedSecret(value: String?): Boolean {
     val trimmed = value?.trim().orEmpty()

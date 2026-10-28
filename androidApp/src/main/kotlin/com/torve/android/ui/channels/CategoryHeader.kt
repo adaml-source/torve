@@ -1,5 +1,7 @@
 package com.torve.android.ui.channels
 
+import com.torve.android.ui.community.parityLabel as localizedUiText
+
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.clickable
@@ -17,6 +19,7 @@ import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
+import com.torve.android.ui.components.mobileGlassSurface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -52,8 +55,10 @@ fun CategoryHeader(
     Row(
         modifier = modifier
             .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 3.dp)
+            .mobileGlassSurface(selected = isExpanded, quiet = !isExpanded)
             .clickable(onClick = onToggle)
-            .padding(horizontal = 16.dp, vertical = 12.dp),
+            .padding(horizontal = 12.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         // Country code badge
@@ -66,7 +71,7 @@ fun CategoryHeader(
                     text = countryCode,
                     modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp),
                     style = MaterialTheme.typography.labelSmall,
-                    color = Amber,
+                    color = MaterialTheme.colorScheme.primary,
                     fontWeight = FontWeight.Bold,
                 )
             }
@@ -75,10 +80,10 @@ fun CategoryHeader(
 
         // Category name — EXPLICIT color, never rely on theme defaults
         Text(
-            text = name,
+            text = androidx.compose.runtime.remember(name, countryCode) { channelCategoryLabel(name, countryCode) },
             style = MaterialTheme.typography.titleSmall,
             fontWeight = FontWeight.SemiBold,
-            color = if (isExpanded) Amber else Torve.colors.textPrimary,
+            color = if (isExpanded) MaterialTheme.colorScheme.primary else Torve.colors.textPrimary,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.weight(1f),
@@ -112,7 +117,7 @@ fun CategoryHeader(
         // Chevron — explicit color
         Icon(
             Icons.Rounded.ExpandMore,
-            contentDescription = if (isExpanded) "Collapse" else "Expand",
+            contentDescription = localizedUiText(if (isExpanded) "Collapse" else "Expand"),
             modifier = Modifier
                 .size(20.dp)
                 .rotate(rotation),

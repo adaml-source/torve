@@ -1,5 +1,7 @@
 package com.torve.android.ui.stats
 
+import com.torve.android.ui.community.parityLabel as localizedUiText
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -66,16 +68,7 @@ fun StatsScreen(
                 .fillMaxWidth()
                 .padding(horizontal = 4.dp, vertical = 8.dp),
         ) {
-            IconButton(
-                onClick = onBack,
-                modifier = Modifier.align(Alignment.CenterStart),
-            ) {
-                Icon(
-                    Icons.AutoMirrored.Filled.ArrowBack,
-                    contentDescription = stringResource(R.string.common_back_cd),
-                    tint = Snow,
-                )
-            }
+            com.torve.android.ui.components.BackButton(onClick = onBack, modifier = Modifier.align(Alignment.CenterStart))
             Text(
                 text = stringResource(R.string.stats_title),
                 style = MaterialTheme.typography.titleLarge,
@@ -278,7 +271,7 @@ private fun StatBox(value: String, label: String) {
         )
         Spacer(Modifier.height(4.dp))
         Text(
-            text = label,
+            text = localizedUiText(label),
             style = MaterialTheme.typography.bodySmall,
             color = Torve.colors.textSecondary,
         )

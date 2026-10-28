@@ -1,5 +1,7 @@
 package com.torve.android.ui.channels
 
+import com.torve.android.ui.community.parityLabel as localizedUiText
+
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
@@ -18,6 +20,9 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import com.torve.android.ui.components.mobileGlassSurface
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.ui.semantics.Role
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
@@ -35,7 +40,7 @@ import com.torve.presentation.channels.ChannelsSubTab
 private val tabs = listOf(
     ChannelsSubTab.LIVE to "LIVE",
     ChannelsSubTab.MOVIES to "VOD",
-    ChannelsSubTab.FAVOURITES to "FAVOURITES",
+    ChannelsSubTab.FAVOURITES to "SAVED",
     ChannelsSubTab.GUIDE to "GUIDE",
 )
 
@@ -48,19 +53,13 @@ fun ChannelsSubTabBar(
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .background(MaterialTheme.colorScheme.background)
-            .padding(horizontal = 16.dp, vertical = 8.dp),
+            .padding(horizontal = 16.dp, vertical = 4.dp),
         horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         tabs.forEach { (tab, label) ->
             val selected = tab == selectedTab
-            val bgColor by animateColorAsState(
-                if (selected) Amber else Gunmetal,
-                animationSpec = tween(200),
-                label = "tab_bg",
-            )
             val textColor by animateColorAsState(
-                if (selected) MaterialTheme.colorScheme.background else Torve.colors.textTertiary,
+                if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                 animationSpec = tween(200),
                 label = "tab_text",
             )
@@ -68,23 +67,25 @@ fun ChannelsSubTabBar(
             Column(
                 modifier = Modifier
                     .weight(1f)
-                    .clickable(
+                    .height(48.dp)
+                    .selectable(
+                        selected = selected, role = Role.Tab,
                         onClick = { onTabSelected(tab) },
                         indication = null,
                         interactionSource = remember { MutableInteractionSource() },
                     ),
                 horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center,
             ) {
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(36.dp)
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(bgColor),
+                        .height(34.dp)
+                        .mobileGlassSurface(RoundedCornerShape(17.dp), selected = selected, quiet = !selected),
                     contentAlignment = Alignment.Center,
                 ) {
                     Text(
-                        text = label,
+                        text = localizedUiText(label),
                         style = MaterialTheme.typography.labelLarge,
                         fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
                         color = textColor,
@@ -92,16 +93,16 @@ fun ChannelsSubTabBar(
                 }
 
                 // Active indicator dot
-                Spacer(Modifier.height(4.dp))
+                Spacer(Modifier.height(2.dp))
                 if (selected) {
                     Box(
                         modifier = Modifier
-                            .size(4.dp)
+                            .size(3.dp)
                             .clip(CircleShape)
                             .background(Amber),
                     )
                 } else {
-                    Spacer(Modifier.height(4.dp))
+                    Spacer(Modifier.height(3.dp))
                 }
             }
         }

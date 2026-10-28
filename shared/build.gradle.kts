@@ -74,12 +74,17 @@ kotlin {
     listOf(
         iosArm64(),
         iosSimulatorArm64(),
+        tvosArm64(),
+        tvosSimulatorArm64(),
     ).forEach {
         it.binaries.framework {
             baseName = "shared"
             isStatic = true
+            export(libs.koin.core)
         }
     }
+
+    applyDefaultHierarchyTemplate()
 
     sourceSets {
         commonMain.dependencies {
@@ -99,7 +104,7 @@ kotlin {
             implementation(libs.kotlinx.datetime)
 
             // Koin
-            implementation(libs.koin.core)
+            api(libs.koin.core)
         }
 
         androidMain {
@@ -107,6 +112,7 @@ kotlin {
             dependencies {
                 implementation(libs.ktor.okhttp)
                 implementation(libs.sqldelight.android)
+                implementation(libs.androidx.sqlite.framework)
                 implementation(libs.kotlinx.coroutines.android)
                 implementation(libs.qrcode.kotlin)
             }
@@ -121,10 +127,14 @@ kotlin {
             }
         }
 
-        iosMain.dependencies {
-            implementation(libs.ktor.darwin)
-            implementation(libs.sqldelight.native)
+        val appleMain by getting {
+            kotlin.srcDir("src/iosMain/kotlin")
+            dependencies {
+                implementation(libs.ktor.darwin)
+                implementation(libs.sqldelight.native)
+            }
         }
+        iosMain { kotlin.setSrcDirs(emptyList<String>()) }
 
         val desktopTest by getting {
             dependencies {

@@ -41,19 +41,19 @@ data class BetaProgramUiState(
 
 data class BetaProgramSettingsCardState(
     val title: String = "Torve Beta Program",
-    val subtitle: String = "Apply for beta tester access. Free beta access ends July 31, 2026.",
+    val subtitle: String = "Join optional testing for upcoming Torve builds.",
     val badge: String? = null,
 )
 
 object BetaProgramCopy {
     const val SETTINGS_TITLE = "Torve Beta Program"
-    const val SETTINGS_DEFAULT_SUBTITLE = "Apply for beta tester access. Free beta access ends July 31, 2026."
-    const val INTRO = "Want early access? Apply for the Torve Beta Program."
+    const val SETTINGS_DEFAULT_SUBTITLE = "Join optional testing for upcoming Torve builds."
+    const val INTRO = "Want to test upcoming builds? Apply for the Torve Beta Program."
     const val DETAIL_INTRO = "Generate a one-time link code here, then paste it into the Apply for Beta form in the Torve Discord."
-    const val DEADLINE = "Free beta access ends July 31, 2026. Beta tester opt-in can continue after that date."
+    const val DEADLINE = "Beta testing is optional and does not change access to Torve features."
     const val EMAIL_VERIFICATION = "Beta applications require a verified Torve account email."
-    const val PREMIUM_TESTER_APPLICATION = "You already have full access. You can still apply to test upcoming beta builds and features."
-    const val FREE_PREMIUM_NON_PREMIUM_ONLY = "Beta access is only for approved testers and ends July 31, 2026."
+    const val PREMIUM_TESTER_APPLICATION = "You can apply to test upcoming beta builds and features."
+    const val FREE_PREMIUM_NON_PREMIUM_ONLY = "Beta builds are only for approved testers and may be unstable."
     const val DISCORD_INSTRUCTION = "Open the Torve Discord, go to #beta-info, press Apply for Beta, and paste this code."
     const val SAFETY = "Do not share credentials, playlist links, provider names, tokens, passwords, or private account details in Discord."
 }

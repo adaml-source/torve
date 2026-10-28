@@ -44,7 +44,7 @@ class ProviderHealthRecoveryStateProvider(
         val present = mutableSetOf<SecretCategory>()
 
         for (spec in TransferSecretCatalog.specs) {
-            if (spec.keys.isEmpty()) continue
+            if (spec.keys.isEmpty() || spec.category !in RECOVERY_NUDGE_CATEGORIES) continue
             val anyPresent = spec.keys.any { key ->
                 val value = runCatching { secretStore.get(key) }.getOrNull()
                 !value.isNullOrBlank()
@@ -54,6 +54,7 @@ class ProviderHealthRecoveryStateProvider(
 
         for (entry in healthEntries) {
             val transferableCategory = entry.category.transferableSecretCategory() ?: continue
+            if (transferableCategory !in RECOVERY_NUDGE_CATEGORIES) continue
             when (entry.status) {
                 ProviderHealthStatus.UNCONFIGURED -> {
                     missing += transferableCategory
@@ -83,5 +84,15 @@ class ProviderHealthRecoveryStateProvider(
 
     companion object {
         const val MIN_MISSING_FOR_CARD: Int = 2
+
+        // Advanced household-admin integrations remain explicitly transferable,
+        // but their absence must not make a normal playback device look unrestored.
+        private val RECOVERY_NUDGE_CATEGORIES = setOf(
+            SecretCategory.DEBRID,
+            SecretCategory.PLEX_JELLYFIN,
+            SecretCategory.TRAKT_SIMKL,
+            SecretCategory.AI_KEYS,
+            SecretCategory.PANDA,
+        )
     }
 }

@@ -7,8 +7,8 @@ import kotlin.random.Random
  * Concrete [SeriesPassResolver] driven by EPG data. Turns a
  * [RecordingSeriesPass] into one [Recording] per future programme on
  * the pass's channel that matches the title (and the optional season
- * minimum). Wires the resolver hook the scheduler already exposes —
- * Prompt 21 enables series passes for the first time.
+ * minimum). This is the shared resolver used by every platform with guide
+ * data available.
  *
  * Filter order:
  *   1. Drop programmes that already ended before [nowMs].

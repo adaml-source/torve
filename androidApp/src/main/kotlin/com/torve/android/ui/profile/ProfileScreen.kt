@@ -1,5 +1,7 @@
 package com.torve.android.ui.profile
 
+import com.torve.android.ui.community.parityLabel as localizedUiText
+
 import androidx.compose.foundation.background
 import androidx.compose.ui.res.stringResource
 import com.torve.android.R
@@ -41,7 +43,7 @@ import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
+import com.torve.android.ui.system.TorveModalBottomSheet as ModalBottomSheet
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -103,7 +105,7 @@ fun ProfileScreen(
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .background(Brush.verticalGradient(listOf(Graphite, Obsidian)))
+                .background(Brush.verticalGradient(listOf(MaterialTheme.colorScheme.surface, MaterialTheme.colorScheme.background)))
                 .statusBarsPadding()
                 .padding(horizontal = 4.dp, vertical = 8.dp),
         ) {
@@ -111,23 +113,17 @@ fun ProfileScreen(
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier.fillMaxWidth(),
             ) {
-                IconButton(onClick = onBack) {
-                    Icon(
-                        Icons.AutoMirrored.Rounded.ArrowBack,
-                        contentDescription = "Back",
-                        tint = Snow,
-                    )
-                }
+                com.torve.android.ui.components.BackButton(onClick = onBack)
                 Spacer(Modifier.width(4.dp))
                 Column {
                     Text(
-                        text = "Profiles",
+                        text = localizedUiText("Profiles"),
                         style = MaterialTheme.typography.headlineMedium,
-                        color = Snow,
+                        color = MaterialTheme.colorScheme.onSurface,
                         fontWeight = FontWeight.Bold,
                     )
                     Text(
-                        text = "${state.profiles.size} profiles",
+                        text = localizedUiText("${state.profiles.size} profiles"),
                         style = MaterialTheme.typography.bodySmall,
                         color = Amber,
                     )
@@ -156,7 +152,7 @@ fun ProfileScreen(
                     Spacer(Modifier.width(12.dp))
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            "Active Profile",
+                            localizedUiText("Active Profile"),
                             style = MaterialTheme.typography.labelSmall,
                             color = Amber.copy(alpha = 0.7f),
                         )
@@ -164,13 +160,13 @@ fun ProfileScreen(
                             active.name,
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.Bold,
-                            color = Snow,
+                            color = MaterialTheme.colorScheme.onSurface,
                         )
                     }
                     if (active.pin != null) {
                         Icon(
                             Icons.Filled.Lock,
-                            contentDescription = "PIN protected",
+                            contentDescription = localizedUiText("PIN protected"),
                             tint = Amber.copy(alpha = 0.5f),
                             modifier = Modifier.size(20.dp),
                         )
@@ -182,7 +178,7 @@ fun ProfileScreen(
                             color = AmberSubtle,
                         ) {
                             Text(
-                                rating.label,
+                                localizedUiText(rating.label),
                                 modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
                                 style = MaterialTheme.typography.labelSmall,
                                 color = Amber,
@@ -196,7 +192,7 @@ fun ProfileScreen(
 
         // ── All Profiles Header ──
         Text(
-            "All Profiles",
+            localizedUiText("All Profiles"),
             style = MaterialTheme.typography.titleSmall,
             fontWeight = FontWeight.SemiBold,
             color = Torve.colors.textSecondary,
@@ -241,19 +237,19 @@ fun ProfileScreen(
                             modifier = Modifier
                                 .size(48.dp)
                                 .clip(CircleShape)
-                                .background(Gunmetal),
+                                .background(MaterialTheme.colorScheme.surface),
                             contentAlignment = Alignment.Center,
                         ) {
                             Icon(
                                 Icons.Default.Add,
-                                contentDescription = "Add Profile",
+                                contentDescription = localizedUiText("Add Profile"),
                                 tint = Amber,
                                 modifier = Modifier.size(24.dp),
                             )
                         }
                         Spacer(Modifier.height(8.dp))
                         Text(
-                            "Add Profile",
+                            localizedUiText("Add Profile"),
                             style = MaterialTheme.typography.titleSmall,
                             color = Torve.colors.textSecondary,
                         )
@@ -335,7 +331,7 @@ private fun ProfileCard(
             if (isActive) {
                 Spacer(Modifier.height(2.dp))
                 Text(
-                    text = "Active",
+                    text = localizedUiText("Active"),
                     style = MaterialTheme.typography.labelSmall,
                     color = Amber,
                 )
@@ -347,7 +343,7 @@ private fun ProfileCard(
                 if (profile.pin != null) {
                     Icon(
                         Icons.Filled.Lock,
-                        contentDescription = "PIN",
+                        contentDescription = localizedUiText("PIN"),
                         tint = Torve.colors.textTertiary,
                         modifier = Modifier.size(14.dp),
                     )
@@ -371,7 +367,7 @@ private fun ProfileCard(
                 IconButton(onClick = onEdit, modifier = Modifier.size(28.dp)) {
                     Icon(
                         Icons.Default.Edit,
-                        contentDescription = "Edit",
+                        contentDescription = localizedUiText("Edit"),
                         tint = Torve.colors.textTertiary,
                         modifier = Modifier.size(16.dp),
                     )
@@ -380,7 +376,7 @@ private fun ProfileCard(
                     IconButton(onClick = onDelete, modifier = Modifier.size(28.dp)) {
                         Icon(
                             Icons.Default.Delete,
-                            contentDescription = "Delete",
+                            contentDescription = localizedUiText("Delete"),
                             tint = Ruby.copy(alpha = 0.6f),
                             modifier = Modifier.size(16.dp),
                         )
@@ -441,7 +437,7 @@ private fun CreateProfileSheet(
                 .padding(bottom = 16.dp),
         ) {
             Text(
-                "Create Profile",
+                localizedUiText("Create Profile"),
                 style = MaterialTheme.typography.headlineSmall,
                 fontWeight = FontWeight.Bold,
                 color = MaterialTheme.colorScheme.onSurface,
@@ -451,7 +447,7 @@ private fun CreateProfileSheet(
 
             // Name input
             Text(
-                "Name",
+                localizedUiText("Name"),
                 style = MaterialTheme.typography.titleSmall,
                 fontWeight = FontWeight.SemiBold,
                 color = MaterialTheme.colorScheme.onSurface,
@@ -477,7 +473,7 @@ private fun CreateProfileSheet(
                         Box {
                             if (name.isEmpty()) {
                                 Text(
-                                    "Profile name",
+                                    localizedUiText("Profile name"),
                                     style = MaterialTheme.typography.bodyLarge,
                                     color = Torve.colors.textHint,
                                 )
@@ -492,7 +488,7 @@ private fun CreateProfileSheet(
 
             // Avatar color
             Text(
-                "Avatar Color",
+                localizedUiText("Avatar Color"),
                 style = MaterialTheme.typography.titleSmall,
                 fontWeight = FontWeight.SemiBold,
                 color = MaterialTheme.colorScheme.onSurface,
@@ -545,7 +541,7 @@ private fun CreateProfileSheet(
                 )
                 Spacer(Modifier.width(12.dp))
                 Text(
-                    text = name.ifEmpty { "Preview" },
+                    text = localizedUiText(name.ifEmpty { "Preview" }),
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Medium,
                     color = if (name.isNotEmpty()) Torve.colors.textPrimary else Torve.colors.textHint,
@@ -563,7 +559,7 @@ private fun CreateProfileSheet(
                 enabled = name.isNotBlank(),
             ) {
                 Text(
-                    "Create Profile",
+                    localizedUiText("Create Profile"),
                     style = MaterialTheme.typography.titleSmall,
                     fontWeight = FontWeight.SemiBold,
                 )
@@ -599,7 +595,7 @@ private fun EditProfileSheet(
                 .padding(bottom = 16.dp),
         ) {
             Text(
-                "Edit Profile",
+                localizedUiText("Edit Profile"),
                 style = MaterialTheme.typography.headlineSmall,
                 fontWeight = FontWeight.Bold,
                 color = MaterialTheme.colorScheme.onSurface,
@@ -609,7 +605,7 @@ private fun EditProfileSheet(
 
             // Name
             Text(
-                "Name",
+                localizedUiText("Name"),
                 style = MaterialTheme.typography.titleSmall,
                 fontWeight = FontWeight.SemiBold,
                 color = MaterialTheme.colorScheme.onSurface,
@@ -638,7 +634,7 @@ private fun EditProfileSheet(
 
             // PIN
             Text(
-                "PIN (4 digits, optional)",
+                localizedUiText("PIN (4 digits, optional)"),
                 style = MaterialTheme.typography.titleSmall,
                 fontWeight = FontWeight.SemiBold,
                 color = MaterialTheme.colorScheme.onSurface,
@@ -666,7 +662,7 @@ private fun EditProfileSheet(
                         Box {
                             if (pin.isEmpty()) {
                                 Text(
-                                    "Enter 4-digit PIN",
+                                    localizedUiText("Enter 4-digit PIN"),
                                     style = MaterialTheme.typography.bodyLarge,
                                     color = Torve.colors.textHint,
                                 )
@@ -681,7 +677,7 @@ private fun EditProfileSheet(
 
             // Content Rating
             Text(
-                "Max Content Rating",
+                localizedUiText("Max Content Rating"),
                 style = MaterialTheme.typography.titleSmall,
                 fontWeight = FontWeight.SemiBold,
                 color = MaterialTheme.colorScheme.onSurface,
@@ -707,7 +703,7 @@ private fun EditProfileSheet(
                     FilterChip(
                         selected = selectedRating == rating,
                         onClick = { selectedRating = rating },
-                        label = { Text(rating.label) },
+                        label = { Text(localizedUiText(rating.label)) },
                         colors = FilterChipDefaults.filterChipColors(
                             selectedContainerColor = Amber,
                             selectedLabelColor = Obsidian,
@@ -777,14 +773,14 @@ private fun PinPromptSheet(
             Spacer(Modifier.height(16.dp))
 
             Text(
-                "Enter PIN",
+                localizedUiText("Enter PIN"),
                 style = MaterialTheme.typography.headlineSmall,
                 fontWeight = FontWeight.Bold,
                 color = MaterialTheme.colorScheme.onSurface,
             )
             Spacer(Modifier.height(4.dp))
             Text(
-                "This profile is PIN protected.",
+                localizedUiText("This profile is PIN protected."),
                 style = MaterialTheme.typography.bodyMedium,
                 color = Torve.colors.textSecondary,
             )
@@ -848,7 +844,7 @@ private fun PinPromptSheet(
                 enabled = pin.length == 4,
             ) {
                 Text(
-                    "Unlock",
+                    localizedUiText("Unlock"),
                     style = MaterialTheme.typography.titleSmall,
                     fontWeight = FontWeight.SemiBold,
                 )

@@ -1,0 +1,8 @@
+# Same HTTP/runtime versions as the existing backend. cryptography is explicit
+# here because this standalone image does not install python-jose's extras.
+fastapi==0.115.6
+uvicorn==0.32.1
+httpx==0.28.1
+cryptography==46.0.3
+discord.py==2.7.1
+pydantic==2.12.5

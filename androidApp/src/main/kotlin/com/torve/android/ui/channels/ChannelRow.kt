@@ -1,5 +1,7 @@
 package com.torve.android.ui.channels
 
+import com.torve.android.ui.community.parityLabel as localizedUiText
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
@@ -14,10 +16,12 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.FavoriteBorder
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import com.torve.android.ui.components.mobileGlassSurface
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -38,6 +42,7 @@ import com.torve.android.ui.theme.Amber
 import com.torve.android.ui.theme.Coral
 import com.torve.android.ui.theme.Torve
 import com.torve.domain.model.EnrichedChannel
+import com.torve.domain.model.supportsCatchupArchive
 
 @Composable
 fun ChannelRow(
@@ -47,13 +52,16 @@ fun ChannelRow(
     modifier: Modifier = Modifier,
 ) {
     val channel = enriched.channel
+    val displayName = channel.iptvDisplayName()
     val hasProgramme = enriched.currentProgramme != null
 
     Row(
         modifier = modifier
             .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 3.dp)
+            .mobileGlassSurface(quiet = true)
             .clickable(onClick = onPlay)
-            .padding(horizontal = 16.dp, vertical = 8.dp),
+            .padding(horizontal = 12.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         // Channel logo — rounded rectangle, not circle
@@ -67,15 +75,15 @@ fun ChannelRow(
             if (channel.tvgLogo != null) {
                 AsyncImage(
                     model = channel.tvgLogo,
-                    contentDescription = channel.name,
+                    contentDescription = displayName,
                     modifier = Modifier.size(52.dp),
                     contentScale = ContentScale.Fit,
                 )
             } else {
                 Text(
-                    text = channel.name.take(2).uppercase(),
+                    text = displayName.take(2).uppercase(),
                     style = MaterialTheme.typography.titleSmall,
-                    color = Amber,
+                    color = MaterialTheme.colorScheme.primary,
                     fontWeight = FontWeight.Bold,
                 )
             }
@@ -97,7 +105,7 @@ fun ChannelRow(
                     Spacer(Modifier.width(6.dp))
                 }
                 Text(
-                    text = channel.name,
+                    text = displayName,
                     style = MaterialTheme.typography.titleSmall,
                     fontWeight = FontWeight.Medium,
                     color = Torve.colors.textPrimary,
@@ -105,8 +113,15 @@ fun ChannelRow(
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f, fill = false),
                 )
-                // Live indicator
-                if (hasProgramme) {
+                if (channel.supportsCatchupArchive) {
+                    Spacer(Modifier.width(6.dp))
+                    Icon(
+                        imageVector = Icons.Filled.History,
+                        contentDescription = localizedUiText("Timeshift available"),
+                        tint = Amber,
+                        modifier = Modifier.size(20.dp),
+                    )
+                } else if (hasProgramme) {
                     Spacer(Modifier.width(6.dp))
                     LiveDot()
                 }
@@ -164,4 +179,20 @@ fun ChannelRow(
             )
         }
     }
+}
+
+internal fun com.torve.domain.model.Channel.iptvDisplayName(): String {
+    val trimmedName = name.trim()
+    val separator = trimmedName.indexOf(':')
+    if (separator !in 2..3) return trimmedName
+    val prefix = trimmedName.substring(0, separator).trim().uppercase()
+    val country = tvgCountry?.trim()?.uppercase()?.takeIf { it.isNotEmpty() }
+    val unambiguousTwoLetterPrefix = separator == 2 &&
+        prefix.length == 2 &&
+        prefix.all { it in 'A'..'Z' }
+    val matchesCountryMetadata = country != null &&
+        prefix.all { it.isLetter() } &&
+        (country.startsWith(prefix) || prefix.startsWith(country.take(2)))
+    val isCountryPrefix = unambiguousTwoLetterPrefix || matchesCountryMetadata
+    return if (isCountryPrefix) trimmedName.substring(separator + 1).trim().ifEmpty { trimmedName } else trimmedName
 }

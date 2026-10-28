@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="tv_source_all">Tüm kaynaklar</string>
+    <string name="tv_source_best">Önerilen</string>
+    <string name="tv_source_largest">Önce en büyük</string>
+    <string name="tv_source_smallest">Önce en küçük</string>
+    <string name="tv_source_quality">Kalite</string>
+    <string name="tv_source_all_qualities">Tüm kaliteler</string>
+    <string name="tv_source_cached">Önbellekte</string>
+    <string name="tv_source_count">%2$d kaynaktan %1$d</string>
+    <string name="tv_source_sort">SÄ±ralama</string>
+    <string name="tv_source_hints">Dil ipuçları doğrulanmamıştır. Kontrol edilen ses parçaları önceliklidir.</string>
+    <string name="tv_source_clear">Filtreleri temizle</string>
+    <string name="tv_source_override">Bu kaynak oynatma kurallarÄ±nÄ±za uymuyor</string>
+    <string name="tv_source_status_ready">Hazır</string>
+    <string name="tv_source_status_preparing">Hazırlanıyor</string>
+    <string name="tv_source_status_unavailable">Kullanılamıyor</string>
+    <string name="tv_source_status_check">Oynatırken kontrol et</string>
+    <string name="tv_source_status_unconfirmed">Kullanılabilirlik doğrulanmadı</string>
+    <string name="tv_source_status_direct">Doğrudan kaynak</string>
+    <string name="source_tracks_verified">Dosya parçaları kontrol edildi</string>
+    <string name="source_tracks_hint">Kaynak bilgisi · parçalar kontrol edilmedi</string>
+</resources>

@@ -4,6 +4,10 @@ import com.torve.data.mdblist.MdbListApi
 import com.torve.data.mdblist.RatingsEnricher
 import com.torve.domain.integrations.IntegrationSecretKey
 import com.torve.domain.integrations.IntegrationSecretStore
+import com.torve.domain.integrations.MediaLifecycleRequest
+import com.torve.domain.integrations.MediaLifecycleService
+import com.torve.domain.integrations.MediaLifecycleState
+import com.torve.domain.integrations.MediaLifecycleStatus
 import com.torve.domain.model.MediaItem
 import com.torve.domain.model.MediaType
 import com.torve.domain.model.Season
@@ -14,6 +18,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.cancelChildren
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -31,15 +36,25 @@ data class DesktopSearchDetailUiState(
     val selectedSeason: Season? = null,
     val selectedEpisodeNumber: Int? = null,
     val isLoadingSeason: Boolean = false,
+    val mediaLifecycleStatus: MediaLifecycleStatus? = null,
+    val isLoadingMediaLifecycle: Boolean = false,
+    val mediaLifecycleMessage: String? = null,
+    val mediaLifecycleError: String? = null,
 )
 
 class DesktopSearchController(
     private val metadataRepository: MetadataRepository,
     private val ratingsEnricher: RatingsEnricher? = null,
     private val integrationSecretStore: IntegrationSecretStore? = null,
+    private val mediaLifecycleService: MediaLifecycleService? = null,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val started = AtomicBoolean(false)
+    private var selectionRevision = 0L
+    private var seasonRevision = 0L
+    private val detailCache = object : LinkedHashMap<String, DesktopSearchDetailUiState>(8, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, DesktopSearchDetailUiState>?): Boolean = size > 8
+    }
 
     private val _state = MutableStateFlow(DesktopSearchDetailUiState())
     val state: StateFlow<DesktopSearchDetailUiState> = _state.asStateFlow()
@@ -50,6 +65,14 @@ class DesktopSearchController(
 
     fun dispose() {
         scope.cancel()
+    }
+
+    fun reset() {
+        selectionRevision++
+        seasonRevision++
+        detailCache.clear()
+        scope.coroutineContext.cancelChildren()
+        _state.value = DesktopSearchDetailUiState()
     }
 
     fun onResultsChanged(results: List<MediaItem>) {
@@ -74,6 +97,24 @@ class DesktopSearchController(
         seasonNumber: Int? = null,
         episodeNumber: Int? = null,
     ) {
+        val previous = _state.value
+        val key = "${item.type}:${item.id}"
+        previous.selectedResult?.let { old ->
+            if (!previous.isLoadingDetail && previous.detailError == null) detailCache["${old.type}:${old.id}"] = previous
+        }
+        selectionRevision++
+        seasonRevision++
+        scope.coroutineContext.cancelChildren()
+        val revision = selectionRevision
+        detailCache[key]?.let { cached ->
+            _state.value = cached
+            if (seasonNumber != null) {
+                if (cached.selectedSeasonNumber == seasonNumber && cached.selectedSeason != null) {
+                    _state.update { it.copy(selectedEpisodeNumber = episodeNumber ?: it.selectedEpisodeNumber) }
+                } else selectSeason(seasonNumber, episodeNumber)
+            }
+            return
+        }
         _state.update {
             it.copy(
                 selectedResult = item,
@@ -86,13 +127,17 @@ class DesktopSearchController(
                 selectedEpisodeNumber = null,
                 isLoadingSeason = false,
                 similarItems = emptyList(),
+                mediaLifecycleStatus = null,
+                isLoadingMediaLifecycle = false,
+                mediaLifecycleMessage = null,
+                mediaLifecycleError = null,
             )
         }
 
         scope.launch {
             val tmdbId = item.tmdbId ?: item.id.toIntOrNull()
             if (tmdbId == null) {
-                if (!isCurrentSelection(item)) return@launch
+                if (revision != selectionRevision || !isCurrentSelection(item)) return@launch
                 _state.update {
                     it.copy(
                         detailItem = item,
@@ -105,7 +150,8 @@ class DesktopSearchController(
 
             val type = item.type.toTmdbType()
             val rawDetail = runCatching { metadataRepository.getDetail(type, tmdbId) }.getOrElse { error ->
-                if (!isCurrentSelection(item)) return@launch
+                if (error is kotlinx.coroutines.CancellationException) throw error
+                if (revision != selectionRevision || !isCurrentSelection(item)) return@launch
                 _state.update {
                     it.copy(
                         detailItem = item,
@@ -124,7 +170,7 @@ class DesktopSearchController(
             val detail = ratingsEnricher?.hydrateFromCache(rawDetail) ?: rawDetail
             val similar = ratingsEnricher?.hydrateListFromCache(rawSimilar) ?: rawSimilar
 
-            if (!isCurrentSelection(item)) return@launch
+            if (revision != selectionRevision || !isCurrentSelection(item)) return@launch
             _state.update {
                 it.copy(
                     detailItem = detail,
@@ -142,6 +188,7 @@ class DesktopSearchController(
             // only ever showed TMDB pills because DesktopSearchController
             // was constructed with just the metadata repo, no enricher.
             launchEnrich(detail, similar)
+            loadMediaLifecycle(detail, seasonNumber ?: detail.seasons.firstOrNull()?.seasonNumber)
             (seasonNumber ?: detail.seasons.firstOrNull()?.seasonNumber)?.let { resolvedSeason ->
                 selectSeason(
                     seasonNumber = resolvedSeason,
@@ -152,10 +199,11 @@ class DesktopSearchController(
     }
 
     private fun isCurrentSelection(item: MediaItem): Boolean =
-        _state.value.selectedResult?.id == item.id
+        _state.value.selectedResult?.let { it.id == item.id && it.type == item.type } == true
 
     fun refreshSelectedDetail() {
-        state.value.selectedResult?.let(::selectResult)
+        val current = state.value
+        current.selectedResult?.let { item -> reset(); selectResult(item, current.selectedSeasonNumber, current.selectedEpisodeNumber) }
     }
 
     fun selectSeason(
@@ -164,6 +212,8 @@ class DesktopSearchController(
     ) {
         val detail = _state.value.detailItem ?: return
         val tmdbId = detail.tmdbId ?: return
+        val revision = ++seasonRevision
+        val selection = selectionRevision
         _state.update {
             it.copy(
                 selectedSeasonNumber = seasonNumber,
@@ -177,6 +227,8 @@ class DesktopSearchController(
             val season = runCatching {
                 metadataRepository.getSeasonDetail(tmdbId, seasonNumber)
             }.getOrElse { error ->
+                if (error is kotlinx.coroutines.CancellationException) throw error
+                if (revision != seasonRevision || selection != selectionRevision) return@launch
                 _state.update {
                     it.copy(
                         isLoadingSeason = false,
@@ -186,7 +238,7 @@ class DesktopSearchController(
                 return@launch
             }
             _state.update {
-                if (it.detailItem?.id != detail.id) return@update it
+                if (revision != seasonRevision || selection != selectionRevision || it.detailItem?.id != detail.id) return@update it
                 it.copy(
                     selectedSeasonNumber = seasonNumber,
                     selectedSeason = season,
@@ -194,6 +246,7 @@ class DesktopSearchController(
                     isLoadingSeason = false,
                 )
             }
+            loadMediaLifecycle(detail, seasonNumber)
         }
     }
 
@@ -205,6 +258,87 @@ class DesktopSearchController(
 
     fun clearActionMessage() {
         _state.update { it.copy(actionMessage = null) }
+    }
+
+    /** Request a permanent copy without interrupting the normal stream-now path. */
+    fun requestPermanentCopy() {
+        val service = mediaLifecycleService ?: return
+        val item = _state.value.detailItem ?: return
+        val tmdbId = item.tmdbId ?: return
+        if (_state.value.isLoadingMediaLifecycle) return
+        val seasons = if (item.type == MediaType.SERIES) {
+            listOfNotNull(_state.value.selectedSeasonNumber)
+        } else {
+            emptyList()
+        }
+        scope.launch {
+            _state.update {
+                it.copy(
+                    isLoadingMediaLifecycle = true,
+                    mediaLifecycleMessage = null,
+                    mediaLifecycleError = null,
+                )
+            }
+            val status = runCatching {
+                val current = _state.value.mediaLifecycleStatus
+                val retryRequestId = current?.requestId
+                if (current?.canRetry == true && retryRequestId != null) {
+                    service.retry(retryRequestId)
+                } else {
+                    service.request(
+                        MediaLifecycleRequest(
+                            tmdbId = tmdbId,
+                            mediaType = item.type,
+                            seasons = seasons,
+                        ),
+                    )
+                }
+            }.getOrElse {
+                _state.update {
+                    it.copy(
+                        isLoadingMediaLifecycle = false,
+                        mediaLifecycleError = "Could not add this title. Check the Seerr connection in Settings and try again.",
+                    )
+                }
+                return@launch
+            }
+            if (_state.value.detailItem?.id == item.id) {
+                _state.update {
+                    it.copy(
+                        mediaLifecycleStatus = status,
+                        isLoadingMediaLifecycle = false,
+                        mediaLifecycleMessage = when (item.type) {
+                            MediaType.MOVIE -> "Movie requested. You can stream it now while your library copy is prepared."
+                            MediaType.SERIES -> "Season requested. You can keep watching while it is prepared."
+                        },
+                    )
+                }
+            }
+        }
+    }
+
+    private fun loadMediaLifecycle(item: MediaItem, seasonNumber: Int?) {
+        val service = mediaLifecycleService ?: return
+        val tmdbId = item.tmdbId ?: return
+        val seasons = if (item.type == MediaType.SERIES) listOfNotNull(seasonNumber) else emptyList()
+        scope.launch {
+            _state.update { current ->
+                if (current.detailItem?.id == item.id) {
+                    current.copy(isLoadingMediaLifecycle = true, mediaLifecycleError = null)
+                } else current
+            }
+            val status = runCatching { service.getStatus(tmdbId, item.type, seasons) }
+                .getOrElse {
+                    MediaLifecycleStatus(tmdbId, item.type, MediaLifecycleState.UNKNOWN)
+                }
+            _state.update { current ->
+                if (current.detailItem?.id == item.id &&
+                    (item.type != MediaType.SERIES || current.selectedSeasonNumber == seasonNumber)
+                ) {
+                    current.copy(mediaLifecycleStatus = status, isLoadingMediaLifecycle = false)
+                } else current
+            }
+        }
     }
 
     /**

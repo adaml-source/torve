@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Extensions - Torve</title>
+  <link rel="icon" type="image/png" href="/assets/favicon.png" />
+  <link rel="stylesheet" href="/assets/site-base.css?v=20260517-mobile" />
+  <link rel="stylesheet" href="/assets/app/app.css?v=1774286000" />
+  <link rel="stylesheet" href="/assets/app/portal-layout.css" />
+  <style>
+    .ext-count { display:flex; align-items:center; gap:12px; margin:14px 0 0; padding:14px 18px; background:var(--bg-card); border:1px solid var(--border); border-radius:var(--radius); font-size:13px; color:var(--text-muted); }
+    .ext-count strong { color:var(--text); margin-right:4px; }
+
+    .ext-list { display:grid; gap:12px; max-width:720px; margin-top:16px; }
+    .ext-row { display:flex; align-items:center; gap:16px; padding:16px 20px; background:var(--bg-card); border:1px solid var(--border); border-radius:var(--radius); transition:border-color .2s; }
+    .ext-row:hover { border-color:rgba(255,255,255,.1); }
+    .ext-row.disabled { opacity:.5; }
+
+    .ext-icon { width:40px; height:40px; border-radius:10px; background:rgba(200,164,78,.08); border:1px solid rgba(200,164,78,.1); display:flex; align-items:center; justify-content:center; flex-shrink:0; font-size:18px; overflow:hidden; }
+    .ext-icon.catalog { color:var(--accent); }
+    .ext-icon.stream { color:#86efac; }
+    .ext-icon.both { background:linear-gradient(135deg, rgba(200,164,78,.1), rgba(134,239,172,.08)); color:#86efac; }
+    .ext-icon.has-logo { background:#0d0f14; border-color:var(--border); padding:0; }
+    .ext-icon.has-logo img { width:100%; height:100%; object-fit:cover; display:block; }
+
+    .ext-info { flex:1; min-width:0; }
+    .ext-name { font-size:14px; font-weight:600; color:var(--text); margin-bottom:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .ext-meta { font-size:12px; color:var(--text-muted); display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
+    .ext-badge { font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:.04em; padding:2px 7px; border-radius:4px; }
+    .ext-badge.catalog-badge { background:rgba(200,164,78,.12); color:var(--accent); }
+    .ext-badge.stream-badge { background:rgba(34,197,94,.1); color:#86efac; }
+    .ext-badge.disabled-badge { background:rgba(255,255,255,.06); color:#777; }
+
+    .ext-actions { display:flex; gap:8px; flex-shrink:0; }
+    .ext-btn { padding:6px 14px; border-radius:6px; border:1px solid var(--border); background:transparent; color:var(--text-muted); font-size:12px; cursor:pointer; transition:all .2s; }
+    .ext-btn:hover { border-color:rgba(255,255,255,.15); color:var(--text); }
+    .ext-btn.danger { color:#fca5a5; }
+    .ext-btn.danger:hover { border-color:rgba(239,68,68,.3); background:rgba(239,68,68,.06); }
+
+    .ext-empty { text-align:center; padding:48px 24px; color:var(--text-muted); font-size:14px; line-height:1.6; }
+    .ext-empty p { margin-bottom:12px; }
+    .ext-error { padding:20px; background:rgba(239,68,68,.06); border:1px solid rgba(239,68,68,.12); border-radius:var(--radius); font-size:13px; color:#fca5a5; text-align:center; }
+
+    .ext-add-form { max-width:720px; margin:20px 0; padding:20px 24px; background:var(--bg-card); border:1px solid var(--border); border-radius:var(--radius); }
+    .ext-add-form h3 { font-size:14px; font-weight:600; color:var(--text); margin-bottom:8px; }
+    .ext-add-form p { font-size:12px; color:var(--text-muted); margin-bottom:14px; line-height:1.5; }
+    .ext-add-row { display:flex; gap:10px; }
+    .ext-add-input { flex:1; padding:10px 14px; background:var(--bg-surface); border:1px solid var(--border); border-radius:6px; color:var(--text); font-size:13px; outline:none; }
+    .ext-add-input:focus { border-color:var(--accent); }
+    .ext-add-input::placeholder { color:#52525b; }
+    .ext-add-btn { padding:10px 20px; border-radius:6px; border:none; background:var(--accent); color:#08080e; font-size:13px; font-weight:600; cursor:pointer; white-space:nowrap; transition:opacity .2s; }
+    .ext-add-btn:hover { opacity:.85; }
+    .ext-add-btn:disabled { opacity:.4; cursor:not-allowed; }
+    .ext-add-status { margin-top:10px; font-size:12px; line-height:1.5; }
+    .ext-add-status.success { color:#86efac; }
+    .ext-add-status.error { color:#fca5a5; }
+
+    .ext-info-panel { max-width:720px; margin:24px 0 0; padding:18px 22px; background:rgba(200,164,78,.04); border:1px solid rgba(200,164,78,.08); border-radius:var(--radius); }
+    .ext-info-panel h3 { font-size:13px; font-weight:600; color:var(--accent); margin-bottom:6px; }
+    .ext-info-panel p { font-size:12px; color:var(--text-muted); line-height:1.6; margin-bottom:6px; }
+    .ext-info-panel p:last-child { margin-bottom:0; }
+    .ext-info-panel a { color:var(--accent); text-decoration:underline; }
+
+    .ext-badge.origin-badge { background:var(--bg-surface); color:var(--text-muted); border:1px solid var(--border); }
+    .ext-help { max-width:720px; margin:20px 0; padding:18px 22px; background:var(--bg-card); border:1px solid var(--border); border-radius:var(--radius); }
+    .ext-help summary { cursor:pointer; font-size:14px; font-weight:600; color:var(--text); }
+    .ext-help ol { padding-left:20px; font-size:13px; line-height:1.6; color:var(--text-muted); }
+    .ext-help li { margin:8px 0; }
+    .ext-help p { font-size:13px; line-height:1.6; color:var(--text-muted); }
+    .ext-details { width:min(520px,calc(100% - 32px)); padding:24px; border:1px solid var(--border); border-radius:var(--radius); background:var(--bg-card); color:var(--text); }
+    .ext-details::backdrop { background:rgba(0,0,0,.65); }
+    .ext-details h2 { margin:0 0 12px; font-size:20px; }
+    .ext-details p { font-size:14px; line-height:1.6; color:var(--text-muted); overflow-wrap:anywhere; }
+    .ext-details a { color:var(--accent); }
+    .ext-details footer { margin-top:20px; display:flex; justify-content:flex-end; }
+
+    .portal-section-header { margin:32px 0 16px; padding-top:12px; border-top:1px solid var(--border); }
+    .portal-section-header h2 { font-size:17px; font-weight:700; color:var(--text); margin-bottom:4px; }
+    .portal-section-header span { font-size:13px; color:var(--text-muted); }
+
+    @media (max-width:640px) {
+      .ext-row { flex-direction:column; align-items:flex-start; gap:12px; }
+      .ext-actions { width:100%; }
+      .ext-add-row { flex-direction:column; }
+    }
+  </style>
+  <link rel="stylesheet" href="/assets/modern-site.css?v=20261012-7" />
+  <meta name="robots" content="noindex, nofollow" />
+</head>
+<body class="app-body modern-page">
+  <div id="loading" class="app-loading"><div class="spinner"></div> Loading...</div>
+  <div id="appShell" style="display:none;">
+    <div id="verifyBanner" class="verify-banner">Your email is not yet verified. Check your inbox or <a href="#" id="resendLink">resend verification email</a>.</div>
+
+    <!-- Shared site header -->
+    <header class="site-header" data-site-header>
+    <div class="site-header-inner">
+      <a class="site-brand" href="/" aria-label="Torve home"><img src="/assets/torve-logo-transparent.png" alt="Torve" class="site-header-logo" /></a>
+      <nav id="site-navigation" class="site-header-nav" aria-label="Main navigation"><a href="/#explore">Explore</a><a href="/download.html">Downloads</a><a href="/app/help.html">Guide</a><a href="/support.html">Support</a></nav>
+      <div class="site-header-actions">
+
+          <span class="portal-user-email" id="userEmail"></span>
+          <button class="t-btn t-btn-secondary t-btn-sm" id="signoutBtn">Sign out</button>
+        </div>
+      <button class="site-menu-toggle" type="button" aria-label="Open menu" aria-controls="site-navigation" aria-expanded="false"><span></span><span></span></button>
+    </div>
+  </header><nav class="account-subnav" aria-label="Account navigation">
+          <a href="/account.html">Account overview</a>
+          <a href="/app/setup.html">Service setup</a>
+          <a href="/app/extensions.html">Extensions</a>
+          <a href="/app/devices.html">Devices</a>
+          <a href="/app/help.html">Help</a>
+          <a href="/account.html#seerr-setup">Media automation</a>
+        </nav>
+
+    <div class="portal-page">
+      <div class="portal-2col">
+        <div class="portal-primary">
+          <h1 class="portal-page-title">Extensions</h1>
+          <p class="portal-page-intro">Manage your installed extensions. Extensions sync across all your signed-in devices.</p>
+
+          <div class="ext-count" id="extCount"></div>
+
+          <details class="ext-help" id="extensionHelp">
+            <summary>How extensions work</summary>
+            <ol>
+              <li>Get a manifest URL from the extension provider you choose.</li>
+              <li>If setup is required, complete it with that provider and copy the personal manifest URL it supplies.</li>
+              <li>Paste the URL below to install it on your account. On iOS, use Settings → Libraries &amp; extensions → Extensions → Preview link.</li>
+            </ol>
+            <p>A manifest is JSON data. Opening it in a browser displays JSON; paste its URL into Torve to install the extension.</p>
+            <p>Compatible extensions can provide catalogues, metadata, subtitles and playback sources. Some playback providers manage debrid or Usenet accounts on their own websites and return playable video links.</p>
+          </details>
+
+          <!-- Add extension form -->
+          <div class="ext-add-form">
+            <h3>Add extension</h3>
+            <p>Paste the manifest URL supplied by your chosen extension provider. No external extensions are installed automatically.</p>
+            <div class="ext-add-row">
+              <input type="url" aria-label="Extension manifest URL" id="manifestInput" class="ext-add-input" placeholder="https://example.com/manifest.json" />
+              <button id="addBtn" class="ext-add-btn">Add</button>
+            </div>
+            <div id="addStatus" class="ext-add-status"></div>
+          </div>
+
+          <section class="ext-info-panel" aria-label="Included with Torve">
+            <h3>Torve catalogue <span class="ext-badge origin-badge">Built-in</span></h3>
+            <p>Discovery and title details powered by TMDB are included in the app. They remain available without installing an extension.</p>
+          </section>
+
+          <!-- Extension list -->
+          <div class="portal-section-header">
+            <h2>Installed extensions</h2>
+            <span>Extensions you have installed on your account.</span>
+          </div>
+          <div id="extList" class="ext-list"></div>
+
+          <!-- Info panel -->
+          <div class="ext-info-panel" id="extensionAbout">
+            <h3>About extensions</h3>
+            <p>Extensions are added from a provider’s manifest URL. They can add catalogues, metadata, subtitles and playback sources.</p>
+            <p><strong>Built-in</strong> identifies features included with the app. <strong>External</strong> identifies extensions installed from a URL, including those hosted by Torve.</p>
+            <p>Each external extension is operated by its provider. The External label does not establish independence, endorsement or verification. Use sources you are authorized to access.</p>
+            <p><a href="/app/help.html#article:what-are-extensions">Learn more about extensions</a></p>
+          </div>
+        </div>
+
+        <!-- Right rail -->
+        <aside class="portal-rail">
+          <div class="portal-rail-card">
+            <div class="portal-rail-stat">
+              <span class="portal-rail-stat-label">Installed</span>
+              <span class="portal-rail-stat-value accent" id="railCount">0</span>
+            </div>
+            <div class="portal-rail-stat" style="margin-top:8px">
+              <span class="portal-rail-stat-label">Stream-capable</span>
+              <span class="portal-rail-stat-value" id="railStreamCount">0</span>
+            </div>
+          </div>
+          <div class="portal-rail-card">
+            <ul class="portal-rail-nav">
+              <li><a href="#" id="scrollToAdd">Add extension manually</a></li>
+              <li><a href="/app/help.html#article:what-are-extensions">What are extensions?</a></li>
+              <li><a href="/app/help.html#article:catalog-vs-stream">Catalog vs stream</a></li>
+              <li><a href="/app/help.html#article:no-streams-troubleshooting">No streams found?</a></li>
+            </ul>
+          </div>
+        </aside>
+      </div>
+    </div>
+  </div>
+
+  <dialog class="ext-details" id="extensionDetails" aria-labelledby="extensionDetailsTitle">
+    <h2 id="extensionDetailsTitle">Extension details</h2>
+    <p><span class="ext-badge origin-badge">External</span></p>
+    <p id="extensionDetailsStatus" role="status"></p>
+    <p id="extensionDetailsProvider"></p>
+    <p id="extensionDetailsDescription"></p>
+    <p><a id="extensionConfigureLink" target="_blank" rel="noopener noreferrer" hidden>Configure with provider ↗</a></p>
+    <footer><button class="ext-btn" id="extensionDetailsClose" type="button">Done</button></footer>
+  </dialog>
+
+  <script src="/assets/app/i18n.js"></script>
+  <script src="/assets/app/lang/en.js?v=20261017-generic-guidance"></script>
+  <script src="/assets/app/lang/de.js?v=20261017-generic-guidance"></script>
+  <script src="/assets/app/lang/es.js?v=20261017-generic-guidance"></script>
+  <script src="/assets/app/lang/fr.js?v=20261017-generic-guidance"></script>
+  <script src="/assets/app/lang/it.js?v=20261017-generic-guidance"></script>
+  <script src="/assets/app/lang/pt.js?v=20261017-generic-guidance"></script>
+  <script src="/assets/app/lang/tr.js?v=20261017-generic-guidance"></script>
+  <script src="/assets/app/lang-switcher.js"></script>
+  <script src="/assets/app/api.js"></script>
+  <script src="/assets/app/shell.js?v=20260328"></script>
+  <script src="/assets/app/analytics.js"></script>
+  <script src="/assets/app/page-extensions.js?v=20261017-generic-guidance"></script>
+  <script src="/assets/modern-site.js?v=20261012-7" defer></script>
+</body>
+</html>

@@ -64,6 +64,24 @@ class Prompt8AvailabilityProvidersTest {
     }
 
     @Test
+    fun `debrid cache ignores credentials for disabled providers`() = runTest {
+        val provider = DebridCacheSourceAvailabilityProvider(
+            streamRepository = StubStreamRepository(
+                snapshot = snapshotOf(
+                    candidate(provenance = CandidateProvenanceKind.STARTUP_FETCH, isCached = true),
+                ),
+            ),
+            secretStore = SecretStore(
+                mapOf(IntegrationSecretKey.DEBRID_API_KEY_REAL_DEBRID to "rdkey"),
+            ),
+            tmdbToImdbResolver = { _, _ -> "tt0123456" },
+            isProviderEnabled = { false },
+        )
+
+        assertNull(provider.probe(42, MediaType.MOVIE))
+    }
+
+    @Test
     fun `debrid cache returns null when imdb id cannot be resolved`() = runTest {
         val provider = DebridCacheSourceAvailabilityProvider(
             streamRepository = StubStreamRepository(),

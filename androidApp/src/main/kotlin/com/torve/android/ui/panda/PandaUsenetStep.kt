@@ -1,5 +1,7 @@
 package com.torve.android.ui.panda
 
+import com.torve.android.ui.community.parityLabel as localizedUiText
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -86,43 +88,11 @@ fun PandaUsenetStep(
         )
         Spacer(Modifier.height(20.dp))
 
-        // Enable toggle
-        val enableInteractionSource = remember { MutableInteractionSource() }
-        val enableFocused by enableInteractionSource.collectIsFocusedAsState()
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .then(entryFocusRequester?.let { Modifier.focusRequester(it) } ?: Modifier)
-                .clip(RoundedCornerShape(12.dp))
-                .background(Gunmetal)
-                .border(
-                    width = if (enableFocused) 2.dp else 1.dp,
-                    color = if (enableFocused) Amber else Steel.copy(alpha = 0.35f),
-                    shape = RoundedCornerShape(12.dp),
-                )
-                .clickable(
-                    interactionSource = enableInteractionSource,
-                    indication = null,
-                    onClick = { viewModel.setEnableUsenet(!state.enableUsenet) },
-                )
-                .padding(horizontal = 16.dp, vertical = 12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween,
-        ) {
-            Text(
-                stringResource(R.string.panda_setup_usenet_enable),
-                style = MaterialTheme.typography.bodyLarge,
-                color = Snow,
-            )
-            Switch(
-                checked = state.enableUsenet,
-                onCheckedChange = { viewModel.setEnableUsenet(it) },
-                colors = SwitchDefaults.colors(
-                    checkedThumbColor = Amber,
-                    checkedTrackColor = Amber.copy(alpha = 0.3f),
-                ),
-            )
-        }
+        PandaChoiceCard(
+            title = stringResource(R.string.panda_setup_usenet_enable), selected = state.enableUsenet,
+            onClick = { viewModel.setEnableUsenet(!state.enableUsenet) },
+            modifier = Modifier.then(entryFocusRequester?.let { Modifier.focusRequester(it) } ?: Modifier),
+        )
 
         if (!state.enableUsenet) return
 
@@ -203,51 +173,14 @@ private fun BandwidthSaverSwitch(state: PandaSetupUiState, viewModel: PandaSetup
     val hasCloudClient = state.downloadClient in cloudClients
     val canEnable = state.enableUsenet && hasIndexer && hasCloudClient
 
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
-            .background(Gunmetal)
-            .padding(horizontal = 16.dp, vertical = 12.dp),
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween,
-        ) {
-            Column(Modifier.weight(1f)) {
-                Text(
-                    "Bandwidth saver — use NZB path when available",
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = if (canEnable) Snow else Silver,
-                )
-                Spacer(Modifier.height(4.dp))
-                Text(
-                    "When the same release is on both Easynews and one of your NZB indexers, route playback through your cloud download service. Saves Easynews data.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = Silver,
-                )
-            }
-            Spacer(Modifier.width(12.dp))
-            Switch(
-                checked = canEnable && state.easynewsPreferNzb,
-                onCheckedChange = { viewModel.setBandwidthSaver(it) },
-                enabled = canEnable,
-                colors = SwitchDefaults.colors(
-                    checkedThumbColor = Amber,
-                    checkedTrackColor = Amber.copy(alpha = 0.3f),
-                ),
-            )
-        }
-        if (!canEnable) {
-            Spacer(Modifier.height(8.dp))
-            Text(
-                "Configure at least one NZB indexer with an API key and a cloud download client (Premiumize / TorBox / AllDebrid) to enable.",
-                style = MaterialTheme.typography.bodySmall,
-                color = Amber.copy(alpha = 0.8f),
-            )
-        }
-    }
+    PandaChoiceCard(
+        title = localizedUiText("Bandwidth saver — use NZB path when available"),
+        description = localizedUiText(if (canEnable) "Use your cloud download service when a release is also on an NZB indexer."
+            else "Add an indexer API key and a cloud download client to enable this option."),
+        selected = canEnable && state.easynewsPreferNzb,
+        enabled = canEnable,
+        onClick = { viewModel.setBandwidthSaver(!state.easynewsPreferNzb) },
+    )
 }
 
 @Composable
@@ -257,31 +190,7 @@ private fun ProviderCard(
     selected: Boolean,
     onClick: () -> Unit,
 ) {
-    val interactionSource = remember { MutableInteractionSource() }
-    val isFocused by interactionSource.collectIsFocusedAsState()
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
-            .background(if (selected) Amber.copy(alpha = 0.15f) else Gunmetal)
-            .border(
-                width = if (isFocused) 3.dp else 1.dp,
-                color = if (isFocused) Amber else if (selected) Amber.copy(alpha = 0.55f) else Steel.copy(alpha = 0.35f),
-                shape = RoundedCornerShape(12.dp),
-            )
-            .clickable(
-                interactionSource = interactionSource,
-                indication = null,
-                onClick = onClick,
-            )
-            .padding(16.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Column(Modifier.weight(1f)) {
-            Text(name, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium, color = Snow)
-            Text(description, style = MaterialTheme.typography.bodySmall, color = Silver)
-        }
-    }
+    PandaChoiceCard(name, description, selected, onClick)
 }
 
 @Composable
@@ -331,22 +240,9 @@ private fun GenericNntpCredentials(state: PandaSetupUiState, viewModel: PandaSet
         isPassword = true,
     )
     Spacer(Modifier.height(10.dp))
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
-            .background(Gunmetal)
-            .padding(horizontal = 16.dp, vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.SpaceBetween,
-    ) {
-        Text(stringResource(R.string.panda_setup_usenet_ssl), style = MaterialTheme.typography.bodyMedium, color = Snow)
-        Switch(
-            checked = state.usenetSSL,
-            onCheckedChange = { viewModel.setUsenetSSL(it) },
-            colors = SwitchDefaults.colors(checkedThumbColor = Amber, checkedTrackColor = Amber.copy(alpha = 0.3f)),
-        )
-    }
+    PandaChoiceCard(stringResource(R.string.panda_setup_usenet_ssl), selected = state.usenetSSL,
+        onClick = { viewModel.setUsenetSSL(!state.usenetSSL) })
+
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -380,11 +276,11 @@ private fun NzbIndexerSection(state: PandaSetupUiState, viewModel: PandaSetupVie
     }
 
     Spacer(Modifier.height(10.dp))
-    OutlinedButton(
+    PandaButton(
         onClick = { viewModel.addIndexer() },
         modifier = Modifier.fillMaxWidth(),
     ) {
-        Text(stringResource(R.string.panda_setup_usenet_add_indexer), color = Amber)
+        Text(stringResource(R.string.panda_setup_usenet_add_indexer))
     }
 }
 
@@ -416,11 +312,10 @@ private fun NzbIndexerRowCard(
             }
             if (canRemove) {
                 Spacer(Modifier.width(8.dp))
-                IconButton(onClick = onRemove) {
+                PandaButton(onClick = onRemove) {
                     Icon(
                         imageVector = Icons.Default.Close,
-                        contentDescription = "Remove indexer",
-                        tint = Silver,
+                        contentDescription = localizedUiText("Remove indexer"),
                     )
                 }
             }
@@ -514,7 +409,7 @@ private fun FieldInput(
     PandaEditableOutlinedTextField(
         value = value,
         onValueChange = onValueChange,
-        label = { Text(label) },
+        label = { Text(localizedUiText(label)) },
         modifier = modifier.fillMaxWidth(),
         singleLine = true,
         shape = RoundedCornerShape(12.dp),
@@ -526,11 +421,10 @@ private fun FieldInput(
         keyboardOptions = KeyboardOptions(keyboardType = effectiveKeyboardType),
         trailingIcon = if (isPassword) {
             {
-                IconButton(onClick = { revealed = !revealed }) {
+                PandaButton(onClick = { revealed = !revealed }) {
                     Icon(
                         imageVector = if (revealed) Icons.Outlined.VisibilityOff else Icons.Outlined.Visibility,
-                        contentDescription = if (revealed) "Hide" else "Show",
-                        tint = Silver,
+                        contentDescription = localizedUiText(if (revealed) "Hide" else "Show"),
                     )
                 }
             }
@@ -554,37 +448,5 @@ private fun UsenetDropdown(
     options: List<Pair<String, String>>,
     onSelect: (String) -> Unit,
 ) {
-    var expanded by remember { mutableStateOf(false) }
-    val displayValue = options.find { it.first == value }?.second ?: value
-
-    ExposedDropdownMenuBox(
-        expanded = expanded,
-        onExpandedChange = { expanded = it },
-    ) {
-        OutlinedTextField(
-            value = displayValue,
-            onValueChange = {},
-            readOnly = true,
-            modifier = Modifier.fillMaxWidth().menuAnchor(),
-            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded) },
-            shape = RoundedCornerShape(12.dp),
-            colors = OutlinedTextFieldDefaults.colors(
-                focusedBorderColor = Amber,
-                unfocusedBorderColor = Steel,
-                focusedTextColor = Snow,
-                unfocusedTextColor = Snow,
-            ),
-        )
-        ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-            options.forEach { (key, display) ->
-                DropdownMenuItem(
-                    text = { Text(display) },
-                    onClick = {
-                        onSelect(key)
-                        expanded = false
-                    },
-                )
-            }
-        }
-    }
+    PandaDropdown(value, options, onSelect)
 }

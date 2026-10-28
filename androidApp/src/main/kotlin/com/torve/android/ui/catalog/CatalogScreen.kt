@@ -1,5 +1,7 @@
 package com.torve.android.ui.catalog
 
+import com.torve.android.ui.community.parityLabel as localizedUiText
+
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
@@ -22,7 +24,8 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.asPaddingValues
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.ui.zIndex
@@ -61,7 +64,7 @@ import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
+import com.torve.android.ui.system.TorveModalBottomSheet as ModalBottomSheet
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
@@ -82,12 +85,14 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
@@ -99,6 +104,7 @@ import com.torve.android.ui.components.LocalCardStyle
 import com.torve.android.ui.components.PosterCard
 import com.torve.android.ui.components.ShimmerBox
 import com.torve.android.ui.components.ShimmerPosterCard
+import com.torve.android.ui.image.MobileImagePrefetcher
 import com.torve.android.ui.theme.Amber
 import com.torve.android.ui.theme.AmberSubtle
 import com.torve.android.ui.theme.Gunmetal
@@ -139,10 +145,6 @@ private val TV_GENRES = listOf(
     10765 to "Sci-Fi & Fantasy", 53 to "Thriller", 10768 to "War & Politics",
 )
 
-// Floating search overlay heights — keep in sync with the overlay Column below.
-private val SEARCH_BAR_BLOCK_HEIGHT = 72.dp  // search field + vertical padding
-private val BACK_TITLE_ROW_HEIGHT = 44.dp    // optional back/title row
-
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun CatalogScreen(
@@ -152,6 +154,7 @@ fun CatalogScreen(
     onBack: (() -> Unit)? = null,
     title: String? = null,
     onMediaTypeChange: ((String) -> Unit)? = null,
+    isActive: Boolean = true,
     settingsViewModel: SettingsViewModel = koinInject(),
     homeViewModel: HomeViewModel = koinInject(),
 ) {
@@ -160,6 +163,8 @@ fun CatalogScreen(
     val homeState by homeViewModel.state.collectAsState()
     val genres = if (mediaType == "movie") MOVIE_GENRES else TV_GENRES
     val gridState = rememberLazyGridState()
+    val listState = rememberLazyListState()
+    val context = LocalContext.current
     val mdblistApiKey = settingsState.mdblistApiKey
 
     if (onBack != null) {
@@ -177,26 +182,18 @@ fun CatalogScreen(
         }
     }
 
-    LaunchedEffect(mdblistApiKey) {
-        if (mdblistApiKey.isNotBlank()) viewModel.refresh()
+    // Tabs leave composition while hidden. Returning must not restart rating requests.
+    val ratingsRefreshKey = remember(mdblistApiKey, settingsState.personalDataUserId) {
+        java.security.MessageDigest.getInstance("SHA-256")
+            .digest("${settingsState.personalDataUserId}:$mdblistApiKey".toByteArray())
+            .joinToString("") { "%02x".format(it) }
     }
-
-    // After any sort change, jump the grid back to the first card so the user
-    // sees the top of the newly-sorted list. The API reload is async, so we
-    // watch sortBy for changes, then wait for the next "loaded with items"
-    // signal (isLoading flips false and items.size > 0) before scrolling —
-    // otherwise scrollToItem(0) fires on the OLD list and the fresh list
-    // renders wherever the grid's saved position lands.
-    LaunchedEffect(viewModel) {
-        snapshotFlow { state.filter.sortBy }
-            .distinctUntilChanged()
-            .drop(1)
-            .collect {
-                snapshotFlow { state.isLoading to state.items.size }
-                    .filter { (loading, size) -> !loading && size > 0 }
-                    .first()
-                gridState.scrollToItem(0)
-            }
+    var lastRatingsRefreshKey by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf<String?>(null) }
+    LaunchedEffect(ratingsRefreshKey) {
+        if (lastRatingsRefreshKey != ratingsRefreshKey) {
+            lastRatingsRefreshKey = ratingsRefreshKey
+            if (mdblistApiKey.isNotBlank()) viewModel.refresh()
+        }
     }
 
     // Infinite scroll: trigger loadMore when near the bottom
@@ -210,7 +207,12 @@ fun CatalogScreen(
         }
             .distinctUntilChanged()
             .collect { (lastVisible, totalItems) ->
-                if (totalItems > 0 && lastVisible >= totalItems - 6) {
+                val current = viewModel.state.value
+                val hasVisibleTitles = if (current.hasActiveSearch || current.isAiSearching)
+                    current.searchResults.isNotEmpty() else current.items.isNotEmpty()
+                // Header/empty-state cells must not page through the entire
+                // catalogue when a strict IMDb minimum excludes every title.
+                if (hasVisibleTitles && totalItems > 0 && lastVisible >= totalItems - 6) {
                     viewModel.loadMore()
                 }
             }
@@ -225,6 +227,34 @@ fun CatalogScreen(
     val isLoadingMore = if (isSearchMode) state.isSearchingMore else state.isLoadingMore
     val upcomingSchedule = remember(homeState.upcomingSchedule, mediaType, isSearchMode) {
         if (mediaType == "tv" && !isSearchMode) homeState.upcomingSchedule else emptyList()
+    }
+
+    val contentPositionKey = remember(
+        mediaType,
+        isSearchMode,
+        state.searchQuery,
+    ) {
+        buildString {
+            append(mediaType)
+            append('|').append(isSearchMode)
+            if (isSearchMode) append('|').append(state.searchQuery.trim())
+        }
+    }
+    var lastContentPositionKey by rememberSaveable(viewModel) {
+        mutableStateOf(contentPositionKey)
+    }
+    LaunchedEffect(contentPositionKey) {
+        if (contentPositionKey != lastContentPositionKey) {
+            gridState.scrollToItem(0)
+            listState.scrollToItem(0)
+            lastContentPositionKey = contentPositionKey
+        }
+    }
+
+    LaunchedEffect(displayItems, isActive) {
+        if (isActive) {
+            MobileImagePrefetcher.prefetchCatalog(context, displayItems)
+        }
     }
 
     // Track scroll direction for floating search bar visibility
@@ -242,10 +272,8 @@ fun CatalogScreen(
     } }
 
     // Top padding so grid content starts below the floating search overlay.
-    val statusBarTop = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
-    val showBackTitleRow = onBack != null || title != null
-    val gridTopPadding = statusBarTop + SEARCH_BAR_BLOCK_HEIGHT +
-        if (showBackTitleRow) BACK_TITLE_ROW_HEIGHT else 0.dp
+    var searchHeaderHeightPx by remember { mutableIntStateOf(0) }
+    val gridTopPadding = with(LocalDensity.current) { searchHeaderHeightPx.toDp() }
 
     val defaultCardStyle = resolveCardStyle(
         presets = settingsState.cardStylePresets,
@@ -256,7 +284,7 @@ fun CatalogScreen(
         LocalCardStyle provides defaultCardStyle,
         LocalRatingPrefs provides settingsState.ratingPrefs,
     ) {
-    Box(modifier = Modifier.fillMaxSize()) {
+    Box(modifier = Modifier.fillMaxSize().statusBarsPadding()) {
         when {
             state.isLoading && displayItems.isEmpty() -> {
                 CatalogSkeletonLoader()
@@ -283,8 +311,6 @@ fun CatalogScreen(
 
             else -> {
                 if (state.viewMode == CatalogViewMode.LIST) {
-                    val listState = rememberLazyListState()
-
                     // Infinite scroll for list mode
                     LaunchedEffect(listState, viewModel) {
                         snapshotFlow {
@@ -302,6 +328,7 @@ fun CatalogScreen(
                     }
 
                     LazyColumn(
+                        modifier = Modifier.testTag("catalog_list"),
                         state = listState,
                         contentPadding = PaddingValues(
                             top = gridTopPadding,
@@ -309,7 +336,7 @@ fun CatalogScreen(
                         ),
                     ) {
                         // ── Featured Hero Pager ──
-                        if (!isSearchMode && displayItems.size >= 3) {
+                        if ((if (mediaType == "movie") settingsState.moviesHeroEnabled else settingsState.showsHeroEnabled) && !isSearchMode && displayItems.size >= 3) {
                             item(key = "hero") {
                                 Box(modifier = Modifier.padding(horizontal = 16.dp)) {
                                     CatalogHeroPager(
@@ -325,7 +352,7 @@ fun CatalogScreen(
                             item(key = "upcoming_schedule") {
                                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                                     Text(
-                                        text = "Upcoming Schedule",
+                                        text = localizedUiText("Upcoming Schedule"),
                                         style = MaterialTheme.typography.headlineSmall,
                                         color = Torve.colors.textPrimary,
                                         modifier = Modifier.padding(horizontal = 16.dp),
@@ -360,7 +387,7 @@ fun CatalogScreen(
                                         onClick = { viewModel.selectCategory(category) },
                                         label = {
                                             Text(
-                                                category.label,
+                                                localizedUiText(category.label),
                                                 style = MaterialTheme.typography.labelLarge,
                                             )
                                         },
@@ -444,7 +471,7 @@ fun CatalogScreen(
                                     text = if (isSearchMode) {
                                         state.aiSearchLabel ?: stringResource(R.string.catalog_search_results)
                                     } else {
-                                        state.selectedCategory.label
+                                        localizedUiText(state.selectedCategory.label)
                                     },
                                     style = MaterialTheme.typography.headlineSmall,
                                     color = Torve.colors.textPrimary,
@@ -520,6 +547,7 @@ fun CatalogScreen(
                     }
 
                     LazyVerticalGrid(
+                        modifier = Modifier.testTag("catalog_grid"),
                         state = gridState,
                         columns = gridColumns,
                         contentPadding = PaddingValues(
@@ -533,7 +561,7 @@ fun CatalogScreen(
                     ) {
 
                         // ── Featured Hero Pager ──
-                        if (!isSearchMode && displayItems.size >= 3) {
+                        if ((if (mediaType == "movie") settingsState.moviesHeroEnabled else settingsState.showsHeroEnabled) && !isSearchMode && displayItems.size >= 3) {
                             item(
                                 key = "hero",
                                 span = { GridItemSpan(maxLineSpan) },
@@ -553,7 +581,7 @@ fun CatalogScreen(
                             ) {
                                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                                     Text(
-                                        text = "Upcoming Schedule",
+                                        text = localizedUiText("Upcoming Schedule"),
                                         style = MaterialTheme.typography.headlineSmall,
                                         color = Torve.colors.textPrimary,
                                     )
@@ -588,7 +616,7 @@ fun CatalogScreen(
                                         onClick = { viewModel.selectCategory(category) },
                                         label = {
                                             Text(
-                                                category.label,
+                                                localizedUiText(category.label),
                                                 style = MaterialTheme.typography.labelLarge,
                                             )
                                         },
@@ -677,7 +705,7 @@ fun CatalogScreen(
                                     text = if (isSearchMode) {
                                         state.aiSearchLabel ?: stringResource(R.string.catalog_search_results)
                                     } else {
-                                        state.selectedCategory.label
+                                        localizedUiText(state.selectedCategory.label)
                                     },
                                     style = MaterialTheme.typography.headlineSmall,
                                     color = Torve.colors.textPrimary,
@@ -747,6 +775,26 @@ fun CatalogScreen(
             }
         }
 
+        if (displayItems.isEmpty() && !state.isLoading && !state.isSearching && !isLoadingMore &&
+            (if (isSearchMode) state.searchHasMore else state.hasMore)) {
+            TextButton(onClick = viewModel::loadMore,
+                modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 88.dp)) {
+                Text(localizedUiText("Load more titles"))
+            }
+        }
+
+        if (state.isLoading && displayItems.isNotEmpty()) {
+            androidx.compose.material3.LinearProgressIndicator(
+                modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth().testTag("catalog_refresh_progress"),
+            )
+        } else if (state.error != null && displayItems.isNotEmpty()) {
+            androidx.compose.material3.Surface(
+                modifier = Modifier.align(Alignment.BottomCenter).padding(16.dp),
+            ) {
+                Text(localizedUiText(state.error.orEmpty()), modifier = Modifier.padding(12.dp))
+            }
+        }
+
         // ── Floating Search Bar ──
         AnimatedVisibility(
             visible = isSearchBarVisible.value,
@@ -762,7 +810,7 @@ fun CatalogScreen(
                             listOf(Obsidian, Obsidian, Obsidian.copy(alpha = 0.9f), Color.Transparent),
                         ),
                     )
-                    .statusBarsPadding(),
+                    .onSizeChanged { searchHeaderHeightPx = it.height },
             ) {
                 // Back + Title row when navigated from provider/genre
                 if (onBack != null || title != null) {
@@ -851,7 +899,7 @@ fun CatalogScreen(
                     // AI search hint / error
                     state.aiSearchError?.let { hint ->
                         Text(
-                            text = hint,
+                            text = localizedUiText(hint),
                             style = MaterialTheme.typography.labelSmall,
                             color = Amber.copy(alpha = 0.7f),
                             modifier = Modifier.padding(top = 4.dp),
@@ -1119,7 +1167,7 @@ private fun CatalogSearchRow(
                 } else {
                     Icon(
                         Icons.Rounded.AutoAwesome,
-                        contentDescription = "AI Search",
+                        contentDescription = localizedUiText("AI Search"),
                         tint = Amber,
                     )
                 }
@@ -1159,7 +1207,7 @@ private fun CatalogSearchRow(
         ) {
             Icon(
                 Icons.Rounded.Apps,
-                contentDescription = "Small grid",
+                contentDescription = localizedUiText("Small grid"),
                 tint = if (viewMode == CatalogViewMode.GRID_SMALL) Amber else Torve.colors.textTertiary,
                 modifier = Modifier.size(18.dp),
             )
@@ -1170,7 +1218,7 @@ private fun CatalogSearchRow(
         ) {
             Icon(
                 Icons.Rounded.ViewModule,
-                contentDescription = "Medium grid",
+                contentDescription = localizedUiText("Medium grid"),
                 tint = if (viewMode == CatalogViewMode.GRID_MEDIUM) Amber else Torve.colors.textTertiary,
                 modifier = Modifier.size(18.dp),
             )
@@ -1181,7 +1229,7 @@ private fun CatalogSearchRow(
         ) {
             Icon(
                 Icons.Rounded.GridView,
-                contentDescription = "Large grid",
+                contentDescription = localizedUiText("Large grid"),
                 tint = if (viewMode == CatalogViewMode.GRID_LARGE) Amber else Torve.colors.textTertiary,
                 modifier = Modifier.size(18.dp),
             )
@@ -1192,7 +1240,7 @@ private fun CatalogSearchRow(
         ) {
             Icon(
                 Icons.AutoMirrored.Rounded.ViewList,
-                contentDescription = "List view",
+                contentDescription = localizedUiText("List view"),
                 tint = if (viewMode == CatalogViewMode.LIST) Amber else Torve.colors.textTertiary,
                 modifier = Modifier.size(18.dp),
             )
@@ -1329,13 +1377,13 @@ private fun FilterBottomSheet(
             )
             Spacer(Modifier.height(8.dp))
             LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                items(SortOption.entries) { option ->
+                items(SortOption.entries.sortedBy { it != SortOption.IMDB_SCORE_DESC }) { option ->
                     val selected = selectedSort == option
                     FilterChip(
                         selected = selected,
                         onClick = { selectedSort = option },
                         label = {
-                            Text(option.label, style = MaterialTheme.typography.labelMedium)
+                            Text(localizedUiText(option.label), style = MaterialTheme.typography.labelMedium)
                         },
                         colors = FilterChipDefaults.filterChipColors(
                             selectedContainerColor = Amber,
@@ -1355,7 +1403,7 @@ private fun FilterBottomSheet(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
-                    stringResource(R.string.catalog_min_rating),
+                    localizedUiText("Minimum IMDb Rating"),
                     style = MaterialTheme.typography.titleSmall,
                     fontWeight = FontWeight.SemiBold,
                     color = MaterialTheme.colorScheme.onSurface,
@@ -1436,7 +1484,7 @@ private fun FilterBottomSheet(
                             }
                         },
                         label = {
-                            Text(label, style = MaterialTheme.typography.labelSmall)
+                            Text(localizedUiText(label), style = MaterialTheme.typography.labelSmall)
                         },
                         colors = FilterChipDefaults.filterChipColors(
                             selectedContainerColor = AmberSubtle,
@@ -1527,7 +1575,7 @@ private fun FilterBottomSheet(
                         selected = selected,
                         onClick = { selectedRuntime = if (selected) null else runtime },
                         label = {
-                            Text(runtime.label, style = MaterialTheme.typography.labelSmall)
+                            Text(localizedUiText(runtime.label), style = MaterialTheme.typography.labelSmall)
                         },
                         colors = FilterChipDefaults.filterChipColors(
                             selectedContainerColor = AmberSubtle,

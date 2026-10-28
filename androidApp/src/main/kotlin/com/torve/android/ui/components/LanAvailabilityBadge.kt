@@ -1,5 +1,7 @@
 package com.torve.android.ui.components
 
+import com.torve.android.ui.community.parityLabel as localizedUiText
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -68,7 +70,7 @@ fun LanAvailabilityBadge(
         )
         Spacer(Modifier.width(6.dp))
         Text(
-            text = "Available on desktop",
+            text = localizedUiText("Available on desktop"),
             style = MaterialTheme.typography.labelSmall,
             color = Color(0xFFD9F1E1),
         )

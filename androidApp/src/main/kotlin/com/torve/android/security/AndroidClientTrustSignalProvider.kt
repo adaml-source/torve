@@ -4,13 +4,12 @@ import android.content.Context
 import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
 import android.os.Build
-import android.util.Base64
 import com.torve.android.BuildConfig
 import com.torve.domain.security.ClientIntegrityAttestation
+import com.torve.domain.security.ClientIntegrityChallenge
 import com.torve.domain.security.ClientTrustSignal
 import com.torve.domain.security.ClientTrustSignalProvider
 import java.security.MessageDigest
-import java.security.SecureRandom
 
 class AndroidClientTrustSignalProvider(
     private val context: Context,
@@ -48,15 +47,14 @@ class AndroidClientTrustSignalProvider(
         )
     }
 
-    override suspend fun currentIntegrityAttestation(): ClientIntegrityAttestation? {
-        val nonce = randomNonce()
-        val token = integrityTokenProvider.requestIntegrityToken(nonce)
+    override suspend fun currentIntegrityAttestation(challenge: ClientIntegrityChallenge): ClientIntegrityAttestation? {
+        if (!challenge.enabled || installerPackageName() != "com.android.vending" || isDebuggable()) return null
+        val token = integrityTokenProvider.requestIntegrityToken(challenge.requestHash, challenge.cloudProjectNumber)
             ?.takeIf { it.isNotBlank() }
             ?: return null
         return ClientIntegrityAttestation(
             integrityProvider = integrityTokenProvider.providerName,
             integrityToken = token,
-            nonce = nonce,
             generatedAtEpochMillis = System.currentTimeMillis(),
         )
     }
@@ -141,12 +139,4 @@ class AndroidClientTrustSignalProvider(
             true
         }.getOrDefault(false)
 
-    private fun randomNonce(): String {
-        val bytes = ByteArray(24)
-        SecureRandom().nextBytes(bytes)
-        return Base64.encodeToString(
-            bytes,
-            Base64.URL_SAFE or Base64.NO_WRAP or Base64.NO_PADDING,
-        )
-    }
 }

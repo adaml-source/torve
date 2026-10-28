@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="replay_highlight_tv_playback">Highlights öffnen sich im Vollbild in YouTube oder SmartTube. Mit Zurück geht es wieder zu dieser Liste.</string>
+    <string name="replay_highlight_tv_missing_player">Installieren Sie YouTube oder SmartTube, um Highlights im Vollbild abzuspielen.</string>
+</resources>

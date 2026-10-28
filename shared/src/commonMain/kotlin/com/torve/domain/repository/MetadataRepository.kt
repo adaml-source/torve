@@ -7,12 +7,17 @@ import com.torve.domain.model.MediaItem
 import com.torve.domain.model.PagedResult
 import com.torve.domain.model.PersonSummary
 import com.torve.domain.model.Season
+import com.torve.domain.model.StreamingProviderCandidate
 
 interface MetadataRepository {
     suspend fun getTrending(type: String, page: Int = 1): List<MediaItem>
     suspend fun getPopular(type: String, page: Int = 1): List<MediaItem>
     suspend fun getTopRated(type: String, page: Int = 1): List<MediaItem>
     suspend fun getUpcoming(page: Int = 1): List<MediaItem>
+    suspend fun getUpcomingPaged(page: Int = 1): PagedResult {
+        val items = getUpcoming(page)
+        return PagedResult(items, page, if (items.isEmpty()) page else page + 1, items.size)
+    }
     suspend fun getNowPlaying(page: Int = 1): List<MediaItem>
     suspend fun getAiringToday(page: Int = 1): List<MediaItem>
     suspend fun searchMulti(query: String, page: Int = 1): List<MediaItem>
@@ -21,6 +26,10 @@ interface MetadataRepository {
     suspend fun getSimilar(type: String, id: Int, page: Int = 1): List<MediaItem>
     suspend fun getRecommendations(type: String, id: Int, page: Int = 1): List<MediaItem>
     suspend fun getHomeShelves(): List<CatalogShelf>
+    /** Verified rows can paint independently of slow optional rows. */
+    fun homeShelves(): kotlinx.coroutines.flow.Flow<List<CatalogShelf>> = kotlinx.coroutines.flow.flow {
+        emit(getHomeShelves())
+    }
     suspend fun getPersonCredits(personId: Int): List<MediaItem>
     suspend fun getPersonDetail(personId: Int): TmdbPerson
     suspend fun getPersonImageUrls(personId: Int): List<String> = emptyList()
@@ -51,11 +60,21 @@ interface MetadataRepository {
         withWatchProviders: String? = null,
         watchRegion: String? = null,
         withKeywords: String? = null,
+        withCompanies: String? = null,
     ): PagedResult
     suspend fun searchKeywords(query: String): List<TmdbKeyword>
     suspend fun searchMultiPaged(query: String, page: Int = 1, type: String? = null): PagedResult
+    /** Optional prefix completions, resolved to catalogue records before emission. */
+    fun titleSuggestions(query: String, type: String? = null): kotlinx.coroutines.flow.Flow<List<MediaItem>> =
+        kotlinx.coroutines.flow.flowOf(emptyList())
     suspend fun getPopularPeople(page: Int = 1): List<PersonSummary>
     suspend fun searchPerson(query: String, page: Int = 1): List<PersonSummary>
+    suspend fun getWatchProviderNames(type: String = "movie", region: String = "US"): Map<Int, String> = emptyMap()
+    suspend fun getWatchProviderCandidates(type: String = "movie"): List<StreamingProviderCandidate> = emptyList()
+    suspend fun getTitleWatchProviderCandidates(
+        type: String,
+        tmdbId: Int,
+    ): List<StreamingProviderCandidate> = emptyList()
     suspend fun getWatchProviderLogos(type: String = "movie", region: String = "US"): Map<Int, String>
     suspend fun getLogoUrl(type: String, tmdbId: Int): String?
 }

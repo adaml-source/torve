@@ -121,8 +121,9 @@ class PandaApiClient(
         checkResponse(response)
     }
 
-    suspend fun createConfig(config: PandaConfigPayload): PandaConfigResponse {
+    suspend fun createConfig(config: PandaConfigPayload, accountToken: String? = null): PandaConfigResponse {
         val response: HttpResponse = httpClient.post("$BASE_URL/api/v1/configs") {
+            accountToken?.takeIf { it.isNotBlank() }?.let { header("Authorization", "Bearer $it") }
             contentType(ContentType.Application.Json)
             setBody(json.encodeToString(PandaConfigPayload.serializer(), config))
         }

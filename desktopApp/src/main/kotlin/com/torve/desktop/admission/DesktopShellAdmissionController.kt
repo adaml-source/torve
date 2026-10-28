@@ -178,7 +178,7 @@ class DesktopShellAdmissionController(
         val sharedSetupCompleted = prefsRepo.getString(SetupWizardViewModel.KEY_SETUP_COMPLETED) == "true"
         val userScopedOnboardingCompleted = prefsRepo.getString(onboardingCompletedKey(userId)) == "true"
 
-        val hasVodPlaybackPath = settingsState.debridConnected
+        val hasVodPlaybackPath = settingsState.canPlayStreams
         val hasLivePlaybackPath = channelsState.playlists.isNotEmpty()
 
         // Returning-user fast-path: if AccountSessionCoordinator's

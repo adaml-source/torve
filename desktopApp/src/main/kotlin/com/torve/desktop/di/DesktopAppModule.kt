@@ -16,10 +16,11 @@ import com.torve.platform.NetworkMonitor
 import org.koin.dsl.module
 
 val desktopAppModule = module {
+    single { com.torve.desktop.reminders.DesktopEpisodeAlerts(get(), get(), get()) { title, body -> com.torve.desktop.desktopNotify(title, body) } }
     single { DatabaseDriverFactory() }
     single { NetworkMonitor() }
     single<DesktopSecretStore> { createDesktopSecretStore() }
-    single<IntegrationSecretStore> { get<DesktopSecretStore>() }
+    single<IntegrationSecretStore> { com.torve.domain.integrations.ProfileScopedSecretStore(get<DesktopSecretStore>(), get<com.torve.data.auth.UserIdProvider>()) }
     single<SecureStorage> { get<DesktopSecretStore>() }
     single<SyncPayloadEncryptor> { DesktopSyncPayloadEncryptor(get()) }
     single<DeviceIdProvider> { DesktopDeviceIdProvider() }
@@ -153,11 +154,16 @@ val desktopAppModule = module {
             secretStore = get(),
             prefs = get(),
             libraryService = get(),
+            mediaLifecycleService = get(),
+            automationRepository = get(),
+            automationAdminClient = get(),
             addonRepository = get(),
             stremioAddonClient = get(),
             channelsViewModel = get(),
             pandaConfigStateStore = get(),
             refreshOnSettings = get(),
+            traktClient = get(),
+            simklClient = get(),
         )
     }
 }

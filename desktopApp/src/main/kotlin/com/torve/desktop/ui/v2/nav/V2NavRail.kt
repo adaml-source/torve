@@ -53,6 +53,7 @@ fun V2NavRail(
     isSettingsActive: Boolean = false,
     backdropLuminance: Float = 0.15f,
     adultModeEnabled: Boolean = false,
+    optionalFeatures: com.torve.presentation.settings.OptionalAppFeatures = com.torve.presentation.settings.OptionalAppFeatures(),
     modifier: Modifier = Modifier,
 ) {
     val colors = TorveDesktopThemeTokens.colors
@@ -144,6 +145,8 @@ fun V2NavRail(
 
             V2Destination.entries
                 .filter { it != V2Destination.ADULT || adultModeEnabled }
+                .filter { optionalFeatures.channels || (it != V2Destination.LIVE_TV && it != V2Destination.RECORDINGS) }
+                .filter { it != V2Destination.SPORTS }
                 .forEach { dest ->
                     NavIcon(
                         icon = dest.icon,

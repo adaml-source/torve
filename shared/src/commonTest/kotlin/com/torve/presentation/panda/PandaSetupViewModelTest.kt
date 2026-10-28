@@ -13,9 +13,9 @@ class PandaSetupViewModelTest {
     // ── Step navigation ──
 
     @Test
-    fun initialStepIsSetupType() {
+    fun initialStepIsConnections() {
         val state = PandaSetupUiState()
-        assertEquals(PandaSetupStep.SETUP_TYPE, state.currentStep)
+        assertEquals(PandaSetupStep.AUTH, state.currentStep)
         assertEquals(null, state.setupMode)
     }
 
@@ -26,8 +26,8 @@ class PandaSetupViewModelTest {
             currentStep = PandaSetupStep.AUTH,
         )
 
-        assertEquals(2, state.progressStepNumber())
-        assertEquals(6, state.progressStepCount())
+        assertEquals(1, state.progressStepNumber())
+        assertEquals(5, state.progressStepCount())
     }
 
     @Test
@@ -40,6 +40,19 @@ class PandaSetupViewModelTest {
 
         assertEquals(2, state.progressStepNumber())
         assertEquals(4, state.progressStepCount())
+    }
+
+    @Test fun reopeningReturnsToFirstPageWithoutDiscardingIndexerEdits() {
+        val editing = PandaSetupUiState(currentStep = PandaSetupStep.REVIEW, authLoading = true,
+            error = "old error", addonInstalled = true,
+            nzbIndexers = listOf(com.torve.data.panda.NzbIndexerRow("custom", "https://indexer.example/api", "saved-key")))
+        val reopened = editing.reopened()
+        assertEquals(PandaSetupStep.AUTH, reopened.currentStep)
+        assertEquals(1, reopened.progressStepNumber())
+        assertEquals(editing.nzbIndexers, reopened.nzbIndexers)
+        assertFalse(reopened.authLoading)
+        assertFalse(reopened.addonInstalled)
+        assertEquals(null, reopened.error)
     }
 
     @Test
@@ -183,6 +196,45 @@ class PandaSetupViewModelTest {
     }
 
     @Test
+    fun disabledProviderKeepsCredentialButIsMarkedIneligible() {
+        val state = PandaSetupUiState(
+            selectedProvider = PandaProvider("realdebrid", "Real-Debrid", listOf("oauth", "apikey")),
+            debridApiKey = "rd-key",
+            debridApiKeys = mapOf(
+                "realdebrid" to "rd-key",
+                "torbox" to "tb-key",
+            ),
+            debridProviderEnabled = mapOf(
+                "realdebrid" to false,
+                "torbox" to true,
+            ),
+        )
+
+        val connections = pandaDebridConnectionsForPayload(state).associateBy { it.provider }
+
+        assertEquals("rd-key", connections["realdebrid"]?.apiKey)
+        assertFalse(connections["realdebrid"]?.enabled ?: true)
+        assertTrue(connections["torbox"]?.enabled == true)
+        assertEquals("torbox", primaryPandaDebridConnection(state).provider)
+    }
+
+    @Test
+    fun allDisabledProvidersRemainConfiguredWithoutLegacyResolutionFallback() {
+        val state = PandaSetupUiState(
+            selectedProvider = PandaProvider("realdebrid", "Real-Debrid", listOf("oauth", "apikey")),
+            debridApiKey = "rd-key",
+            debridApiKeys = mapOf("realdebrid" to "rd-key"),
+            debridProviderEnabled = mapOf("realdebrid" to false),
+        )
+
+        val connection = pandaDebridConnectionsForPayload(state).single()
+        assertEquals("rd-key", connection.apiKey)
+        assertFalse(connection.enabled)
+        assertEquals("none", primaryPandaDebridConnection(state).provider)
+        assertEquals("", primaryPandaDebridConnection(state).apiKey)
+    }
+
+    @Test
     fun selectedProviderKeyDoesNotBleedFromAnotherProvider() {
         val state = PandaSetupUiState(
             selectedProvider = PandaProvider("torbox", "TorBox", listOf("apikey")),
@@ -214,6 +266,21 @@ class PandaSetupViewModelTest {
         assertEquals("rd-key", connections["realdebrid"])
         assertEquals("tb-key-new", connections["torbox"])
         assertEquals(2, connections.size)
+    }
+
+    @Test
+    fun hydrationPreservesProviderBeingEditedAcrossActivationRefresh() {
+        val realDebrid = PandaProvider("realdebrid", "Real-Debrid", listOf("oauth", "apikey"))
+        val torBox = PandaProvider("torbox", "TorBox", listOf("apikey"))
+
+        val selected = hydratedPandaProviderSelection(
+            currentSelection = torBox,
+            availableProviders = listOf(realDebrid, torBox),
+            matchedServerProvider = realDebrid,
+            setupMode = PandaSetupMode.DEBRID,
+        )
+
+        assertEquals("torbox", selected?.id)
     }
 
     @Test

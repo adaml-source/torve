@@ -44,7 +44,22 @@ object CategoryNameCleaner {
     )
 
     // Country/provider prefix pattern: "XX|" or "XX |"
-    private val PREFIX_PATTERN = Regex("""^[A-Z0-9]{1,4}\s*\|\s*""")
+    private val PREFIX_PATTERN = Regex("""(?i)^[A-Z0-9]{1,4}\s*[|:]\s*""")
+    private val countryNames = mapOf(
+        "albania" to "AL", "germany" to "DE", "deutschland" to "DE", "austria" to "AT", "switzerland" to "CH",
+        "france" to "FR", "italy" to "IT", "spain" to "ES", "portugal" to "PT", "netherlands" to "NL",
+        "belgium" to "BE", "poland" to "PL", "romania" to "RO", "bulgaria" to "BG", "greece" to "GR",
+        "turkey" to "TR", "croatia" to "HR", "serbia" to "RS", "bosnia" to "BA", "kosovo" to "XK",
+        "hungary" to "HU", "czech" to "CZ", "slovakia" to "SK", "slovenia" to "SI", "ukraine" to "UA",
+        "russia" to "RU", "denmark" to "DK", "norway" to "NO", "sweden" to "SE", "finland" to "FI",
+        "ireland" to "IE", "united kingdom" to "GB", "united states" to "US", "canada" to "CA",
+        "australia" to "AU", "india" to "IN", "pakistan" to "PK", "brazil" to "BR", "mexico" to "MX",
+        "argentina" to "AR", "japan" to "JP", "china" to "CN", "south korea" to "KR", "south africa" to "ZA",
+    )
+    fun normalizeCountryCode(code: String): String = when (val value = code.trim().uppercase()) {
+        "UK", "GBR" -> "GB"; "USA" -> "US"; "GER", "DEU" -> "DE"; "ALB" -> "AL"; "FRA" -> "FR"
+        else -> value
+    }
 
     // Junk patterns often seen in group titles
     private val JUNK_PATTERNS = listOf(
@@ -82,10 +97,12 @@ object CategoryNameCleaner {
 
         // 3. Extract country code prefix before stripping it
         val prefixMatch = PREFIX_PATTERN.find(name)
-        val countryCode = prefixMatch?.value?.replace(Regex("""[\s|]+"""), "")?.uppercase()?.takeIf {
+        val countryCode = prefixMatch?.value?.replace(Regex("""[\s|:]+"""), "")?.uppercase()?.takeIf {
             // Only treat as country code if it's 2-3 letters (ISO country codes)
             it.length in 2..3 && it.all { c -> c.isLetter() }
-        }
+        }?.let(::normalizeCountryCode) ?: countryNames.entries.firstOrNull { (country, _) ->
+            name.equals(country, ignoreCase = true) || name.startsWith("$country ", ignoreCase = true)
+        }?.value
         name = PREFIX_PATTERN.replace(name, "")
 
         // 4. Strip junk patterns
@@ -108,6 +125,13 @@ object CategoryNameCleaner {
             name = rawName.trim()
         }
 
+        // A generic "SPORT" in two countries must never become one visibility switch.
+        val countryAliases = countryNames.entries.filter { it.value == countryCode }.map { it.key }
+        if (countryCode != null && !name.startsWith(countryCode, ignoreCase = true) &&
+            countryAliases.none { name.equals(it, true) || name.startsWith("$it ", ignoreCase = true) }) {
+            val label = countryAliases.firstOrNull()?.split(" ")?.joinToString(" ") { it.replaceFirstChar(Char::uppercase) } ?: countryCode
+            name = "$label $name"
+        }
         return CleanResult(name, extractedQualities, countryCode)
     }
 
@@ -132,6 +156,7 @@ object CategoryNameCleaner {
      */
     fun processCategoryCountsOnly(rawCounts: List<Pair<String, Long>>): List<ChannelCategory> {
         data class MergedCategory(
+            val displayName: String,
             var totalCount: Long = 0,
             val qualityTags: MutableSet<String> = mutableSetOf(),
             var countryCode: String? = null,
@@ -141,20 +166,14 @@ object CategoryNameCleaner {
         for ((rawName, count) in rawCounts) {
             val cleaned = clean(rawName)
             val key = cleaned.name.lowercase()
-            val entry = merged.getOrPut(key) { MergedCategory(countryCode = cleaned.countryCode) }
+            val entry = merged.getOrPut(key) { MergedCategory(displayName = cleaned.name, countryCode = cleaned.countryCode) }
             entry.totalCount += count
             entry.qualityTags.addAll(cleaned.qualityTags)
         }
 
-        return merged.entries.map { (key, data) ->
-            // Recover display-cased name from the first raw entry that maps to this key
-            val displayName = rawCounts.firstNotNullOfOrNull { (rawName, _) ->
-                val cleaned = clean(rawName)
-                if (cleaned.name.lowercase() == key) cleaned.name else null
-            } ?: key
-
+        return merged.values.map { data ->
             ChannelCategory(
-                name = displayName,
+                name = data.displayName,
                 channelCount = data.totalCount.toInt(),
                 channels = emptyList(),
                 qualityTags = data.qualityTags,

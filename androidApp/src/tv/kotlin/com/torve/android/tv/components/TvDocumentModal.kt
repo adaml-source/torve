@@ -1,5 +1,7 @@
 package com.torve.android.tv.components
 
+import com.torve.android.tv.components.tvSettingsLabel as localizedUiText
+
 import android.content.Context
 import android.graphics.Color as AndroidColor
 import android.view.View
@@ -8,6 +10,7 @@ import android.webkit.WebView
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -29,6 +32,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
@@ -42,7 +46,7 @@ import androidx.compose.ui.input.key.type
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
-import androidx.compose.ui.window.Popup
+import com.torve.android.remote.TorveRemotePopup as Popup
 import androidx.compose.ui.window.PopupProperties
 import com.torve.android.R
 import com.torve.android.ui.theme.Amber
@@ -104,11 +108,6 @@ fun TvDocumentModal(
 ) {
     BackHandler(onBack = onDismiss)
 
-    LaunchedEffect(initialFocusRequester) {
-        withFrameNanos { }
-        runCatching { initialFocusRequester.requestFocus() }
-    }
-
     Popup(
         alignment = Alignment.Center,
         onDismissRequest = onDismiss,
@@ -118,19 +117,44 @@ fun TvDocumentModal(
             dismissOnClickOutside = false,
         ),
     ) {
+        val windowInfo = LocalWindowInfo.current
+        var contentHasFocus by remember { mutableStateOf(false) }
+        var selectKeyStartedHere by remember { mutableStateOf(false) }
+        LaunchedEffect(initialFocusRequester, windowInfo.isWindowFocused) {
+            if (!windowInfo.isWindowFocused) return@LaunchedEffect
+            repeat(24) {
+                withFrameNanos { }
+                if (contentHasFocus) return@LaunchedEffect
+                runCatching { initialFocusRequester.requestFocus() }
+                withFrameNanos { }
+                if (contentHasFocus) return@LaunchedEffect
+            }
+        }
         Box(
             modifier = Modifier
                 .fillMaxSize()
                 .background(Obsidian.copy(alpha = 0.92f))
+                .onFocusChanged { contentHasFocus = it.hasFocus }
+                .focusGroup()
                 .onPreviewKeyEvent { event ->
                     when {
+                        event.key == Key.DirectionCenter || event.key == Key.Enter || event.key == Key.NumPadEnter -> {
+                            if (event.type == KeyEventType.KeyDown) {
+                                selectKeyStartedHere = true
+                                false
+                            } else {
+                                val releaseFromOpeningScreen = !selectKeyStartedHere
+                                selectKeyStartedHere = false
+                                releaseFromOpeningScreen
+                            }
+                        }
                         event.type == KeyEventType.KeyDown &&
+                            (event.key == Key.Back || event.key == Key.Escape) -> true
+                        event.type == KeyEventType.KeyUp &&
                             (event.key == Key.Back || event.key == Key.Escape) -> {
                             onDismiss()
                             true
                         }
-                        event.type == KeyEventType.KeyUp &&
-                            (event.key == Key.Back || event.key == Key.Escape) -> true
                         else -> false
                     }
                 },
@@ -148,7 +172,7 @@ fun TvDocumentModal(
             ) {
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Text(
-                        text = title,
+                        text = localizedUiText(title),
                         style = MaterialTheme.typography.headlineMedium,
                         color = Snow,
                         fontWeight = FontWeight.SemiBold,

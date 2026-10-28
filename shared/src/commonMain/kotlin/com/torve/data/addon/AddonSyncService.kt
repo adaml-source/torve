@@ -47,6 +47,7 @@ class AddonSyncService(
     }
 
     suspend fun onAddonInstalled(addon: InstalledAddon) {
+        if (deviceOnly(addon)) return
         val token = accessTokenProvider() ?: return
         val success = runCatching {
             pushAddonToServer(token, addon, remoteId = addon.serverId)
@@ -63,6 +64,7 @@ class AddonSyncService(
 
     suspend fun onAddonRemoved(addon: InstalledAddon?) {
         if (addon == null) return
+        if (deviceOnly(addon)) return
         val token = accessTokenProvider() ?: return
         rememberPendingRemoval(addon)
         val success = runCatching {
@@ -76,6 +78,7 @@ class AddonSyncService(
     suspend fun onAddonStateChanged(manifestUrl: String) {
         val token = accessTokenProvider() ?: return
         val addon = addonRepo.getAddon(normalizeManifestUrl(manifestUrl)) ?: return
+        if (deviceOnly(addon)) return
         val success = runCatching {
             pushAddonToServer(token, addon, remoteId = addon.serverId)
         }.getOrElse { false }
@@ -89,6 +92,7 @@ class AddonSyncService(
         var allSucceeded = true
         orderedUrls.forEach { url ->
             val addon = addonRepo.getAddon(normalizeManifestUrl(url)) ?: return@forEach
+            if (deviceOnly(addon)) return@forEach
             val success = runCatching {
                 pushAddonToServer(token, addon, remoteId = addon.serverId)
             }.getOrElse { false }
@@ -120,7 +124,9 @@ class AddonSyncService(
             if (!force && !isStale(nowMs)) return
 
             try {
-                val fetchedServerAddons = accountSettingsApi.getAddons(token)
+                val fetchedServerAddons = accountSettingsApi.getAddons(token).filterNot {
+                    !ExtensionRuntimePolicy.restorePandaFromAccount && isPandaServerAddon(it)
+                }
                 // Collapse Panda duplicates on the already-fetched server snapshot BEFORE
                 // computing the merge plan. This avoids an extra unconditional getAddons()
                 // call on every sync while still preventing stale Panda rows from being
@@ -133,11 +139,13 @@ class AddonSyncService(
                 addonPolicyRepository?.updateFromServer(serverAddons)
                 torveVerboseLog { "ADDON_SYNC_STARTED count=${serverAddons.size} reason=$reason" }
 
-                val pendingRemovals = loadPendingRemovals().toMutableList()
+                val pendingRemovals = loadPendingRemovals().filterNot {
+                    !ExtensionRuntimePolicy.restorePandaFromAccount && isPandaExtension(it.addonId, it.manifestUrl)
+                }.toMutableList()
                 val serverByUrl = serverAddons.associateBy { normalizeManifestUrl(it.manifestUrl) }.toMutableMap()
                 reconcilePendingRemovals(token, pendingRemovals, serverByUrl)
 
-                val localBefore = addonRepo.getInstalledAddons()
+                val localBefore = addonRepo.getInstalledAddons().filterNot(::deviceOnly)
                 val localByUrl = localBefore.associateBy { normalizeManifestUrl(it.manifestUrl) }.toMutableMap()
 
                 var localChanged = false
@@ -374,6 +382,7 @@ class AddonSyncService(
      * regardless of server sync state.
      */
     suspend fun collapseLocalPandaDuplicates() {
+        if (!ExtensionRuntimePolicy.restorePandaFromAccount) return
         val locals = runCatching { addonRepo.getInstalledAddons() }.getOrNull().orEmpty()
         val pandas = locals.filter { isPandaAddon(it) }
         if (pandas.size <= 1) return
@@ -455,14 +464,15 @@ class AddonSyncService(
     }
 
     private fun isPandaAddon(addon: InstalledAddon): Boolean {
-        return addon.manifest.id == "com.torve.panda" ||
-            addon.manifestUrl.contains("panda.torve.app")
+        return isPandaExtension(addon.manifest.id, addon.manifestUrl)
     }
 
     private fun isPandaServerAddon(addon: AddonDto): Boolean {
-        return addon.addonId == "com.torve.panda" ||
-            addon.manifestUrl.contains("panda.torve.app")
+        return isPandaExtension(addon.addonId, addon.manifestUrl)
     }
+
+    private fun deviceOnly(addon: InstalledAddon): Boolean =
+        !ExtensionRuntimePolicy.restorePandaFromAccount && isPandaAddon(addon)
 
     private fun normalizeManifestUrl(url: String): String {
         val trimmed = url.trim().trimEnd('/')

@@ -1,5 +1,7 @@
 package com.torve.android.ui.components
 
+import com.torve.android.ui.community.parityLabel as localizedUiText
+
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -238,7 +240,7 @@ fun TorveSearchField(
             ) {
                 Icon(
                     Icons.Rounded.Close,
-                    contentDescription = "Clear",
+                    contentDescription = localizedUiText("Clear"),
                     tint = Torve.colors.textTertiary,
                     modifier = Modifier.size(16.dp),
                 )

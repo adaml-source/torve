@@ -14,6 +14,8 @@ import com.torve.domain.stats.WatchStatsFilters
 import com.torve.domain.stats.WatchStatsMetadata
 import com.torve.domain.stats.WatchStatsRepository
 import com.torve.domain.stats.WatchStatsSummary
+import com.torve.util.ioDispatcher
+import kotlinx.coroutines.withContext
 
 class WatchStatsRepositoryImpl(
     private val database: TorveDatabase,
@@ -25,27 +27,36 @@ class WatchStatsRepositoryImpl(
     private val backfill = WatchStatsBackfill(
         database = database,
         preferencesRepository = preferencesRepository,
-        currentUserId = { userIdProvider.currentUserId() },
+        currentUserId = { userIdProvider.currentDataUserId() },
     )
 
-    override suspend fun getSessions(filters: WatchStatsFilters): List<WatchSession> {
+    override suspend fun getSessions(filters: WatchStatsFilters): List<WatchSession> = withContext(ioDispatcher) {
         val bundle = loadSessionBundle()
-        return bundle.sessions.filter { session ->
+        bundle.sessions.filter { session ->
             filters.matches(session, bundle.metadataBySessionId[session.id])
         }
     }
 
-    override suspend fun getAggregation(filters: WatchStatsFilters): WatchStatsSummary {
+    override suspend fun getLatestPlayerSession(mediaId: String): WatchSession? = withContext(ioDispatcher) {
+        val person = userIdProvider.currentDataUserId()
+        val latest = database.torveQueries.selectWatchSessionsByMedia(person, mediaId).executeAsList()
+            .asSequence().filter { it.source == com.torve.domain.stats.WatchSessionSource.TORVE_PLAYER.name }
+            .maxWithOrNull(compareBy<com.torve.db.Watch_session> { it.started_at }.thenBy { it.updated_at })
+            ?.toDomain()
+        latest.takeIf { person == userIdProvider.currentDataUserId() }
+    }
+
+    override suspend fun getAggregation(filters: WatchStatsFilters): WatchStatsSummary = withContext(ioDispatcher) {
         val bundle = loadSessionBundle()
-        return engine.aggregate(
+        engine.aggregate(
             sessions = bundle.sessions,
             filters = filters,
             metadataBySessionId = bundle.metadataBySessionId,
         )
     }
 
-    override suspend fun upsertSession(session: WatchSession) {
-        database.torveQueries.insertOrReplaceWatchSession(session.copy(userId = userIdProvider.currentUserId()))
+    override suspend fun upsertSession(session: WatchSession) = withContext(ioDispatcher) {
+        database.torveQueries.insertOrReplaceWatchSession(session.copy(userId = userIdProvider.currentDataUserId()))
     }
 
     override suspend fun updateSessionProgress(
@@ -58,9 +69,9 @@ class WatchStatsRepositoryImpl(
         completionPercent: Double,
         runtimeConfidence: RuntimeConfidence,
         updatedAt: Long,
-    ) {
+    ) = withContext(ioDispatcher) {
         database.torveQueries.updateWatchSessionProgress(
-            userId = userIdProvider.currentUserId(),
+            userId = userIdProvider.currentDataUserId(),
             id = id,
             endedAt = endedAt,
             status = status.name,
@@ -73,24 +84,24 @@ class WatchStatsRepositoryImpl(
         )
     }
 
-    override suspend fun runBackfillIfNeeded() {
+    override suspend fun runBackfillIfNeeded() = withContext(ioDispatcher) {
         backfill.runIfNeeded()
     }
 
-    override suspend fun clearForCurrentUser() {
-        database.torveQueries.clearWatchSessionsForUser(userIdProvider.currentUserId())
+    override suspend fun clearForCurrentUser() = withContext(ioDispatcher) {
+        database.torveQueries.clearWatchSessionsForUser(userIdProvider.currentDataUserId())
     }
 
-    override suspend fun clearForMedia(mediaId: String) {
+    override suspend fun clearForMedia(mediaId: String) = withContext(ioDispatcher) {
         database.torveQueries.clearWatchSessionsForUserAndMedia(
-            userId = userIdProvider.currentUserId(),
+            userId = userIdProvider.currentDataUserId(),
             mediaId = mediaId,
         )
     }
 
     private suspend fun loadSessionBundle(): SessionBundle {
         runBackfillIfNeeded()
-        val userId = userIdProvider.currentUserId()
+        val userId = userIdProvider.currentDataUserId()
         val sessions = database.torveQueries.selectWatchSessionsForUser(userId)
             .executeAsList()
             .map { it.toDomain() }

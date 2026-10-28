@@ -1,0 +1,24 @@
+-- Catalog top-cache tables were added to the current schema without a
+-- corresponding migration. Existing desktop installations therefore reached
+-- schema version 9 without the table and crashed when the background cache
+-- worker queried it. Keep this migration in shared code so every existing
+-- platform database receives the same repair.
+CREATE TABLE IF NOT EXISTS catalog_top_items (
+    media_type TEXT NOT NULL,
+    genre_id INTEGER NOT NULL,
+    rank INTEGER NOT NULL,
+    tmdb_id INTEGER NOT NULL,
+    title TEXT NOT NULL,
+    poster_path TEXT,
+    backdrop_path TEXT,
+    overview TEXT,
+    release_date TEXT,
+    year INTEGER,
+    vote_average REAL,
+    vote_count INTEGER,
+    fetched_at INTEGER NOT NULL,
+    PRIMARY KEY (media_type, genre_id, rank)
+);
+
+CREATE INDEX IF NOT EXISTS catalog_top_items_lookup
+    ON catalog_top_items(media_type, genre_id, rank);

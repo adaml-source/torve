@@ -1,5 +1,7 @@
 package com.torve.android.ui.settings
 
+import com.torve.android.ui.community.parityLabel as localizedUiText
+
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.shrinkVertically
@@ -49,6 +51,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
@@ -76,6 +79,7 @@ import com.torve.domain.model.CatalogShelf
 import com.torve.domain.model.CustomSection
 import com.torve.domain.model.HomeSection
 import com.torve.domain.model.HomeSectionConfig
+import com.torve.domain.model.configurableHomeSections
 import com.torve.presentation.home.HomeViewModel
 import com.torve.presentation.settings.SettingsViewModel
 import org.koin.compose.koinInject
@@ -103,6 +107,8 @@ fun HomeLayoutScreen(
     settingsViewModel: SettingsViewModel = koinInject(),
 ) {
     val sectionConfigs by viewModel.sectionConfigs.collectAsState()
+    val returningViewerHome by viewModel.returningViewerHome.collectAsState()
+    val showPhoneResumeBar by viewModel.showPhoneResumeBar.collectAsState()
     val customSections by viewModel.customSections.collectAsState()
     val homeState by viewModel.state.collectAsState()
     val addonShelves = homeState.addonShelves
@@ -116,7 +122,7 @@ fun HomeLayoutScreen(
         mutableStateOf(
             buildList {
                 sectionConfigs
-                    .filter { it.section != HomeSection.DIRECTORS && it.section != HomeSection.ADDON_SHELVES }
+                    .filter { it.section != HomeSection.ADDON_SHELVES }
                     .forEach { add(SectionItem(it)) }
                 customSections.forEach { add(CustomItem(it)) }
                 addonShelves.forEachIndexed { idx, shelf ->
@@ -160,14 +166,14 @@ fun HomeLayoutScreen(
                 stringResource(R.string.home_layout_title),
                 style = MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.Bold,
-                color = Snow,
+                color = MaterialTheme.colorScheme.onSurface,
                 modifier = Modifier.weight(1f),
             )
             TextButton(onClick = {
                 viewModel.resetSections()
                 orderedItems = buildList {
-                    HomeSection.entries
-                        .filter { it != HomeSection.DIRECTORS && it != HomeSection.ADDON_SHELVES }
+                    configurableHomeSections
+                        .filter { it != HomeSection.ADDON_SHELVES }
                         .map { HomeSectionConfig(it, it.defaultEnabled, it.defaultOrder) }
                         .forEach { add(SectionItem(it)) }
                     customSections.forEach { add(CustomItem(it)) }
@@ -200,11 +206,55 @@ fun HomeLayoutScreen(
             state = listState,
             contentPadding = PaddingValues(bottom = 24.dp),
         ) {
+            item(key = "featured_heroes") {
+                Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp)) {
+                    Text(localizedUiText("Show featured hero"), style = MaterialTheme.typography.titleMedium)
+                    Text(localizedUiText("Turn off a spotlight to start that page at its rows."), style = MaterialTheme.typography.bodySmall)
+                    listOf("Home", "Movies", "TV Shows").forEachIndexed { index, label ->
+                        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                            Text(localizedUiText(label), Modifier.weight(1f))
+                            androidx.compose.material3.Switch(checked = when (index) {
+                                0 -> sectionConfigs.firstOrNull { it.section == HomeSection.HERO }?.enabled ?: true
+                                1 -> settingsState.moviesHeroEnabled
+                                else -> settingsState.showsHeroEnabled
+                            }, onCheckedChange = { enabled ->
+                                if (index == 0) viewModel.toggleSection(HomeSection.HERO, enabled)
+                                else settingsViewModel.setCatalogueHeroEnabled(if (index == 1) "movie" else "tv", enabled)
+                            })
+                        }
+                    }
+                }
+            }
+            item(key = "returning_viewer") {
+              Column {
+                Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Column(Modifier.weight(1f)) {
+                        Text(stringResource(R.string.phone_home_resume_bar), style = MaterialTheme.typography.titleMedium)
+                        Text(stringResource(R.string.phone_home_resume_bar_detail), style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    Switch(checked = showPhoneResumeBar, onCheckedChange = viewModel::setShowPhoneResumeBar,
+                        modifier = Modifier.testTag("home_resume_bar_toggle"))
+                }
+                Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Column(Modifier.weight(1f)) {
+                        Text(stringResource(R.string.phone_home_compact_up_next), style = MaterialTheme.typography.titleMedium)
+                        Text(stringResource(R.string.phone_home_compact_up_next_detail), style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    Switch(checked = returningViewerHome, onCheckedChange = viewModel::setReturningViewerHome)
+                }
+              }
+            }
             item(key = "sections_header") {
                 Text(
                     stringResource(R.string.home_layout_hint),
                     style = MaterialTheme.typography.bodySmall,
-                    color = Silver,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
                 )
             }
@@ -275,7 +325,7 @@ fun HomeLayoutScreen(
                                 if (draggedIndex < 0) return@SectionRow
                                 dragOffset += delta
                                 val currentItem = listState.layoutInfo.visibleItemsInfo
-                                    .find { it.index == draggedIndex + 1 } // +1 for header item
+                                    .find { it.index == draggedIndex + 2 } // returning-viewer control and section header
                                     ?: return@SectionRow
                                 val itemHeight = currentItem.size.toFloat()
                                 val list = orderedItems.toMutableList()
@@ -323,7 +373,7 @@ fun HomeLayoutScreen(
                                 if (draggedIndex < 0) return@CustomSectionRow
                                 dragOffset += delta
                                 val currentItem = listState.layoutInfo.visibleItemsInfo
-                                    .find { it.index == draggedIndex + 1 } // +1 for header item
+                                    .find { it.index == draggedIndex + 2 } // returning-viewer control and section header
                                     ?: return@CustomSectionRow
                                 val itemHeight = currentItem.size.toFloat()
                                 val list = orderedItems.toMutableList()
@@ -371,7 +421,7 @@ fun HomeLayoutScreen(
                                 if (draggedIndex < 0) return@AddonShelfRow
                                 dragOffset += delta
                                 val currentItem = listState.layoutInfo.visibleItemsInfo
-                                    .find { it.index == draggedIndex + 1 }
+                                    .find { it.index == draggedIndex + 2 }
                                     ?: return@AddonShelfRow
                                 val itemHeight = currentItem.size.toFloat()
                                 val list = orderedItems.toMutableList()
@@ -470,7 +520,7 @@ private fun CustomSectionRow(
         Icon(
             Icons.Rounded.DragHandle,
             contentDescription = stringResource(R.string.drag_to_reorder_cd),
-            tint = Silver,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier
                 .size(32.dp)
                 .padding(4.dp)
@@ -479,7 +529,8 @@ private fun CustomSectionRow(
                         onDragStart = { currentOnDragStart() },
                         onDragEnd = { currentOnDragEnd() },
                         onDragCancel = { currentOnDragEnd() },
-                        onDrag = { _, dragAmount ->
+                        onDrag = { change, dragAmount ->
+                            change.consume()
                             currentOnDrag(dragAmount.y)
                         },
                     )
@@ -503,7 +554,7 @@ private fun CustomSectionRow(
             Icon(
                 Icons.Rounded.Edit,
                 contentDescription = stringResource(R.string.common_edit_cd),
-                tint = Silver,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.size(18.dp),
             )
         }
@@ -551,7 +602,7 @@ private fun AddonShelfRow(
         Icon(
             Icons.Rounded.DragHandle,
             contentDescription = stringResource(R.string.drag_to_reorder_cd),
-            tint = Silver,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier
                 .size(32.dp)
                 .padding(4.dp)
@@ -560,7 +611,8 @@ private fun AddonShelfRow(
                         onDragStart = { currentOnDragStart() },
                         onDragEnd = { currentOnDragEnd() },
                         onDragCancel = { currentOnDragEnd() },
-                        onDrag = { _, dragAmount ->
+                        onDrag = { change, dragAmount ->
+                            change.consume()
                             currentOnDrag(dragAmount.y)
                         },
                     )
@@ -605,9 +657,11 @@ private fun HomeLayoutItem.withOrder(order: Int): HomeLayoutItem = when (this) {
 
 private fun persistOrder(viewModel: HomeViewModel, items: List<HomeLayoutItem>) {
     val sections = items.filterIsInstance<SectionItem>().map { it.config }
-    viewModel.updateSectionOrder(sections)
-    viewModel.updateHomeLayoutOrder(
-        items.map {
+    // Preserve configurations this phone editor does not expose, and save the combined order once.
+    val preservedSections = viewModel.sectionConfigs.value.filter { original -> sections.none { it.section == original.section } }
+    viewModel.updateHomeLayout(
+        configs = sections + preservedSections,
+        layoutOrder = items.map {
             when (it) {
                 is SectionItem -> "section:${it.config.section.name}"
                 is CustomItem -> "custom:${it.section.id}"
@@ -716,7 +770,7 @@ private fun SectionRow(
                     Icon(
                         if (isExpanded) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore,
                         contentDescription = if (isExpanded) stringResource(R.string.home_layout_collapse) else stringResource(R.string.home_layout_customize),
-                        tint = Silver,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.size(20.dp),
                     )
                 }
@@ -726,6 +780,7 @@ private fun SectionRow(
             Switch(
                 checked = config.enabled,
                 onCheckedChange = onToggle,
+                modifier = Modifier.testTag("home_section_toggle_${config.section.name}"),
                 enabled = !isHero,
                 colors = SwitchDefaults.colors(
                     checkedThumbColor = Amber,
@@ -751,7 +806,7 @@ private fun SectionRow(
             ) {
                 Column(Modifier.padding(16.dp)) {
                     // Card style preset selector
-                    Text(stringResource(R.string.home_layout_card_style), color = Silver, style = MaterialTheme.typography.labelLarge)
+                    Text(stringResource(R.string.home_layout_card_style), color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelLarge)
                     Spacer(Modifier.height(8.dp))
                     var expanded by remember { mutableStateOf(false) }
                     val selectedPreset = presets.firstOrNull { it.presetId == config.presetId }
@@ -768,11 +823,11 @@ private fun SectionRow(
                             modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            Text(label, color = Snow, modifier = Modifier.weight(1f))
+                            Text(localizedUiText(label), color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.weight(1f))
                             Icon(
                                 imageVector = if (expanded) Icons.Rounded.KeyboardArrowUp else Icons.Rounded.KeyboardArrowDown,
                                 contentDescription = null,
-                                tint = Silver,
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                         }
                     }

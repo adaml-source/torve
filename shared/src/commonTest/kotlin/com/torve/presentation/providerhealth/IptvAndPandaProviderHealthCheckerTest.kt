@@ -267,25 +267,25 @@ class IptvAndPandaProviderHealthCheckerTest {
 
     @Test
     fun `trakt unconfigured without token`() = runTest {
-        val out = TraktProviderHealthChecker { null }.check()
+        val out = TraktProviderHealthChecker(tokenSource = { null }).check()
         assertEquals(ProviderHealthStatus.UNCONFIGURED, out.status)
     }
 
     @Test
-    fun `trakt green with token`() = runTest {
-        val out = TraktProviderHealthChecker { "abc" }.check()
-        assertEquals(ProviderHealthStatus.GREEN, out.status)
+    fun `trakt token requires verification`() = runTest {
+        val out = TraktProviderHealthChecker(tokenSource = { "abc" }).check()
+        assertEquals(ProviderHealthStatus.YELLOW, out.status)
     }
 
     @Test
     fun `simkl unconfigured without token`() = runTest {
-        val out = SimklProviderHealthChecker { "" }.check()
+        val out = SimklProviderHealthChecker(tokenSource = { "" }).check()
         assertEquals(ProviderHealthStatus.UNCONFIGURED, out.status)
     }
 
     @Test
-    fun `simkl green with token`() = runTest {
-        val out = SimklProviderHealthChecker { "tok" }.check()
-        assertEquals(ProviderHealthStatus.GREEN, out.status)
+    fun `simkl token requires verification`() = runTest {
+        val out = SimklProviderHealthChecker(tokenSource = { "tok" }).check()
+        assertEquals(ProviderHealthStatus.YELLOW, out.status)
     }
 }

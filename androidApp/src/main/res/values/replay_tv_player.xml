@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="replay_highlight_tv_playback">Highlights open full screen in YouTube or SmartTube. Press Back to return here.</string>
+    <string name="replay_highlight_tv_missing_player">Install YouTube or SmartTube to play highlights full screen.</string>
+</resources>

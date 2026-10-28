@@ -1,5 +1,7 @@
 package com.torve.android.tv.components
 
+import com.torve.android.tv.components.tvSettingsLabel as localizedUiText
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -123,7 +125,7 @@ private fun OnNowTile(
             verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
             Text(
-                text = "LIVE  •  ${channel.channel.name}",
+                text = localizedUiText("LIVE  •  ${channel.channel.name}"),
                 style = MaterialTheme.typography.labelLarge,
                 color = Color(0xFF26C6DA),
                 fontWeight = FontWeight.SemiBold,

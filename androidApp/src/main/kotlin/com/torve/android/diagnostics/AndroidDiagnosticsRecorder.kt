@@ -37,6 +37,20 @@ object AndroidDiagnosticsRecorder {
     private val focusEvents = ArrayDeque<DiagnosticFocusEvent>()
     private val httpFailures = ArrayDeque<DiagnosticHttpFailure>()
     private val playbackErrors = ArrayDeque<JsonObject>()
+    private data class PendingLog(val now: Long, val severity: String, val tag: String, val screen: String, val message: String)
+    private val pendingLogs = java.util.concurrent.ArrayBlockingQueue<PendingLog>(256)
+    private val logSignal = java.util.concurrent.Semaphore(0)
+    private val processingLock = Any()
+
+    init {
+        Thread({
+            android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_BACKGROUND)
+            while (true) {
+                logSignal.acquire()
+                flushPendingLogs()
+            }
+        }, "DiagnosticRedaction").apply { isDaemon = true }.start()
+    }
 
     fun init(context: Context) {
         recordLog("INFO", "app", "Torve diagnostics session started")
@@ -134,19 +148,35 @@ object AndroidDiagnosticsRecorder {
         message: String,
         screen: String = currentScreen,
     ) {
-        val now = System.currentTimeMillis()
+        val pending = PendingLog(System.currentTimeMillis(), severity, tag, screen,
+            if (message.length <= 16_000) message else "[Oversized diagnostic message omitted]")
+        if (!pendingLogs.offer(pending)) {
+            pendingLogs.poll()
+            pendingLogs.offer(pending)
+        }
+        logSignal.release()
+    }
+
+    private fun flushPendingLogs() = synchronized(processingLock) {
+        repeat(256) {
+            val pending = pendingLogs.poll() ?: return@synchronized
+            appendSanitizedLog(pending)
+        }
+    }
+
+    private fun appendSanitizedLog(pending: PendingLog) {
         val line = DiagnosticLogLine(
-            timestampEpochMs = now,
-            severity = safe(severity).uppercase(),
-            tag = safe(tag),
-            screen = safe(screen),
+            timestampEpochMs = pending.now,
+            severity = safe(pending.severity).uppercase(),
+            tag = safe(pending.tag),
+            screen = safe(pending.screen),
             sessionId = sessionId,
-            message = safe(message),
+            message = safe(pending.message),
         )
         synchronized(lock) {
             logLines.addLast(line)
             while (logLines.size > MAX_LOG_LINES) logLines.removeFirst()
-            pruneLocked(now)
+            pruneLocked(pending.now)
         }
     }
 
@@ -167,6 +197,7 @@ object AndroidDiagnosticsRecorder {
     }
 
     fun logsForReport(): List<String> {
+        flushPendingLogs()
         val now = System.currentTimeMillis()
         return synchronized(lock) {
             pruneLocked(now)

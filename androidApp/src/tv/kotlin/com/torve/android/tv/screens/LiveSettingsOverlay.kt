@@ -1,5 +1,9 @@
 package com.torve.android.tv.screens
 
+import com.torve.android.tv.components.tvSettingsLabel as localizedUiText
+
+import androidx.compose.ui.graphics.Color
+import com.torve.android.tv.components.tvGlassControl
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -26,12 +30,16 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -227,7 +235,7 @@ fun LiveSettingsOverlay(
             if (pictureFormats.isNotEmpty()) {
                 item(key = "picture_header") {
                     Spacer(Modifier.height(8.dp))
-                    SectionHeader("Picture format")
+                    SectionHeader(localizedUiText("Picture format"))
                 }
                 item(key = "picture_modes") {
                     FlowRow(
@@ -251,7 +259,7 @@ fun LiveSettingsOverlay(
                                 ),
                             ) {
                                 Text(
-                                    text = option.label,
+                                    text = localizedUiText(option.label),
                                     color = if (isSelected) Amber else Snow,
                                     fontSize = 13.sp,
                                     fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
@@ -294,7 +302,7 @@ fun LiveSettingsOverlay(
                             ),
                         ) {
                             Text(
-                                text = label,
+                                text = localizedUiText(label),
                                 color = if (selected) Amber else Snow,
                                 fontSize = 13.sp,
                                 fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
@@ -441,12 +449,12 @@ fun LiveSettingsOverlay(
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            CompactButton(label = "-100") { onSetAudioDelay((audioDelayMs - 100).coerceIn(-2000, 2000)) }
+                            CompactButton(label = "-50") { onSetAudioDelay((audioDelayMs - 50).coerceIn(-2000, 2000)) }
                             Slider(
                                 value = audioDelayMs.toFloat(),
-                                onValueChange = { onSetAudioDelay(it.toInt()) },
+                                onValueChange = { onSetAudioDelay((kotlin.math.round(it / 50f).toInt() * 50).coerceIn(-2000, 2000)) },
                                 valueRange = -2000f..2000f,
-                                steps = 39,
+                                steps = 79,
                                 modifier = Modifier.weight(1f),
                                 colors = SliderDefaults.colors(
                                     thumbColor = Amber,
@@ -454,11 +462,11 @@ fun LiveSettingsOverlay(
                                     inactiveTrackColor = Charcoal,
                                 ),
                             )
-                            CompactButton(label = "+100") { onSetAudioDelay((audioDelayMs + 100).coerceIn(-2000, 2000)) }
+                            CompactButton(label = "+50") { onSetAudioDelay((audioDelayMs + 50).coerceIn(-2000, 2000)) }
                         }
                         if (audioDelayMs != 0) {
                             Spacer(Modifier.height(4.dp))
-                            CompactButton(label = "Reset") { onSetAudioDelay(0) }
+                            CompactButton(label = localizedUiText("Reset")) { onSetAudioDelay(0) }
                         }
                     }
                 }
@@ -468,7 +476,7 @@ fun LiveSettingsOverlay(
             if (audioTracks.size > 1) {
                 item(key = "audio_track_header") {
                     Spacer(Modifier.height(8.dp))
-                    SectionHeader("Audio Track")
+                    SectionHeader(localizedUiText("Audio Track"))
                 }
                 items(audioTracks, key = { "atrack_${it.id}" }) { track ->
                     val label = track.label.ifBlank { track.language ?: "Track ${track.id}" }
@@ -492,7 +500,7 @@ fun LiveSettingsOverlay(
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             Text(
-                                text = label,
+                                text = localizedUiText(label),
                                 color = if (track.isSelected) Amber else Snow,
                                 fontSize = 14.sp,
                                 fontWeight = if (track.isSelected) FontWeight.Bold else FontWeight.Normal,
@@ -506,7 +514,7 @@ fun LiveSettingsOverlay(
             if (subtitleTracks.isNotEmpty()) {
                 item(key = "subtitle_track_header") {
                     Spacer(Modifier.height(8.dp))
-                    SectionHeader("Subtitles")
+                    SectionHeader(localizedUiText("Subtitles"))
                 }
                 item(key = "strack_off") {
                     val noSubSelected = subtitleTracks.none { it.isSelected }
@@ -530,7 +538,7 @@ fun LiveSettingsOverlay(
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             Text(
-                                text = "Off",
+                                text = localizedUiText("Off"),
                                 color = if (noSubSelected) Amber else Snow,
                                 fontSize = 14.sp,
                                 fontWeight = if (noSubSelected) FontWeight.Bold else FontWeight.Normal,
@@ -560,7 +568,7 @@ fun LiveSettingsOverlay(
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             Text(
-                                text = label,
+                                text = localizedUiText(label),
                                 color = if (track.isSelected) Amber else Snow,
                                 fontSize = 14.sp,
                                 fontWeight = if (track.isSelected) FontWeight.Bold else FontWeight.Normal,
@@ -669,7 +677,7 @@ private fun PlaylistRow(
                     fontWeight = FontWeight.Medium,
                 )
                 Text(
-                    text = "${playlist.channelCount} channels",
+                    text = localizedUiText("${playlist.channelCount} channels"),
                     color = Silver,
                     fontSize = 11.sp,
                 )
@@ -691,12 +699,15 @@ private fun CompactButton(
     label: String,
     onClick: () -> Unit,
 ) {
+    var focused by remember { mutableStateOf(false) }
     Surface(
         onClick = onClick,
+        modifier = Modifier.tvGlassControl(focused, cornerRadius = 8.dp).onFocusChanged { focused = it.isFocused },
         shape = ClickableSurfaceDefaults.shape(RoundedCornerShape(8.dp)),
         colors = ClickableSurfaceDefaults.colors(
-            containerColor = Graphite,
-            focusedContainerColor = Amber.copy(alpha = 0.25f),
+            containerColor = Color.Transparent,
+            focusedContainerColor = Color.Transparent,
+            disabledContainerColor = Color.Transparent,
         ),
         border = ClickableSurfaceDefaults.border(
             focusedBorder = androidx.tv.material3.Border(
@@ -706,7 +717,7 @@ private fun CompactButton(
         ),
     ) {
         Text(
-            text = label,
+            text = localizedUiText(label),
             color = Snow,
             fontSize = 13.sp,
             modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),

@@ -14,6 +14,11 @@ import androidx.work.OutOfQuotaPolicy
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import androidx.work.workDataOf
+import androidx.work.Constraints
+import androidx.work.NetworkType
+import androidx.work.BackoffPolicy
+import com.torve.data.auth.UserIdProvider
+import com.torve.data.auth.withPersonalDataScope
 import com.torve.domain.model.DownloadStatus
 import com.torve.domain.repository.DownloadRepository
 import kotlinx.coroutines.Dispatchers
@@ -23,6 +28,12 @@ import java.io.File
 import java.io.FileOutputStream
 import java.net.HttpURLConnection
 import java.net.URL
+import java.io.IOException
+import java.util.concurrent.TimeUnit
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.ensureActive
+import kotlin.coroutines.coroutineContext
 
 class DownloadWorker(
     context: Context,
@@ -31,31 +42,40 @@ class DownloadWorker(
 
     companion object {
         const val KEY_DOWNLOAD_ID = "download_id"
+        private const val KEY_OWNER = "download_owner"
         const val CHANNEL_ID = "download_transfer"
         private const val NOTIFICATION_ID_BASE = 2000
         private const val PROGRESS_UPDATE_BYTES = 256 * 1024L
         private const val WORK_NAME_PREFIX = "download_"
 
         fun enqueue(context: Context, downloadId: String) {
-            android.util.Log.w("DownloadWorker", "enqueue() called for downloadId=$downloadId")
+            val owner = getKoin().get<UserIdProvider>().currentDataUserId()
             ensureChannel(context)
             val request = OneTimeWorkRequestBuilder<DownloadWorker>()
-                .setInputData(workDataOf(KEY_DOWNLOAD_ID to downloadId))
+                .setInputData(workDataOf(KEY_DOWNLOAD_ID to downloadId, KEY_OWNER to owner))
+                .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).setRequiresStorageNotLow(true).build())
+                .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 30, TimeUnit.SECONDS)
                 .addTag("download_work")
                 // Expedited: starts immediately, promotes to foreground service right away
                 .setExpedited(OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST)
                 .build()
             WorkManager.getInstance(context).enqueueUniqueWork(
-                "$WORK_NAME_PREFIX$downloadId",
+                workName(owner, downloadId),
                 ExistingWorkPolicy.KEEP,
                 request,
             )
         }
 
         fun cancel(context: Context, downloadId: String) {
+            val owner = getKoin().get<UserIdProvider>().currentDataUserId()
             WorkManager.getInstance(context)
-                .cancelUniqueWork("$WORK_NAME_PREFIX$downloadId")
+                .cancelUniqueWork(workName(owner, downloadId))
+            WorkManager.getInstance(context).cancelUniqueWork("$WORK_NAME_PREFIX$downloadId")
         }
+
+        private fun workName(owner: String, id: String) = "$WORK_NAME_PREFIX${ownerDigest(owner)}_$id"
+        private fun ownerDigest(owner: String) = java.security.MessageDigest.getInstance("SHA-256")
+            .digest(owner.toByteArray()).take(8).joinToString("") { "%02x".format(it) }
 
         fun ensureChannel(context: Context) {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -77,12 +97,17 @@ class DownloadWorker(
 
     override suspend fun doWork(): Result {
         val downloadId = inputData.getString(KEY_DOWNLOAD_ID) ?: return Result.failure()
-        android.util.Log.w("DownloadWorker", "doWork() started for downloadId=$downloadId")
+        if (!downloadId.matches(Regex("[A-Za-z0-9_-]+"))) return Result.failure()
+        val ids: UserIdProvider = getKoin().get()
+        val owner = inputData.getString(KEY_OWNER) ?: return Result.failure()
+        if (ids.currentDataUserId() != owner) return Result.success()
+        return ids.withPersonalDataScope { transfer(downloadId, owner, ids) }
+    }
+
+    private suspend fun transfer(downloadId: String, owner: String, ids: UserIdProvider): Result {
         val repo: DownloadRepository = getKoin().get()
-        val download = repo.getDownload(downloadId) ?: run {
-            android.util.Log.e("DownloadWorker", "Download not found in DB: $downloadId")
-            return Result.failure()
-        }
+        val download = repo.getDownload(downloadId) ?: return Result.failure()
+        if (download.status == DownloadStatus.COMPLETED || download.status == DownloadStatus.PAUSED) return Result.success()
 
         val notificationId = NOTIFICATION_ID_BASE + downloadId.hashCode()
 
@@ -93,21 +118,28 @@ class DownloadWorker(
             ?: applicationContext.filesDir.resolve("downloads")
         downloadsDir.mkdirs()
 
-        val extension = download.streamUrl.substringAfterLast('.', "mp4")
-            .substringBefore('?').take(5).ifBlank { "mp4" }
-        val outputFile = File(downloadsDir, "$downloadId.$extension")
-        val existingBytes = if (outputFile.exists()) outputFile.length() else 0L
+        val extension = runCatching { URL(download.streamUrl).path.substringAfterLast('.', "mp4").lowercase() }.getOrDefault("mp4")
+            .takeIf { it in setOf("mp4", "mkv", "webm", "avi", "mov", "ts", "m4v") } ?: "mp4"
+        // Preserve primary-profile files while isolating every additional profile.
+        val fileId = if (ids.currentProfileId() == "default") downloadId else "${ownerDigest(owner)}_$downloadId"
+        val outputFile = File(downloadsDir, "$fileId.$extension")
+        val validatorFile = File(downloadsDir, "$fileId.validator")
+        val validator = validatorFile.takeIf { it.exists() && it.length() <= 1024 }?.readText()?.takeIf { it.isNotBlank() && !it.startsWith("W/") }
+        val existingBytes = if (outputFile.exists() && validator != null) outputFile.length() else 0L
 
         return try {
             repo.updateProgress(downloadId, existingBytes, DownloadStatus.DOWNLOADING)
 
             withContext(Dispatchers.IO) {
+                if (downloadsDir.usableSpace < 32 * 1024 * 1024L) throw InsufficientDownloadStorage()
                 val connection = (URL(download.streamUrl).openConnection() as HttpURLConnection).apply {
                     connectTimeout = 30_000
                     readTimeout = 60_000
                     requestMethod = "GET"
+                    setRequestProperty("Accept-Encoding", "identity")
                     if (existingBytes > 0) {
                         setRequestProperty("Range", "bytes=$existingBytes-")
+                        setRequestProperty("If-Range", validator)
                     }
                 }
 
@@ -115,23 +147,26 @@ class DownloadWorker(
                     connection.connect()
 
                     val responseCode = connection.responseCode
-                    val contentLength = connection.contentLengthLong
-                    val isResume = existingBytes > 0 && responseCode == 206
-                    val totalSize = if (isResume) {
-                        existingBytes + (contentLength.takeIf { it > 0 } ?: 0L)
-                    } else {
-                        contentLength.takeIf { it > 0 } ?: 0L
-                    }
+                    val plan = DownloadResponsePolicy.plan(responseCode, existingBytes,
+                        connection.contentLengthLong.takeIf { it >= 0 }, connection.getHeaderField("Content-Range"))
+                    val isResume = plan.append
+                    val totalSize = plan.totalBytes ?: 0L
+                    val remaining = (totalSize - if (isResume) existingBytes else 0L).coerceAtLeast(0)
+                    if (remaining > 0 && downloadsDir.usableSpace - 16 * 1024 * 1024L < remaining) throw InsufficientDownloadStorage()
+                    // Discard the previous representation before recording the new validator.
+                    // A crash between those operations must never append new bytes to the old file.
+                    if (!isResume && outputFile.exists() && !outputFile.delete()) throw java.io.IOException("Could not restart the download file")
+                    val nextValidator = connection.getHeaderField("ETag")?.takeUnless { it.startsWith("W/") }
+                        ?: connection.getHeaderField("Last-Modified")
+                    if (nextValidator != null && nextValidator.length <= 1024) validatorFile.writeText(nextValidator)
+                    else if (!isResume) validatorFile.delete()
 
                     if (totalSize > 0) {
                         repo.updateFileSize(downloadId, totalSize)
                     }
 
-                    if (!isResume && outputFile.exists()) {
-                        outputFile.delete()
-                    }
-
                     var downloadedBytes = if (isResume) existingBytes else 0L
+                    repo.updateProgress(downloadId, downloadedBytes, DownloadStatus.DOWNLOADING)
                     var lastProgressUpdate = downloadedBytes
                     val buffer = ByteArray(8192)
 
@@ -145,9 +180,10 @@ class DownloadWorker(
                         )
                     }
 
-                    connection.inputStream.use { inputStream ->
+                    if (!plan.alreadyComplete) connection.inputStream.use { inputStream ->
                         FileOutputStream(outputFile, isResume).use { fos ->
                             while (true) {
+                                coroutineContext.ensureActive()
                                 if (isStopped) break
 
                                 val bytesRead = inputStream.read(buffer)
@@ -168,6 +204,7 @@ class DownloadWorker(
                                     )
                                 }
                             }
+                            fos.fd.sync()
                         }
                     }
 
@@ -176,7 +213,10 @@ class DownloadWorker(
                         showCancelledNotification(notificationId, download.title)
                         Result.success()
                     } else {
+                        DownloadResponsePolicy.verifyComplete(downloadedBytes, plan.totalBytes)
+                        repo.updateProgress(downloadId, downloadedBytes, DownloadStatus.DOWNLOADING)
                         repo.markCompleted(downloadId, outputFile.absolutePath)
+                        validatorFile.delete()
                         showCompletionNotification(notificationId, download.title)
                         Result.success()
                     }
@@ -184,14 +224,21 @@ class DownloadWorker(
                     connection.disconnect()
                 }
             }
+        } catch (e: CancellationException) {
+            if (ids.currentDataUserId() == owner) withContext(NonCancellable) {
+                repo.updateProgress(downloadId, outputFile.length(), DownloadStatus.PAUSED)
+            }
+            throw e
         } catch (e: Exception) {
+            val retry = runAttemptCount < 2 && e is IOException && e !is InsufficientDownloadStorage &&
+                (e !is DownloadHttpException || e.retryable)
             repo.updateProgress(
                 downloadId,
                 if (outputFile.exists()) outputFile.length() else 0L,
-                DownloadStatus.FAILED,
+                if (retry) DownloadStatus.PENDING else DownloadStatus.FAILED,
             )
-            showFailureNotification(notificationId, download.title)
-            Result.failure()
+            if (!retry) showFailureNotification(notificationId, download.title)
+            if (retry) Result.retry() else Result.failure()
         }
     }
 
@@ -276,3 +323,5 @@ class DownloadWorker(
             .notify(notificationId, notification)
     }
 }
+
+private class InsufficientDownloadStorage : IOException("Not enough storage for this download")

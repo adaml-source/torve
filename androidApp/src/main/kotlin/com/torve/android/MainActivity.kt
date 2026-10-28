@@ -14,7 +14,6 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.core.os.LocaleListCompat
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
@@ -22,7 +21,6 @@ import com.torve.android.deeplink.TorveAppLink
 import com.torve.android.deeplink.TorveAppLinkParser
 import com.torve.android.ui.navigation.TorveNavGraph
 import com.torve.android.ui.player.ActivePlaybackState
-import com.torve.android.ui.splash.TorveEyeSplashScreen
 import com.torve.android.ui.system.configureTorveEdgeToEdge
 import com.torve.android.ui.theme.TorveTheme
 import com.torve.data.auth.AuthEvent
@@ -42,10 +40,20 @@ import kotlinx.coroutines.launch
 import org.koin.java.KoinJavaComponent.getKoin
 
 class MainActivity : AppCompatActivity() {
+    companion object {
+        /** Survives configuration changes, but resets when the app process does. */
+        private var hasCreatedActivityInProcess = false
+    }
+
     private var keepSplash = true
+    private var storeUpdates: com.torve.android.update.StoreUpdateController = com.torve.android.update.NoStoreUpdateController
+    private val usageReporter = com.torve.android.usage.AppUsageReporter()
+    override fun onStart() { super.onStart(); usageReporter.start() }
+    override fun onStop() { usageReporter.stop(); super.onStop() }
     private var hasResumedBefore = false
     private val activityScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var pendingAppLink by mutableStateOf<TorveAppLink?>(null)
+    private var pendingEpisodeAlert by mutableStateOf<com.torve.android.notification.EpisodeAlertTarget?>(null)
 
     private fun localeTagsFor(language: AppLanguage): String = language.code
 
@@ -73,6 +81,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
+        storeUpdates.onResume()
         if (hasResumedBefore) {
             val accountSessionCoordinator: AccountSessionCoordinator = getKoin().get()
             val homeViewModel: HomeViewModel = getKoin().get()
@@ -99,13 +108,22 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        // A new task or process should always enter Home at the top. A pure
+        // configuration recreation (for example rotation) keeps its position.
+        val resetMobileHomeScroll = savedInstanceState == null || !hasCreatedActivityInProcess
+        hasCreatedActivityInProcess = true
         val splashScreen = installSplashScreen()
         splashScreen.setKeepOnScreenCondition { keepSplash }
 
-        super.onCreate(savedInstanceState)
+        // Compose and Navigation both restore rememberSaveable/back-stack state from
+        // this bundle.  On a genuine new process/task that would otherwise override
+        // the explicit Home selection below and reopen the last tab (or the middle
+        // of Settings). Keep the bundle only for an in-process configuration change.
+        super.onCreate(if (resetMobileHomeScroll) null else savedInstanceState)
+        storeUpdates = com.torve.android.update.StoreUpdates.createController(this)
         pendingAppLink = TorveAppLinkParser.parse(intent?.data)
+        pendingEpisodeAlert = com.torve.android.notification.EpisodeAlertTarget.from(intent)
         configureTorveEdgeToEdge()
-        requestNotificationPermission()
         val authClient: AuthClient = getKoin().get()
         val settingsViewModel: SettingsViewModel = getKoin().get()
 
@@ -137,8 +155,6 @@ class MainActivity : AppCompatActivity() {
 
         setContent {
             val settingsState by settingsViewModel.state.collectAsState()
-            var showSplash by rememberSaveable { mutableStateOf(true) }
-
             LaunchedEffect(settingsState.appLanguage) {
                 AppCompatDelegate.setApplicationLocales(
                     LocaleListCompat.forLanguageTags(localeTagsFor(settingsState.appLanguage)),
@@ -146,20 +162,21 @@ class MainActivity : AppCompatActivity() {
             }
 
             TorveTheme(themeMode = settingsState.themeMode) {
-                // Dismiss native splash — MUST be outside if/else so it also
-                // fires on recreation (e.g. locale change) when showSplash
-                // is restored as false by rememberSaveable.
+                // Keep only Android's native launch splash. Composing the real
+                // navigation graph immediately lets content loading begin on
+                // the first Compose frame.
                 LaunchedEffect(Unit) { keepSplash = false }
-
-                if (showSplash) {
-                    TorveEyeSplashScreen(
-                        onSplashComplete = { showSplash = false },
-                    )
-                } else {
-                    TorveNavGraph(
-                        appLink = pendingAppLink,
-                        onAppLinkConsumed = { pendingAppLink = null },
-                    )
+                com.torve.android.ui.community.PersonalAppearanceProvider {
+                com.torve.android.ui.profile.FamilyAppGate {
+                TorveNavGraph(
+                    storeUpdates = storeUpdates,
+                    episodeAlert = pendingEpisodeAlert,
+                    onEpisodeAlertConsumed = { pendingEpisodeAlert = null; intent?.removeExtra(com.torve.android.notification.EpisodeAlertTarget.PERSON) },
+                    appLink = pendingAppLink,
+                    onAppLinkConsumed = { pendingAppLink = null },
+                    resetMobileHomeScrollOnLaunch = resetMobileHomeScroll,
+                )
+                }
                 }
             }
         }
@@ -168,21 +185,15 @@ class MainActivity : AppCompatActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
+        storeUpdates.onResume()
         pendingAppLink = TorveAppLinkParser.parse(intent.data)
+        pendingEpisodeAlert = com.torve.android.notification.EpisodeAlertTarget.from(intent)
     }
 
     override fun onDestroy() {
+        storeUpdates.close()
         activityScope.cancel()
         super.onDestroy()
     }
 
-    private fun requestNotificationPermission() {
-        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
-            if (checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS)
-                != android.content.pm.PackageManager.PERMISSION_GRANTED
-            ) {
-                requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 1001)
-            }
-        }
-    }
 }

@@ -21,6 +21,7 @@ internal enum class MobilePlaybackPicker {
     AUDIO_TRACK,
     SUBTITLE_TRACK,
     AUDIO_DELAY,
+    SUBTITLE_DELAY,
     PLAYBACK_SPEED,
     PICTURE_FORMAT,
     LIVE_AUDIO_MODE,
@@ -29,6 +30,7 @@ internal enum class MobilePlaybackPicker {
 
 internal enum class MobilePlaybackSetting {
     AUDIO_DELAY,
+    SUBTITLE_DELAY,
     PLAYBACK_SPEED,
     PICTURE_FORMAT,
     LIVE_AUDIO_MODE,
@@ -80,6 +82,7 @@ internal fun supportedMobilePlaybackSettings(
 ): List<MobilePlaybackSetting> {
     return buildList {
         add(MobilePlaybackSetting.AUDIO_DELAY)
+        add(MobilePlaybackSetting.SUBTITLE_DELAY)
         add(MobilePlaybackSetting.PLAYBACK_SPEED)
         add(MobilePlaybackSetting.PICTURE_FORMAT)
         if (isLivePlayback) {

@@ -1,83 +1,49 @@
 # Contributing to Torve
 
-Torve is free software. There are no subscriptions, no paid tiers, no premium features, and no purchase required. Donations are optional and never unlock features.
+Torve is free software under `AGPL-3.0-or-later`. Bug reports, focused fixes,
+tests, documentation, accessibility improvements, and platform-specific
+verification are welcome.
 
-## Local Setup
+## Before opening an issue
 
-Install:
+- Search existing issues and include the Torve version, platform, device model,
+  and reproducible steps.
+- Remove account emails, tokens, API keys, playlist URLs, stream URLs, server
+  addresses, and copyrighted media from screenshots and logs.
+- Describe the user outcome that is blocked. For TV issues, include the exact
+  D-pad sequence and which control owned focus before and after the problem.
+- Do not request bundled content, credentials, playlists, or features intended
+  to bypass access rights. Torve connects user-authorized services and sources.
 
-- JDK compatible with the Gradle build
-- Android SDK tooling for Android tasks
-- Python 3.12 and Postgres for backend work
-- Xcode on macOS for iOS work
+## Local checks
 
-Backend:
+Use Java 21 and the Gradle wrapper. The main host-runnable gate is:
 
-```bash
-cd backend
-python -m venv venv
-source venv/bin/activate
-python -m pip install --upgrade pip
-pip install -r requirements.txt
-cp .env.example .env
-alembic upgrade head
-pytest
+```powershell
+./gradlew.bat :shared:allTests :desktopApp:test :androidApp:testAmazonTvDebugUnitTest :androidApp:testGoogleTvDebugUnitTest :androidApp:testGoogleMobileDebugUnitTest --console=plain
 ```
 
-Shared and app checks:
+Compile release surfaces without installing them on a device:
 
-```bash
-./gradlew :shared:compileKotlinMetadata
-./gradlew :shared:allTests
-./gradlew :androidApp:testGoogleMobileDebugUnitTest
-./gradlew :androidApp:testGoogleTvDebugUnitTest
-./gradlew :androidApp:testAmazonTvDebugUnitTest
-./gradlew :desktopApp:test
+```powershell
+./gradlew.bat :androidApp:compileAmazonTvReleaseKotlin :androidApp:compileGoogleTvReleaseKotlin :androidApp:compileGoogleMobileReleaseKotlin --console=plain
 ```
 
-## Platform Expectations
+Backend development and migration instructions are in
+[`server/README.md`](server/README.md). Never use production credentials or
+production user data in tests.
 
-Run the checks that match the files you touched.
+## Pull requests
 
-- Backend changes should include `cd backend && pytest`.
-- Shared KMP changes should include shared metadata and relevant shared tests.
-- Android changes should include the relevant compile, unit test, or assemble task for the affected variant.
-- Desktop changes should include `:desktopApp:test` or `:desktopApp:build` when practical.
-- iOS changes require macOS/Xcode validation when they touch Swift app behavior.
+- Keep changes scoped to one coherent problem and preserve existing
+  architecture unless evidence requires a broader change.
+- Add regression coverage using the project’s existing conventions.
+- For Android TV changes, preserve D-pad navigation, Back behavior, stable
+  focus identity, and a visible focus owner after recomposition.
+- Do not commit generated builds, signing keys, `.env` files, device dumps,
+  private logs, or screenshots containing account data.
+- State which commands actually passed. Do not describe unrun device or store
+  checks as verified.
 
-If a host cannot run a platform-specific check, say so in the pull request and describe what was run instead.
-
-## Product Invariants
-
-Do not add:
-
-- billing flows
-- subscriptions
-- purchase requirements
-- paid tiers
-- premium feature gates
-- donor-only features
-- supporter benefits
-- login checks that behave like payment or entitlement gates
-
-Login may protect sync, device linking, account-backed data, data export, account deletion, ownership, privacy, anti-abuse, and technical stability. It must not become monetization.
-
-## Secrets and Artifacts
-
-Never commit real credentials or local runtime artifacts.
-
-Do not commit:
-
-- `.env` or `.env.*`
-- signing keys, certificates, provisioning profiles, or keystores
-- service-account JSON
-- production database URLs, API keys, webhook secrets, or admin tokens
-- generated APK, AAB, MSI, ZIP, archive, log, dump, or database files
-
-Use placeholder-only examples and dummy CI values.
-
-## Licensing
-
-By contributing, you agree that your contribution is provided under Torve's `AGPL-3.0-or-later` license.
-
-If you add third-party code, assets, or dependencies, include compatible license information and avoid assets whose terms prevent redistribution, modification, or public source distribution.
+By contributing, you agree that your contribution is provided under the
+project’s `AGPL-3.0-or-later` license.

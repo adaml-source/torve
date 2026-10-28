@@ -1,5 +1,7 @@
 package com.torve.android.ui.splash
 
+import com.torve.android.ui.community.parityLabel as localizedUiText
+
 import android.media.MediaPlayer
 import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.EaseOut
@@ -311,7 +313,7 @@ fun TorveSplashScreen(
         if (textAlpha > 0f) {
             val textOffset = (1f - textAlpha) * 10f
             Text(
-                text = "TORVE",
+                text = localizedUiText("TORVE"),
                 color = Color(0xFF55555C).copy(alpha = textAlpha),
                 fontSize = 13.sp,
                 fontWeight = FontWeight.Light,

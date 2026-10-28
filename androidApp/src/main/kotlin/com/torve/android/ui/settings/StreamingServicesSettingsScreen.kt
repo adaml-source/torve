@@ -76,14 +76,14 @@ fun StreamingServicesSettingsScreen(
                 stringResource(R.string.settings_streaming_services),
                 style = MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.Bold,
-                color = Snow,
+                color = MaterialTheme.colorScheme.onSurface,
             )
         }
 
         Text(
             stringResource(R.string.settings_streaming_services_desc),
             style = MaterialTheme.typography.bodyMedium,
-            color = Silver,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
         )
 
@@ -140,7 +140,7 @@ fun StreamingServicesSettingsScreen(
                         service.name,
                         style = MaterialTheme.typography.bodyLarge,
                         fontWeight = FontWeight.Medium,
-                        color = Snow,
+                        color = MaterialTheme.colorScheme.onSurface,
                         modifier = Modifier.weight(1f),
                     )
 
@@ -162,7 +162,7 @@ fun StreamingServicesSettingsScreen(
         Text(
             stringResource(R.string.home_tmdb_credit),
             style = MaterialTheme.typography.labelSmall,
-            color = Silver,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp),
         )
     }

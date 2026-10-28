@@ -10,7 +10,11 @@ import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
 import io.ktor.serialization.kotlinx.json.json
 import kotlinx.coroutines.async
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
 import kotlin.test.Test
@@ -19,6 +23,43 @@ import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 
 class MetadataRepositoryImplRegressionTest {
+    @Test fun failedLogoRequestDoesNotPoisonTheArtworkCache() = runTest {
+        var requests = 0
+        val http = HttpClient(MockEngine {
+            requests++
+            if (requests == 1) throw IllegalStateException("Temporary connection failure")
+            respond("""{"logos":[{"file_path":"/recovered.png","iso_639_1":"en"}]}""",
+                headers = headersOf(HttpHeaders.ContentType, "application/json"))
+        }) { install(ContentNegotiation) { json(jsonConfig()) } }
+        try {
+            val repo = MetadataRepositoryImpl(TmdbApiClient(http, apiKeyProvider = { "fixture" }, resolvedHostProvider = { null }))
+            kotlin.test.assertNull(repo.getLogoUrl("movie", 42))
+            assertTrue(repo.getLogoUrl("movie", 42)!!.endsWith("/recovered.png"))
+            assertEquals(2, requests)
+        } finally { http.close() }
+    }
+
+    @Test
+    fun cancellingOneMetadataConsumerDoesNotCancelAnotherOrPoisonTheCache() = runTest {
+        var requests = 0
+        val started = CompletableDeferred<Unit>()
+        val http = HttpClient(MockEngine {
+            requests++
+            if (requests == 1) { started.complete(Unit); awaitCancellation() }
+            respond(movieResponse("Recovered movie"), headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()))
+        }) { install(ContentNegotiation) { json(jsonConfig()) } }
+        try {
+            val repo = MetadataRepositoryImpl(TmdbApiClient(http, resolvedHostProvider = { listOf("127.0.0.1") }))
+            val leavingScreen = async { repo.getTrending("movie", 1) }
+            started.await()
+            val visibleScreen = async { repo.getTrending("movie", 1) }
+            runCurrent()
+            leavingScreen.cancelAndJoin()
+            assertEquals("Recovered movie", visibleScreen.await().single().title)
+            assertEquals("Recovered movie", repo.getTrending("movie", 1).single().title)
+            assertEquals(2, requests)
+        } finally { http.close() }
+    }
 
     @Test
     fun homeLoadsContentWhenTmdbResponsesSucceed() = runTest {
@@ -131,6 +172,58 @@ class MetadataRepositoryImplRegressionTest {
         second.await()
 
         assertEquals(1, requests)
+    }
+
+    @Test
+    fun discoverySendsGlobalMovieStudioFilterToTmdb() = runTest {
+        var requestedCompanies: String? = null
+        val repo = MetadataRepositoryImpl(
+            api = TmdbApiClient(
+                HttpClient(
+                    MockEngine { request ->
+                        requestedCompanies = request.url.parameters["with_companies"]
+                        respond(
+                            content = movieResponse("Studio result"),
+                            status = HttpStatusCode.OK,
+                            headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                        )
+                    },
+                ) {
+                    install(ContentNegotiation) { json(jsonConfig()) }
+                },
+                resolvedHostProvider = { listOf("127.0.0.1") },
+            ),
+        )
+
+        repo.discover(type = "movie", withCompanies = "2|420")
+
+        assertEquals("2|420", requestedCompanies)
+    }
+
+    @Test
+    fun discoveryMapsTvStudioFilterToTmdbNetworks() = runTest {
+        var requestedNetworks: String? = null
+        val repo = MetadataRepositoryImpl(
+            api = TmdbApiClient(
+                HttpClient(
+                    MockEngine { request ->
+                        requestedNetworks = request.url.parameters["with_networks"]
+                        respond(
+                            content = tvResponse("Network result"),
+                            status = HttpStatusCode.OK,
+                            headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                        )
+                    },
+                ) {
+                    install(ContentNegotiation) { json(jsonConfig()) }
+                },
+                resolvedHostProvider = { listOf("127.0.0.1") },
+            ),
+        )
+
+        repo.discover(type = "tv", withCompanies = "49|213")
+
+        assertEquals("49|213", requestedNetworks)
     }
 
     private fun httpClientWithRoutes(

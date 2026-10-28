@@ -1,0 +1,10 @@
+[Unit]
+Description=Poll the Torve restricted repair queue
+
+[Timer]
+OnBootSec=1min
+OnUnitInactiveSec=1min
+Unit=torve-support-repair.service
+
+[Install]
+WantedBy=timers.target

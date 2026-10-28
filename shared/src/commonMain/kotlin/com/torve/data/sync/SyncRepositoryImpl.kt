@@ -2,12 +2,15 @@ package com.torve.data.sync
 
 import com.torve.data.auth.UserIdProvider
 import com.torve.data.channels.playlistIdentityFor
+import com.torve.data.progress.readPreferenceSafely
 import com.torve.db.TorveDatabase
 import com.torve.domain.model.CardOrientation
 import com.torve.domain.model.CardSizePreset
 import com.torve.domain.model.CardStyle
 import com.torve.domain.model.CardStylePreset
 import com.torve.domain.model.HomeSectionConfig
+import com.torve.domain.model.migrateLegacyBecauseYouWatchedConfigs
+import com.torve.domain.model.migrateLegacyBecauseYouWatchedLayoutOrder
 import com.torve.domain.model.RatingDisplayPrefs
 import com.torve.domain.model.RatingSource
 import com.torve.domain.model.defaultTorveWeights
@@ -46,7 +49,7 @@ class SyncRepositoryImpl(
     private val secretStore: IntegrationSecretStore? = null,
 ) : SyncRepository {
     private val tolerantJson = Json { ignoreUnknownKeys = true }
-    private fun uid(): String = userIdProvider.currentUserId()
+    private fun uid(): String = userIdProvider.currentDataUserId()
 
     companion object {
         /** Keys that contain credentials/tokens — never exported as preferences.
@@ -106,7 +109,9 @@ class SyncRepositoryImpl(
 
     // ── Export ────────────────────────────────────────────────
 
-    override suspend fun exportSyncPayload(): SyncPayload {
+    override suspend fun exportSyncPayload(): SyncPayload = exportPayload().withoutBackupSecrets()
+
+    private suspend fun exportPayload(): SyncPayload {
         val queries = database.torveQueries
 
         val addons = queries.getAllAddons(userId = uid()).executeAsList().map { row ->
@@ -117,9 +122,9 @@ class SyncRepositoryImpl(
             )
         }
 
-        val preferences = queries.getAllPreferences(userId = uid()).executeAsList()
-            .filter { !isSensitive(it.key) }
-            .map { SyncPreference(key = it.key, value = it.value_) }
+        val preferences = queries.getPreferenceKeys(userId = uid()).executeAsList()
+            .filter { !isSensitive(it) }
+            .mapNotNull { key -> queries.readPreferenceSafely(uid(), key)?.let { SyncPreference(key = key, value = it) } }
 
         val progress = queries.getAllProgress(userId = uid()).executeAsList().map { row ->
             SyncProgress(
@@ -184,7 +189,7 @@ class SyncRepositoryImpl(
     }
 
     override suspend fun exportForLocalTransfer(): String {
-        val base = exportSyncPayload()
+        val base = exportPayload()
         val secrets = if (secretStore != null) {
             LOCAL_TRANSFER_SECRET_KEYS.mapNotNull { key ->
                 val value = secretStore.get(key) ?: return@mapNotNull null
@@ -198,7 +203,11 @@ class SyncRepositoryImpl(
 
     // ── Import ───────────────────────────────────────────────
 
-    override suspend fun importSyncPayload(payload: SyncPayload): SyncResult {
+    override suspend fun importSyncPayload(payload: SyncPayload): SyncResult = importPayload(payload.withoutBackupSecrets())
+
+    override suspend fun importForLocalTransfer(payload: SyncPayload): SyncResult = importPayload(payload)
+
+    private suspend fun importPayload(payload: SyncPayload): SyncResult {
         val queries = database.torveQueries
         var addonsImported = 0
         var prefsImported = 0
@@ -209,6 +218,8 @@ class SyncRepositoryImpl(
 
         // Addons: insert if new, update enabled/priority if existing
         for (addon in payload.addons) {
+            if (!com.torve.data.addon.ExtensionRuntimePolicy.restorePandaFromAccount &&
+                com.torve.data.addon.isPandaExtension(null, addon.manifestUrl)) continue
             val existing = queries.getAddonByUrl(
                 userId = uid(),
                 manifestUrl = addon.manifestUrl,
@@ -440,6 +451,12 @@ class SyncRepositoryImpl(
                 }.getOrNull() ?: emptyList()
                 json.encodeToString(sanitizeHomeSectionConfigs(parsed))
             }
+            "home_layout_order" -> {
+                val parsed = runCatching {
+                    tolerantJson.decodeFromString<List<String>>(raw)
+                }.getOrNull() ?: emptyList()
+                json.encodeToString(migrateLegacyBecauseYouWatchedLayoutOrder(parsed))
+            }
             else -> raw
         }
     }
@@ -531,7 +548,7 @@ class SyncRepositoryImpl(
 
     private fun sanitizeHomeSectionConfigs(configs: List<HomeSectionConfig>): List<HomeSectionConfig> {
         val seen = mutableSetOf<com.torve.domain.model.HomeSection>()
-        return configs.asSequence()
+        return migrateLegacyBecauseYouWatchedConfigs(configs).asSequence()
             .filter { seen.add(it.section) }
             .map { config ->
                 config.copy(

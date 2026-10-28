@@ -17,6 +17,6 @@ internal data class SportsBootstrapPayload(
     val items: List<NewznabItem> = emptyList(),
 )
 
-internal fun sportsBootstrapKey(userId: String, indexerUrl: String, indexerKey: String): String {
-    return "tv_sports_bootstrap:${userId.hashCode()}:${indexerUrl.hashCode()}:${indexerKey.hashCode()}"
+internal fun sportsBootstrapKey(userId: String, indexers: List<SportsIndexer>): String {
+    return "tv_sports_bootstrap_v2:${userId.hashCode()}:${sportsIndexersKey(indexers)}"
 }

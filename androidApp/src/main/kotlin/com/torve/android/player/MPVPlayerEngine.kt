@@ -6,11 +6,25 @@ import android.os.Looper
 import android.util.Log
 import com.torve.domain.model.Channel
 import com.torve.domain.player.LiveAudioOutputMode
+import com.torve.domain.player.MediaChapter
 import com.torve.domain.player.PlayerEngine
 import com.torve.domain.player.PlayerListener
 import com.torve.domain.player.PlayerState
 import com.torve.domain.player.TrackDescription
 import java.util.Locale
+
+internal data class MpvPictureFormatProperties(
+    val aspectOverride: String,
+    val panscan: String,
+)
+
+internal fun mpvPictureFormatProperties(
+    aspectRatioOverride: Float?,
+    panscan: Float,
+): MpvPictureFormatProperties = MpvPictureFormatProperties(
+    aspectOverride = aspectRatioOverride?.toString() ?: "-1",
+    panscan = panscan.coerceIn(0f, 1f).toString(),
+)
 
 /**
  * PlayerEngine backed by libmpv via JNI.
@@ -59,6 +73,8 @@ class MPVPlayerEngine(
     private var mistimedFrameCount: Int? = null
     private var droppedFrameCount: Int? = null
     private var delayedFrameCount: Int? = null
+    @Volatile
+    private var mediaChapters: List<MediaChapter> = emptyList()
     private val mainHandler = Handler(Looper.getMainLooper())
     private val promoteSteadyStateRunnable = Runnable {
         applyActivePlaybackProfile(
@@ -148,6 +164,7 @@ class MPVPlayerEngine(
         mistimedFrameCount = null
         droppedFrameCount = null
         delayedFrameCount = null
+        mediaChapters = emptyList()
         livePlaybackToken += 1
         mainHandler.removeCallbacks(promoteSteadyStateRunnable)
         applyRememberedCompatibilityHintIfAvailable()
@@ -279,9 +296,7 @@ class MPVPlayerEngine(
 
     override fun setAudioDelay(delayMs: Int) {
         if (!initialized) return
-        val seconds = delayMs / 1000.0
-        if (delayMs == 0) return
-        MPVLib.setPropertyString("audio-delay", seconds.toString())
+        MPVLib.setPropertyDouble("audio-delay", delayMs / 1000.0)
     }
 
     override fun getAudioDelay(): Int {
@@ -327,19 +342,47 @@ class MPVPlayerEngine(
         )
     }
 
-    fun setPictureFormat(aspectRatio: Float?, fill: Boolean) {
+    fun setPictureFormat(aspectRatioOverride: Float?, panscan: Float) {
         if (!initialized) return
-        if (fill) {
-            MPVLib.setPropertyString("video-aspect-override", "-1")
-            MPVLib.setPropertyString("panscan", "1.0")
-        } else if (aspectRatio != null) {
-            MPVLib.setPropertyString("video-aspect-override", aspectRatio.toString())
-            MPVLib.setPropertyString("panscan", "0.0")
-        } else {
-            // Leave the default mpv output geometry alone on first startup.
-            MPVLib.setPropertyString("video-aspect-override", "-1")
-            MPVLib.setPropertyString("panscan", "0.0")
+        val properties = mpvPictureFormatProperties(aspectRatioOverride, panscan)
+        MPVLib.setPropertyString("video-aspect-override", properties.aspectOverride)
+        MPVLib.setPropertyString("panscan", properties.panscan)
+    }
+
+    override fun getMediaChapters(): List<MediaChapter> = mediaChapters
+
+    private fun readMediaChapters(): List<MediaChapter> {
+        if (!initialized) return emptyList()
+        val count = runCatching { MPVLib.getPropertyInt("chapter-list/count") }.getOrDefault(0)
+            .coerceIn(0, MAX_MEDIA_CHAPTERS)
+        if (count == 0) return emptyList()
+        val runtimeMs = _state.durationMs
+        val starts = (0 until count).mapNotNull { index ->
+            val startSeconds = runCatching { MPVLib.getPropertyDouble("chapter-list/$index/time") }.getOrNull()
+                ?.takeIf { it.isFinite() && it >= 0.0 }
+                ?: return@mapNotNull null
+            val title = runCatching { MPVLib.getPropertyString("chapter-list/$index/title") }.getOrNull()
+                ?.trim()
+                ?.take(MAX_CHAPTER_TITLE_LENGTH)
+                .orEmpty()
+            Triple(index, (startSeconds * 1_000.0).toLong(), title)
+        }.sortedBy { it.second }
+        return starts.mapIndexedNotNull { listIndex, (_, startMs, title) ->
+            val endMs = starts.getOrNull(listIndex + 1)?.second ?: runtimeMs
+            if (title.isBlank() || startMs < 0L || endMs <= startMs || runtimeMs <= 0L || endMs > runtimeMs + 1_000L) {
+                null
+            } else {
+                MediaChapter(title = title, startMs = startMs, endMs = endMs.coerceAtMost(runtimeMs))
+            }
         }
+    }
+
+    /** Compatibility overload for the non-live player picture-format model. */
+    fun setPictureFormat(aspectRatio: Float?, fill: Boolean) {
+        setPictureFormat(
+            aspectRatioOverride = aspectRatio,
+            panscan = if (fill) 1f else 0f,
+        )
     }
 
     fun setPlaybackVolume(volume: Float) {
@@ -655,6 +698,10 @@ class MPVPlayerEngine(
     override fun onEvent(eventId: Int) {
         // MPV event IDs: 7 = end-file, etc.
         when (eventId) {
+            8 -> { // MPV_EVENT_FILE_LOADED
+                mediaChapters = readMediaChapters()
+                notifyStateChanged()
+            }
             7 -> { // MPV_EVENT_END_FILE
                 if (!channelProfileRemembered && _state.positionMs in 1L until EARLY_END_FILE_THRESHOLD_MS) {
                     recordLiveTvIssue("end_file_before_stable_playback")
@@ -929,6 +976,8 @@ class MPVPlayerEngine(
     }
 
     private companion object {
+        const val MAX_MEDIA_CHAPTERS = 256
+        const val MAX_CHAPTER_TITLE_LENGTH = 160
         private const val TAG = "MPVPlayerEngine"
         private const val MIN_AUTO_TRACK_SWITCH_DELTA = 35
         private const val LIVE_VIDEO_SYNC_MODE = "display-resample"

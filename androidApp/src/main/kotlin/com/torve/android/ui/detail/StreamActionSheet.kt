@@ -1,5 +1,7 @@
 package com.torve.android.ui.detail
 
+import com.torve.android.ui.community.parityLabel as localizedUiText
+
 import android.content.Intent
 import android.net.Uri
 import android.widget.Toast
@@ -26,7 +28,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
+import com.torve.android.ui.system.TorveModalBottomSheet as ModalBottomSheet
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
@@ -56,6 +58,7 @@ fun StreamActionSheet(
     posterUrl: String = "",
     onPlayInApp: () -> Unit,
     onDownload: (() -> Unit)? = null,
+    onExternalPlaybackStarted: () -> Unit = {},
     onDismiss: () -> Unit,
 ) {
     val context = LocalContext.current
@@ -100,6 +103,7 @@ fun StreamActionSheet(
                     icon = if (castService.isCasting) Icons.Default.CastConnected else Icons.Default.Cast,
                     label = if (castService.isCasting) stringResource(R.string.stream_cast_connected) else stringResource(R.string.stream_cast_to_device),
                     onClick = {
+                        onExternalPlaybackStarted()
                         castService.requestCast(
                             url = url,
                             title = title,
@@ -131,6 +135,7 @@ fun StreamActionSheet(
                             title = title,
                             player = player,
                         )
+                        if (launched) onExternalPlaybackStarted()
                         if (!launched) {
                             Toast.makeText(context, context.getString(R.string.stream_player_not_found, player.label), Toast.LENGTH_SHORT).show()
                         }
@@ -145,6 +150,7 @@ fun StreamActionSheet(
                 label = stringResource(R.string.action_play_external),
                 onClick = {
                     ExternalPlayerLauncher.playWithChooser(context, url, title)
+                    onExternalPlaybackStarted()
                     onDismiss()
                 },
             )
@@ -241,7 +247,7 @@ private fun ActionItem(
         )
         Spacer(Modifier.width(16.dp))
         Text(
-            text = label,
+            text = localizedUiText(label),
             style = MaterialTheme.typography.bodyLarge,
             color = if (accentColor) Amber else Snow,
     )

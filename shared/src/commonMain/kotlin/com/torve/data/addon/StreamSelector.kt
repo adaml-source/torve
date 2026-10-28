@@ -13,7 +13,45 @@ import com.torve.domain.model.StreamQuality
  */
 class StreamSelector(
     private val scorer: StreamScorer,
+    private val continuationSelector: StreamContinuationSelector = StreamContinuationSelector(),
 ) {
+    fun rankWithPresetFallback(streams: List<ParsedStream>, preferences: StreamPreferences,
+        deviceCaps: DeviceCodecCaps, context: StreamSelectionContext = StreamSelectionContext()): List<ParsedStream> {
+        val matching = rankPlayableVariants(streams, preferences, deviceCaps, selectionContext = context)
+        if (matching.isNotEmpty() || preferences.sourceFallbackPolicy != com.torve.domain.model.SourceFallbackPolicy.BEST_AVAILABLE) return matching
+        // An explicit Best available preference can relax content rules, never the decoder or quality cap.
+        return rankPlayableVariants(streams, preferences.copy(minQuality = StreamQuality.SD_480P,
+            minSourceSizePerHourBytes = 0, sourceLanguageMatchMode = com.torve.domain.model.SourceLanguageMatchMode.PREFER,
+            unknownSourceLanguagePolicy = com.torve.domain.model.UnknownSourceMetadataPolicy.ALLOW_WITH_PENALTY,
+            unknownSourceSizePolicy = com.torve.domain.model.UnknownSourceMetadataPolicy.ALLOW_WITH_PENALTY),
+            deviceCaps, selectionContext = context)
+    }
+
+    /**
+     * Applies the normal compatibility/policy gate first, then ranks the viable result set using
+     * the active source as a continuity reference. This keeps autoplay heuristics out of UI code.
+     */
+    fun rankPlayableVariantsForContinuation(
+        streams: List<ParsedStream>,
+        reference: SourceProfile,
+        preferences: StreamPreferences,
+        deviceCaps: DeviceCodecCaps,
+        h264Only: Boolean = false,
+        selectionContext: StreamSelectionContext = StreamSelectionContext(),
+    ): List<RankedContinuationSource> {
+        val viable = rankPlayableVariants(
+            streams = streams,
+            preferences = preferences,
+            deviceCaps = deviceCaps,
+            h264Only = h264Only,
+            selectionContext = selectionContext,
+        )
+        return continuationSelector.rankSourcesForContinuation(
+            candidates = viable,
+            reference = reference,
+            candidateDurationMs = selectionContext.durationMs,
+        )
+    }
 
     fun selectBestPlayableVariant(
         streams: List<ParsedStream>,
@@ -34,12 +72,17 @@ class StreamSelector(
         preferences: StreamPreferences,
         deviceCaps: DeviceCodecCaps,
         h264Only: Boolean = false,
+        selectionContext: StreamSelectionContext = StreamSelectionContext(),
     ): List<ParsedStream> {
         if (streams.isEmpty()) return emptyList()
 
         val maxHeight = effectiveMaxHeight(preferences)
+        val policyDecisions = streams.associateWith { stream ->
+            StreamAutoSelectionPolicy.evaluate(stream, preferences, selectionContext)
+        }
         val eligible = streams.filter { stream ->
-            passesQualityCap(stream, maxHeight) &&
+            policyDecisions.getValue(stream).eligible &&
+                passesQualityCap(stream, maxHeight) &&
                 passesCodecFilter(stream, deviceCaps) &&
                 passesH264OnlyFilter(stream, h264Only)
         }
@@ -62,7 +105,8 @@ class StreamSelector(
                     stream.directUrl != null -> 14
                     else -> 0
                 }
-                stream.copy(score = (base + qualityBias + hostAdj + directPlayableBonus).coerceIn(0, 100))
+                val policyAdjustment = policyDecisions.getValue(stream).scoreAdjustment
+                stream.copy(score = (base + qualityBias + hostAdj + directPlayableBonus + policyAdjustment).coerceIn(0, 100))
             }
             .sortedByDescending { it.score }
     }

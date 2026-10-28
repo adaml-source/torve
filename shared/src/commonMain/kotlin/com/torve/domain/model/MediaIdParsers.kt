@@ -6,6 +6,7 @@ private val imdbIdRegex = Regex("""tt\d{6,}""")
 fun String.extractTmdbIdOrNull(): Int? {
     val raw = trim()
     if (raw.isBlank()) return null
+    if (raw.startsWith("jf_")) return null
 
     raw.toIntOrNull()?.let { return it }
 

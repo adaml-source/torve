@@ -1,6 +1,10 @@
 package com.torve.presentation.detail
 
 import com.torve.data.addon.ParsedStream
+import com.torve.data.addon.ContinuationSelectionOrigin
+import com.torve.data.addon.SourceContinuationSessionStore
+import com.torve.data.addon.SourceProfile
+import com.torve.data.addon.StreamContinuationSelector
 import com.torve.data.addon.StreamSelector
 import com.torve.data.addon.isAddonHostedUrl
 import com.torve.data.acceleration.StreamHandoffApiException
@@ -35,6 +39,7 @@ import com.torve.domain.model.DeviceCodecCaps
 import com.torve.domain.model.ContentWarmupTrigger
 import com.torve.domain.model.Episode
 import com.torve.domain.model.MediaItem
+import com.torve.domain.model.ParentalFilter
 import com.torve.domain.model.MediaType
 import com.torve.domain.model.Season
 import com.torve.domain.model.SensitiveClassification
@@ -42,6 +47,7 @@ import com.torve.domain.model.SourceAccelerationRequest
 import com.torve.domain.model.StreamFetchPolicy
 import com.torve.domain.model.StreamPreferences
 import com.torve.domain.model.StreamQuality
+import com.torve.domain.model.countsAsWatchedEpisode
 import com.torve.domain.model.WatchHistoryEntry
 import com.torve.domain.model.WatchProgress
 import com.torve.domain.integrations.LibraryOverlayService
@@ -49,13 +55,19 @@ import com.torve.domain.repository.AddonRepository
 import com.torve.domain.repository.AvailabilityRepository
 import com.torve.domain.repository.MetadataRepository
 import com.torve.domain.repository.PreferencesRepository
+import com.torve.domain.repository.ProfileRepository
 import com.torve.domain.repository.StreamRepository
+import com.torve.domain.repository.StreamFetchResult
 import com.torve.domain.repository.WatchHistoryRepository
 import com.torve.domain.repository.WatchProgressRepository
 import com.torve.data.mdblist.MdbListApi
 import com.torve.data.mdblist.RatingsEnricher
 import com.torve.domain.integrations.IntegrationSecretKey
 import com.torve.domain.integrations.IntegrationSecretStore
+import com.torve.domain.integrations.MediaLifecycleRequest
+import com.torve.domain.integrations.MediaLifecycleService
+import com.torve.domain.integrations.MediaLifecycleStatus
+import com.torve.domain.integrations.MediaLifecycleState
 import com.torve.data.usenet.UsenetMapper
 import com.torve.data.usenet.model.UsenetAvailability
 import com.torve.data.usenet.model.UsenetCandidatePayload
@@ -80,7 +92,9 @@ import com.torve.domain.telemetry.timeBucket
 import com.torve.platform.torveVerboseLog
 import com.torve.presentation.contentpolicy.ContentPolicyFilter
 import com.torve.presentation.settings.SettingsViewModel
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CancellationException
 import kotlinx.datetime.Clock
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -134,6 +148,10 @@ class DetailViewModel(
      */
     private val watchStateRemoteSource: com.torve.domain.integrations.WatchStateRemoteSource? = null,
     private val watchSessionRecorder: WatchSessionRecorder? = null,
+    private val mediaLifecycleService: MediaLifecycleService? = null,
+    private val profileRepository: ProfileRepository? = null,
+    private val sourceTrackInspector: com.torve.data.addon.SourceTrackInspector? = null,
+    private val libraryRequestMonitor: com.torve.presentation.library.LibraryRequestMonitor? = null,
 ) {
     private data class StreamPresentationResult(
         val ordered: List<ParsedStream>,
@@ -159,7 +177,7 @@ class DetailViewModel(
         // alternate source than by watching a spinner indefinitely.
         const val PREPARING_PROBE_INTERVAL_MS = 15_000L
         const val PREPARING_MAX_ATTEMPTS = 20
-        const val MARKED_WATCHED_PROGRESS_RATIO = 0.9f
+        const val MARKED_WATCHED_PROGRESS_RATIO = 0.85f
         const val MARKED_WATCHED_DURATION_MS = 1_000_000L
         val STREAM_HANDOFF_BLOCKING_ERROR_CODES = setOf(
             "device_required",
@@ -169,9 +187,20 @@ class DetailViewModel(
             "rate_limited",
         )
     }
-    private val _state = MutableStateFlow(DetailUiState())
+    private val _state = contentPolicyFilter.profileState(DetailUiState())
     val state: StateFlow<DetailUiState> = _state.asStateFlow()
+    private var hasExplicitSeasonSelection = false
+    private var pinnedPlaybackEpisode: Pair<Int, Int>? = null
+    private var detailLoadJob: Job? = null
+    private var ratingsJob: Job? = null
+    private var watchedEpisodesJob: Job? = null
+    private var seriesWatchRefreshJob: Job? = null
+    private var seasonDetailJob: Job? = null
+    private var mediaLifecycleLookupJob: Job? = null
     private var warmupJob: Job? = null
+    private var streamFetchJob: Job? = null
+    private val sourceResultsCache = DetailSourceResultsCache()
+    private var activeSourceResultsKey: DetailSourceResultsCache.Key? = null
     private var currentType: String? = null
     private var currentId: Int? = null
     /**
@@ -261,7 +290,29 @@ class DetailViewModel(
         deviceCodecCaps = caps
     }
 
+    /**
+     * Loads the requested title only when this destination does not already
+     * own usable state for it. Navigation Compose may remove a details screen
+     * from composition while Player is above it; returning from Player must
+     * not clear and fetch the same title again before focus can be restored.
+     */
+    fun ensureDetailLoaded(type: String, id: Int) {
+        if (currentType == type && currentId == id && _state.value.mediaItem != null) {
+            loadWatchedEpisodes(preserveSelectedSeason = true)
+            return
+        }
+        loadDetail(type, id)
+    }
+
     fun loadDetail(type: String, id: Int) {
+        sourceResultsCache.clear()
+        activeSourceResultsKey = null
+        streamFetchJob?.cancel()
+        mediaLifecycleLookupJob?.cancel()
+        detailLoadJob?.cancel()
+        ratingsJob?.cancel()
+        watchedEpisodesJob?.cancel()
+        seriesWatchRefreshJob?.cancel()
         warmupJob?.cancel()
         // Content-switch cleanup: drop any Usenet prewarm state for the
         // outgoing content so a later revisit can re-warm, and ask the
@@ -270,7 +321,8 @@ class DetailViewModel(
         // previous content identity can't be formatted.
         val prevType = currentType
         val prevId = currentId
-        if (prevType != null && prevId != null && (prevType != type || prevId != id)) {
+        val contentChanged = prevType != type || prevId != id
+        if (prevType != null && prevId != null && contentChanged) {
             val coordinator = usenetWarmCoordinator
             val prevContentId = formatUsenetContentId(type = prevType, tmdbId = prevId)
             if (coordinator != null && prevContentId != null) {
@@ -283,13 +335,23 @@ class DetailViewModel(
         }
         currentType = type
         currentId = id
-        scope.launch {
+        detailLoadJob = scope.launch {
             detailDiagLog("loadDetail enter type=$type id=$id")
-            _state.update {
-                it.copy(
+            if (contentChanged) {
+                hasExplicitSeasonSelection = false
+                pinnedPlaybackEpisode = null
+            }
+            _state.update { current ->
+                if (contentChanged) {
+                    // Never render the previous title while the requested one
+                    // is loading. Besides showing incorrect details, the stale
+                    // Watch-now action allowed a fast click to open a picker
+                    // just before the real title replaced the whole surface.
+                    DetailUiState(isLoading = true)
+                } else current.copy(
                     isLoading = true,
                     error = null,
-                    streams = emptyList(),
+                    streams = emptyList(), sourceStatistics = emptyList(),
                     startupCandidates = emptyList(),
                     isLoadingStreams = false,
                     isLoadingMoreSources = false,
@@ -301,12 +363,23 @@ class DetailViewModel(
                     autoPlayMessage = null,
                     autoPlayFailed = false,
                     fallbackAttempt = 0,
+                    isInLibrary = false,
+                    mediaLifecycleStatus = null,
+                    isLoadingMediaLifecycle = false,
+                    mediaLifecycleOperation = MediaLifecycleOperation.CHECK_AVAILABILITY,
+                    mediaLifecycleError = null,
+                    mediaLifecycleMessage = null,
                 )
             }
             try {
-                val rawItem = ratingsEnricher.hydrateFromCache(metadataRepo.getDetail(type, id))
+                val rawItem = contentPolicyFilter.certifiedDetail(ratingsEnricher.hydrateFromCache(metadataRepo.getDetail(type, id)))
+                val hideSpoilers = prefsRepo.getString(com.torve.presentation.watching.KEY_HIDE_UNWATCHED_SPOILERS) == "true"
+                _state.update { it.copy(hideUnwatchedSpoilers = hideSpoilers) }
                 val policy = currentPolicy()
-                val item = when (contentPolicyFilter.decide(
+                val blockedByProfile = applyActiveProfileLimit(listOf(rawItem)).isEmpty()
+                val item = if (blockedByProfile) {
+                    contentPolicyFilter.run { rawItem.asStubDetail() }
+                } else when (contentPolicyFilter.decide(
                     policy = policy,
                     context = ContentAccessContext.DETAIL_PAGE,
                     item = rawItem,
@@ -333,6 +406,9 @@ class DetailViewModel(
                 if (item.isStubDetail) {
                     return@launch
                 }
+                // Refresh the visible title immediately; recommendations and account
+                // progress must not delay its ratings.
+                enrichRatings(item)
 
                 // TV pages should expose seasons/episodes immediately. Similar
                 // titles and other enrichment can be slower; they must not block
@@ -340,7 +416,7 @@ class DetailViewModel(
                 if (type == "tv" && item.seasons.isNotEmpty()) {
                     val firstReal = item.seasons.firstOrNull { it.seasonNumber > 0 }
                     if (firstReal != null) {
-                        loadSeasonDetail(id, firstReal.seasonNumber)
+                        loadSeasonDetail(id, if (hasExplicitSeasonSelection) _state.value.selectedSeason else firstReal.seasonNumber)
                     }
                     loadWatchedEpisodes()
                 }
@@ -384,10 +460,11 @@ class DetailViewModel(
                             .take(24)
                             .toList(),
                     )
+                    val profileSafeSimilar = applyActiveProfileLimit(similar)
                     val filteredSimilar = contentPolicyFilter.filterItems(
                         policy = policy,
                         context = ContentAccessContext.SIMILAR_OR_MORE_LIKE_THIS,
-                        items = similar,
+                        items = profileSafeSimilar,
                         sourceType = ContentSourceType.TMDB,
                         allowSensitiveBecauseUserReachedSensitiveParent = allowSensitiveFromParent,
                     ).items
@@ -414,6 +491,10 @@ class DetailViewModel(
                     }
                 }
 
+                // Optional metadata failures may have caught cancellation. Do not
+                // start account or playback work for a detail that was closed.
+                ensureActive()
+
                 // Load watch progress — merge local SQLDelight row with the
                 // backend's latest report (cross-device resume). Whichever has
                 // the newer timestamp wins. Remote fetch is best-effort; if
@@ -426,7 +507,7 @@ class DetailViewModel(
                 // If remote wins, persist to local DB so the next cold
                 // start shows the right Resume position even offline.
                 if (merged != null && merged !== local) {
-                    runCatching { watchProgressRepo.saveProgress(merged) }
+                    runCatching { watchProgressRepo.saveBookmark(merged) }
                 }
                 val rating = item.tmdbId?.let { tmdbId ->
                     runCatching { traktSyncRepo.getUserRating(tmdbId, item.type) }.getOrNull()
@@ -436,7 +517,7 @@ class DetailViewModel(
                         history.seasonNumber == null && history.episodeNumber == null
                     }
                 }.getOrDefault(false)
-                val progressWatched = (merged?.progressPercent ?: 0f) >= MARKED_WATCHED_PROGRESS_RATIO
+                val progressWatched = merged?.isWatched(MARKED_WATCHED_PROGRESS_RATIO) == true
                 _state.update {
                     it.copy(
                         watchProgress = merged,
@@ -448,8 +529,9 @@ class DetailViewModel(
                 warmupLikelyPlaybackTarget(ContentWarmupTrigger.DETAIL_OPEN)
                 loadAvailability(item)
                 loadLibraryStatus(item)
-                detailDiagLog("loadDetail about to call enrichRatings id=${item.id}")
-                enrichRatings(item)
+                loadMediaLifecycleStatus(item)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
             } catch (e: Exception) {
                 detailDiagLog("loadDetail FAILED id=$id error=${e.message}")
                 _state.update { current ->
@@ -497,15 +579,16 @@ class DetailViewModel(
 
     private fun enrichRatings(item: com.torve.domain.model.MediaItem) {
         if (item.isStubDetail) return
-        scope.launch {
+        ratingsJob?.cancel()
+        ratingsJob = scope.launch {
             val apiKey = try {
                 integrationSecretStore.get(IntegrationSecretKey.MDBLIST_API_KEY)
                     ?: prefsRepo.getString(SettingsViewModel.KEY_MDBLIST_API_KEY)
                     ?: MdbListApi.DEFAULT_API_KEY
             } catch (_: Exception) { MdbListApi.DEFAULT_API_KEY }
-            if (apiKey.isBlank()) return@launch
             try {
-                val enriched = ratingsEnricher.enrichSingle(item, apiKey)
+                fun publish(enriched: com.torve.domain.model.MediaItem) {
+                ensureActive()
                 val filtered = when (contentPolicyFilter.decide(
                     policy = currentPolicy(),
                     context = ContentAccessContext.DETAIL_PAGE,
@@ -524,7 +607,19 @@ class DetailViewModel(
                     "trakt=${r?.traktScore} mc=${r?.metacriticScore} mdb=${r?.mdblistScore})"
                 println("TORVE_DETAIL: $msg")
                 detailDiagLog(msg)
-                _state.update { it.copy(mediaItem = filtered) }
+                _state.update { current ->
+                    val currentItem = current.mediaItem
+                    if (currentItem != null && currentItem.id == item.id && currentItem.type == item.type) {
+                        current.copy(mediaItem = filtered)
+                    } else {
+                        current
+                    }
+                }
+                }
+                val enriched = ratingsEnricher.enrichDetail(item, apiKey, onUpdate = ::publish)
+                publish(enriched)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
             } catch (e: Exception) {
                 val msg = "enrichRatings FAILED id=${item.id} error=${e.message}"
                 println("TORVE_DETAIL: $msg")
@@ -587,12 +682,239 @@ class DetailViewModel(
             val inLibrary = runCatching {
                 libraryOverlayService.isInLibrary(tmdbId, item.type)
             }.getOrDefault(false)
-            _state.update { it.copy(isInLibrary = inLibrary) }
+            _state.update { current ->
+                if (current.mediaItem?.tmdbId == tmdbId) {
+                    current.copy(isInLibrary = inLibrary)
+                } else {
+                    current
+                }
+            }
         }
     }
 
-    fun loadSeasonDetail(tvId: Int, seasonNumber: Int) {
+    private suspend fun applyActiveProfileLimit(items: List<MediaItem>): List<MediaItem> {
+        val repository = profileRepository ?: return items
+        val maxRating = runCatching { repository.getActiveProfile()?.maxContentRating }.getOrNull()
+        return contentPolicyFilter.filterProfileLimit(items, maxRating)
+    }
+
+    private fun loadMediaLifecycleStatus(item: MediaItem, force: Boolean = false) {
+        val service = mediaLifecycleService ?: return
+        val tmdbId = item.tmdbId ?: return
+        // A resume/season refresh must not overwrite progress for a request
+        // explicitly submitted by the user. New checks replace old checks.
+        if (_state.value.isLoadingMediaLifecycle &&
+            _state.value.mediaLifecycleOperation != MediaLifecycleOperation.CHECK_AVAILABILITY
+        ) return
+        mediaLifecycleLookupJob?.cancel()
+        mediaLifecycleLookupJob = scope.launch {
+            // These are local checks of configuration and prior validation.
+            // No loading UI or title lookup until the request route is ready.
+            val configured = service.isConfigured()
+            if (!configured || (!force && !service.canAutomaticallyCheckStatus(item.type))) {
+                _state.update { current ->
+                    if (current.mediaItem?.tmdbId == tmdbId) {
+                        current.copy(
+                            isLoadingMediaLifecycle = false,
+                            // A configured route must remain discoverable even before its
+                            // automatic-check readiness has been verified. The user can
+                            // explicitly check it from Add to library without an entry-time probe.
+                            mediaLifecycleStatus = MediaLifecycleStatus(tmdbId, item.type,
+                                if (configured) MediaLifecycleState.UNKNOWN else MediaLifecycleState.UNCONFIGURED),
+                        )
+                    } else current
+                }
+                return@launch
+            }
+            _state.update { current ->
+                if (current.mediaItem?.tmdbId == tmdbId) {
+                    current.copy(
+                        isLoadingMediaLifecycle = true,
+                        mediaLifecycleOperation = MediaLifecycleOperation.CHECK_AVAILABILITY,
+                        mediaLifecycleError = null,
+                        mediaLifecycleMessage = null,
+                    )
+                } else current
+            }
+            val seasons = if (item.type == MediaType.SERIES) listOf(_state.value.selectedSeason) else emptyList()
+            val status = runCatching { service.getStatus(tmdbId, item.type, seasons = seasons) }
+                .getOrElse {
+                    if (it is CancellationException) throw it
+                    _state.update { current ->
+                        if (current.mediaItem?.tmdbId == tmdbId) {
+                            current.copy(
+                                isLoadingMediaLifecycle = false,
+                                mediaLifecycleError = "Library availability could not be checked. No request was sent.",
+                            )
+                        } else current
+                    }
+                    return@launch
+                }
+            libraryRequestMonitor?.track(status, item.title, seasons)
+            _state.update { current ->
+                if (current.mediaItem?.tmdbId == tmdbId) {
+                    current.copy(
+                        mediaLifecycleStatus = status,
+                        isLoadingMediaLifecycle = false,
+                        mediaLifecycleError = null,
+                    )
+                } else current
+            }
+        }
+    }
+
+    fun refreshMediaLifecycleStatus(force: Boolean = false) {
+        _state.value.mediaItem?.let { loadMediaLifecycleStatus(it, force = force) }
+    }
+
+    /**
+     * Sends a household-safe Seerr request. For series the current season is
+     * the conservative default; explicit callers can pass multiple seasons.
+     */
+    fun requestPermanentCopy(
+        is4k: Boolean = false,
+        seasons: List<Int>? = null,
+    ) {
+        if (_state.value.isLoadingMediaLifecycle) return
+        val service = mediaLifecycleService ?: return
+        val item = _state.value.mediaItem ?: return
+        val tmdbId = item.tmdbId ?: return
+        val requestedSeasons = when {
+            item.type != MediaType.SERIES -> emptyList()
+            seasons != null -> seasons.distinct().filter { it >= 0 }
+            else -> listOf(_state.value.selectedSeason).filter { it >= 0 }
+        }
         scope.launch {
+            _state.update {
+                it.copy(
+                    isLoadingMediaLifecycle = true,
+                    mediaLifecycleOperation = MediaLifecycleOperation.REQUEST,
+                    mediaLifecycleError = null,
+                    mediaLifecycleMessage = null,
+                )
+            }
+            val status = runCatching {
+                service.request(
+                    MediaLifecycleRequest(
+                        tmdbId = tmdbId,
+                        mediaType = item.type,
+                        seasons = requestedSeasons,
+                        is4k = is4k,
+                    ),
+                )
+            }.getOrElse {
+                _state.update {
+                    it.copy(
+                        isLoadingMediaLifecycle = false,
+                        mediaLifecycleError = "The library request could not be submitted.",
+                    )
+                }
+                return@launch
+            }
+            _state.update {
+                it.copy(
+                    mediaLifecycleStatus = status,
+                    isLoadingMediaLifecycle = false,
+                    mediaLifecycleError = null,
+                    mediaLifecycleMessage = when (status.state) {
+                        MediaLifecycleState.PENDING_APPROVAL -> "Request sent for approval"
+                        MediaLifecycleState.AVAILABLE -> "Already available in your library"
+                        else -> "Added to your library queue"
+                    },
+                )
+            }
+            if (status.state == MediaLifecycleState.AVAILABLE) loadLibraryStatus(item)
+            libraryRequestMonitor?.track(status, item.title, requestedSeasons)
+        }
+    }
+
+    fun retryMediaLifecycleRequest() {
+        if (_state.value.isLoadingMediaLifecycle) return
+        val service = mediaLifecycleService ?: return
+        val requestId = _state.value.mediaLifecycleStatus?.requestId ?: return
+        scope.launch {
+            _state.update {
+                it.copy(
+                    isLoadingMediaLifecycle = true,
+                    mediaLifecycleOperation = MediaLifecycleOperation.RETRY,
+                    mediaLifecycleError = null,
+                    mediaLifecycleMessage = null,
+                )
+            }
+            val status = runCatching { service.retry(requestId) }.getOrElse {
+                _state.update {
+                    it.copy(
+                        isLoadingMediaLifecycle = false,
+                        mediaLifecycleError = "The failed library request could not be retried.",
+                    )
+                }
+                return@launch
+            }
+            _state.update {
+                it.copy(
+                    mediaLifecycleStatus = status,
+                    isLoadingMediaLifecycle = false,
+                    mediaLifecycleMessage = "Library request restarted",
+                )
+            }
+        }
+    }
+
+    /**
+     * Removes only the Seerr request record. Existing Radarr/Sonarr/Jellyfin
+     * files are deliberately left untouched so this action is safe on TV.
+     */
+    fun deleteMediaLifecycleRequest() {
+        if (_state.value.isLoadingMediaLifecycle) return
+        val service = mediaLifecycleService ?: return
+        val status = _state.value.mediaLifecycleStatus ?: return
+        val requestId = status.requestId ?: return
+        scope.launch {
+            _state.update {
+                it.copy(
+                    isLoadingMediaLifecycle = true,
+                    mediaLifecycleOperation = MediaLifecycleOperation.REMOVE,
+                    mediaLifecycleError = null,
+                    mediaLifecycleMessage = null,
+                )
+            }
+            val removed = runCatching { service.deleteRequest(requestId) }.getOrDefault(false)
+            if (!removed) {
+                _state.update {
+                    it.copy(
+                        isLoadingMediaLifecycle = false,
+                        mediaLifecycleError = "The library request could not be removed.",
+                    )
+                }
+                return@launch
+            }
+            libraryRequestMonitor?.forget(status.tmdbId, status.mediaType)
+            _state.update {
+                it.copy(
+                    mediaLifecycleStatus = status.copy(
+                        state = MediaLifecycleState.DELETED,
+                        requestId = null,
+                    ),
+                    isLoadingMediaLifecycle = false,
+                    mediaLifecycleError = null,
+                    mediaLifecycleMessage = "Library request removed. Downloaded files were kept.",
+                )
+            }
+        }
+    }
+
+    /** An explicit browse choice must survive next-episode and watch-state refreshes. */
+    fun selectSeason(seasonNumber: Int) {
+        val item = _state.value.mediaItem ?: return
+        val id = item.tmdbId ?: return
+        if (item.type != MediaType.SERIES || seasonNumber <= 0) return
+        hasExplicitSeasonSelection = true
+        loadSeasonDetail(id, seasonNumber)
+    }
+
+    fun loadSeasonDetail(tvId: Int, seasonNumber: Int) {
+        seasonDetailJob?.cancel()
+        seasonDetailJob = scope.launch {
             _state.update {
                 it.copy(
                     selectedSeason = seasonNumber,
@@ -611,6 +933,7 @@ class DetailViewModel(
                     )
                 }
             } catch (e: Exception) {
+                if (e is CancellationException) throw e
                 detailDiagLog("loadSeasonDetail FAILED tvId=$tvId season=$seasonNumber error=${e::class.simpleName}")
                 val fallbackSeason = fallbackSeasonFromShowMetadata(seasonNumber)
                 _state.update {
@@ -676,30 +999,28 @@ class DetailViewModel(
      * Updates [DetailUiState.nextEpisode] — the single source of truth for both
      * the play button label and the playback target.
      */
-    private suspend fun resolveNextEpisode() {
+    private suspend fun resolveNextEpisode(preserveSelectedSeason: Boolean = false) {
         val item = _state.value.mediaItem ?: return
         if (item.type != MediaType.SERIES) {
             _state.update { it.copy(nextEpisode = null) }
             return
         }
 
-        // 1. Check for a partially-watched episode (2%–90% progress)
+        // 1. Check for a partially-watched episode (2%–85% progress)
         val allProgress = try { watchProgressRepo.getAllProgress() } catch (_: Exception) { emptyList() }
-        val inProgress = allProgress
-            .filter { it.seasonNumber != null && it.episodeNumber != null }
-            .filter { it.showTitle == item.title || it.mediaId == item.id.toString() }
-            .filter { it.progressPercent > 0.02f && it.progressPercent < 0.9f }
-            .maxByOrNull { it.updatedAt }
+        if (_state.value.mediaItem?.id != item.id) return
+        val inProgress = preferredInProgressEpisode(item, allProgress)
 
         if (inProgress != null) {
-            _state.update {
-                it.copy(nextEpisode = NextEpisodeInfo(
+            applyPreferredEpisode(
+                NextEpisodeInfo(
                     season = inProgress.seasonNumber!!,
                     episode = inProgress.episodeNumber!!,
                     progressPercent = inProgress.progressPercent,
                     mode = NextEpisodeMode.RESUME_IN_PROGRESS,
-                ))
-            }
+                ),
+                preserveSelectedSeason = preserveSelectedSeason,
+            )
             return
         }
 
@@ -709,31 +1030,54 @@ class DetailViewModel(
             .filter { it.seasonNumber > 0 }
             .sortedBy { it.seasonNumber }
 
-        for (season in seasons) {
-            for (ep in 1..season.episodeCount) {
-                if (episodeKey(season.seasonNumber, ep) !in watched) {
-                    _state.update {
-                        it.copy(nextEpisode = NextEpisodeInfo(
-                            season = season.seasonNumber,
-                            episode = ep,
-                            mode = NextEpisodeMode.PLAY_FIRST_UNWATCHED,
-                        ))
-                    }
-                    return
-                }
-            }
+        firstUnwatchedEpisode(seasons, watched)?.let { (season, episode) ->
+            applyPreferredEpisode(
+                NextEpisodeInfo(
+                    season = season,
+                    episode = episode,
+                    mode = NextEpisodeMode.PLAY_FIRST_UNWATCHED,
+                ),
+                preserveSelectedSeason = preserveSelectedSeason,
+            )
+            return
         }
 
         // 3. All episodes watched — restart from S01E01
         val firstSeason = seasons.firstOrNull()
         if (firstSeason != null) {
-            _state.update {
-                it.copy(nextEpisode = NextEpisodeInfo(
+            applyPreferredEpisode(
+                NextEpisodeInfo(
                     season = firstSeason.seasonNumber,
                     episode = 1,
                     mode = NextEpisodeMode.PLAY_FROM_START,
-                ))
-            }
+                ),
+                preserveSelectedSeason = preserveSelectedSeason,
+            )
+        }
+    }
+
+    /** Keep the play target and the visible season/episode selector aligned. */
+    private fun applyPreferredEpisode(
+        next: NextEpisodeInfo,
+        preserveSelectedSeason: Boolean = false,
+    ) {
+        val item = _state.value.mediaItem ?: return
+        val keepSelectedSeason = preserveSelectedSeason || hasExplicitSeasonSelection
+        val seasonNeedsLoading = !keepSelectedSeason && (
+            _state.value.selectedSeason != next.season ||
+                _state.value.seasonDetail?.seasonNumber != next.season
+            )
+        _state.update {
+            it.copy(
+                nextEpisode = next,
+                selectedSeason = if (keepSelectedSeason) it.selectedSeason else next.season,
+                streamContextSeason = pinnedPlaybackEpisode?.first ?: next.season,
+                streamContextEpisode = pinnedPlaybackEpisode?.second ?: next.episode,
+            )
+        }
+        if (seasonNeedsLoading) {
+            item.tmdbId?.let { tvId -> loadSeasonDetail(tvId, next.season) }
+            loadMediaLifecycleStatus(item)
         }
     }
 
@@ -741,6 +1085,21 @@ class DetailViewModel(
      * For TV shows: play the resolved next episode.
      * For movies: delegates straight to fetchStreams().
      */
+    fun selectEpisodeForPlayback(season: Int, episode: Int) =
+        selectEpisodeForPlayback(season, episode, pinPlaybackTarget = false)
+
+    fun selectEpisodeForPlayback(season: Int, episode: Int, pinPlaybackTarget: Boolean) {
+        if (season < 0 || episode <= 0) return
+        hasExplicitSeasonSelection = true
+        pinnedPlaybackEpisode = (season to episode).takeIf { pinPlaybackTarget }
+        _state.update {
+            it.copy(
+                streamContextSeason = season,
+                streamContextEpisode = episode,
+            )
+        }
+    }
+
     fun playNextEpisode() {
         val item = _state.value.mediaItem ?: return
         if (item.type != MediaType.SERIES) {
@@ -762,9 +1121,44 @@ class DetailViewModel(
         }
     }
 
+    /** Use an extension's supplied metadata without enabling or querying the built-in catalogue. */
+    fun loadExtensionDetail(json: String) {
+        val item = kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
+            .decodeFromString<MediaItem>(json)
+        require(item.id.isNotBlank())
+        detailLoadJob?.cancel()
+        ratingsJob?.cancel()
+        cancelSourceLookup()
+        watchedEpisodesJob?.cancel()
+        seriesWatchRefreshJob?.cancel()
+        sourceResultsCache.clear()
+        currentType = if (item.type == MediaType.SERIES) "tv" else "movie"
+        currentId = item.tmdbId
+        hasExplicitSeasonSelection = false
+        pinnedPlaybackEpisode = null
+        val season = item.seasons.firstOrNull { it.seasonNumber > 0 }
+        _state.value = DetailUiState(isLoading = false, mediaItem = item,
+            selectedSeason = season?.seasonNumber ?: 1, seasonDetail = season)
+        // Catalogue, Search and Library destinations enter here after resolving
+        // supplied metadata, rather than through loadDetail.
+        enrichRatings(item)
+        if (item.type == MediaType.SERIES) loadWatchedEpisodes()
+        else scope.launch {
+            val progress = watchProgressRepo.getProgress(item.id)
+            if (_state.value.mediaItem?.id == item.id) _state.update { it.copy(watchProgress = progress) }
+        }
+    }
+
+    fun selectExtensionSeason(number: Int) {
+        val season = _state.value.mediaItem?.seasons?.firstOrNull { it.seasonNumber == number } ?: return
+        hasExplicitSeasonSelection = true
+        _state.update { it.copy(selectedSeason = number, seasonDetail = season) }
+    }
+
     fun warmupLikelyPlaybackTarget(
         trigger: ContentWarmupTrigger = ContentWarmupTrigger.DETAIL_OPEN,
     ) {
+        if (com.torve.data.addon.ExtensionRuntimePolicy.userManagedOnly) return
         warmupJob?.cancel()
         warmupJob = scope.launch {
             val uiState = _state.value
@@ -793,28 +1187,110 @@ class DetailViewModel(
     }
 
     fun fetchStreams(season: Int? = null, episode: Int? = null, forceManualPick: Boolean = false) {
+        if (_state.value.mediaItem?.catalogueNotice != null) return
+        fetchSourceResults(season, episode, forceManualPick, refreshSources = false)
+    }
+
+    /** An explicit next-episode handoff carries only the source that actually started playing. */
+    fun fetchStreamsForContinuation(season: Int, episode: Int, reference: SourceProfile?) {
+        fetchSourceResults(season, episode, forceManualPick = false, refreshSources = false,
+            continuationReference = reference, continuingEpisode = true)
+    }
+
+    fun refreshStreams(season: Int? = null, episode: Int? = null) {
+        fetchSourceResults(season, episode, forceManualPick = true, refreshSources = true)
+    }
+
+    fun onPlaybackLaunched(season: Int?, episode: Int?) {
+        val key = activeSourceResultsKey ?: return
+        if (key.season == season && key.episode == episode) {
+            sourceResultsCache.playbackLaunched(key, _state.value)
+        }
+    }
+
+    fun restoreSourcesAfterPlayback() {
+        sourceResultsCache.restoreAfterPlayback(_state.value) {
+            sourceTrackInspector?.cached(it) ?: it
+        } ?: return
+        resumeDetail()
+        _state.update { it.copy(returnToPrimaryRequestId = it.returnToPrimaryRequestId + 1) }
+    }
+
+    /** Keep reusable results in their identity-bound cache, never an open presentation on return. */
+    fun leaveDetail() {
+        cancelSourceLookup()
+        _state.update { it.withSourcePresentationClosed() }
+    }
+
+    /** Re-evaluate Watch now after playback; an explicit old episode is no longer pinned. */
+    fun resumeDetail() {
+        leaveDetail()
+        pinnedPlaybackEpisode = null
+        refreshWatchState()
+    }
+
+    private fun fetchSourceResults(season: Int?, episode: Int?, forceManualPick: Boolean,
+        refreshSources: Boolean, continuationReference: SourceProfile? = null, continuingEpisode: Boolean = false) {
+        if (_state.value.mediaItem?.catalogueNotice != null) return
+        if (com.torve.data.addon.ExtensionRuntimePolicy.userManagedOnly) {
+            fetchUserManagedSources(season, episode, refreshSources, forceManualPick, continuationReference, continuingEpisode)
+            return
+        }
         val item = _state.value.mediaItem ?: return
         val imdbId = item.imdbId
         if (imdbId == null) {
             _state.update {
                 it.copy(
+                    isLoadingStreams = false,
+                    isLoadingMoreSources = false,
+                    isResolving = false,
                     streamsError = "No IMDB ID — cannot fetch streams for this title",
                     streamsErrorHint = null,
                     streamFilterHiddenCount = 0,
+                    autoPlayMessage = null,
+                    preparing = null,
                 )
             }
             return
         }
 
-        scope.launch {
+        activeSourceResultsKey?.let { sourceResultsCache.retain(it, _state.value) }
+        streamFetchJob?.cancel()
+        cancelPreparingLoop()
+        cancelUsenetResolveAndPoll()
+        streamFetchJob = scope.launch {
+            val settings = settingsProvider?.invoke()
+            val preferences = settings?.buildStreamPreferences() ?: StreamPreferences()
+            val addons = try { addonRepo.getInstalledAddons() }
+                catch (cancelled: CancellationException) { throw cancelled }
+                catch (_: Exception) { emptyList() }
+            val debridAccounts = settings?.getDebridAccounts() ?: emptyMap()
+            // Account sync updates timestamps without changing the source configuration.
+            val sourceAddons = addons.map { it.copy(installedAt = 0L, syncedAt = null) }
+            val resultsKey = DetailSourceResultsCache.Key(item.type, imdbId, season, episode,
+                preferences, sourceAddons, debridAccounts)
+            if (refreshSources) sourceResultsCache.invalidate(resultsKey)
+            if (!refreshSources && !continuingEpisode) {
+                val retained = sourceResultsCache.restore(resultsKey, _state.value) {
+                    sourceTrackInspector?.cached(it) ?: it
+                }
+                if (retained != null) {
+                    activeSourceResultsKey = resultsKey
+                    _state.value = retained
+                    return@launch
+                }
+            }
+            activeSourceResultsKey = resultsKey
             _state.update {
                 it.copy(
                     isLoadingStreams = true,
                     isLoadingMoreSources = false,
                     streamsError = null,
                     streamsErrorHint = null,
+                    resolveError = null,
+                    resolvedStream = null,
                     streamFilterHiddenCount = 0,
-                    streams = emptyList(),
+                    streams = emptyList(), sourceStatistics = emptyList(),
                     startupCandidates = emptyList(),
                     streamContextSeason = season,
                     streamContextEpisode = episode,
@@ -829,11 +1305,7 @@ class DetailViewModel(
                 )
             }
             try {
-                val settings = settingsProvider?.invoke()
-                val preferences = settings?.buildStreamPreferences() ?: StreamPreferences()
-                val addons = try { addonRepo.getInstalledAddons() } catch (_: Exception) { emptyList() }
                 println("TORVE_STREAMS: ${addons.size} addons installed: ${addons.map { "${it.manifest.name}(${it.isEnabled},res=${it.manifest.resources})" }}")
-                val debridAccounts = settings?.getDebridAccounts() ?: emptyMap()
                 val request = buildStartupRequest(
                     item = item,
                     season = season,
@@ -842,17 +1314,20 @@ class DetailViewModel(
                     addons = addons,
                     debridAccounts = debridAccounts,
                 ) ?: return@launch
-                val startupSnapshot = runCatching {
-                    streamRepo.getWarmStartupCandidates(request)
-                        ?: streamRepo.getStartupCandidates(request)
-                }.getOrDefault(
-                    com.torve.domain.model.StartupCandidatesSnapshot(
+                val emptyStartupSnapshot = com.torve.domain.model.StartupCandidatesSnapshot(
                         request = request,
                         readinessState = com.torve.domain.model.ReadinessState.EMPTY,
                         candidates = emptyList(),
-                    ),
-                )
-                val startupFetch = runCatching {
+                    )
+                val startupSnapshot = try {
+                    streamRepo.getWarmStartupCandidates(request)
+                        ?: streamRepo.getStartupCandidates(request)
+                } catch (cancellationException: CancellationException) {
+                    throw cancellationException
+                } catch (_: Exception) {
+                    emptyStartupSnapshot
+                }
+                val startupResult = try {
                     streamRepo.fetchStreamsWithFeedback(
                         type = item.type,
                         imdbId = imdbId,
@@ -865,13 +1340,18 @@ class DetailViewModel(
                         preferences = preferences,
                         fetchPolicy = StreamFetchPolicy.PLAYBACK_STARTUP,
                     )
+                } catch (cancellationException: CancellationException) {
+                    throw cancellationException
+                } catch (_: Exception) {
+                    null
                 }
-                val startupResult = startupFetch.getOrNull()
+                _state.update { it.copy(sourceStatistics = startupResult?.providerStats.orEmpty()) }
                 val startupStreams = startupResult?.streams.orEmpty()
                 val startupFilterHiddenCount = startupResult?.filterFeedback?.hiddenCount ?: 0
                 val startupPresentation = prioritizeStreamsForPresentation(
                     streams = startupStreams,
                     preferences = preferences,
+                    continuationReference = continuationReference,
                 )
 
                 if (startupPresentation.ordered.isNotEmpty()) {
@@ -881,19 +1361,21 @@ class DetailViewModel(
                             startupCandidates = startupSnapshot.candidates,
                             isLoadingStreams = false,
                             streamFilterHiddenCount = startupFilterHiddenCount,
-                            showStreamPicker = forceManualPick || !preferences.autoPlayEnabled,
+                            showStreamPicker = forceManualPick || (!preferences.autoPlayEnabled && !continuingEpisode),
                             playbackStartupStatus = DetailPlaybackStartupOrchestrator.reduce(
                                 it.playbackStartupStatus,
                                 PlaybackStartupEvent.StartupCandidatesAvailable(startupPresentation.ordered.size),
                             ),
                         )
                     }
+                    sourceResultsCache.retain(resultsKey, _state.value, fresh = true)
                 }
 
-                val shouldAutoPlay = preferences.autoPlayEnabled && !forceManualPick
+                val shouldAutoPlay = (preferences.autoPlayEnabled || continuingEpisode) && !forceManualPick
                 var startupResolveResult = AutoResolveResult(resolved = false)
 
-                if (shouldAutoPlay && startupPresentation.rankedPlayable.isNotEmpty()) {
+                if (shouldAutoPlay && startupPresentation.rankedPlayable.isNotEmpty() &&
+                    StreamContinuationSelector().canStartFromPartialResults(startupPresentation.rankedPlayable, continuationReference)) {
                     val bestStartup = startupPresentation.rankedPlayable.first()
                     _state.update {
                         it.copy(
@@ -948,16 +1430,19 @@ class DetailViewModel(
                     preferences = preferences,
                     fetchPolicy = StreamFetchPolicy.FULL,
                 )
-                val fullStreams = fullFetch.streams
+                _state.update { it.copy(sourceStatistics = fullFetch.providerStats) }
+                val fullStreams = inspectAutoPlayLanguages(fullFetch.streams, preferences, shouldAutoPlay)
                 val fullFilterHiddenCount = fullFetch.filterFeedback.hiddenCount
                 val fullPresentation = prioritizeStreamsForPresentation(
                     streams = fullStreams,
                     preferences = preferences,
+                    continuationReference = continuationReference,
                 )
                 val mergedPresentation = mergePresentations(
                     startupPresentation = startupPresentation,
                     fullPresentation = fullPresentation,
                     preferences = preferences,
+                    continuationReference = continuationReference,
                 )
 
                 _state.update {
@@ -975,6 +1460,7 @@ class DetailViewModel(
                         ),
                     )
                 }
+                sourceResultsCache.retain(resultsKey, _state.value, fresh = true)
 
                 if (mergedPresentation.ordered.isEmpty()) {
                     val filteredMessage = StreamFilterUiText.allHiddenMessage(
@@ -983,7 +1469,7 @@ class DetailViewModel(
                     )
                     _state.update {
                         it.copy(
-                            streamsError = filteredMessage ?: "No streams found",
+                            streamsError = fullFetch.sourceErrors.firstOrNull() ?: filteredMessage ?: "No streams found",
                             streamsErrorHint = StreamFilterUiText.allHiddenHint(
                                 visibleCount = mergedPresentation.ordered.size,
                                 hiddenCount = fullFilterHiddenCount,
@@ -1004,6 +1490,15 @@ class DetailViewModel(
                             it.copy(
                                 showStreamPicker = true,
                                 streamsError = "No compatible streams found for this device - pick manually or try a different quality",
+                            )
+                        }
+                    }
+                    if (playable.isEmpty()) {
+                        _state.update {
+                            it.copy(
+                                streamsError = null,
+                                streamsErrorHint = null,
+                                autoPlayFailed = true,
                             )
                         }
                     } else {
@@ -1078,14 +1573,20 @@ class DetailViewModel(
                 } else {
                     _state.update { it.copy(showStreamPicker = true) }
                 }
+            } catch (cancellationException: CancellationException) {
+                throw cancellationException
             } catch (e: Exception) {
-                _state.update {
-                    it.copy(
+                _state.update { current ->
+                    val hasVisibleCandidates = current.streams.isNotEmpty()
+                    current.copy(
                         isLoadingStreams = false,
                         isLoadingMoreSources = false,
-                        streamsError = com.torve.presentation.error.UserFacingError.STREAMS_LOAD_FAILED.messageKey,
+                        streamsError = if (hasVisibleCandidates) null
+                        else com.torve.presentation.error.UserFacingError.STREAMS_LOAD_FAILED.messageKey,
                         streamsErrorHint = null,
-                        streamFilterHiddenCount = 0,
+                        streamFilterHiddenCount = if (hasVisibleCandidates) current.streamFilterHiddenCount else 0,
+                        showStreamPicker = hasVisibleCandidates,
+                        autoPlayFailed = hasVisibleCandidates,
                     )
                 }
             } finally {
@@ -1095,6 +1596,102 @@ class DetailViewModel(
                 // the startup snapshot surfaced. No-op when no Usenet
                 // candidates are present.
                 maybePrewarmUsenetCandidates(season = season, episode = episode)
+            }
+        }
+    }
+
+    /** Watch and Choose source share one bounded search; only Watch may resolve a result. */
+    private fun fetchUserManagedSources(season: Int?, episode: Int?, refresh: Boolean,
+        manual: Boolean, continuationReference: SourceProfile?, continuingEpisode: Boolean) {
+        val item = _state.value.mediaItem ?: return
+        val lookupOwner = contentPolicyFilter.profileOwnerKey()
+        cancelSourceLookup()
+        warmupJob?.cancel()
+        _state.update { it.copy(streams = emptyList(), sourceStatistics = emptyList(), startupCandidates = emptyList(),
+            isLoadingStreams = true, isLoadingMoreSources = false, showStreamPicker = manual,
+            streamsError = null, streamsErrorHint = null, streamContextSeason = season,
+            streamContextEpisode = episode, resolvedStream = null, autoPlayStream = null,
+            autoPlayMessage = if (manual) null else "Finding the best source…", resolveError = null,
+            autoPlayFailed = false, streamFilterHiddenCount = 0) }
+        streamFetchJob = scope.launch {
+            try {
+                val settings = settingsProvider?.invoke()
+                settings?.awaitPlaybackSettings()
+                val preferences = settings?.buildStreamPreferences() ?: StreamPreferences()
+                val debridAccounts = settings?.getDebridAccounts().orEmpty()
+                var latestPartial: StreamFetchResult? = null
+                val completedResult = withTimeoutOrNull(35_000L) {
+                    val imdb = item.imdbId ?: item.id
+                    val addons = addonRepo.getInstalledAddons()
+                    val key = DetailSourceResultsCache.Key(item.type, imdb, season, episode, preferences,
+                        addons.map { it.copy(installedAt = 0L, syncedAt = null) }, debridAccounts)
+                    activeSourceResultsKey = key
+                    if (refresh) sourceResultsCache.invalidate(key)
+                    // Keep manifest URLs unchanged. Connected accounts still verify raw
+                    // torrent results before the cached-only filter and resolve playback.
+                    streamRepo.fetchStreamsProgressively(type = item.type, imdbId = imdb,
+                        contentId = item.tmdbId?.let { "tmdb:$it" }, title = item.title,
+                        season = season, episode = episode, addons = addons, debridAccounts = debridAccounts,
+                        preferences = preferences, fetchPolicy = StreamFetchPolicy.FULL,
+                        onPartialResults = { partial ->
+                            kotlinx.coroutines.currentCoroutineContext().ensureActive()
+                            if (lookupOwner == contentPolicyFilter.profileOwnerKey() && _state.value.mediaItem?.id == item.id) {
+                                latestPartial = partial
+                                _state.update { it.copy(streams = partial.streams, isLoadingStreams = partial.streams.isEmpty(),
+                                    isLoadingMoreSources = true, streamFilterHiddenCount = partial.filterFeedback.hiddenCount,
+                                    showStreamPicker = it.showStreamPicker || (partial.streams.isNotEmpty() &&
+                                        !preferences.autoPlayEnabled && !continuingEpisode)) }
+                            }
+                        })
+                }
+                if (lookupOwner != contentPolicyFilter.profileOwnerKey() || _state.value.mediaItem?.id != item.id) return@launch
+                // A slow provider must not erase usable, already-filtered rows
+                // from another provider when the overall search budget expires.
+                val result = completedResult ?: latestPartial?.takeIf { it.streams.isNotEmpty() }
+                val streams = result?.streams.orEmpty()
+                _state.update { it.copy(sourceStatistics = result?.providerStats.orEmpty()) }
+                _state.update { it.copy(streams = streams, isLoadingStreams = false, isLoadingMoreSources = false,
+                    isResolving = false, streamFilterHiddenCount = result?.filterFeedback?.hiddenCount ?: 0,
+                    streamsError = when {
+                        streams.isEmpty() && !result?.sourceErrors.isNullOrEmpty() -> result?.sourceErrors?.firstOrNull()
+                        result == null -> com.torve.presentation.error.UserFacingError.STREAMS_SEARCH_TIMEOUT.messageKey
+                        streams.isEmpty() && result.filterFeedback.hiddenCount > 0 ->
+                            com.torve.presentation.error.UserFacingError.STREAMS_FILTERED_OUT.messageKey
+                        streams.isEmpty() -> com.torve.presentation.error.UserFacingError.STREAMS_NONE_FOUND.messageKey
+                        else -> null
+                    }, autoPlayMessage = null, showStreamPicker = manual || streams.isEmpty()) }
+                if (streams.isNotEmpty()) activeSourceResultsKey?.let { sourceResultsCache.retain(it, _state.value, fresh = completedResult != null) }
+                if (streams.isEmpty()) return@launch
+                if (manual || (!preferences.autoPlayEnabled && !continuingEpisode)) {
+                    _state.update { it.copy(showStreamPicker = true) }
+                    return@launch
+                }
+                // Track verification and resolver fallback have explicit budgets as well as provider search.
+                // Unverified language preferences are never silently relaxed to force autoplay.
+                withTimeoutOrNull(25_000L) { inspectAutoPlayLanguages(streams, preferences, true) }
+                val presentation = prioritizeStreamsForPresentation(streams, preferences, continuationReference)
+                _state.update { it.copy(streams = presentation.ordered, isInspectingSourceLanguages = false) }
+                if (presentation.rankedPlayable.isEmpty()) {
+                    _state.update { it.copy(showStreamPicker = true, autoPlayMessage = null,
+                        streamsError = com.torve.presentation.error.UserFacingError.STREAMS_NO_PREFERENCE_MATCH.messageKey) }
+                    return@launch
+                }
+                // Personal providers can wait two minutes for an existing cloud
+                // download before returning a video or an explicit pending state.
+                val resolved = withTimeoutOrNull(180_000L) {
+                    autoResolveStreamProgressive(presentation.rankedPlayable, 0, preferences,
+                        failureBehavior = AutoResolveFailureBehavior.DEFER_TO_FULL_FETCH).resolved
+                } == true
+                if (!resolved && _state.value.preparing == null) {
+                    _state.update { it.copy(isResolving = false, preparing = null, autoPlayMessage = null,
+                        showStreamPicker = true, autoPlayFailed = true,
+                        streamsError = it.streamsError ?: com.torve.presentation.error.UserFacingError.STREAMS_PROVIDER_OPEN_FAILED.messageKey) }
+                }
+            } catch (cancelled: CancellationException) { throw cancelled }
+            catch (_: Exception) {
+                _state.update { it.copy(isLoadingStreams = false, isLoadingMoreSources = false,
+                    isResolving = false, showStreamPicker = true,
+                    streamsError = com.torve.presentation.error.UserFacingError.STREAMS_LOAD_FAILED.messageKey) }
             }
         }
     }
@@ -1268,6 +1865,20 @@ class DetailViewModel(
                         // updated by every iteration of this loop and
                         // also by fresh taps; if it's drifted, drop.
                         if (activeUsenetCandidateId == tryingThis.candidateId) {
+                            val selected = _state.value.streams.firstOrNull {
+                                it.usenetCandidateIdOrNull() == tryingThis.candidateId
+                            } ?: return@launch
+                            try {
+                                streamRepo.authorizePreparedStream(selected,
+                                    com.torve.domain.model.ResolvedStream(url = terminal.stream.url))
+                            } catch (cancelled: CancellationException) {
+                                throw cancelled
+                            } catch (error: Exception) {
+                                _state.update { it.copy(isResolving = false, autoPlayMessage = null,
+                                    resolveError = streamResolveErrorKey(error)) }
+                                return@launch
+                            }
+                            sourceTrackInspector?.associate(selected, terminal.stream.url)
                             _state.update {
                                 it.copy(
                                     isResolving = false,
@@ -1474,6 +2085,13 @@ class DetailViewModel(
      * times.
      */
     fun clear() {
+        detailLoadJob?.cancel()
+        ratingsJob?.cancel()
+        sourceResultsCache.clear()
+        activeSourceResultsKey = null
+        streamFetchJob?.cancel()
+        watchedEpisodesJob?.cancel()
+        seriesWatchRefreshJob?.cancel()
         cancelUsenetResolveAndPoll()
     }
 
@@ -1541,19 +2159,49 @@ class DetailViewModel(
         }
     }
 
+    private suspend fun inspectAutoPlayLanguages(
+        streams: List<ParsedStream>, preferences: StreamPreferences, autoPlay: Boolean,
+    ): List<ParsedStream> {
+        val inspector = sourceTrackInspector ?: return streams
+        if (autoPlay && preferences.preferredAudioLanguages.isNotEmpty()) {
+            _state.update { it.copy(streams = streams,
+                showStreamPicker = it.showStreamPicker || !com.torve.data.addon.ExtensionRuntimePolicy.userManagedOnly, isLoadingStreams = false,
+                isInspectingSourceLanguages = true, autoPlayMessage = "Checking audio and subtitle languages…") }
+            try {
+                for (stream in streams.filter { inspector.canInspect(it) && !inspector.cached(it).trackLanguagesVerified }
+                    .take(if (com.torve.data.addon.ExtensionRuntimePolicy.userManagedOnly) 3 else 12)) {
+                    inspector.inspect(stream)
+                    _state.update { it.copy(streams = streams.map(inspector::cached)) }
+                }
+            } finally { _state.update { it.copy(isInspectingSourceLanguages = false, autoPlayMessage = null) } }
+        }
+        return streams.map(inspector::cached)
+    }
+
     private fun prioritizeStreamsForPresentation(
         streams: List<ParsedStream>,
         preferences: StreamPreferences,
+        continuationReference: SourceProfile? = null,
     ): StreamPresentationResult {
         if (streams.isEmpty()) return StreamPresentationResult(emptyList(), emptyList())
 
-        val rankedPlayable = streamSelector.rankPlayableVariants(
-            streams = streams,
+        val enriched = streams.map { sourceTrackInspector?.cached(it) ?: it }
+        val playable = streamSelector.rankWithPresetFallback(
+            streams = enriched.filter { stream ->
+                preferences.preferredAudioLanguages.isEmpty() || sourceTrackInspector == null ||
+                    stream.trackLanguagesVerified || !sourceTrackInspector.canInspect(stream)
+            },
             preferences = preferences,
             deviceCaps = deviceCodecCaps,
+            context = com.torve.data.addon.StreamSelectionContext(durationMs = (
+                _state.value.seasonDetail?.episodes?.firstOrNull { it.episodeNumber == _state.value.streamContextEpisode }?.runtime
+                    ?: _state.value.mediaItem?.runtime)?.takeIf { it > 0 }?.times(60_000L)),
         )
+        // Compatibility and the user's filters remain authoritative before continuity ranking.
+        val rankedPlayable = if (continuationReference == null) playable else
+            StreamContinuationSelector().rankSourcesForContinuation(playable, continuationReference).map { it.stream }
         val rankedKeys = rankedPlayable.mapTo(linkedSetOf()) { it.presentationKey() }
-        val remaining = streams
+        val remaining = enriched
             .filterNot { it.presentationKey() in rankedKeys }
             .sortedWith(
                 compareByDescending<ParsedStream> { it.isInstantPlaybackCandidate() }
@@ -1573,6 +2221,7 @@ class DetailViewModel(
         startupPresentation: StreamPresentationResult,
         fullPresentation: StreamPresentationResult,
         preferences: StreamPreferences,
+        continuationReference: SourceProfile? = null,
     ): StreamPresentationResult {
         val mergedOrdered = DetailPlaybackStartupOrchestrator.mergeStreams(
             startupStreams = startupPresentation.ordered,
@@ -1589,7 +2238,10 @@ class DetailViewModel(
 
         return StreamPresentationResult(
             ordered = mergedOrdered,
-            rankedPlayable = if (mergedRankedPlayable.isNotEmpty()) {
+            rankedPlayable = if (continuationReference != null) {
+                // Merge can prepend a cached fallback ahead of a newly fetched group match.
+                prioritizeStreamsForPresentation(mergedOrdered, preferences, continuationReference).rankedPlayable
+            } else if (mergedRankedPlayable.isNotEmpty()) {
                 mergedRankedPlayable
             } else {
                 prioritizeStreamsForPresentation(mergedOrdered, preferences).rankedPlayable
@@ -1606,7 +2258,7 @@ class DetailViewModel(
     }
 
     private fun ParsedStream.isInstantPlaybackCandidate(): Boolean {
-        return isCached || directUrl != null
+        return isCached || (directUrl != null && configuredNzb == null)
     }
 
     private fun removeFailedStreamCandidate(stream: ParsedStream) {
@@ -1676,17 +2328,36 @@ class DetailViewModel(
                 return
             }
             println("TORVE_AUTORESOLVE: Success resolvedUrl=${resolved.url.isNotBlank()}")
-            com.torve.data.addon.StreamRuntimeTelemetry.recordStartupSuccess(hostKey, 0L)
             val url = resolved.url.orEmpty()
+            val dispatch = DetailPlaybackStartupOrchestrator.classifyResolvedStream(
+                url = url,
+                addonHosted = stream.isAddonHostedUrl(),
+            )
+            if (dispatch == ResolvedStreamDispatch.REJECT_EMPTY) {
+                com.torve.data.addon.StreamRuntimeTelemetry.recordFatalError(hostKey)
+                streamRepo.reportPlaybackOutcome(stream, provider, success = false)
+                _state.update {
+                    it.copy(
+                        autoPlayMessage = "Source returned no playable link, trying next...",
+                        fallbackAttempt = attemptIndex + 1,
+                    )
+                }
+                autoResolveStream(streams, attemptIndex + 1, preferences)
+                return
+            }
             // Non-addon URLs are playable immediately — same as the fast
             // path below. Addon URLs go through probe; Ready plays, Preparing
             // locks in on this stream (no fallback), Failed falls through.
-            if (!stream.isAddonHostedUrl() || url.isBlank()) {
+            if (dispatch == ResolvedStreamDispatch.PLAY_IMMEDIATELY) {
+                stageContinuationSelection(stream, resolved, origin = ContinuationSelectionOrigin.AUTOMATIC)
                 _state.update {
                     it.copy(
                         resolvedStream = resolved,
                         isResolving = false,
                         showStreamPicker = false,
+                        resolveError = null,
+                        streamsError = null,
+                        autoPlayFailed = false,
                         autoPlayMessage = if (attemptIndex > 0) {
                             "Switched to a more stable source"
                         } else {
@@ -1698,11 +2369,20 @@ class DetailViewModel(
             }
             when (val readiness = streamRepo.probeStreamReadiness(url)) {
                 is com.torve.domain.repository.StreamReadiness.Ready -> {
+                    stageContinuationSelection(
+                        stream,
+                        resolved,
+                        playbackUrl = readiness.finalUrl,
+                        origin = ContinuationSelectionOrigin.AUTOMATIC,
+                    )
                     _state.update {
                         it.copy(
                             resolvedStream = resolved.copy(url = readiness.finalUrl),
                             isResolving = false,
                             showStreamPicker = false,
+                            resolveError = null,
+                            streamsError = null,
+                            autoPlayFailed = false,
                             autoPlayMessage = if (attemptIndex > 0) {
                                 "Switched to a more stable source"
                             } else {
@@ -1713,7 +2393,12 @@ class DetailViewModel(
                 }
                 com.torve.domain.repository.StreamReadiness.Preparing -> {
                     _state.update { it.copy(autoPlayMessage = null) }
-                    startPreparingLoop(stream, url, resolved)
+                    startPreparingLoop(
+                        stream,
+                        url,
+                        resolved,
+                        origin = ContinuationSelectionOrigin.AUTOMATIC,
+                    )
                 }
                 is com.torve.domain.repository.StreamReadiness.Failed -> {
                     streamRepo.reportPlaybackOutcome(stream, provider, success = false)
@@ -1726,6 +2411,8 @@ class DetailViewModel(
                     autoResolveStream(streams, attemptIndex + 1, preferences)
                 }
             }
+        } catch (cancellationException: CancellationException) {
+            throw cancellationException
         } catch (e: Exception) {
             com.torve.data.addon.StreamRuntimeTelemetry.recordFatalError(hostKey)
             streamRepo.reportPlaybackOutcome(stream, provider, success = false)
@@ -1825,14 +2512,38 @@ class DetailViewModel(
                     attemptedKeys = currentAttemptedKeys,
                 )
             }
-            com.torve.data.addon.StreamRuntimeTelemetry.recordStartupSuccess(hostKey, 0L)
             val url = resolved.url.orEmpty()
-            if (!stream.isAddonHostedUrl() || url.isBlank()) {
+            val dispatch = DetailPlaybackStartupOrchestrator.classifyResolvedStream(
+                url = url,
+                addonHosted = stream.isAddonHostedUrl(),
+            )
+            if (dispatch == ResolvedStreamDispatch.REJECT_EMPTY) {
+                com.torve.data.addon.StreamRuntimeTelemetry.recordFatalError(hostKey)
+                streamRepo.reportPlaybackOutcome(stream, provider, success = false)
+                _state.update {
+                    it.copy(
+                        autoPlayMessage = "Source returned no playable link, trying next...",
+                        fallbackAttempt = attemptIndex + 1,
+                    )
+                }
+                return autoResolveStreamProgressive(
+                    streams = streams,
+                    attemptIndex = attemptIndex + 1,
+                    preferences = preferences,
+                    failureBehavior = failureBehavior,
+                    attemptedKeys = currentAttemptedKeys,
+                )
+            }
+            if (dispatch == ResolvedStreamDispatch.PLAY_IMMEDIATELY) {
+                stageContinuationSelection(stream, resolved, origin = ContinuationSelectionOrigin.AUTOMATIC)
                 _state.update {
                     it.copy(
                         resolvedStream = resolved,
                         isResolving = false,
                         showStreamPicker = false,
+                        resolveError = null,
+                        streamsError = null,
+                        autoPlayFailed = false,
                         autoPlayMessage = if (attemptIndex > 0) {
                             "Switched to a more stable source"
                         } else {
@@ -1844,11 +2555,20 @@ class DetailViewModel(
             }
             when (val readiness = streamRepo.probeStreamReadiness(url)) {
                 is com.torve.domain.repository.StreamReadiness.Ready -> {
+                    stageContinuationSelection(
+                        stream,
+                        resolved,
+                        playbackUrl = readiness.finalUrl,
+                        origin = ContinuationSelectionOrigin.AUTOMATIC,
+                    )
                     _state.update {
                         it.copy(
                             resolvedStream = resolved.copy(url = readiness.finalUrl),
                             isResolving = false,
                             showStreamPicker = false,
+                            resolveError = null,
+                            streamsError = null,
+                            autoPlayFailed = false,
                             autoPlayMessage = if (attemptIndex > 0) {
                                 "Switched to a more stable source"
                             } else {
@@ -1860,7 +2580,12 @@ class DetailViewModel(
                 }
                 com.torve.domain.repository.StreamReadiness.Preparing -> {
                     _state.update { it.copy(autoPlayMessage = null) }
-                    startPreparingLoop(stream, url, resolved)
+                    startPreparingLoop(
+                        stream,
+                        url,
+                        resolved,
+                        origin = ContinuationSelectionOrigin.AUTOMATIC,
+                    )
                     AutoResolveResult(resolved = false, attemptedKeys = currentAttemptedKeys)
                 }
                 is com.torve.domain.repository.StreamReadiness.Failed -> {
@@ -1880,6 +2605,8 @@ class DetailViewModel(
                     )
                 }
             }
+        } catch (cancellationException: CancellationException) {
+            throw cancellationException
         } catch (e: Exception) {
             com.torve.data.addon.StreamRuntimeTelemetry.recordFatalError(hostKey)
             streamRepo.reportPlaybackOutcome(stream, provider, success = false)
@@ -1919,7 +2646,10 @@ class DetailViewModel(
         if (!stream.codec.isNullOrBlank()) parts.add(stream.codec)
         if (stream.hdr != null) parts.add(stream.hdr)
         if (stream.size != null) parts.add(stream.size)
-        return "Playing: ${parts.joinToString(" · ")}"
+        val preset = settingsProvider?.invoke()?.buildStreamPreferences()?.let(com.torve.domain.model.PlaybackPreset::recognize)
+        if (stream.isCached) parts.add("cached")
+        if (stream.recentSuccessCount > 0) parts.add("played successfully before")
+        return "${preset?.label ?: "Selected source"}: ${parts.joinToString(" · ")}"
     }
 
     private fun Exception.shouldStopAutoResolveAndShowUser(): Boolean {
@@ -1935,12 +2665,13 @@ class DetailViewModel(
 
     private fun resolvingStatusMessage(stream: ParsedStream, provider: DebridServiceType?): String {
         return when {
+            stream.configuredNzb != null -> "Preparing Usenet video with TorBox..."
             stream.accelerationProvenanceKind == com.torve.domain.model.CandidateProvenanceKind.USENET_NZBDAV ->
                 "Preparing Usenet stream..."
             stream.isAddonHostedUrl() -> "Checking cloud stream readiness..."
             provider == DebridServiceType.REAL_DEBRID -> "Resolving with Real-Debrid..."
             provider != null -> "Resolving with ${provider.label}..."
-            stream.infoHash != null -> "Connect Real-Debrid in Panda to resolve this torrent stream."
+            stream.infoHash != null -> "Configure a playback provider in your extension to resolve this torrent stream."
             else -> "Resolving stream..."
         }
     }
@@ -2003,9 +2734,9 @@ class DetailViewModel(
     private fun streamResolveErrorMessage(error: Exception): String {
         return when (streamResolveErrorKey(error)) {
             com.torve.presentation.error.UserFacingError.STREAM_REAL_DEBRID_MISSING.messageKey ->
-                "Connect Real-Debrid in Panda to use this stream."
+                "Configure a playback provider in your extension to use this stream."
             com.torve.presentation.error.UserFacingError.STREAM_REAL_DEBRID_RECONNECT.messageKey ->
-                "Real-Debrid needs reconnecting. Open Settings > Advanced > Panda."
+                "Real-Debrid needs reconnecting. Open Extensions and update the provider configuration."
             com.torve.presentation.error.UserFacingError.STREAM_REAL_DEBRID_SOURCE_BLOCKED.messageKey ->
                 "Real-Debrid blocked this source. Try another source."
             com.torve.presentation.error.UserFacingError.STREAM_NO_CACHED_SOURCE.messageKey ->
@@ -2027,23 +2758,28 @@ class DetailViewModel(
     }
 
     fun resolveStream(stream: ParsedStream, provider: DebridServiceType?, apiKey: String) {
-        scope.launch {
+        streamFetchJob?.cancel()
+        streamFetchJob = scope.launch {
             cancelPreparingLoop()
             _state.update {
                 it.copy(
                     isResolving = true,
                     resolveError = null,
+                    resolvedStream = null,
+                    streamsError = null,
                     autoPlayMessage = resolvingStatusMessage(stream, provider),
                     preparing = null,
                 )
             }
             println("TORVE_RESOLVE: Starting resolve hasHash=${stream.infoHash != null} hasUrl=${stream.directUrl != null} provider=$provider keyLen=${apiKey.length}")
             try {
-                val resolved = withTimeoutOrNull(90_000L) {
+                // A selected NZB may need a fresh cloud download before a video is ready.
+                val timeoutMs = if (stream.configuredNzb != null) 330_000L else 90_000L
+                val resolved = withTimeoutOrNull(timeoutMs) {
                     streamRepo.resolveStream(stream, provider, apiKey)
                 }
                 if (resolved == null) {
-                    println("TORVE_RESOLVE: Timed out after 90s")
+                    println("TORVE_RESOLVE: Timed out after ${timeoutMs / 1000}s")
                     streamRepo.reportPlaybackOutcome(stream, provider, success = false)
                     _state.update {
                         it.copy(
@@ -2054,7 +2790,9 @@ class DetailViewModel(
                     }
                     return@launch
                 }
-                dispatchResolved(stream, provider, apiKey, resolved)
+                dispatchResolved(stream, provider, resolved)
+            } catch (cancellationException: CancellationException) {
+                throw cancellationException
             } catch (e: Exception) {
                 println("TORVE_RESOLVE: Exception ${e::class.simpleName}")
                 streamRepo.reportPlaybackOutcome(stream, provider, success = false)
@@ -2072,6 +2810,53 @@ class DetailViewModel(
         }
     }
 
+    /** Recover the selected extension source using an already-prepared TorBox
+     * file. The native caller binds the file to its exact existing job and keeps
+     * account/source generation checks around the provider request.
+     */
+    fun resolvePreparedTorBoxStream(stream: ParsedStream, url: String, fileName: String, fileSize: Long): Boolean {
+        val resolved = DetailPlaybackStartupOrchestrator.preparedTorBoxStream(stream, url, fileName, fileSize)
+            ?: return false
+        streamFetchJob?.cancel()
+        streamFetchJob = scope.launch {
+            cancelPreparingLoop()
+            _state.update { it.copy(isResolving = true, resolveError = null, resolvedStream = null,
+                streamsError = null, autoPlayMessage = null, preparing = null) }
+            try {
+                val approved = streamRepo.authorizePreparedStream(stream, resolved)
+                dispatchResolved(stream, DebridServiceType.TORBOX, approved)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                _state.update { it.copy(isResolving = false, autoPlayMessage = null,
+                    resolveError = streamResolveErrorKey(error)) }
+            }
+        }
+        return true
+    }
+
+    private fun stageContinuationSelection(
+        stream: ParsedStream,
+        resolved: com.torve.domain.model.ResolvedStream,
+        playbackUrl: String = resolved.url,
+        origin: ContinuationSelectionOrigin,
+    ) {
+        sourceTrackInspector?.associate(stream, playbackUrl)
+        SourceContinuationSessionStore.session.stageResolvedSource(
+            stream = stream,
+            playbackUrl = playbackUrl,
+            alternatePlaybackUrls = listOfNotNull(
+                resolved.url,
+                resolved.transcodeUrls?.mp4,
+                resolved.transcodeUrls?.hls,
+                resolved.transcodeUrls?.webm,
+            ),
+            resolvedFileName = resolved.fileName,
+            resolvedFileSize = resolved.fileSize,
+            origin = origin,
+        )
+    }
+
     /**
      * Route a freshly-resolved stream based on whether it needs a readiness
      * probe. Addon-hosted URLs (Panda's `/u/<token>/…`) go through the
@@ -2085,47 +2870,62 @@ class DetailViewModel(
     private suspend fun dispatchResolved(
         stream: ParsedStream,
         provider: DebridServiceType?,
-        apiKey: String,
         resolved: com.torve.domain.model.ResolvedStream,
+        readyMessage: String? = null,
+        origin: ContinuationSelectionOrigin = ContinuationSelectionOrigin.MANUAL,
     ) {
         val url = resolved.url.orEmpty()
-        if (url.isBlank()) {
+        val dispatch = DetailPlaybackStartupOrchestrator.classifyResolvedStream(
+            url = url,
+            addonHosted = stream.isAddonHostedUrl(),
+        )
+        if (dispatch == ResolvedStreamDispatch.REJECT_EMPTY) {
+            streamRepo.reportPlaybackOutcome(stream, provider, success = false)
             _state.update {
                 it.copy(
                     isResolving = false,
                     autoPlayMessage = null,
+                    showStreamPicker = true,
                     resolveError = com.torve.presentation.error.UserFacingError.STREAM_RESOLVE_FAILED.messageKey,
                 )
             }
             return
         }
-        if (!stream.isAddonHostedUrl()) {
+        if (dispatch == ResolvedStreamDispatch.PLAY_IMMEDIATELY) {
+            stageContinuationSelection(stream, resolved, origin = origin)
             _state.update {
                 it.copy(
                     resolvedStream = resolved,
                     isResolving = false,
-                    autoPlayMessage = null,
+                    autoPlayMessage = readyMessage,
                     showStreamPicker = false,
                     preparing = null,
+                    resolveError = null,
+                    streamsError = null,
+                    autoPlayFailed = false,
                 )
             }
             return
         }
         when (val readiness = streamRepo.probeStreamReadiness(url)) {
             is com.torve.domain.repository.StreamReadiness.Ready -> {
+                stageContinuationSelection(stream, resolved, readiness.finalUrl, origin)
                 _state.update {
                     it.copy(
-                        resolvedStream = resolved.copy(url = readiness.finalUrl),
-                        isResolving = false,
-                        autoPlayMessage = null,
+                            resolvedStream = resolved.copy(url = readiness.finalUrl),
+                            isResolving = false,
+                            autoPlayMessage = readyMessage,
                         showStreamPicker = false,
                         preparing = null,
+                        resolveError = null,
+                        streamsError = null,
+                        autoPlayFailed = false,
                     )
                 }
             }
             com.torve.domain.repository.StreamReadiness.Preparing -> {
                 _state.update { it.copy(isResolving = false, autoPlayMessage = null) }
-                startPreparingLoop(stream, url, resolved)
+                startPreparingLoop(stream, url, resolved, readyMessage, origin)
             }
             is com.torve.domain.repository.StreamReadiness.Failed -> {
                 streamRepo.reportPlaybackOutcome(stream, provider, success = false)
@@ -2153,6 +2953,8 @@ class DetailViewModel(
         stream: ParsedStream,
         url: String,
         resolved: com.torve.domain.model.ResolvedStream,
+        readyMessage: String? = null,
+        origin: ContinuationSelectionOrigin = ContinuationSelectionOrigin.MANUAL,
     ) {
         preparingJob?.cancel()
         val startedAt = Clock.System.now().toEpochMilliseconds()
@@ -2173,6 +2975,7 @@ class DetailViewModel(
                     serviceName = serviceName,
                     canCancel = true,
                 ),
+                isResolving = false,
                 resolveError = null,
                 autoPlayMessage = null,
                 // Close the source picker so the user doesn't accidentally
@@ -2182,56 +2985,47 @@ class DetailViewModel(
             )
         }
         preparingJob = scope.launch {
-            repeat(PREPARING_MAX_ATTEMPTS) { attemptIdx ->
-                delay(PREPARING_PROBE_INTERVAL_MS)
-                // Re-read latest PreparingStreamState each tick so the attempt
-                // counter can advance independently of the loop's local idx.
-                val result = try {
-                    streamRepo.probeStreamReadiness(url)
-                } catch (cancelled: kotlinx.coroutines.CancellationException) {
-                    throw cancelled
-                } catch (e: Exception) {
-                    com.torve.domain.repository.StreamReadiness.Failed(
-                        com.torve.presentation.error.UserFacingError.STREAM_RESOLVE_FAILED.messageKey,
-                    )
-                }
-                when (result) {
-                    is com.torve.domain.repository.StreamReadiness.Ready -> {
-                        _state.update {
-                            it.copy(
-                                preparing = null,
-                                resolvedStream = resolved.copy(url = result.finalUrl),
-                                showStreamPicker = false,
-                                resolveError = null,
-                            )
-                        }
-                        return@launch
+            // The budget includes resolver requests, which can themselves take
+            // minutes while a user's cloud service prepares its existing job.
+            val terminal = withTimeoutOrNull(PREPARING_PROBE_INTERVAL_MS * PREPARING_MAX_ATTEMPTS) {
+                repeat(PREPARING_MAX_ATTEMPTS) { attemptIdx ->
+                    delay(PREPARING_PROBE_INTERVAL_MS)
+                    val result = try {
+                        streamRepo.probeStreamReadiness(url)
+                    } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                        throw cancelled
+                    } catch (e: Exception) {
+                        com.torve.domain.repository.StreamReadiness.Failed(
+                            com.torve.presentation.error.UserFacingError.STREAM_RESOLVE_FAILED.messageKey,
+                        )
                     }
-                    com.torve.domain.repository.StreamReadiness.Preparing -> {
-                        _state.update { s ->
-                            val current = s.preparing ?: return@update s
-                            s.copy(preparing = current.copy(attempt = attemptIdx + 2))
-                        }
+                    if (result != com.torve.domain.repository.StreamReadiness.Preparing) {
+                        return@withTimeoutOrNull result
                     }
-                    is com.torve.domain.repository.StreamReadiness.Failed -> {
-                        _state.update {
-                            it.copy(
-                                preparing = null,
-                                resolveError = result.reason,
-                            )
-                        }
-                        return@launch
+                    _state.update { s ->
+                        val current = s.preparing ?: return@update s
+                        s.copy(preparing = current.copy(attempt = attemptIdx + 2))
                     }
                 }
+                null
             }
-            // Budget exhausted — the cloud client hasn't produced a URL in
-            // 5 min. Clear preparing, surface a specific timeout message so
-            // the user can pick an alternate source.
-            _state.update {
-                it.copy(
-                    preparing = null,
-                    resolveError = "error_stream_preparing_timeout",
-                )
+            when (terminal) {
+                is com.torve.domain.repository.StreamReadiness.Ready -> {
+                    stageContinuationSelection(stream, resolved, terminal.finalUrl, origin)
+                    _state.update {
+                        it.copy(
+                            preparing = null,
+                            isResolving = false,
+                            resolvedStream = resolved.copy(url = terminal.finalUrl),
+                            showStreamPicker = false,
+                            autoPlayMessage = readyMessage,
+                            resolveError = null,
+                        )
+                    }
+                }
+                is com.torve.domain.repository.StreamReadiness.Failed ->
+                    _state.update { it.withPreparingFailure(terminal.reason) }
+                else -> _state.update { it.withPreparingFailure("error_stream_preparing_timeout") }
             }
         }
     }
@@ -2247,6 +3041,15 @@ class DetailViewModel(
                 showStreamPicker = state.showStreamPicker || state.streams.isNotEmpty(),
             )
         }
+    }
+
+    /** Cancel an active lookup without navigating away from the detail page. */
+    fun cancelSourceLookup() {
+        streamFetchJob?.cancel()
+        streamFetchJob = null
+        cancelPreparingLoop()
+        cancelUsenetResolveAndPoll()
+        _state.update { it.withSourceLookupCancelled() }
     }
 
     private fun cancelPreparingLoop() {
@@ -2290,13 +3093,13 @@ class DetailViewModel(
                     streamRepo.resolveStream(fallback, provider, apiKey)
                 }
                 if (resolved != null) {
-                    _state.update {
-                        it.copy(
-                            resolvedStream = resolved,
-                            isResolving = false,
-                            autoPlayMessage = "Switched to a more stable source",
-                        )
-                    }
+                    dispatchResolved(
+                        stream = fallback,
+                        provider = provider,
+                        resolved = resolved,
+                        readyMessage = "Switched to a more stable source",
+                        origin = ContinuationSelectionOrigin.RETRY,
+                    )
                 } else {
                     com.torve.data.addon.StreamRuntimeTelemetry.recordStartupTimeout(hostKey, 30_000L)
                     streamRepo.reportPlaybackOutcome(fallback, provider, success = false)
@@ -2430,7 +3233,13 @@ class DetailViewModel(
             } catch (_: Exception) {
                 traktSyncRepo.enqueueHistoryRemove(tmdbId, item.type, item.imdbId)
             }
-            // Simkl — no remove API available; SIMKL is push-only for history
+            runCatching {
+                integrationSecretStore.get(IntegrationSecretKey.SIMKL_ACCESS_TOKEN)?.takeIf { it.isNotBlank() }?.let { token ->
+                    val value = SimklSyncItem(SimklIds(tmdb = tmdbId, imdb = item.imdbId))
+                    simklClient.removeFromHistory(token, if (item.type == MediaType.MOVIE)
+                        SimklSyncBody(movies = listOf(value)) else SimklSyncBody(shows = listOf(value)))
+                }
+            }.onFailure { if (it is CancellationException) throw it }
         }
     }
 
@@ -2498,14 +3307,17 @@ class DetailViewModel(
                     newWatched.add(episodeKey(seasonNumber, ep))
                 }
                 _state.update { it.copy(watchedEpisodes = newWatched) }
-                resolveNextEpisode()
+                // Keep the season action that initiated this mutation attached
+                // and focused. The primary Play target still advances through
+                // streamContextSeason/streamContextEpisode.
+                resolveNextEpisode(preserveSelectedSeason = true)
             } catch (_: Exception) { }
         }
     }
 
     private suspend fun saveWholeItemWatchedProgress(item: com.torve.domain.model.MediaItem): Boolean {
         return try {
-            watchProgressRepo.saveProgress(
+            watchProgressRepo.markWatchedManually(
                 WatchProgress(
                     mediaId = item.id,
                     mediaType = item.type,
@@ -2562,7 +3374,7 @@ class DetailViewModel(
 
     /**
      * Toggle watched state for a single episode.
-     * Unwatching also clears any partial playback progress for that episode.
+     * Unwatching clears completed progress for that episode and retains partial resumes.
      */
     fun toggleEpisodeWatched(seasonNumber: Int, episodeNumber: Int) {
         val key = episodeKey(seasonNumber, episodeNumber)
@@ -2615,35 +3427,30 @@ class DetailViewModel(
         val item = _state.value.mediaItem ?: return
         scope.launch {
             try {
-                // Remove watch history entry
-                val historyId = "${item.id}_${episodeKey(seasonNumber, episodeNumber)}"
-                watchHistoryRepo.delete(historyId)
-                // Clear partial playback progress for this episode so the resolver
-                // does not immediately surface it as "Resume".
-                watchProgressRepo.deleteProgress(item.id)
+                // Queue the removal before clearing every local representation
+                // of this episode, including imported Trakt history rows.
+                item.tmdbId?.let { tmdbId ->
+                    traktSyncRepo.enqueueEpisodeHistoryRemove(
+                        tmdbId = tmdbId,
+                        imdbId = item.imdbId,
+                        season = seasonNumber,
+                        episode = episodeNumber,
+                    )
+                }
+                watchHistoryRepo.deleteEpisode(item.id, seasonNumber, episodeNumber)
+                val progress = watchProgressRepo.getProgress(item.id)
+                val clearProgress = shouldClearEpisodeProgressOnUnwatch(progress, seasonNumber, episodeNumber)
+                if (clearProgress) watchProgressRepo.deleteProgress(item.id)
+                val recovered = if (progress == null || clearProgress) {
+                    watchSessionRecorder?.getUnfinishedEpisodeBookmark(item.id, seasonNumber, episodeNumber)
+                } else null
+                if (recovered != null) watchProgressRepo.saveProgress(recovered)
                 // Update UI state immediately so it doesn't flicker back on reload
                 val newWatched = _state.value.watchedEpisodes - episodeKey(seasonNumber, episodeNumber)
-                _state.update { it.copy(watchedEpisodes = newWatched, watchProgress = null) }
+                _state.update { it.copy(watchedEpisodes = newWatched, watchProgress = recovered ?: progress.takeUnless { clearProgress }) }
                 resolveNextEpisode()
             } catch (_: Exception) { }
-            // Remove from Trakt so syncFromTrakt cannot re-import this episode.
-            val tmdbId = item.tmdbId ?: return@launch
-            val ids = com.torve.data.trakt.TraktIds(tmdb = tmdbId)
-            val season = com.torve.data.trakt.TraktHistorySeasonEntry(
-                number = seasonNumber,
-                episodes = listOf(com.torve.data.trakt.TraktHistoryEpisodeEntry(number = episodeNumber)),
-            )
-            val show = com.torve.data.trakt.TraktHistoryShow(ids = ids, seasons = listOf(season))
-            try {
-                traktApi.removeFromHistory(com.torve.data.trakt.TraktRemoveHistoryBody(shows = listOf(show)))
-            } catch (_: Exception) {
-                traktSyncRepo.enqueueEpisodeHistoryRemove(
-                    tmdbId = tmdbId,
-                    imdbId = item.imdbId,
-                    season = seasonNumber,
-                    episode = episodeNumber,
-                )
-            }
+            runCatching { traktSyncRepo.flushPendingWrites() }
         }
     }
 
@@ -2651,38 +3458,69 @@ class DetailViewModel(
      * Refresh watch state from repositories (media-scoped, not full-table).
      * Call after returning from player, after toggling watched, or after sync.
      */
-    fun refreshWatchState() {
+    fun refreshWatchState(preserveSelectedSeason: Boolean = false) {
         val item = _state.value.mediaItem ?: return
         scope.launch {
             try {
                 // Refresh watched episodes (media-scoped)
                 val history = watchHistoryRepo.getForMedia(item.id)
                 val watched = history
-                    .filter { it.seasonNumber != null && it.episodeNumber != null }
+                    .filter { it.countsAsWatchedEpisode() }
                     .map { episodeKey(it.seasonNumber!!, it.episodeNumber!!) }
                     .toSet()
                 // Refresh playback progress
                 val progress = watchProgressRepo.getProgress(item.id)
+                if (_state.value.mediaItem?.id != item.id) return@launch
                 _state.update { it.copy(watchedEpisodes = watched, watchProgress = progress) }
-                resolveNextEpisode()
+                resolveNextEpisode(preserveSelectedSeason = preserveSelectedSeason)
             } catch (_: Exception) { }
         }
     }
 
-    fun loadWatchedEpisodes() {
+    /** Quiet, series-scoped cloud refresh; callers control its visible lifetime. */
+    suspend fun refreshSeriesWatchState() {
         val item = _state.value.mediaItem ?: return
-        scope.launch {
-            try {
-                val history = watchHistoryRepo.getForMedia(item.id)
-                val watched = history
-                    .filter { it.seasonNumber != null && it.episodeNumber != null }
-                    .map { episodeKey(it.seasonNumber!!, it.episodeNumber!!) }
-                    .toSet()
-                _state.update { it.copy(watchedEpisodes = watched) }
-                resolveNextEpisode()
-                warmupLikelyPlaybackTarget(ContentWarmupTrigger.DETAIL_OPEN)
-            } catch (_: Exception) { }
+        if (item.type != MediaType.SERIES) return
+        try {
+            watchHistoryRepo.refreshSeries(item)
+            if (_state.value.mediaItem?.id == item.id) refreshWatchState(preserveSelectedSeason = true)
+        } catch (e: Exception) {
+            if (e is CancellationException) throw e
+            // Keep the cached watched set available while offline or unauthorized.
+            val status = when (e) {
+                is com.torve.data.trakt.TraktServerException -> e.status
+                is com.torve.data.trakt.TraktUnknownException -> e.status
+                is com.torve.data.trakt.TraktRateLimitedException -> e.status
+                is com.torve.data.trakt.api.TraktAuthorizationRequiredException -> 401
+                else -> 0
+            }
+            println("EpisodeWatchSync media=${item.tmdbId ?: 0} result=failed kind=${e::class.simpleName} status=$status cause=${e.cause?.let { it::class.simpleName } ?: "none"}")
         }
+    }
+
+    fun loadWatchedEpisodes(preserveSelectedSeason: Boolean = false) {
+        val item = _state.value.mediaItem ?: return
+        watchedEpisodesJob?.cancel()
+        watchedEpisodesJob = scope.launch {
+            var initial = true
+            try {
+                watchHistoryRepo.observeForMedia(item.id).collectLatest { history ->
+                    if (_state.value.mediaItem?.id != item.id) return@collectLatest
+                    val watched = history
+                        .filter { it.countsAsWatchedEpisode() }
+                        .map { episodeKey(it.seasonNumber!!, it.episodeNumber!!) }
+                        .toSet()
+                    _state.update { it.copy(watchedEpisodes = watched) }
+                    resolveNextEpisode(preserveSelectedSeason = preserveSelectedSeason || !initial)
+                    if (initial) warmupLikelyPlaybackTarget(ContentWarmupTrigger.DETAIL_OPEN)
+                    initial = false
+                }
+            } catch (e: Exception) {
+                if (e is CancellationException) throw e
+            }
+        }
+        seriesWatchRefreshJob?.cancel()
+        seriesWatchRefreshJob = scope.launch { refreshSeriesWatchState() }
     }
 
     private suspend fun buildStartupRequest(

@@ -47,6 +47,13 @@ data class TmdbMovie(
     val similar: TmdbResponse<TmdbMovie>? = null,
     @SerialName("external_ids") val externalIds: TmdbExternalIds? = null,
     val images: TmdbImages? = null,
+    @SerialName("belongs_to_collection") val collection: TmdbCollectionRef? = null,
+    @SerialName("original_title") val originalTitle: String? = null,
+    @SerialName("original_language") val originalLanguage: String? = null,
+    @SerialName("production_countries") val productionCountries: List<TmdbCountry> = emptyList(),
+    @SerialName("release_dates") val releaseDates: TmdbReleaseDates? = null,
+    val budget: Long? = null,
+    val revenue: Long? = null,
 )
 
 @Serializable
@@ -66,6 +73,7 @@ data class TmdbTv(
     val genres: List<TmdbGenre>? = null,
     val tagline: String? = null,
     val status: String? = null,
+    @SerialName("content_ratings") val contentRatings: TmdbContentRatings? = null,
     val networks: List<TmdbCompany> = emptyList(),
     @SerialName("production_companies") val productionCompanies: List<TmdbCompany> = emptyList(),
     @SerialName("episode_run_time") val episodeRunTime: List<Int> = emptyList(),
@@ -75,6 +83,10 @@ data class TmdbTv(
     val similar: TmdbResponse<TmdbTv>? = null,
     @SerialName("external_ids") val externalIds: TmdbExternalIds? = null,
     val images: TmdbImages? = null,
+    @SerialName("original_name") val originalName: String? = null,
+    @SerialName("original_language") val originalLanguage: String? = null,
+    @SerialName("origin_country") val originCountry: List<String> = emptyList(),
+    @SerialName("production_countries") val productionCountries: List<TmdbCountry> = emptyList(),
 )
 
 @Serializable
@@ -100,6 +112,9 @@ data class TmdbGenre(
     val id: Int,
     val name: String,
 )
+
+@Serializable
+data class TmdbCountry(@SerialName("iso_3166_1") val code: String = "", val name: String = "")
 
 @Serializable
 data class TmdbCompany(
@@ -188,6 +203,8 @@ data class TmdbPersonCastCredit(
     @SerialName("release_date") val releaseDate: String? = null,
     @SerialName("first_air_date") val firstAirDate: String? = null,
     val popularity: Double = 0.0,
+    @SerialName("genre_ids") val genreIds: List<Int> = emptyList(),
+    @SerialName("vote_count") val voteCount: Int = 0,
 )
 
 @Serializable
@@ -203,6 +220,8 @@ data class TmdbPersonCrewCredit(
     @SerialName("release_date") val releaseDate: String? = null,
     @SerialName("first_air_date") val firstAirDate: String? = null,
     val popularity: Double = 0.0,
+    @SerialName("genre_ids") val genreIds: List<Int> = emptyList(),
+    @SerialName("vote_count") val voteCount: Int = 0,
 )
 
 @Serializable
@@ -212,6 +231,8 @@ data class TmdbPersonSummary(
     @SerialName("profile_path") val profilePath: String? = null,
     @SerialName("known_for_department") val knownForDepartment: String? = null,
     val popularity: Double = 0.0,
+    @SerialName("genre_ids") val genreIds: List<Int> = emptyList(),
+    @SerialName("vote_count") val voteCount: Int = 0,
 )
 
 @Serializable
@@ -252,6 +273,7 @@ data class TmdbWatchProvider(
     @SerialName("provider_id") val providerId: Int,
     @SerialName("provider_name") val providerName: String = "",
     @SerialName("logo_path") val logoPath: String? = null,
+    @SerialName("display_priorities") val displayPriorities: Map<String, Int> = emptyMap(),
 )
 
 @Serializable
@@ -288,3 +310,27 @@ data class TmdbTitleRegionProviders(
     val free: List<TmdbWatchProvider> = emptyList(),
     val ads: List<TmdbWatchProvider> = emptyList(),
 )
+
+@Serializable
+data class TmdbCollectionRef(val id: Int, val name: String = "")
+
+@Serializable
+data class TmdbCollection(val id: Int, val name: String = "", val overview: String = "",
+    @SerialName("poster_path") val posterPath: String? = null,
+    val parts: List<TmdbMovie> = emptyList())
+
+@Serializable
+data class TmdbCuratedList(val id: kotlinx.serialization.json.JsonPrimitive, val name: String = "",
+    val description: String = "", @SerialName("item_count") val itemCount: Int = 0,
+    val items: List<TmdbMovie> = emptyList(), @SerialName("total_pages") val totalPages: Int = 0)
+
+@Serializable
+data class TmdbReleaseDates(val results: List<TmdbReleaseCountry> = emptyList())
+@Serializable
+data class TmdbReleaseCountry(@SerialName("iso_3166_1") val country: String, @SerialName("release_dates") val releases: List<TmdbReleaseCertificate> = emptyList())
+@Serializable
+data class TmdbReleaseCertificate(val certification: String = "")
+@Serializable
+data class TmdbContentRatings(val results: List<TmdbContentCertificate> = emptyList())
+@Serializable
+data class TmdbContentCertificate(@SerialName("iso_3166_1") val country: String, val rating: String = "")

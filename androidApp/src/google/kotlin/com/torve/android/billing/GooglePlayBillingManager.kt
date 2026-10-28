@@ -6,8 +6,10 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
-class GooglePlayBillingManager(context: Context) : BillingManager {
-    private val _billingState = MutableStateFlow<BillingManager.BillingState>(BillingManager.BillingState.Disconnected)
+class GooglePlayBillingManager(@Suppress("unused") context: Context? = null) : BillingManager {
+    private val _billingState = MutableStateFlow<BillingManager.BillingState>(
+        BillingManager.BillingState.Ready(emptyList()),
+    )
     override val billingState: StateFlow<BillingManager.BillingState> = _billingState.asStateFlow()
 
     private val _purchaseResult = MutableStateFlow<BillingManager.PurchaseResult?>(null)

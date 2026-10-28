@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Delete Your Torve Account</title>
+  <meta name="description" content="Delete your Torve account and account-backed data from the web or app." />
+  <link rel="canonical" href="https://torve.app/account-deletion.html" />
+  <meta property="og:title" content="Delete Your Torve Account" />
+  <meta property="og:description" content="Public Torve account deletion instructions and request path." />
+  <meta property="og:type" content="website" />
+  <meta property="og:url" content="https://torve.app/account-deletion.html" />
+  <meta property="og:image" content="https://torve.app/assets/torve-logo-transparent.png" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <link rel="icon" type="image/png" href="assets/favicon.png" />
+  <link rel="stylesheet" href="assets/site-base.css?v=20260701-storecopy" />
+  <link rel="stylesheet" href="assets/style.css?v=20260701-storecopy" />
+  <link rel="stylesheet" href="/assets/modern-site.css?v=20261012-7" />
+  <link rel="stylesheet" href="/assets/account-deletion.css?v=20261016-1" />
+</head>
+<body class="modern-page">
+  <a class="skip-link" href="#main">Skip to content</a>
+  <header class="site-header" data-site-header>
+    <div class="site-header-inner">
+      <a class="site-brand" href="/" aria-label="Torve home"><img src="/assets/torve-logo-transparent.png" alt="Torve" class="site-header-logo" /></a>
+      <nav id="site-navigation" class="site-header-nav" aria-label="Main navigation"><a href="/#explore">Explore</a><a href="/download.html">Downloads</a><a href="/app/help.html">Guide</a><a href="/support.html">Support</a></nav>
+      <div class="site-header-actions"><a class="site-account-link t-btn t-btn-secondary" href="/signin.html">Sign in</a><a class="t-btn t-btn-primary" href="/download.html"><span class="install-label-full">Install Torve</span><span class="install-label-short">Install</span><svg class="button-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M12 3v12m-4-4 4 4 4-4M5 16v4h14v-4"/></svg></a></div>
+      <button class="site-menu-toggle" type="button" aria-label="Open menu" aria-controls="site-navigation" aria-expanded="false"><span></span><span></span></button>
+    </div>
+  </header>
+
+  <main id="main">
+    <section class="page-hero">
+      <div class="container article-wide center">
+        <div class="eyebrow">Account deletion</div>
+        <h1 class="section-title">Delete your Torve account</h1>
+        <p class="section-subtitle">Use this public page from mobile, desktop, or TV browser entry. Deleting your Torve account does not cancel Apple subscription billing. Cancel the subscription separately in Apple subscription settings.</p>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="container two-col">
+        <section class="method-block">
+          <h2>Delete your account</h2>
+          <p>Sign in first, then type <strong>DELETE</strong> to permanently delete your account. A confirmation will appear when deletion is complete.</p>
+          <form data-delete-account-form>
+            <div class="t-field">
+              <label for="delete-confirm">Confirmation</label>
+              <input id="delete-confirm" name="confirm" autocomplete="off" placeholder="DELETE" required />
+            </div>
+            <button class="t-btn t-btn-primary" type="submit">Delete account</button>
+            <p class="status-message" data-message role="status" aria-live="polite" tabindex="-1"></p>
+          </form>
+          <p>If you cannot sign in, email <a href="mailto:support@torve.app?subject=Account%20Deletion%20Request">support@torve.app</a> from the address associated with your account and use the subject line "Account Deletion Request".</p>
+        </section>
+
+        <aside class="method-block">
+          <h2>What is deleted</h2>
+          <ul class="plain-list">
+            <li>Account profile information</li>
+            <li>Login credentials and active sessions</li>
+            <li>Account-backed preferences and sync data</li>
+            <li>Linked device associations</li>
+            <li>Account-backed watch state and saved items where stored by Torve</li>
+          </ul>
+          <h2>Limited retention</h2>
+          <p>Torve may retain narrow records only where needed for security, abuse prevention, legal compliance, backups, dispute handling, historical refund reconciliation, or operational integrity.</p>
+          <p><a href="/privacy.html">Read the privacy policy</a></p>
+        </aside>
+      </div>
+    </section>
+
+    <section class="section section-dark">
+      <div class="container article">
+        <h2>In-app deletion path</h2>
+        <ol>
+          <li>Open Torve.</li>
+          <li>Sign in to your account.</li>
+          <li>Open Settings.</li>
+          <li>Open Account.</li>
+          <li>Select Delete Account and follow the confirmation steps.</li>
+        </ol>
+      </div>
+    </section>
+  </main>
+
+  <dialog id="account-deleted-dialog" aria-labelledby="account-deleted-title" aria-describedby="account-deleted-description">
+    <div class="deletion-success-icon" aria-hidden="true"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="m5 12 4 4L19 6" /></svg></div>
+    <h2 id="account-deleted-title">Account deleted</h2>
+    <p id="account-deleted-description">Your Torve account has been deleted. You can no longer sign in with this account.</p>
+    <p class="deletion-billing-note">Any Apple subscription must still be cancelled separately in Apple subscription settings.</p>
+    <form method="dialog"><button class="t-btn t-btn-primary" type="submit" autofocus>Done</button></form>
+  </dialog>
+
+  <footer class="footer"><div class="container footer-main"><div><a class="footer-wordmark" href="/">TORVE<span aria-hidden="true">.</span></a><p>For the love of film.<br>Your sources. Your watchlist. Your media.</p></div><nav aria-label="Explore Torve"><span>Explore</span><a href="/#explore">The app</a><a href="/download.html">Downloads</a><a href="/firetv.html">Fire TV setup</a></nav><nav aria-label="Torve help"><span>Here to help</span><a href="/support.html">Support</a><a href="/app/help.html">Documentation</a><a href="/signin.html">Sign in</a><a href="/source.html">Open source</a><a href="/status.html">Service status</a></nav><nav aria-label="Torve policies"><span>The details</span><a href="/privacy.html">Privacy</a><a href="/terms.html">Terms</a><a href="/account-deletion.html">Delete account</a><a href="/credits.html">Image credits</a></nav></div><div class="container footer-bottom"><span>© <span data-current-year>2026</span> Torve · AGPL-3.0-or-later</span><span>Bring your own lawful media.</span></div></footer>
+
+  <script src="assets/script.js"></script>
+  <script src="site.js?v=20261016-deletion-confirmation"></script>
+  <script src="/assets/modern-site.js?v=20261012-7" defer></script>
+</body>
+</html>

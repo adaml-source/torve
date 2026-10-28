@@ -24,6 +24,7 @@ object TvSourcePicker {
      */
     fun build(
         localFile: PlaybackRoute.LocalFile? = null,
+        jellyfinStream: PlaybackRoute.JellyfinStream? = null,
         lanStream: PlaybackRoute.LanDesktopStream? = null,
         providerStream: PlaybackRoute.ProviderStream? = null,
         networkMode: NetworkMode = NetworkMode.UNKNOWN,
@@ -51,6 +52,14 @@ object TvSourcePicker {
                 hint = "Plays from your local file. Fastest, offline.",
                 route = it,
                 tier = TvSourceTier.BEST,
+            )
+        }
+        jellyfinStream?.let {
+            opts += TvSourcePickerOption(
+                label = "Jellyfin library",
+                hint = "Plays the permanent copy from your media server.",
+                route = it,
+                tier = if (opts.isEmpty()) TvSourceTier.BEST else TvSourceTier.FALLBACK,
             )
         }
         effectiveLan?.let {

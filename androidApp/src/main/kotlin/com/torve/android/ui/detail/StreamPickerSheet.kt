@@ -1,5 +1,7 @@
 package com.torve.android.ui.detail
 
+import com.torve.android.ui.community.parityLabel as localizedUiText
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -9,6 +11,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -19,13 +22,17 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.CloudDone
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
+import com.torve.android.ui.system.TorveModalBottomSheet as ModalBottomSheet
 import androidx.compose.material3.Surface
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
@@ -52,20 +59,14 @@ import com.torve.android.ui.theme.Snow
 import com.torve.android.ui.theme.Torve
 import com.torve.android.ui.theme.Gunmetal
 import com.torve.data.addon.ParsedStream
-import com.torve.data.addon.isTorrentOrDebridStream
-import com.torve.data.addon.isUsenetStream
+import com.torve.data.addon.StreamSortMode
+import com.torve.data.addon.parseStreamSizeBytes
+import com.torve.data.addon.sortStreamResults
 import com.torve.data.usenet.model.UsenetCandidateStates
 import com.torve.domain.model.StartupCandidate
 import com.torve.presentation.detail.StreamFilterUiText
 
-private enum class StreamSourceFilter { ALL, TORRENT, USENET }
-
-private fun ParsedStream.sourceFilter(): StreamSourceFilter =
-    when {
-        isUsenetStream() -> StreamSourceFilter.USENET
-        isTorrentOrDebridStream() -> StreamSourceFilter.TORRENT
-        else -> StreamSourceFilter.TORRENT
-    }
+private fun ParsedStream.sizeBytes(): Long = parseStreamSizeBytes(size) ?: -1L
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -74,6 +75,9 @@ fun StreamPickerSheet(
     startupCandidates: List<StartupCandidate> = emptyList(),
     isResolving: Boolean,
     isLoadingMoreSources: Boolean = false,
+    isInspectingSourceLanguages: Boolean = false,
+    sourceSessionKey: String = "",
+    sourceStatistics: List<com.torve.domain.model.ProviderSourceStat> = emptyList(),
     playbackStartupStatus: com.torve.presentation.detail.PlaybackStartupStatus? = null,
     hiddenByFiltersCount: Int = 0,
     onStreamSelected: (ParsedStream) -> Unit,
@@ -85,16 +89,21 @@ fun StreamPickerSheet(
      * untouched. Default empty is the no-Usenet case.
      */
     usenetCandidates: UsenetCandidateStates = emptyMap(),
+    onRefresh: (() -> Unit)? = null,
     onDismiss: () -> Unit,
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    var activeFilter by remember { mutableStateOf(StreamSourceFilter.ALL) }
+    var activeSortMode by remember { mutableStateOf(StreamSortMode.DEFAULT) }
+    val languagePicker = rememberSourceLanguagePicker(streams, enabled = !isResolving,
+        sessionKey = sourceSessionKey, externalChecking = isInspectingSourceLanguages)
 
-    val filteredStreams = remember(streams, activeFilter) {
-        if (activeFilter == StreamSourceFilter.ALL) streams
-        else streams.filter { it.sourceFilter() == activeFilter }
+    val filteredStreams = languagePicker.visible
+    val sortedStreams = remember(filteredStreams, activeSortMode) {
+        sortStreamResults(filteredStreams, activeSortMode)
     }
-    val groups = groupPlaybackOptionStreams(filteredStreams, startupCandidates)
+    val groups = remember(filteredStreams, startupCandidates) {
+        groupPlaybackOptionStreams(filteredStreams, startupCandidates)
+    }
     val startupCandidateMap = startupCandidates.associateBy { it.streamKey }
 
     ModalBottomSheet(
@@ -135,6 +144,11 @@ fun StreamPickerSheet(
                         color = Torve.colors.textTertiary,
                     )
                 }
+                onRefresh?.let { refresh ->
+                    TextButton(onClick = refresh, enabled = !isResolving && !isLoadingMoreSources) {
+                        Text(localizedUiText("Refresh"), color = Amber)
+                    }
+                }
                 IconButton(onClick = onDismiss) {
                     Icon(
                         Icons.Rounded.Close,
@@ -146,34 +160,66 @@ fun StreamPickerSheet(
 
             Spacer(Modifier.height(10.dp))
 
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                listOf(
-                    StreamSourceFilter.ALL to stringResource(R.string.catalog_all),
-                    StreamSourceFilter.TORRENT to stringResource(R.string.stream_filter_torrent),
-                    StreamSourceFilter.USENET to stringResource(R.string.stream_filter_usenet_nzb),
-                ).forEach { (filter, label) ->
-                    val selected = activeFilter == filter
-                    Box(
-                        modifier = Modifier
-                            .background(
-                                if (selected) Amber else Gunmetal,
-                                RoundedCornerShape(20.dp),
-                            )
-                            .clickable { activeFilter = filter }
-                            .padding(horizontal = 12.dp, vertical = 6.dp),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Text(
-                            text = label,
-                            style = MaterialTheme.typography.labelMedium,
-                            color = if (selected) Charcoal else Torve.colors.textSecondary,
-                            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
-                        )
-                    }
+            com.torve.android.ui.community.SourceStatisticsButton(sourceStatistics, isLoadingMoreSources)
+            SourceLanguageControls(languagePicker)
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Spacer(Modifier.weight(1f))
+                val sortActive = activeSortMode != StreamSortMode.DEFAULT
+                Box(
+                    modifier = Modifier
+                        .background(if (sortActive) Amber else Gunmetal, RoundedCornerShape(20.dp))
+                        .clickable {
+                            activeSortMode = when (activeSortMode) {
+                                StreamSortMode.DEFAULT -> StreamSortMode.SIZE_DESC
+                                StreamSortMode.SIZE_DESC -> StreamSortMode.SIZE_ASC
+                                StreamSortMode.SIZE_ASC -> StreamSortMode.DEFAULT
+                            }
+                        }
+                        .padding(horizontal = 12.dp, vertical = 6.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        text = localizedUiText(when (activeSortMode) {
+                            StreamSortMode.DEFAULT -> "Size"
+                            StreamSortMode.SIZE_DESC -> "Size ↓"
+                            StreamSortMode.SIZE_ASC -> "Size ↑"
+                        }),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = if (sortActive) Charcoal else Torve.colors.textSecondary,
+                        fontWeight = if (sortActive) FontWeight.SemiBold else FontWeight.Normal,
+                    )
                 }
             }
 
             Spacer(Modifier.height(10.dp))
+
+            filteredStreams.firstOrNull()?.let { recommended ->
+                Button(
+                    onClick = { languagePicker.select(recommended, onStreamSelected) },
+                    modifier = Modifier.fillMaxWidth().height(48.dp),
+                    enabled = !isResolving,
+                    shape = RoundedCornerShape(10.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Amber,
+                        contentColor = Obsidian,
+                    ),
+                ) {
+                    Icon(Icons.Filled.PlayArrow, contentDescription = null, modifier = Modifier.size(20.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text(localizedUiText("Play recommended"), fontWeight = FontWeight.Bold)
+                }
+                Text(
+                    text = localizedUiText("Best match for your quality, language, size, cache, and device settings. Other sources remain below."),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Torve.colors.textSecondary,
+                    modifier = Modifier.padding(top = 6.dp, bottom = 8.dp),
+                )
+            }
 
             DetailPlaybackReadinessCard(
                 streams = streams,
@@ -194,7 +240,7 @@ fun StreamPickerSheet(
                         .padding(bottom = 12.dp),
                 ) {
                     Text(
-                        text = message,
+                        text = localizedUiText(message),
                         style = MaterialTheme.typography.bodySmall,
                         modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
                     )
@@ -224,24 +270,45 @@ fun StreamPickerSheet(
                 }
             } else {
                 LazyColumn(
-                    modifier = Modifier.height(420.dp),
+                    modifier = Modifier.weight(1f, fill = false).heightIn(max = 420.dp),
                     verticalArrangement = Arrangement.spacedBy(6.dp),
                     contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 24.dp),
                 ) {
-                    groups.forEach { group ->
+                    if (activeSortMode != StreamSortMode.DEFAULT) {
                         item {
                             GroupHeader(
-                                stringResource(group.titleRes),
-                                group.subtitleRes?.let { stringResource(it) },
+                                title = localizedUiText(when (activeSortMode) {
+                                    StreamSortMode.SIZE_DESC -> "Largest first"
+                                    StreamSortMode.SIZE_ASC -> "Smallest first"
+                                    else -> "By size"
+                                }),
+                                subtitle = ((if (sortedStreams.any { it.sizeBytes() < 0 }) localizedUiText("Sources without size info at end") else null)?.let { localizedUiText(it) })?.let { com.torve.android.ui.community.parityLabel(it) },
                             )
                         }
-                        items(group.items) { stream ->
+                        items(sortedStreams) { stream ->
                             StreamItem(
                                 stream = stream,
                                 startupCandidate = startupCandidateMap[stream.streamUiKey()],
                                 usenetRowState = stream.accelerationSourceKey?.let { usenetCandidates[it] },
-                                onClick = { onStreamSelected(stream) },
+                                onClick = { languagePicker.select(stream, onStreamSelected) },
                             )
+                        }
+                    } else {
+                        groups.forEach { group ->
+                            item {
+                                GroupHeader(
+                                    stringResource(group.titleRes),
+                                    group.subtitleRes?.let { stringResource(it) },
+                                )
+                            }
+                            items(group.items) { stream ->
+                                StreamItem(
+                                    stream = stream,
+                                    startupCandidate = startupCandidateMap[stream.streamUiKey()],
+                                    usenetRowState = stream.accelerationSourceKey?.let { usenetCandidates[it] },
+                                    onClick = { languagePicker.select(stream, onStreamSelected) },
+                                )
+                            }
                         }
                     }
                 }
@@ -341,10 +408,8 @@ private fun StreamItem(
                     startupCandidate = startupCandidate,
                     modifier = Modifier.padding(bottom = 2.dp),
                 )
-                // Stremio Stream.title may be multi-line. Panda puts resolution,
-                // size, video codec, and audio-language tags (e.g. 🗣️ DE, EN) on
-                // subsequent lines — rendering only the first line drops the
-                // language info entirely.
+                // Structured audio and quality fields replace the addon's raw
+                // metadata lines, which can include a long subtitle inventory.
                 val titleLines = stream.title.split('\n')
                 Text(
                     text = titleLines.first(),
@@ -353,15 +418,6 @@ private fun StreamItem(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
-                if (titleLines.size > 1) {
-                    Text(
-                        text = titleLines.drop(1).joinToString(" "),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = Silver,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
                 Spacer(Modifier.height(3.dp))
                 Row(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -371,12 +427,10 @@ private fun StreamItem(
                     if (!stream.codec.isNullOrBlank()) MetaChip(stream.codec!!)
                     stream.hdr?.let { MetaChip(it) }
                     stream.audioCodec?.let { MetaChip(it) }
-                    if (stream.languages.isNotEmpty()) {
-                        MetaChip("\uD83D\uDDE3 " + stream.languages.joinToString(", "))
-                    }
                     stream.seeds?.let { MetaChip(stringResource(R.string.stream_seed_count, it)) }
                 }
                 Spacer(Modifier.height(6.dp))
+                SourceTrackLabels(stream, textColor = Snow, detailColor = Silver)
                 StreamExperienceBadges(
                     stream = stream,
                     startupCandidate = startupCandidate,

@@ -367,6 +367,7 @@ class SearchViewModelLateClassificationTest {
             certificationGte: String?, certificationLte: String?, certificationCountry: String?,
             withCast: String?, withCrew: String?, withWatchProviders: String?, watchRegion: String?,
             withKeywords: String?,
+            withCompanies: String?,
         ): PagedResult = PagedResult(emptyList(), 1, 1, 0)
         override suspend fun searchKeywords(query: String): List<TmdbKeyword> = emptyList()
         override suspend fun getPopularPeople(page: Int): List<PersonSummary> = emptyList()

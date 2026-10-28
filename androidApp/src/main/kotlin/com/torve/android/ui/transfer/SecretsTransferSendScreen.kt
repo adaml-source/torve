@@ -30,7 +30,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -51,6 +50,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.torve.android.R
+import com.torve.android.ui.components.TvBrowseOutlinedTextField
 import com.torve.domain.transfer.SecretCategory
 import com.torve.presentation.transfer.RelayDeliveryState
 import com.torve.presentation.transfer.SecretsTransferSenderViewModel
@@ -90,9 +90,7 @@ fun SecretsTransferSendScreen(
             TopAppBar(
                 title = { Text(stringResource(R.string.transfer_send_title)) },
                 navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.common_back))
-                    }
+                    com.torve.android.ui.components.BackButton(onClick = onBack)
                 },
             )
         },
@@ -140,6 +138,7 @@ fun SecretsTransferSendScreen(
             PasteSection(
                 value = state.receiverSessionString,
                 onChange = viewModel::updateReceiverSessionString,
+                tvEnabled = preferPaste,
             )
 
             if (preferPaste && hasCamera) {
@@ -257,6 +256,7 @@ private fun ScanSection(
 private fun PasteSection(
     value: String,
     onChange: (String) -> Unit,
+    tvEnabled: Boolean,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Text(
@@ -264,9 +264,10 @@ private fun PasteSection(
             style = MaterialTheme.typography.titleSmall,
             fontWeight = FontWeight.SemiBold,
         )
-        OutlinedTextField(
+        TvBrowseOutlinedTextField(
             value = value,
             onValueChange = onChange,
+            tvEnabled = tvEnabled,
             label = { Text(stringResource(R.string.transfer_send_receiver_field_placeholder)) },
             singleLine = false,
             modifier = Modifier.fillMaxWidth().heightIn(min = 90.dp),
@@ -436,6 +437,7 @@ private fun transferCategoryTitle(category: SecretCategory): String = when (cate
     SecretCategory.TRAKT_SIMKL -> stringResource(R.string.transfer_category_trakt_simkl)
     SecretCategory.AI_KEYS -> stringResource(R.string.transfer_category_ai_keys)
     SecretCategory.PANDA -> stringResource(R.string.transfer_category_panda)
+    SecretCategory.ARR_STACK -> stringResource(R.string.transfer_category_arr_stack)
 }
 
 @Composable
@@ -446,6 +448,7 @@ private fun transferCategoryTitles(): Map<SecretCategory, String> = mapOf(
     SecretCategory.TRAKT_SIMKL to stringResource(R.string.transfer_category_trakt_simkl),
     SecretCategory.AI_KEYS to stringResource(R.string.transfer_category_ai_keys),
     SecretCategory.PANDA to stringResource(R.string.transfer_category_panda),
+    SecretCategory.ARR_STACK to stringResource(R.string.transfer_category_arr_stack),
 )
 
 @Composable
@@ -456,6 +459,7 @@ private fun transferCategoryDescription(category: SecretCategory): String = when
     SecretCategory.TRAKT_SIMKL -> stringResource(R.string.transfer_category_trakt_simkl_desc)
     SecretCategory.AI_KEYS -> stringResource(R.string.transfer_category_ai_keys_desc)
     SecretCategory.PANDA -> stringResource(R.string.transfer_category_panda_desc)
+    SecretCategory.ARR_STACK -> stringResource(R.string.transfer_category_arr_stack_desc)
 }
 
 @Composable

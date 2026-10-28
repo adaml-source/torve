@@ -1,0 +1,40 @@
+/* Film frames remain behind the established homepage copy and actions. */
+.film-hero{overflow:clip}
+.film-hero .film-backdrop{background:none;opacity:1}
+.hero-film{position:absolute;inset:0;opacity:0;transition:opacity 1.3s ease;overflow:hidden}
+.hero-film.is-active{opacity:1}
+.hero-film img{width:100%;height:100%;object-fit:cover;object-position:var(--film-position,center);transform:scale(1.035)}
+.hero-film.is-active img{animation:film-drift 12s ease-out both;animation-play-state:paused}
+.hero-playing .hero-film.is-active img{animation-play-state:running}
+@keyframes film-drift{from{transform:scale(1.035)}to{transform:scale(1)}}
+.film-hero:after{background:linear-gradient(90deg,rgba(8,10,12,.92) 0%,rgba(8,10,12,.64) 38%,rgba(8,10,12,.12) 76%),linear-gradient(0deg,#090b0dd9 0%,transparent 35%,#090b0d1a 100%)}
+.film-hero .hero-inner{padding-bottom:130px}
+.film-hero .hero-caption{left:48px;right:auto;bottom:27px;display:flex;align-items:center;gap:16px}
+.film-hero .hero-caption>span{display:none}
+.hero-film-credit{line-height:1.6}
+.hero-film-credit strong{font-size:13px;font-weight:500;display:block;color:#f2efeb;letter-spacing:.02em}
+.hero-film-credit a{font-size:11px;color:#c2c7cd}
+.hero-controller{position:absolute;bottom:28px;right:48px;display:flex;align-items:center;gap:14px;z-index:2}
+.hero-film-choices{display:flex;gap:7px}
+.hero-film-choices button{position:relative;width:52px;height:66px;padding:0;border:0;border-radius:9px;overflow:hidden;background:#20252b;cursor:pointer;opacity:.52;transition:opacity .25s,transform .25s;box-shadow:0 2px 14px #0007}
+.hero-film-choices img{display:block;width:100%;height:100%;object-fit:cover}
+.hero-film-choices button[aria-pressed=true]{opacity:1;transform:translateY(-4px);box-shadow:0 0 0 2px #efc56e,0 5px 20px #0007}
+.hero-film-choices button:hover{opacity:1}
+.hero-transport{display:flex;align-items:center;gap:6px}
+.hero-transport button{width:44px;height:44px;border:0;border-radius:50%;padding:0;display:grid;place-items:center;color:#f8f5ee;background:linear-gradient(160deg,#ffffff26,#ffffff0c);box-shadow:inset 0 1px 0 #ffffff35,0 3px 12px #0004;backdrop-filter:blur(14px);font:18px system-ui;cursor:pointer}
+.hero-transport button:hover{background:#ffffff30}
+.hero-transport svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.8}
+.hero-count{font-size:10px;letter-spacing:.12em;color:#d0c9bd;min-width:43px;text-align:center}
+.hero-controller button:focus-visible{outline:3px solid #fff;outline-offset:4px}
+.hero-status{position:absolute;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
+.media-stage figcaption a{color:inherit;text-underline-offset:3px}
+.film-gallery{display:grid;grid-template-columns:1fr 1fr;gap:20px;align-items:start;min-height:0;padding:15px 5px}
+.film-gallery .film-frame{width:100%}
+.film-gallery .film-train{margin:80px 0 0}
+.film-gallery .film-frame img{aspect-ratio:764/1080;object-fit:contain;object-position:center}
+.film-gallery .film-frame figcaption{padding:12px 5px 6px;justify-content:space-between;gap:8px}
+.film-gallery .film-credits-link{grid-column:1/-1;margin:8px 0 0}
+@media(max-width:1100px){.hero-controller{right:32px}.film-hero .hero-caption{left:32px}.hero-controller{gap:10px}.hero-film-choices button{width:44px;height:58px}}
+@media(max-width:780px){.film-hero .hero-inner{padding-bottom:155px}.film-hero .hero-caption{left:24px;bottom:22px}.hero-controller{bottom:22px;right:24px}.hero-film-choices{display:none}.film-hero .hero-film img{object-position:var(--film-mobile-position,65% center)}.film-hero:after{background:linear-gradient(90deg,#080a0ce6 0%,#080a0c78 80%),linear-gradient(0deg,#090b0de6,transparent 55%)}.hero-count{display:none}}
+@media(max-width:380px){.hero-film-credit strong{font-size:12px}.hero-film-credit a{font-size:9px}.hero-controller{right:18px;gap:5px}.hero-transport{gap:4px}.film-hero .hero-caption{left:18px}}
+@media(prefers-reduced-motion:reduce){.hero-film,.hero-film img,.hero-film-choices button{transition:none!important;transform:none!important;animation:none!important}.film-hero .film-backdrop{transform:none}}

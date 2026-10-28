@@ -1,6 +1,12 @@
 package com.torve.android.ui.player
 
 internal object PlayerNavigationMath {
+    enum class TvBackAction {
+        CONSUMED,
+        HIDE_CONTROLS,
+        EXIT_PLAYER,
+    }
+
     private val tvProgressiveSkipStepsMs = longArrayOf(
         15_000L,
         30_000L,
@@ -27,6 +33,13 @@ internal object PlayerNavigationMath {
         val clamped = stepIndex.coerceIn(0, tvProgressiveSkipStepsMs.lastIndex)
         return tvProgressiveSkipStepsMs[clamped]
     }
+
+    fun tvBackAction(overlayConsumed: Boolean, controlsVisible: Boolean): TvBackAction =
+        when {
+            overlayConsumed -> TvBackAction.CONSUMED
+            controlsVisible -> TvBackAction.HIDE_CONTROLS
+            else -> TvBackAction.EXIT_PLAYER
+        }
 
     fun nextProgressiveSkipStepIndex(
         previousDirection: Int,

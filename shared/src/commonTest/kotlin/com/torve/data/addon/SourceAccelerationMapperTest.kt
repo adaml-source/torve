@@ -16,6 +16,60 @@ import kotlin.test.assertTrue
 class SourceAccelerationMapperTest {
 
     @Test
+    fun backendStreamTextDecodesUnicodeWhileIdentifiersAndPlaybackPayloadRemainUnchanged() {
+        val url = "https://stream.example/Bayern%20M%C3%BCnchen?token=a%2Bb"
+        val stream = assertNotNull(SourceAccelerationMapper.backendCandidateToParsedStream(
+            StartupAccelerationCandidateDto(
+                sourceKey = "source%2Bid",
+                title = "Bayern.M%C3%BCnchen.vs.Fenerbah&ccedil;e",
+                addonName = "M&uuml;nchen Provider",
+                sourceLabel = "S&atilde;o Paulo",
+                directUrl = url,
+                provenanceKind = "usenet_nzbdav",
+                hashKey = "hash%2Bvalue",
+                nzbUrl = url,
+            ),
+        ))
+        assertEquals("Bayern.München.vs.Fenerbahçe", stream.title)
+        assertEquals("München Provider", stream.addonName)
+        assertEquals("São Paulo", stream.source)
+        assertEquals("source%2Bid", stream.accelerationSourceKey)
+        assertEquals(url, stream.directUrl)
+        val payload = assertNotNull(stream.usenetCandidate)
+        assertEquals("source%2Bid", payload.candidateId)
+        assertEquals("hash%2Bvalue", payload.hashKey)
+        assertEquals(url, payload.nzbUrl)
+    }
+
+    @Test
+    fun cachedRecommendedAndInventoryResultsAlsoUseDecodedDisplayNames() {
+        val startup = SourceAccelerationMapper.toStartupCandidate(StartupCandidateBackendModel(
+            streamKey = "key%2B123", title = "M%C3%BCnchen", qualityLabel = "1080p",
+            addonName = "&Lstrok;&oacute;d&zacute;", sourceLabel = "S&atilde;o Paulo",
+            readinessState = ReadinessState.READY_NOW, provenanceKind = CandidateProvenanceKind.STARTUP_FETCH,
+        ))
+        assertEquals("München", startup.title)
+        assertEquals("Łódź", startup.addonName)
+        assertEquals("São Paulo", startup.sourceLabel)
+        assertEquals("key%2B123", startup.streamKey)
+        val inventory = SourceAccelerationMapper.toInventoryMatch(InventoryMatchBackendModel(
+            matchKey = "key%2B123", providerLabel = "M&uuml;nchen", displayTitle = "%E6%9D%B1%E4%BA%AC+A%2BB",
+            matchType = InventoryMatchType.EXACT_EPISODE, readinessState = ReadinessState.READY_NOW,
+        ))
+        assertEquals("München", inventory.providerLabel)
+        assertEquals("東京+A+B", inventory.displayTitle)
+        assertEquals("key%2B123", inventory.matchKey)
+        val recent = SourceAccelerationMapper.toRecentSuccessCandidate(RecentSuccessCandidateBackendModel(
+            streamKey = "key%2B123", title = "M%C3%BCnchen", providerLabel = "M&uuml;nchen",
+            addonName = "Provider", qualityLabel = "1080p", readinessState = ReadinessState.READY_NOW,
+            lastSuccessfulAt = 1234L, successCount = 1,
+        ))
+        assertEquals("München", recent.title)
+        assertEquals("München", recent.providerLabel)
+        assertEquals("key%2B123", recent.streamKey)
+    }
+
+    @Test
     fun startupCandidate_mapsClientSafeFieldsAndDefaultReasons() {
         val candidate = SourceAccelerationMapper.toStartupCandidate(
             StartupCandidateBackendModel(

@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<lint>
+    <!-- Torve deliberately uses these pinned Media3 and CameraX APIs. Declaring
+         the opt-in here is the supported mechanism for their Java annotations
+         and keeps every call site covered by the release lint gate. -->
+    <issue id="UnsafeOptInUsageError">
+        <option
+            name="opt-in"
+            value="androidx.media3.common.util.UnstableApi,androidx.camera.core.ExperimentalGetImage" />
+    </issue>
+</lint>

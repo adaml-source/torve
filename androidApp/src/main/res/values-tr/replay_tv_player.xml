@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="replay_highlight_tv_playback">Özetler YouTube veya SmartTube ile tam ekran açılır. Buraya dönmek için Geri tuşuna basın.</string>
+    <string name="replay_highlight_tv_missing_player">Özetleri tam ekran oynatmak için YouTube veya SmartTube yükleyin.</string>
+</resources>

@@ -8,6 +8,23 @@ import kotlin.test.assertTrue
 
 class AccountSessionBootstrapResultTest {
     @Test
+    fun appleSkipsPandaCredentialsIncludingLegacyAndProfileScopedTypes() {
+        val policy = com.torve.data.addon.ExtensionRuntimePolicy
+        val previous = policy.restorePandaFromAccount
+        try {
+            policy.restorePandaFromAccount = false
+            listOf("PANDA_TOKEN", "panda", "PANDA_TOKEN::p:child", "PANDA_INDEXER_API_KEY::profile:child",
+                "PANDA_MANAGEMENT_TOKEN", "torbox_download_client_api_key").forEach {
+                assertFalse(permitsAccountIntegrationRestore(it), it)
+            }
+            listOf("TRAKT_TOKENS", "SIMKL_ACCESS_TOKEN", "JELLYFIN_API_KEY", "PLEX_ACCESS_TOKEN::p:child").forEach {
+                assertTrue(permitsAccountIntegrationRestore(it), it)
+            }
+            policy.restorePandaFromAccount = true
+            assertTrue(permitsAccountIntegrationRestore("PANDA_TOKEN"))
+        } finally { policy.restorePandaFromAccount = previous }
+    }
+    @Test
     fun isReady_true_when_no_limit_and_no_error() {
         val result = AccountSessionBootstrapResult(
             isReady = true,
@@ -86,6 +103,18 @@ class AccountSessionBootstrapResultTest {
         assertEquals(
             IntegrationSecretKey.PANDA_TOKEN,
             integrationSecretKeyForRestore("panda"),
+        )
+        assertEquals(
+            IntegrationSecretKey.JELLYFIN_API_KEY,
+            integrationSecretKeyForRestore("jellyfin"),
+        )
+        assertEquals(
+            IntegrationSecretKey.SEERR_API_KEY,
+            integrationSecretKeyForRestore("seerr"),
+        )
+        assertEquals(
+            IntegrationSecretKey.SEERR_API_KEY,
+            integrationSecretKeyForRestore("jellyseerr"),
         )
     }
 }

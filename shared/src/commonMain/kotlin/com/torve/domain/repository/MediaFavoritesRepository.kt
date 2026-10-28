@@ -17,6 +17,7 @@ interface MediaFavoritesRepository {
     val state: StateFlow<MediaFavoritesState>
 
     fun refresh(force: Boolean = true)
+    suspend fun refreshAndAwait()
     fun toggleFavorite(item: MediaItem)
     fun addFavorite(item: MediaItem)
     fun removeFavorite(mediaKey: String)

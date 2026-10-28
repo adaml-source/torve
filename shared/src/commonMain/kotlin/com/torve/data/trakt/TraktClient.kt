@@ -3,12 +3,14 @@ package com.torve.data.trakt
 import com.torve.data.trakt.api.TraktAuthorizationRequiredException
 import io.ktor.client.HttpClient
 import io.ktor.client.request.get
+import io.ktor.client.request.request
 import io.ktor.client.request.header
 import io.ktor.client.request.parameter
 import io.ktor.client.request.post
 import io.ktor.client.request.setBody
 import io.ktor.client.statement.bodyAsText
 import io.ktor.http.ContentType
+import io.ktor.http.HttpMethod
 import io.ktor.http.contentType
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Deferred
@@ -22,6 +24,8 @@ import kotlinx.datetime.TimeZone
 import kotlinx.datetime.toLocalDateTime
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 
 class TraktClient(
     private val httpClient: HttpClient,
@@ -42,6 +46,8 @@ class TraktClient(
         // (which surfaces as 429 / Cloudflare error 1015).
         private const val USER_AGENT = "Torve/1.0 (+https://torve.app)"
         private const val PUBLIC_AUTH_SCOPE = "public"
+        internal const val WATCHED_SHOW_PAGE_SIZE = 100
+        internal const val MAX_WATCHED_SHOW_PAGES = 100
     }
 
     var clientId: String = DEFAULT_PUBLIC_CLIENT_ID
@@ -49,13 +55,33 @@ class TraktClient(
     var clientSecret: String = DEFAULT_PUBLIC_CLIENT_SECRET
         private set
 
+    private var packagedClientId: String = DEFAULT_PUBLIC_CLIENT_ID
+    private var packagedClientSecret: String = DEFAULT_PUBLIC_CLIENT_SECRET
+
+    val usesCustomCredentials: Boolean
+        get() = clientId != DEFAULT_PUBLIC_CLIENT_ID
+
+    fun setPackagedCredentials(clientId: String, clientSecret: String) {
+        val normalizedClientId = clientId.trim()
+        val normalizedClientSecret = clientSecret.trim()
+        if (normalizedClientId.isBlank() || normalizedClientSecret.isBlank()) return
+        packagedClientId = normalizedClientId
+        packagedClientSecret = normalizedClientSecret
+        this.clientId = normalizedClientId
+        this.clientSecret = normalizedClientSecret
+    }
+
     private val requestScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val inFlightGetMutex = Mutex()
     private val inFlightGets = mutableMapOf<String, Deferred<TraktRawResponse>>()
 
     fun setCredentials(clientId: String, clientSecret: String) {
-        this.clientId = clientId.ifBlank { DEFAULT_PUBLIC_CLIENT_ID }
-        this.clientSecret = clientSecret.ifBlank { DEFAULT_PUBLIC_CLIENT_SECRET }
+        val normalizedClientId = clientId.trim()
+        val normalizedClientSecret = clientSecret.trim()
+        val hasCompleteCustomCredentials = normalizedClientId.isNotBlank() &&
+            normalizedClientSecret.isNotBlank()
+        this.clientId = if (hasCompleteCustomCredentials) normalizedClientId else packagedClientId
+        this.clientSecret = if (hasCompleteCustomCredentials) normalizedClientSecret else packagedClientSecret
     }
 
     suspend fun resetRequestControlForAccountChange() {
@@ -88,6 +114,29 @@ class TraktClient(
     // -------------------------------------------------------------------------
     // Public Rating Lookup (no user auth — only client_id header)
     // -------------------------------------------------------------------------
+
+    /** Exact identity conversion for sparse saved items; never match by title. */
+    suspend fun getImdbIdByTmdb(tmdbId: Int, series: Boolean): String? {
+        require(tmdbId > 0)
+        val type = if (series) "show" else "movie"
+        val response = getRaw("/search/tmdb/$tmdbId", null, listOf("type" to type))
+        return decodeTraktBody<List<TraktBrowseListEntry>>(response, TraktRequestBucket.UNAUTHENTICATED_GET)
+            .filter { it.type == type }
+            .mapNotNull { if (series) it.show?.ids else it.movie?.ids }
+            .filter { it.tmdb == tmdbId }
+            .mapNotNull { it.imdb?.takeIf { id -> id.matches(Regex("tt[0-9]+")) } }
+            .distinct().singleOrNull()
+    }
+
+    suspend fun getContentComments(imdbId: String, series: Boolean, page: Int): com.torve.presentation.detail.ContentCommentPage {
+        require(Regex("tt[0-9]+").matches(imdbId))
+        val response = getRaw("/${if (series) "shows" else "movies"}/$imdbId/comments/newest", null,
+            query = listOf("page" to page.coerceAtLeast(1).toString(), "limit" to "10"))
+        val comments = decodeTraktBody<List<com.torve.presentation.detail.ContentComment>>(response)
+        val pages = response.headers.entries.firstOrNull { it.key.equals("X-Pagination-Page-Count", true) }?.value?.toIntOrNull()
+        return com.torve.presentation.detail.ContentCommentPage(comments, page,
+            if (pages != null) page < pages else comments.size == 10)
+    }
 
     suspend fun getMoviePublicRating(imdbId: String): TraktPublicRating? {
         return try {
@@ -133,6 +182,10 @@ class TraktClient(
                 mapOf("client_id" to clientId),
             ),
             bucket = TraktRequestBucket.OAUTH_REFRESH,
+        )
+        println(
+            "[TraktAuth] Device code response status=${response.status} " +
+                "credentialSource=${if (usesCustomCredentials) "configured" else "bundled"}",
         )
         val resp: TraktDeviceCodeResponse = decodeTraktBody(response, TraktRequestBucket.OAUTH_REFRESH)
         if (resp.userCode.isBlank() || resp.verificationUrl.isBlank()) {
@@ -187,10 +240,21 @@ class TraktClient(
                     }
                 }
                 400 -> TraktPollResult.Pending
-                403 -> TraktPollResult.SlowDown
-                404, 410 -> TraktPollResult.Expired
-                409 -> TraktPollResult.AlreadyUsed
-                418 -> TraktPollResult.Denied
+                403 -> TraktPollResult.Error(
+                    "Trakt rejected Torve's OAuth application (HTTP 403).",
+                )
+                404, 410 -> {
+                    println("[TraktAuth] Device authorization ended status=${response.status}")
+                    TraktPollResult.Expired
+                }
+                409 -> {
+                    println("[TraktAuth] Device authorization ended status=409")
+                    TraktPollResult.AlreadyUsed
+                }
+                418 -> {
+                    println("[TraktAuth] Device authorization ended status=418")
+                    TraktPollResult.Denied
+                }
                 429 -> {
                     rateLimiter.markRateLimited(
                         TraktRequestBucket.OAUTH_REFRESH,
@@ -260,6 +324,14 @@ class TraktClient(
         )
     }
 
+    /** Authenticated account endpoint; no history sync, mutations or OAuth refresh. */
+    suspend fun probeAccount(accessToken: String): com.torve.domain.integrations.ConnectionProbeResult =
+        com.torve.data.integrations.authenticatedProbe {
+            httpClient.get("$TRAKT_BASE/users/settings") {
+                traktHeaders(accessToken).forEach { (key, value) -> header(key, value) }
+            }.status
+        }
+
     suspend fun revokeToken(accessToken: String) {
         try {
             postRaw(
@@ -291,6 +363,50 @@ class TraktClient(
         ).also { ensureSuccess(it) }.body
     }
 
+    /**
+     * Loads the complete watched-show set. `extended=progress` is required by
+     * Trakt for season/episode rows, and the endpoint has required pagination
+     * since July 2026. We stop at the advertised final page when available and
+     * otherwise continue until Trakt returns an empty page.
+     */
+    suspend fun getWatchedShows(accessToken: String): List<TraktWatchedShowResponse> {
+        val watched = mutableListOf<TraktWatchedShowResponse>()
+        for (page in 1..MAX_WATCHED_SHOW_PAGES) {
+            val response = getRaw(
+                path = "/sync/watched/shows",
+                accessToken = accessToken,
+                query = listOf(
+                    "page" to page.toString(),
+                    "limit" to WATCHED_SHOW_PAGE_SIZE.toString(),
+                    "extended" to "progress",
+                ),
+            )
+            val pageItems: List<TraktWatchedShowResponse> = decodeTraktBody(response)
+            if (pageItems.isEmpty()) break
+            watched += pageItems
+
+            val pageCount = response.headers.entries
+                .firstOrNull { (name, _) -> name.equals("X-Pagination-Page-Count", ignoreCase = true) }
+                ?.value
+                ?.substringBefore(',')
+                ?.trim()
+                ?.toIntOrNull()
+            if (pageCount != null && page >= pageCount) break
+        }
+        return watched
+    }
+
+    suspend fun getShowWatchedProgress(accessToken: String, imdbId: String): TraktShowWatchedProgress {
+        require(imdbId.matches(Regex("tt[0-9]+"))) { "A show IMDb ID is required" }
+        return decodeTraktBody(
+            getRaw(
+                path = "/shows/$imdbId/progress/watched",
+                accessToken = accessToken,
+                query = listOf("hidden" to "true", "specials" to "true"),
+            ),
+        )
+    }
+
     suspend fun addToHistory(accessToken: String, body: TraktHistoryBody) {
         postRaw("/sync/history", accessToken, body = body)
             .also { ensureSuccess(it, TraktRequestBucket.AUTHENTICATED_MUTATION) }
@@ -319,6 +435,97 @@ class TraktClient(
     // -------------------------------------------------------------------------
     // Watchlist
     // -------------------------------------------------------------------------
+
+    suspend fun browsePublicLists(query: String, page: Int = 1): List<TraktBrowseList> {
+        val text = query.trim().take(200)
+        if (text.contains("://")) {
+            val address = TraktListLinks.parse(text) ?: error("Paste a public Trakt list URL.")
+            return listOf(decodeTraktBody(getRaw(address.path, null)))
+        }
+        val response = if (text.isBlank()) getRaw("/lists/trending", null, listOf("page" to page.coerceAtLeast(1).toString(), "limit" to "20"))
+        else getRaw("/search/list", null, listOf("query" to text, "page" to page.coerceAtLeast(1).toString(), "limit" to "20"))
+        return decodeTraktBody<List<TraktBrowseListEnvelope>>(response).mapNotNull { entry -> entry.list?.let { it.copy(likes = maxOf(it.likes, entry.likeCount)) } }.filter { (it.ids.trakt ?: 0) > 0 }
+    }
+    suspend fun getPublicListItems(listId: Int, page: Int = 1): List<TraktBrowseListEntry> {
+        require(listId > 0)
+        return decodeTraktBody(getRaw("/lists/$listId/items/movie,show", null,
+            listOf("page" to page.coerceAtLeast(1).toString(), "limit" to "30", "extended" to "full,images")))
+    }
+    suspend fun getLikedBrowseLists(accessToken: String, page: Int = 1): List<TraktBrowseList> =
+        decodeTraktBody<List<TraktBrowseListEnvelope>>(getRaw("/users/likes/lists", accessToken,
+            listOf("page" to page.coerceAtLeast(1).toString(), "limit" to "20"))).mapNotNull { it.list }
+    suspend fun getOwnBrowseListItems(accessToken: String, listId: Int, page: Int = 1): List<TraktBrowseListEntry> {
+        require(listId > 0)
+        return decodeTraktBody(getRaw("/users/me/lists/$listId/items/movie,show", accessToken,
+            listOf("page" to page.coerceAtLeast(1).toString(), "limit" to "30", "extended" to "full,images")))
+    }
+    suspend fun followBrowseList(accessToken: String, listId: Int, followed: Boolean) {
+        require(listId > 0)
+        ensureSuccess(listMutationRaw(if (followed) HttpMethod.Post else HttpMethod.Delete, "/lists/$listId/like", accessToken), TraktRequestBucket.AUTHENTICATED_MUTATION)
+    }
+
+    suspend fun getPersonalLists(accessToken: String): List<TraktPersonalList> =
+        decodeTraktBody(getRaw("/users/me/lists", accessToken))
+
+    suspend fun createPersonalList(accessToken: String, name: String): TraktPersonalList =
+        decodeTraktBody(postRaw("/users/me/lists", accessToken, TraktListWrite(validListName(name))))
+
+    suspend fun renamePersonalList(accessToken: String, listId: Int, name: String): TraktPersonalList {
+        require(listId > 0)
+        return decodeTraktBody(listMutationRaw(HttpMethod.Put, "/users/me/lists/$listId", accessToken,
+            buildJsonObject { put("name", validListName(name)) }.toString()))
+    }
+
+    suspend fun deletePersonalList(accessToken: String, listId: Int) {
+        require(listId > 0)
+        ensureSuccess(listMutationRaw(HttpMethod.Delete, "/users/me/lists/$listId", accessToken), TraktRequestBucket.AUTHENTICATED_MUTATION)
+    }
+
+    suspend fun getPersonalListItems(accessToken: String, listId: Int): List<TraktWatchlistItemResponse> {
+        require(listId > 0)
+        val items = mutableListOf<TraktWatchlistItemResponse>()
+        var page = 1
+        do {
+            val response = getRaw("/users/me/lists/$listId/items", accessToken,
+                listOf("page" to page.toString(), "limit" to "100"))
+            val slice = decodeTraktBody<List<TraktWatchlistItemResponse>>(response)
+            items.addAll(slice)
+            val pageCount = response.headers.entries.firstOrNull { it.key.equals("X-Pagination-Page-Count", true) }
+                ?.value?.toIntOrNull()
+            if (slice.isEmpty() || (pageCount != null && page >= pageCount) || (pageCount == null && slice.size < 100)) break
+            page++
+            check(page <= 100) { "This list is too large to load. Please narrow it in Trakt." }
+        } while (true)
+        return items
+    }
+
+    suspend fun mutatePersonalListItems(accessToken: String, listId: Int, body: TraktListItemsWrite, remove: Boolean) {
+        require(listId > 0)
+        val result = decodeTraktBody<TraktListMutationResponse>(postRaw(
+            "/users/me/lists/$listId/items${if (remove) "/remove" else ""}", accessToken, body))
+        result.requireItemMatched()
+    }
+
+    private fun validListName(name: String): String = name.trim().also {
+        require(it.isNotEmpty() && it.length <= 100) { "Enter a list name of up to 100 characters." }
+    }
+
+    private suspend fun listMutationRaw(method: HttpMethod, path: String, accessToken: String, body: String? = null): TraktRawResponse =
+        rateLimiter.run(TraktRequestBucket.AUTHENTICATED_MUTATION) {
+            try {
+                val response = httpClient.request("$TRAKT_BASE$path") {
+                    this.method = method
+                    contentType(ContentType.Application.Json)
+                    traktHeaders(accessToken).forEach { (key, value) -> header(key, value) }
+                    if (body != null) setBody(body)
+                }
+                TraktRawResponse(response.status.value,
+                    response.headers.entries().associate { it.key to it.value.joinToString(",") }, response.bodyAsText())
+            } catch (error: Exception) {
+                if (error is kotlinx.coroutines.CancellationException || error is TraktException) throw error
+                throw TraktNetworkException(error)
+            }
+        }
 
     suspend fun getWatchlist(accessToken: String): List<TraktWatchlistItemResponse> {
         val response = getRaw("/sync/watchlist", accessToken)

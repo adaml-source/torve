@@ -1,5 +1,7 @@
 package com.torve.android.ui.profile
 
+import com.torve.android.ui.community.parityLabel as localizedUiText
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -66,7 +68,7 @@ fun ProfileTabScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(Obsidian)
+            .background(MaterialTheme.colorScheme.background)
             .statusBarsPadding()
             .verticalScroll(rememberScrollState())
             .padding(16.dp),
@@ -101,7 +103,7 @@ fun ProfileTabScreen(
                 Text(
                     text = state.traktUser?.username ?: stringResource(R.string.profile_torve_user),
                     style = MaterialTheme.typography.headlineSmall,
-                    color = Snow,
+                    color = MaterialTheme.colorScheme.onSurface,
                     fontWeight = FontWeight.Bold,
                 )
                 if (state.traktConnected) {
@@ -201,7 +203,7 @@ fun ProfileTabScreen(
 
         // App version
         Text(
-            text = "Torve v0.5.0",
+            text = localizedUiText("Torve v0.5.0"),
             style = MaterialTheme.typography.bodySmall,
             color = Torve.colors.textTertiary,
             modifier = Modifier.align(Alignment.CenterHorizontally),
@@ -251,7 +253,7 @@ private fun ProfileNavItem(
             Text(
                 text = label,
                 style = MaterialTheme.typography.bodyLarge,
-                color = Snow,
+                color = MaterialTheme.colorScheme.onSurface,
                 fontWeight = FontWeight.Medium,
             )
             Text(
