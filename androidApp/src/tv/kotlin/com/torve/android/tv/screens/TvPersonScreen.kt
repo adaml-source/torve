@@ -21,6 +21,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.torve.android.tv.*
 import com.torve.android.tv.components.*
+import com.torve.android.tv.focus.TvScreenFocusHandle
 import com.torve.android.ui.community.parityLabel as localizedUiText
 import com.torve.android.ui.theme.*
 import com.torve.domain.model.MediaItem
@@ -47,6 +48,7 @@ internal fun TvPersonScreen(
     railFocusRequester: FocusRequester, initialName: String = "",
     onFirstContentRequester: (FocusRequester) -> Unit = {},
     onContentFocused: (FocusRequester) -> Unit = {},
+    registerFocusHandle: ((TvScreenFocusHandle?) -> Unit)? = null,
 ) {
     val viewModel: PersonViewModel = koinInject()
     val settings: SettingsViewModel = koinInject()
@@ -132,6 +134,7 @@ internal fun TvPersonScreen(
                 railFocusRequester, grid, headerRequester = first, modifier = Modifier.weight(1f),
                 onFirstContentRequester = onFirstContentRequester,
                 onContentFocused = onContentFocused,
+                registerFocusHandle = registerFocusHandle,
                 onFocused = { _, _ -> enteredGrid = true },
                 onExitUp = { first.requestFocus() }, onClick = onMediaClick)
         }

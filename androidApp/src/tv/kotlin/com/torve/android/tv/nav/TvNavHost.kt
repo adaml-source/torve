@@ -283,7 +283,7 @@ internal fun TvNavHost(
             TvPersonScreen(entry.arguments?.getInt("personId") ?: 0,
                 onBack = { navController.popBackStack() }, onMediaClick = { navController.navigateToTvDetails(it) },
                 railFocusRequester = latestRailFocusRequester,
-                onContentFocused = { latestOnContentFocused("tv_person", it) })
+                onContentFocused = { latestOnContentFocused(entry.destination.route.orEmpty(), it) })
         }
         composable(TvRoutes.SUB_NAV_START) { /* nothing */ }
 
@@ -496,7 +496,8 @@ internal fun TvNavHost(
                 onMediaClick = { latestOnBeforeDetailsNavigateFromSeeAll(); navController.navigateToTvDetails(it) },
                 railFocusRequester = latestRailFocusRequester, initialName = title,
                 onFirstContentRequester = { latestOnFirstContentRequester(TvRoutes.SEE_ALL, it) },
-                onContentFocused = { latestOnContentFocused(TvRoutes.SEE_ALL, it) })
+                onContentFocused = { latestOnContentFocused(TvRoutes.SEE_ALL, it) },
+                registerFocusHandle = latestRegisterSeeAllFocusHandle)
             else TvSeeAllScreen(
                 railKey = railKey,
                 mediaType = mediaType,
