@@ -44,6 +44,8 @@ enum class IntegrationSecretKey {
      * reads a sanitized status.
      */
     NZBDAV_API_KEY,
+    /** Encrypted local mirror of streaming backend selection and DAV credentials. */
+    NZBDAV_CONNECTION,
     /**
      * Local cache of Panda's NZB indexer API keys. Panda's read API
      * always returns indexer apiKeys as `[redacted]`, so the desktop's

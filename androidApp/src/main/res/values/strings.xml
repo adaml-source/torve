@@ -2022,8 +2022,8 @@
     <!-- NzbDAV integration card. Copy is deliberately neutral — the
          card is backend-owned and must not expose NzbDAV internals,
          version strings, or transport details. -->
-    <string name="integrations_nzbdav_title">NzbDAV</string>
-    <string name="integrations_nzbdav_desc">Torve uses your NzbDAV instance to stream Usenet sources. Connection is managed by the Torve backend.</string>
+    <string name="integrations_nzbdav_title">Usenet streaming</string>
+    <string name="integrations_nzbdav_desc">Connect InfiniDysk, NzbDavEx, AltMount, Decypharr or NZBDav. Configure your NNTP accounts in that server. Torve connects through its API and WebDAV; TorBox is optional.</string>
     <string name="integrations_nzbdav_base_url">Base URL</string>
     <string name="integrations_nzbdav_api_key">API key</string>
     <string name="integrations_nzbdav_test">Test connection</string>

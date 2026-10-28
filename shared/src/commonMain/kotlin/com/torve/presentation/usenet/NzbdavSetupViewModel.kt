@@ -1,5 +1,7 @@
 package com.torve.presentation.usenet
 
+import com.torve.data.usenet.model.UsenetBackendConnectionDto
+import com.torve.data.usenet.model.UsenetStreamingBackend
 import com.torve.data.usenet.UsenetApiException
 import com.torve.data.usenet.UsenetRepository
 import com.torve.data.usenet.model.NzbdavStatusResponseDto
@@ -50,7 +52,12 @@ class NzbdavSetupViewModel(
             val mirroredApiKey = runCatching {
                 secretStore.get(IntegrationSecretKey.NZBDAV_API_KEY)
             }.getOrNull().orEmpty()
-            _state.update { it.copy(baseUrl = mirroredBaseUrl, apiKey = mirroredApiKey) }
+            val connection = runCatching {
+                secretStore.get(IntegrationSecretKey.NZBDAV_CONNECTION)?.let {
+                    kotlinx.serialization.json.Json.decodeFromString(UsenetBackendConnectionDto.serializer(), it)
+                }
+            }.getOrNull() ?: UsenetBackendConnectionDto()
+            _state.update { it.copy(baseUrl = mirroredBaseUrl, apiKey = mirroredApiKey, connection = connection) }
             refreshStatus()
         }
     }
@@ -64,6 +71,18 @@ class NzbdavSetupViewModel(
     fun updateApiKey(value: String) {
         _state.update { it.copy(apiKey = value) }
     }
+
+    fun updateBackendType(value: String) {
+        if (value == _state.value.connection.backendType || UsenetStreamingBackend.entries.none { it.wireValue == value }) return
+        _state.update { it.copy(connection = it.connection.copy(backendType = value, apiPath = "", webdavUrl = "", contentPath = ""), lastTestResult = null) }
+    }
+
+    fun updateWebdavUrl(value: String) { _state.update { it.copy(connection = it.connection.copy(webdavUrl = value)) } }
+    fun updateWebdavUsername(value: String) { _state.update { it.copy(connection = it.connection.copy(webdavUsername = value)) } }
+    fun updateWebdavPassword(value: String) { _state.update { it.copy(connection = it.connection.copy(webdavPassword = value)) } }
+    fun updateCategory(value: String) { _state.update { it.copy(connection = it.connection.copy(category = value)) } }
+    fun updateApiPath(value: String) { _state.update { it.copy(connection = it.connection.copy(apiPath = value)) } }
+    fun updateContentPath(value: String) { _state.update { it.copy(connection = it.connection.copy(contentPath = value)) } }
 
     fun setEnabled(enabled: Boolean) {
         _state.update { it.copy(enabled = enabled) }
@@ -106,6 +125,7 @@ class NzbdavSetupViewModel(
                 val response = repository.testNzbdavIntegration(
                     baseUrl = current.baseUrl.trim(),
                     apiKey = current.apiKey.trim(),
+                    connection = current.connection,
                 )
                 mapTestResult(response)
             } catch (_: UsenetApiException) {
@@ -130,6 +150,7 @@ class NzbdavSetupViewModel(
                 val status = repository.saveNzbdavIntegration(
                     baseUrl = current.baseUrl.trim(),
                     apiKey = current.apiKey.trim(),
+                    connection = current.connection,
                     enabled = current.enabled,
                     storageMode = IntegrationStorageMode.ACCOUNT,
                 )
@@ -163,6 +184,7 @@ class NzbdavSetupViewModel(
                     it.copy(
                         baseUrl = "",
                         apiKey = "",
+                        connection = UsenetBackendConnectionDto(),
                         enabled = true,
                         status = NzbdavStatus.NotConfigured,
                         lastTestResult = NzbdavTestResult.Removed,
@@ -209,6 +231,7 @@ class NzbdavSetupViewModel(
 data class NzbdavSetupUiState(
     val baseUrl: String = "",
     val apiKey: String = "",
+    val connection: UsenetBackendConnectionDto = UsenetBackendConnectionDto(),
     val enabled: Boolean = true,
     val status: NzbdavStatus = NzbdavStatus.Loading,
     val isTesting: Boolean = false,

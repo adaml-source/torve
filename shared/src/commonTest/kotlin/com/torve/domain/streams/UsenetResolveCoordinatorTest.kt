@@ -159,12 +159,15 @@ class UsenetResolveCoordinatorTest {
     ) : UsenetRepository {
         val resolveCalls = mutableListOf<Pair<String, UsenetCandidateDto>>()
 
-        override suspend fun testNzbdavIntegration(baseUrl: String, apiKey: String): NzbdavTestResponseDto =
+        override suspend fun testNzbdavIntegration(baseUrl: String, apiKey: String,
+        connection: com.torve.data.usenet.model.UsenetBackendConnectionDto,
+    ): NzbdavTestResponseDto =
             NzbdavTestResponseDto(ok = true)
 
         override suspend fun saveNzbdavIntegration(
             baseUrl: String, apiKey: String, enabled: Boolean, storageMode: IntegrationStorageMode,
-        ): NzbdavStatusResponseDto = NzbdavStatusResponseDto(configured = true)
+        connection: com.torve.data.usenet.model.UsenetBackendConnectionDto,
+    ): NzbdavStatusResponseDto = NzbdavStatusResponseDto(configured = true)
 
         override suspend fun getNzbdavStatus(): NzbdavStatusResponseDto = NzbdavStatusResponseDto(configured = true)
 

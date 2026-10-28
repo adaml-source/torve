@@ -75,7 +75,7 @@ def test_tampered_signature_rejected():
 def test_different_user_token_rejected_on_handoff_endpoint(client, db, nzbdav_user):
     # Prime cache as if warming finished for user A
     other_uid = str(uuid.uuid4())
-    release_cache.set_warm_success("H-HND", {
+    release_cache.register_stream("stream-xyz", {
         "stream_id": "stream-xyz",
         "upstream_url": "https://upstream.example.com/f.mp4",
         "user_id": other_uid,
@@ -91,7 +91,7 @@ def test_different_user_token_rejected_on_handoff_endpoint(client, db, nzbdav_us
 
 def test_proxy_streams_with_range_forwarding(client, monkeypatch, nzbdav_user):
     uid = str(nzbdav_user.id)
-    release_cache.set_warm_success("H-PROXY", {
+    release_cache.register_stream("stream-proxy", {
         "stream_id": "stream-proxy",
         "upstream_url": "https://upstream.example.com/v.mp4",
         "user_id": uid,

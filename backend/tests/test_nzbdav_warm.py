@@ -17,7 +17,7 @@ from app.config import settings
 from app.models import WarmJob
 from app.nzbdav import warm_service as ws_mod
 from app.nzbdav.account_store import account_store
-from app.nzbdav.release_cache import release_cache
+from app.nzbdav.release_cache import release_cache, connection_scope
 from app.nzbdav.warm_service import (
     NzbdavWarmService,
     WarmCandidateInput,
@@ -76,7 +76,7 @@ def test_cache_hit_short_circuits_upstream(db, nzbdav_user):
         "stream_id": str(uuid.uuid4()),
         "upstream_url": "https://example.com/stream",
         "user_id": str(nzbdav_user.id),
-    })
+    }, scope=f"{connection_scope(account_store.get_for_user(db, nzbdav_user.id))}:tmdb:1")
     cand = WarmCandidateInput(candidate_id="c1", hash_key="HASH-A")
     results = asyncio.run(
         svc.start_warm(
@@ -95,7 +95,7 @@ def test_cache_hit_short_circuits_upstream(db, nzbdav_user):
 
 def test_dead_release_short_circuits_upstream(db, nzbdav_user):
     svc = NzbdavWarmService(client_factory=_no_client_factory)
-    release_cache.set_dead_release("HASH-B", "RELEASE_UNAVAILABLE")
+    release_cache.set_dead_release("HASH-B", "RELEASE_UNAVAILABLE", scope=connection_scope(account_store.get_for_user(db, nzbdav_user.id)))
     cand = WarmCandidateInput(candidate_id="c1", hash_key="HASH-B")
     results = asyncio.run(
         svc.start_warm(
@@ -157,7 +157,7 @@ def test_concurrency_cap_returns_warming_without_upstream(
 
     calls = {"n": 0}
 
-    def factory(base_url, api_key):
+    def factory(base_url, api_key, **kwargs):
         calls["n"] += 1
 
         class _C:

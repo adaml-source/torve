@@ -28,13 +28,14 @@ from app.nzbdav import state as st
 from app.nzbdav import telemetry
 from app.nzbdav.account_store import account_store
 from app.nzbdav.client import NzbdavClient
+from app.nzbdav.backends import BackendConnection
 from app.nzbdav.failures import (
     DEAD_RELEASE_CODES,
     FailureCode,
     UpstreamError,
     default_fallback_suggestions,
 )
-from app.nzbdav.release_cache import release_cache
+from app.nzbdav.release_cache import release_cache, connection_scope
 
 _log = logging.getLogger(__name__)
 
@@ -111,11 +112,11 @@ class WarmCandidateState:
 # ── Service ─────────────────────────────────────────────────────────────
 
 
-ClientFactory = Callable[[str, str], NzbdavClient]
+ClientFactory = Callable[..., NzbdavClient]
 
 
-def _default_client_factory(base_url: str, api_key: str) -> NzbdavClient:
-    return NzbdavClient(base_url=base_url, api_key=api_key)
+def _default_client_factory(base_url: str, api_key: str, *, connection: BackendConnection) -> NzbdavClient:
+    return NzbdavClient(base_url=base_url, api_key=api_key, connection=connection)
 
 
 class NzbdavWarmService:
@@ -174,6 +175,7 @@ class NzbdavWarmService:
                 content_id=content_id,
                 cand=cand,
                 circuit_tripped=circuit_tripped,
+                cfg=cfg,
             )
             if state is not None:
                 results.append(state)
@@ -201,6 +203,7 @@ class NzbdavWarmService:
                 self._run_warm_job(
                     user_id=user_id,
                     cfg_id=cfg.id,
+                    content_id=content_id,
                     job_id=job.job_id,
                     cand=cand,
                     provider_key=provider_key,
@@ -240,10 +243,11 @@ class NzbdavWarmService:
         content_id: str,
         cand: WarmCandidateInput,
         circuit_tripped: bool,
+        cfg: NzbdavConfig,
     ) -> WarmCandidateState | None:
         """Return a terminal state if no new work is needed, else None."""
         # Warm-success cache hit?
-        cached = release_cache.get_warm_success(cand.hash_key)
+        cached = release_cache.get_warm_success(cand.hash_key, scope=f"{connection_scope(cfg)}:{content_id}")
         if cached is not None:
             telemetry.cache_hit(cache="warm_success", hash_key=cand.hash_key)
             return WarmCandidateState(
@@ -254,7 +258,7 @@ class NzbdavWarmService:
             )
 
         # Dead-release cache hit?
-        dead_code = release_cache.get_dead_release(cand.hash_key)
+        dead_code = release_cache.get_dead_release(cand.hash_key, scope=connection_scope(cfg))
         if dead_code is not None:
             telemetry.cache_hit(cache="dead_release", hash_key=cand.hash_key)
             return WarmCandidateState(
@@ -288,6 +292,7 @@ class NzbdavWarmService:
                 WarmJob.user_id == user_id,
                 WarmJob.content_id == content_id,
                 WarmJob.hash_key == cand.hash_key,
+                WarmJob.created_at >= cfg.updated_at,
             )
             .order_by(WarmJob.created_at.desc())
             .first()
@@ -295,12 +300,9 @@ class NzbdavWarmService:
         if existing is not None:
             simplified = st.to_simplified(existing.state)
             if simplified == st.SIMPLIFIED_READY:
-                return WarmCandidateState(
-                    candidate_id=cand.candidate_id,
-                    hash_key=cand.hash_key,
-                    job_id=str(existing.job_id),
-                    simplified_state=st.SIMPLIFIED_READY,
-                )
+                # Its short resolve cache expired: mount again instead of
+                # reporting ready without a usable playback URL.
+                return None
             if simplified == st.SIMPLIFIED_WARMING:
                 # Return the in-flight job — do NOT start a duplicate.
                 return WarmCandidateState(
@@ -317,6 +319,7 @@ class NzbdavWarmService:
         *,
         user_id: uuid.UUID,
         cfg_id: uuid.UUID,
+        content_id: str,
         job_id: uuid.UUID,
         cand: WarmCandidateInput,
         provider_key: str,
@@ -335,9 +338,13 @@ class NzbdavWarmService:
                             failure_code=FailureCode.AUTH_INVALID.value,
                             failure_detail="config_missing")
                 return
+            config_revision = cfg.updated_at.isoformat()
+            if not cfg.is_enabled or connection_scope(cfg) != provider_key:
+                _update_job(db, job_id, state=st.CANCELLED)
+                return
             try:
                 api_key = account_store.get_decrypted_api_key(cfg)
-                client = self._client_factory(cfg.base_url, api_key)
+                client = self._client_factory(cfg.base_url, api_key, connection=account_store.get_connection(cfg))
             except Exception as exc:  # noqa: BLE001
                 _update_job(db, job_id, state=st.FAILED,
                             failure_code=FailureCode.AUTH_INVALID.value,
@@ -361,6 +368,12 @@ class NzbdavWarmService:
                 poll_deadline = time.monotonic() + poll_budget_sec
                 stream_url: str | None = None
                 while time.monotonic() < poll_deadline:
+                    db.expire_all()
+                    active_job = db.query(WarmJob).filter(WarmJob.job_id == job_id).one_or_none()
+                    db.refresh(cfg)
+                    if (active_job is None or active_job.state == st.CANCELLED
+                            or not cfg.is_enabled or cfg.updated_at.isoformat() != config_revision):
+                        raise asyncio.CancelledError()
                     poll = await client.poll_job(
                         upstream_job_id=submit.upstream_job_id
                     )
@@ -390,10 +403,12 @@ class NzbdavWarmService:
                 stream_id = str(uuid.uuid4())
                 release_cache.set_warm_success(cand.hash_key, {
                     "stream_id": stream_id,
+                    "config_id": str(cfg.id),
+                    "config_revision": config_revision,
                     "upstream_url": stream_url,
                     "user_id": str(user_id),
                     "content_id": str(content_id),
-                })
+                }, scope=f"{provider_key}:{content_id}")
                 _update_job(
                     db, job_id,
                     state=st.READY, phase=None,
@@ -443,7 +458,7 @@ class NzbdavWarmService:
 def _provider_key(cfg: NzbdavConfig) -> str:
     # Bucket health by config id so failures for one user don't trip
     # another user's circuit.
-    return f"nzbdav:{cfg.id}"
+    return connection_scope(cfg)
 
 
 def _detach_task(task: asyncio.Task) -> None:
@@ -452,7 +467,7 @@ def _detach_task(task: asyncio.Task) -> None:
     def _cb(_t: asyncio.Task) -> None:
         try:
             _t.result()
-        except Exception:  # noqa: BLE001
+        except (Exception, asyncio.CancelledError):  # noqa: BLE001
             pass
 
     task.add_done_callback(_cb)
@@ -527,7 +542,7 @@ def _handle_upstream_error(
     )
     telemetry.failure(code=code, user_id=user_id, phase=phase)
     if code in DEAD_RELEASE_CODES:
-        release_cache.set_dead_release(hash_key, code)
+        release_cache.set_dead_release(hash_key, code, scope=provider_key)
     if exc.code in (
         FailureCode.UPSTREAM_UNREACHABLE,
         FailureCode.TIMEOUT,

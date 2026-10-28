@@ -635,6 +635,34 @@ private fun NzbdavSetupSection(
             isSensitive = true,
         )
 
+        Spacer(Modifier.height(10.dp))
+        com.torve.data.usenet.model.UsenetStreamingBackend.entries.forEach { backend ->
+            Row(verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth().clickable { vm.updateBackendType(backend.wireValue) }) {
+                RadioButton(selected = state.connection.backendType == backend.wireValue,
+                    onClick = { vm.updateBackendType(backend.wireValue) })
+                Text(backend.displayName, color = Silver)
+            }
+        }
+        IntegrationTextField(label = stringResource(R.string.usenet_webdav_username),
+            value = state.connection.webdavUsername, onValueChange = vm::updateWebdavUsername, isSensitive = false)
+        Spacer(Modifier.height(6.dp))
+        IntegrationTextField(label = stringResource(R.string.usenet_webdav_password),
+            value = state.connection.webdavPassword, onValueChange = vm::updateWebdavPassword, isSensitive = true)
+        var showAdvanced by remember { mutableStateOf(false) }
+        Text(stringResource(R.string.usenet_advanced), color = Amber,
+            modifier = Modifier.padding(vertical = 10.dp).clickable { showAdvanced = !showAdvanced })
+        if (showAdvanced) {
+            IntegrationTextField(label = stringResource(R.string.usenet_webdav_url),
+                value = state.connection.webdavUrl, onValueChange = vm::updateWebdavUrl, isSensitive = false)
+            IntegrationTextField(label = stringResource(R.string.usenet_category),
+                value = state.connection.category, onValueChange = vm::updateCategory, isSensitive = false)
+            IntegrationTextField(label = stringResource(R.string.usenet_api_path),
+                value = state.connection.apiPath, onValueChange = vm::updateApiPath, isSensitive = false)
+            IntegrationTextField(label = stringResource(R.string.usenet_content_path),
+                value = state.connection.contentPath, onValueChange = vm::updateContentPath, isSensitive = false)
+        }
+
         // Inline transient action feedback. Neutral copy only — backend
         // tokens / exception bodies never reach this surface (enforced
         // by NzbdavSetupViewModel mapping + tests).

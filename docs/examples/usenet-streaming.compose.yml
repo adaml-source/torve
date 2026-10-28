@@ -1,0 +1,12 @@
+# Standalone trial only. Use a fresh volume and a separate test Torve backend.
+# After pulling, pin the tested image digest for repeatability.
+services:
+  infinidysk:
+    image: ghcr.io/infinidysk/infinidysk:latest
+    ports:
+      - "127.0.0.1:3000:3000"
+    volumes:
+      - usenet-poc:/config
+    restart: unless-stopped
+volumes:
+  usenet-poc:

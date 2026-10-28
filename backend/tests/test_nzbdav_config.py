@@ -46,7 +46,7 @@ def nzbdav_user(db):
 
 
 class _FakeOkClient:
-    def __init__(self, *, base_url: str, api_key: str) -> None:
+    def __init__(self, *, base_url: str, api_key: str, **kwargs) -> None:
         self.base_url = base_url
         self.api_key = api_key
 

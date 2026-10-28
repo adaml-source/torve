@@ -28,9 +28,31 @@ import kotlinx.serialization.Serializable
 // ─────────────────────────────────────────────────────────────────────────
 
 @Serializable
+data class UsenetBackendConnectionDto(
+    @SerialName("backend_type") val backendType: String = "nzbdav",
+    @SerialName("api_path") val apiPath: String = "",
+    @SerialName("webdav_url") val webdavUrl: String = "",
+    @SerialName("webdav_username") val webdavUsername: String = "",
+    @SerialName("webdav_password") val webdavPassword: String = "",
+    val category: String = "",
+    @SerialName("content_path") val contentPath: String = "",
+) {
+    override fun toString(): String = "UsenetBackendConnectionDto(backendType=$backendType, credentials=[redacted])"
+}
+
+enum class UsenetStreamingBackend(val wireValue: String, val displayName: String) {
+    INFINIDYSK("infinidysk", "InfiniDysk"),
+    NZBDAVEX("nzbdavex", "NzbDavEx"),
+    ALTMOUNT("altmount", "AltMount"),
+    DECYPHARR("decypharr", "Decypharr"),
+    NZBDAV("nzbdav", "NZBDav (legacy)"),
+}
+
+@Serializable
 data class NzbdavTestRequestDto(
     @SerialName("base_url") val baseUrl: String,
     @SerialName("api_key") val apiKey: String,
+    val connection: UsenetBackendConnectionDto = UsenetBackendConnectionDto(),
 )
 
 @Serializable
@@ -46,6 +68,7 @@ data class NzbdavTestResponseDto(
 data class NzbdavConfigRequestDto(
     @SerialName("base_url") val baseUrl: String,
     @SerialName("api_key") val apiKey: String,
+    val connection: UsenetBackendConnectionDto = UsenetBackendConnectionDto(),
     val enabled: Boolean = true,
 )
 
@@ -67,7 +90,7 @@ data class NzbdavStatusResponseDto(
  * Wire-side `UsenetCandidate`. Mirrors the live backend exactly:
  *  - `candidate_id` is mandatory and opaque.
  *  - `hash_key` is mandatory; the backend uses it for dedup + routing.
- *  - `nzb_url` is optional (backend re-fetches from indexer when null).
+ *  - `nzb_url` is required for a new mount; `hash_key` is only a dedup key.
  *
  * Domain counterpart is [com.torve.data.usenet.model.UsenetCandidatePayload]
  * (carried on `ParsedStream`); the projection between the two is a

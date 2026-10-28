@@ -20,7 +20,7 @@ import pytest
 from app.models import WarmJob
 from app.nzbdav import state as st
 from app.nzbdav.account_store import account_store
-from app.nzbdav.release_cache import release_cache
+from app.nzbdav.release_cache import release_cache, connection_scope
 from app.nzbdav.resolve_service import NzbdavResolveService, resolve_service
 from app.nzbdav.warm_service import WarmCandidateInput
 from tests._nzbdav_common import (
@@ -64,7 +64,7 @@ def test_resolve_ready_from_cache(db, nzbdav_user):
         "stream_id": "stream-123",
         "upstream_url": "https://example.com/stream",
         "user_id": str(nzbdav_user.id),
-    })
+    }, scope=f"{connection_scope(account_store.get_for_user(db, nzbdav_user.id))}:tmdb:1")
     cand = WarmCandidateInput(candidate_id="c1", hash_key="H-READY")
     result = asyncio.run(
         resolve_service.resolve(
@@ -103,7 +103,7 @@ def test_resolve_warming_when_job_in_flight(db, nzbdav_user):
 
 
 def test_resolve_failed_from_dead_release(db, nzbdav_user):
-    release_cache.set_dead_release("H-DEAD", "RELEASE_UNAVAILABLE")
+    release_cache.set_dead_release("H-DEAD", "RELEASE_UNAVAILABLE", scope=connection_scope(account_store.get_for_user(db, nzbdav_user.id)))
     cand = WarmCandidateInput(candidate_id="c1", hash_key="H-DEAD")
     result = asyncio.run(
         resolve_service.resolve(
@@ -139,7 +139,7 @@ def test_resolve_normalizes_unknown_upstream(db, nzbdav_user, caplog):
             from app.nzbdav.failures import FailureCode, UpstreamError
             raise UpstreamError(FailureCode.UNKNOWN_UPSTREAM_ERROR, detail="weird")
 
-    def factory(base_url, api_key):
+    def factory(base_url, api_key, **kwargs):
         return _FailClient()
 
     svc_warm = NzbdavWarmService(client_factory=factory)
@@ -171,7 +171,7 @@ def test_resolve_telemetry_emitted(db, nzbdav_user, caplog):
         "stream_id": "sid-tel",
         "upstream_url": "https://u.example/stream",
         "user_id": str(nzbdav_user.id),
-    })
+    }, scope=f"{connection_scope(account_store.get_for_user(db, nzbdav_user.id))}:tmdb:tel")
     caplog.set_level(logging.INFO, logger="app.nzbdav.telemetry")
     cand = WarmCandidateInput(candidate_id="c1", hash_key="H-TEL")
     asyncio.run(

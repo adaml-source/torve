@@ -47,8 +47,12 @@ class _TTLCache:
             return entry.value
 
     def set(self, key: str, value: Any, *, ttl: int | None = None) -> None:
-        exp = time.time() + (ttl if ttl is not None else self._default_ttl)
+        now = time.time()
+        exp = now + (ttl if ttl is not None else self._default_ttl)
         with self._lock:
+            if len(self._data) >= 256:
+                for stale in [k for k, entry in self._data.items() if entry.expires_at <= now]:
+                    self._data.pop(stale, None)
             self._data[key] = _TTLEntry(value=value, expires_at=exp)
 
     def delete(self, key: str) -> None:
@@ -87,6 +91,7 @@ class NzbdavReleaseCache:
         self.warm_success = _TTLCache(
             default_ttl=settings.NZBDAV_WARM_SUCCESS_TTL_SECONDS
         )
+        self.streams = _TTLCache(default_ttl=settings.NZBDAV_HANDOFF_TTL_SECONDS)
         self.dead_release = _TTLCache(
             default_ttl=settings.NZBDAV_DEAD_RELEASE_TTL_SECONDS
         )
@@ -95,19 +100,22 @@ class NzbdavReleaseCache:
 
     # ── warm-success cache ──────────────────────────────────────────────
 
-    def get_warm_success(self, hash_key: str) -> dict | None:
-        return self.warm_success.get(hash_key)
+    def register_stream(self, stream_id: str, payload: dict) -> None:
+        self.streams.set(stream_id, payload)
 
-    def set_warm_success(self, hash_key: str, payload: dict) -> None:
-        self.warm_success.set(hash_key, payload)
+    def get_warm_success(self, hash_key: str, *, scope: str = "") -> dict | None:
+        return self.warm_success.get(f"{scope}:{hash_key}")
+
+    def set_warm_success(self, hash_key: str, payload: dict, *, scope: str = "") -> None:
+        self.warm_success.set(f"{scope}:{hash_key}", payload)
 
     # ── dead-release cache ──────────────────────────────────────────────
 
-    def get_dead_release(self, hash_key: str) -> str | None:
-        return self.dead_release.get(hash_key)
+    def get_dead_release(self, hash_key: str, *, scope: str = "") -> str | None:
+        return self.dead_release.get(f"{scope}:{hash_key}")
 
-    def set_dead_release(self, hash_key: str, failure_code: str) -> None:
-        self.dead_release.set(hash_key, failure_code)
+    def set_dead_release(self, hash_key: str, failure_code: str, *, scope: str = "") -> None:
+        self.dead_release.set(f"{scope}:{hash_key}", failure_code)
 
     # ── provider health / circuit breaker ────────────────────────────────
 
@@ -157,6 +165,7 @@ class NzbdavReleaseCache:
 
     def reset(self) -> None:
         """Clear all caches + health state (test helper)."""
+        self.streams.clear()
         self.warm_success.clear()
         self.dead_release.clear()
         with self._lock:
@@ -165,3 +174,8 @@ class NzbdavReleaseCache:
 
 # Process-wide singleton. Tests reset via `release_cache.reset()`.
 release_cache = NzbdavReleaseCache()
+
+
+def connection_scope(cfg) -> str:
+    """Isolate users, backends and credential/configuration revisions."""
+    return f"{cfg.user_id}:{cfg.id}:{cfg.updated_at.isoformat()}"

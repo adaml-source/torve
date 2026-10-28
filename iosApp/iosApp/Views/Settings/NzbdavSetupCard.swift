@@ -10,9 +10,11 @@ import shared
 struct NzbdavSetupCard: View {
     @StateObject private var wrapper = NzbdavSetupViewModelWrapper()
 
+    @State private var showAdvanced = false
+
     var body: some View {
-        Section("NzbDAV") {
-            Text("Torve uses your NzbDAV instance to stream Usenet sources. Connection is managed by the Torve backend.")
+        Section("Usenet streaming") {
+            Text("Connect InfiniDysk, NzbDavEx, AltMount, Decypharr or NZBDav. Configure NNTP accounts in that server. TorBox is optional.")
                 .font(.caption)
                 .foregroundColor(.secondary)
 
@@ -36,6 +38,37 @@ struct NzbdavSetupCard: View {
                     set: { wrapper.updateApiKey($0) }
                 ))
             }
+
+            Picker("Streaming server", selection: Binding(
+                get: { wrapper.state.connection.backendType },
+                set: { wrapper.updateBackendType($0) }
+            )) {
+                Text("InfiniDysk").tag("infinidysk")
+                Text("NzbDavEx").tag("nzbdavex")
+                Text("AltMount").tag("altmount")
+                Text("Decypharr").tag("decypharr")
+                Text("NZBDav (legacy)").tag("nzbdav")
+            }
+            TextField("WebDAV username", text: Binding(
+                get: { wrapper.state.connection.webdavUsername }, set: { wrapper.updateWebdavUsername($0) }
+            )).textInputAutocapitalization(.never).autocorrectionDisabled()
+            SecureField("WebDAV password", text: Binding(
+                get: { wrapper.state.connection.webdavPassword }, set: { wrapper.updateWebdavPassword($0) }
+            ))
+            DisclosureGroup("Advanced connection settings", isExpanded: $showAdvanced) {
+                TextField("WebDAV URL (optional override)", text: Binding(
+                    get: { wrapper.state.connection.webdavUrl }, set: { wrapper.updateWebdavUrl($0) }
+                ))
+                TextField("Download category (optional)", text: Binding(
+                    get: { wrapper.state.connection.category }, set: { wrapper.updateCategory($0) }
+                ))
+                TextField("API path (optional override)", text: Binding(
+                    get: { wrapper.state.connection.apiPath }, set: { wrapper.updateApiPath($0) }
+                ))
+                TextField("Content path template (optional override)", text: Binding(
+                    get: { wrapper.state.connection.contentPath }, set: { wrapper.updateContentPath($0) }
+                ))
+            }.textInputAutocapitalization(.never).autocorrectionDisabled()
 
             if let result = wrapper.state.lastTestResult {
                 lastActionLine(for: result)

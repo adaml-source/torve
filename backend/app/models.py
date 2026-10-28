@@ -1450,6 +1450,7 @@ class NzbdavConfig(Base):
     )
     base_url: Mapped[str] = mapped_column(String(2000), nullable=False)
     api_key_encrypted: Mapped[str] = mapped_column(Text, nullable=False)
+    connection_options_encrypted: Mapped[str | None] = mapped_column(Text, nullable=True)
     is_enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     last_tested_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
