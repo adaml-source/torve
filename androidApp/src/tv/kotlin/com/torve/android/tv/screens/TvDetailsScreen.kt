@@ -1395,6 +1395,7 @@ fun TvDetailsScreen(
                     )
                     if (relatedPreview) com.torve.android.tv.components.TvFocusPreviewGrid(
                         items = similarItems, screenId = "details:$type:$id", columns = 6,
+                        singleRow = true,
                         railFocusRequester = railFocusRequester, entryRequester = remember { FocusRequester() },
                         modifier = Modifier.fillMaxWidth().height(430.dp), onContentFocused = onContentFocused,
                         onExitUp = {

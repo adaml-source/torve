@@ -21,11 +21,15 @@ internal fun TvFocusPreviewGrid(
     onContextAction: ((MediaItem, TvMediaContextMenuAction, Float?) -> Unit)? = null,
     hero: (@Composable () -> Unit)? = null,
     onExitUp: (() -> Unit)? = null,
+    singleRow: Boolean = false,
     onClick: (MediaItem) -> Unit,
 ) {
-    val rows = remember(items, columns, screenId) { items.chunked(columns.coerceAtLeast(1)).mapIndexed { index, row ->
-        TvContentRail("$screenId:row:$index", "", row, showSeeAllCard = false, allowCrossRailDuplicates = true)
-    } }
+    val rows = remember(items, columns, screenId, singleRow) {
+        val groups = if (singleRow) listOf(items) else items.chunked(columns.coerceAtLeast(1))
+        groups.mapIndexed { index, row ->
+            TvContentRail("$screenId:row:$index", "", row, showSeeAllCard = false, allowCrossRailDuplicates = true)
+        }
+    }
     TvMediaRails(rows, railFocusRequester, onClick, onFirstContentRequester, onContentFocused,
         modifier = modifier, screenId = screenId, entryFocusRequester = entryRequester,
         headerFocusRequester = headerRequester, shouldAutoFocus = false, posterColumns = columns,
