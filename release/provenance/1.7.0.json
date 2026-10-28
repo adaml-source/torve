@@ -1,9 +1,10 @@
 {
   "schema_version": 1,
   "version": "1.7.0",
-  "build_number": 208,
+  "build_number": 210,
   "android_base_version_code": 207,
-  "created_at_utc": "2026-10-28T21:06:21.544497+00:00",
+  "android_tv_base_version_code": 208,
+  "created_at_utc": "2026-10-28T22:29:27.716568+00:00",
   "required_artifacts": [
     "google_mobile_apk",
     "google_tv_apk",
@@ -14,11 +15,11 @@
   ],
   "source": {
     "repository": "https://github.com/adaml-source/torve",
-    "commit": "50a2ad32779741a29d553dd0350aca362e3549be",
-    "tag": "v1.7.0-build.208",
-    "tag_url": "https://github.com/adaml-source/torve/tree/v1.7.0-build.208",
+    "commit": "9ef81433774029543d3c9cf1f6ebd7daa042246b",
+    "tag": "v1.7.0-build.210",
+    "tag_url": "https://github.com/adaml-source/torve/tree/v1.7.0-build.210",
     "includes_uncommitted_worktree_changes": false,
-    "input_manifest_sha256": "9b4cedbc8a797aec2b08d0bddadf5554b9e4d0a64636abb5c5845c9e6399a985"
+    "input_manifest_sha256": "0a07a01c686b5f6df5e86fa302ef6572cf3b981de2462e3bfc7de730f480f297"
   },
   "artifacts": [
     {
@@ -27,13 +28,13 @@
       "package": "com.torve.app",
       "version": "1.7.0",
       "version_code": 10207,
-      "local_path": "output/release-1.7.0/torve-android-mobile-1.7.0-10207-20261028.apk",
+      "local_path": "output/release-1.7.0-r208/torve-android-mobile-1.7.0-10207-20261028.apk",
       "filename": "torve-android-mobile-1.7.0-10207-20261028.apk",
       "bytes": 96701174,
       "sha256": "7f733add15800ba9eca65f1357f230ac9ef550ea155c3b6d7a9fa8b9780cecfe",
       "signer_certificate_sha256": "cc4e51f3d775e199059f58b0c80444e7b9e8c86e23e3ed29d2332b485c73e2fa",
       "built_from_commit": "a8c271f8333f972998f754803172beb8b6761859",
-      "source_equivalence": "All mobile application, dependency and resource inputs match the release tag; only excluded TV sources changed",
+      "source_equivalence": "Mobile application, dependency and resource inputs are unchanged; only TV sources, tests and the TV flavor configuration changed",
       "public_url": "https://torve.app/downloads/android/torve-android-mobile-1.7.0-10207-20261028.apk"
     },
     {
@@ -41,14 +42,14 @@
       "variant": "googleTv",
       "package": "com.torve.app",
       "version": "1.7.0",
-      "version_code": 20207,
-      "local_path": "output/release-1.7.0/torve-google-tv-1.7.0-20207-20261028.apk",
-      "filename": "torve-google-tv-1.7.0-20207-20261028.apk",
-      "bytes": 98979628,
-      "sha256": "34df21bb0380a4b644ec572982eb2f2222109dbc0461f102ebfb28d8a10c85aa",
+      "version_code": 20208,
+      "local_path": "output/release-1.7.0-r208/torve-google-tv-1.7.0-20208-20261028.apk",
+      "filename": "torve-google-tv-1.7.0-20208-20261028.apk",
+      "bytes": 98996012,
+      "sha256": "9f37817591d669133a55a96e06796a075d2227c9be729d0222d6b3bb93933ffa",
       "signer_certificate_sha256": "cc4e51f3d775e199059f58b0c80444e7b9e8c86e23e3ed29d2332b485c73e2fa",
-      "built_from_commit": "50a2ad32779741a29d553dd0350aca362e3549be",
-      "public_url": "https://torve.app/downloads/android/torve-google-tv-1.7.0-20207-20261028.apk"
+      "built_from_commit": "9ef81433774029543d3c9cf1f6ebd7daa042246b",
+      "public_url": "https://torve.app/downloads/android/torve-google-tv-1.7.0-20208-20261028.apk"
     },
     {
       "id": "amazon_mobile_apk",
@@ -56,13 +57,13 @@
       "package": "com.torve.app.amazon",
       "version": "1.7.0",
       "version_code": 10207,
-      "local_path": "output/release-1.7.0/torve-android-amazon-mobile-1.7.0-10207-20261028.apk",
+      "local_path": "output/release-1.7.0-r208/torve-android-amazon-mobile-1.7.0-10207-20261028.apk",
       "filename": "torve-android-amazon-mobile-1.7.0-10207-20261028.apk",
       "bytes": 94372532,
       "sha256": "2ea3ca0d6082dcf53d769a49b194847ae8c73f4cfc9002993734bd74bd6eb7bd",
       "signer_certificate_sha256": "cc4e51f3d775e199059f58b0c80444e7b9e8c86e23e3ed29d2332b485c73e2fa",
       "built_from_commit": "a8c271f8333f972998f754803172beb8b6761859",
-      "source_equivalence": "All mobile application, dependency and resource inputs match the release tag; only excluded TV sources changed",
+      "source_equivalence": "Mobile application, dependency and resource inputs are unchanged; only TV sources, tests and the TV flavor configuration changed",
       "public_url": "https://torve.app/downloads/android/torve-android-amazon-mobile-1.7.0-10207-20261028.apk"
     },
     {
@@ -70,14 +71,14 @@
       "variant": "amazonTv",
       "package": "com.torve.app.amazon",
       "version": "1.7.0",
-      "version_code": 20207,
-      "local_path": "output/release-1.7.0/torve-android-tv-1.7.0-20207-20261028.apk",
-      "filename": "torve-android-tv-1.7.0-20207-20261028.apk",
-      "bytes": 96686249,
-      "sha256": "1c159be2f5e106520ed677009bd5a4011a89a88ff49d41ee0204bea641392299",
+      "version_code": 20208,
+      "local_path": "output/release-1.7.0-r208/torve-android-tv-1.7.0-20208-20261028.apk",
+      "filename": "torve-android-tv-1.7.0-20208-20261028.apk",
+      "bytes": 96702621,
+      "sha256": "55739bf8fa6475a431737743e14dfd08decf7403bba817b6da89b12ce724b36f",
       "signer_certificate_sha256": "cc4e51f3d775e199059f58b0c80444e7b9e8c86e23e3ed29d2332b485c73e2fa",
-      "built_from_commit": "50a2ad32779741a29d553dd0350aca362e3549be",
-      "public_url": "https://torve.app/downloads/android/torve-android-tv-1.7.0-20207-20261028.apk"
+      "built_from_commit": "9ef81433774029543d3c9cf1f6ebd7daa042246b",
+      "public_url": "https://torve.app/downloads/android/torve-android-tv-1.7.0-20208-20261028.apk"
     },
     {
       "id": "google_mobile_aab",
@@ -85,32 +86,32 @@
       "package": "com.torve.app",
       "version": "1.7.0",
       "version_code": 10207,
-      "local_path": "output/release-1.7.0/torve-google-play-mobile-1.7.0-10207-20261028.aab",
+      "local_path": "output/release-1.7.0-r208/torve-google-play-mobile-1.7.0-10207-20261028.aab",
       "filename": "torve-google-play-mobile-1.7.0-10207-20261028.aab",
       "bytes": 61310919,
       "sha256": "988fdbf018e61bb8b1090e254341f67e26de2636d88f17142523f5c3c93e7512",
       "signer_certificate_sha256": "cc4e51f3d775e199059f58b0c80444e7b9e8c86e23e3ed29d2332b485c73e2fa",
       "built_from_commit": "a8c271f8333f972998f754803172beb8b6761859",
-      "source_equivalence": "All mobile application, dependency and resource inputs match the release tag; only excluded TV sources changed"
+      "source_equivalence": "Mobile application, dependency and resource inputs are unchanged; only TV sources, tests and the TV flavor configuration changed"
     },
     {
       "id": "google_tv_aab",
       "variant": "googleTv",
       "package": "com.torve.app",
       "version": "1.7.0",
-      "version_code": 20207,
-      "local_path": "output/release-1.7.0/torve-google-play-tv-1.7.0-20207-20261028.aab",
-      "filename": "torve-google-play-tv-1.7.0-20207-20261028.aab",
-      "bytes": 65902832,
-      "sha256": "4072baabfa0ba20c5b76d585fa29066cb16f6e598f456087bfff47129c1df419",
+      "version_code": 20208,
+      "local_path": "output/release-1.7.0-r208/torve-google-play-tv-1.7.0-20208-20261028.aab",
+      "filename": "torve-google-play-tv-1.7.0-20208-20261028.aab",
+      "bytes": 65928705,
+      "sha256": "988eadc7b69405bd3737d56d378f4f5b90552b908bbc539d4f45bbfa8bb58dba",
       "signer_certificate_sha256": "cc4e51f3d775e199059f58b0c80444e7b9e8c86e23e3ed29d2332b485c73e2fa",
-      "built_from_commit": "50a2ad32779741a29d553dd0350aca362e3549be"
+      "built_from_commit": "9ef81433774029543d3c9cf1f6ebd7daa042246b"
     }
   ],
   "build": {
     "result": "BUILD SUCCESSFUL",
     "initial_log_sha256": "b6b630354730f0e7ebdf18f7158b0cd36358ad32719641cf94295d477aa9f054",
-    "tv_rebuild_log_sha256": "30a234aed6e1fcd1c6c1a34eba03dae527442ac507e59105f341912ddef7254f"
+    "tv_rebuild_log_sha256": "4a0aa9e75d05d993e7fb7081985b091ab71b01ef3e33e4a09363b7e9b388885e"
   },
   "validation": {
     "source_hashes_verified": true,
@@ -118,10 +119,11 @@
     "native_symbols": {
       "reusedArchive": "output/release-1.6.0/google-play-native-debug-symbols.zip",
       "sha256": "16b8fb3b26f92e7291b1cbc6d7febc7d9de3fa76b66a2cb7c7d4ec554e581ad8",
-      "verifiedAgainstFreshBundles": [
+      "verifiedBundles": [
         "google_mobile_aab",
         "google_tv_aab"
       ],
+      "reusedUnchangedMobileBundle": true,
       "librariesPerBundle": 18,
       "checks": "Pinned runtime SHA-256, executable .text, build IDs where present, full debug_info",
       "coverage": "mpv/FFmpeg/player; dependency-owned libraries do not provide full symbols"
@@ -133,12 +135,22 @@
       "source_inputs_unchanged": true,
       "unchanged_binary_hashes_verified": true,
       "excluded_changes": [
+        "androidApp/build.gradle.kts",
+        "androidApp/src/testTv/kotlin/com/torve/android/tv/components/TvRailFocusDestinationTest.kt",
+        "androidApp/src/testTv/kotlin/com/torve/android/tv/focus/TvModalFocusRestoreControllerTest.kt",
         "androidApp/src/tv/kotlin/com/torve/android/tv/TvImagePrefetcher.kt",
         "androidApp/src/tv/kotlin/com/torve/android/tv/components/TvFocusDetailsPanel.kt",
         "androidApp/src/tv/kotlin/com/torve/android/tv/components/TvFocusPreviewGrid.kt",
         "androidApp/src/tv/kotlin/com/torve/android/tv/components/TvMediaRails.kt",
+        "androidApp/src/tv/kotlin/com/torve/android/tv/components/TvRailFocusDestination.kt",
         "androidApp/src/tv/kotlin/com/torve/android/tv/components/TvVisibleMetadata.kt",
-        "androidApp/src/tv/kotlin/com/torve/android/tv/screens/TvDetailsScreen.kt"
+        "androidApp/src/tv/kotlin/com/torve/android/tv/focus/TvModalFocusRestoreController.kt",
+        "androidApp/src/tv/kotlin/com/torve/android/tv/nav/TvNavHost.kt",
+        "androidApp/src/tv/kotlin/com/torve/android/tv/screens/TvDetailsScreen.kt",
+        "androidApp/proguard-tv-rules.pro",
+        "androidApp/src/testTv/kotlin/com/torve/android/tv/screens/TvPersonFilmographyTest.kt",
+        "androidApp/src/tv/kotlin/com/torve/android/tv/components/TvPersonPortrait.kt",
+        "androidApp/src/tv/kotlin/com/torve/android/tv/screens/TvPersonScreen.kt"
       ]
     },
     "device_testing": "Three Fire TVs updated in place; installed APK hashes, versions, foreground launch and running process verified; app data preserved",
@@ -146,53 +158,105 @@
       "passed": true,
       "artifacts": 6,
       "minimum64BitElfAlignment": 16384,
-      "report_sha256": "c89976ac8b7149470ab2de93aed814279ff05a89a5478c7f9348b9f9b7c09492"
+      "report_sha256": "770cacfc73abff3cb4897c824476b525b6f9deee19949dcbb15a4017e0c46ed4"
     },
     "fresh_checks": [
-      "Six signed artifact identities and versions",
-      "Six APK/AAB 16 KB packaging checks",
-      "Native symbols compared against both fresh Google TV/mobile bundles",
+      "Three fresh signed TV artifact identities and versions",
+      "Three fresh TV APK/AAB 16 KB packaging checks",
+      "Native symbols checked against fresh Google TV bundle; unchanged mobile bundle proof reused",
       "Immutable release source inputs verified",
       "Three Fire TV in-place updates and launch checks",
-      "Existing TV preview presentation, identity and focus destination unit tests"
+      "16 focus destination and modal restoration unit tests",
+      "Signed Fire OS release actor navigation, details return and generic See all browser"
     ],
     "reused_checks": [
-      "Three passing mobile artifacts and their unchanged application inputs",
-      "Pinned native-symbol archive; contents freshly checked against release libraries"
+      "Three passing mobile artifacts, signatures, 16 KB checks and unchanged effective application inputs",
+      "Pinned native-symbol archive; contents freshly checked against release libraries",
+      "13 preview presentation/identity tests; exercised helper bodies and test inputs unchanged",
+      "Four actor/director filmography regression tests; tested helper and test inputs unchanged"
     ],
     "more_like_this": "All ten recommendations in one horizontal row; current poster sizing retained",
     "focus_previews": "Vertical focus aligns without a scroll animation; preview panels render immediately; adjacent destinations prefetch artwork; missing remote data still loads asynchronously",
     "fire_tv_devices_verified": 3,
-    "device_report_sha256": "a42df8cf694266f3407494422835ab681905de112de9020fe0ef46b9f7c6526f",
+    "device_report_sha256": "6a4b3031d538209f97612de7d3111ca9510b89e2e287e03cd8cf69f79895a5ad",
     "preview_unit_tests": {
       "passed": true,
-      "tests": 20,
+      "tests": 13,
       "suites": [
         "com.torve.android.tv.components.TvPreviewPresentationTest",
         "com.torve.android.tv.components.TvPreviewIdentityTest",
-        "com.torve.android.tv.components.TvRailFocusDestinationTest",
         "com.torve.android.tv.components.TvExpandedCardPresentationTest"
       ],
-      "report_sha256": "7ebacd64530035fd578f2873cc4a9d3144c1ac22b2ac9d80bf597ac063ae8e2e"
+      "report_sha256": "52f43be559db945832a198ef81f1b145c2ab63bcf7b9879561c2739ac8e8129f"
+    },
+    "actor_unit_tests": {
+      "passed": true,
+      "tests": 4,
+      "suite": "com.torve.android.tv.screens.TvPersonFilmographyTest",
+      "report_sha256": "2a2ed6f68ac72d59e59790c7c5c5d3a6fef6db3a21acfecf74068f9ad43ca9a6",
+      "tested_source_commit": "581dced855bbd9bd3a09178dcdb62b79160c14f7",
+      "helper_and_test_source_unchanged": true,
+      "reuse_after_change": "UI and grid focus restoration changed; tested filmography policy and test data unchanged"
+    },
+    "grid_focus_unit_tests": {
+      "passed": true,
+      "fresh": true,
+      "tests": 16,
+      "suites": [
+        {
+          "name": "com.torve.android.tv.components.TvRailFocusDestinationTest",
+          "tests": "9",
+          "skipped": "0",
+          "failures": "0",
+          "errors": "0",
+          "timestamp": "2026-10-28T22:14:38.110Z",
+          "hostname": "DESKTOP-M0NB0S2",
+          "time": "0.046",
+          "report_sha256": "996db7e115ad8d6ade827a200e3f0b70a615dea5e9a3a82ad8240d0c681a2d1e"
+        },
+        {
+          "name": "com.torve.android.tv.focus.TvModalFocusRestoreControllerTest",
+          "tests": "7",
+          "skipped": "0",
+          "failures": "0",
+          "errors": "0",
+          "timestamp": "2026-10-28T22:14:38.168Z",
+          "hostname": "DESKTOP-M0NB0S2",
+          "time": "0.064",
+          "report_sha256": "80778c8895ff5a7fa4a26dc269712ec195fd26f3576ee58a3b366ee8e5961378"
+        }
+      ],
+      "source_commit": "9ef81433774029543d3c9cf1f6ebd7daa042246b"
+    },
+    "actor_release_tests": {
+      "passed": true,
+      "cases": [
+        "Home popular-actor posters open two different TV person pages without a release verifier crash",
+        "Portrait, biography and TV filmography controls render in the shared TV style",
+        "Returning from a credit detail preserves the selected title after filmography rows reorder",
+        "Generic See all browser opens in the optimized Fire OS release",
+        "Opaque sort dialog closes with remote Back and restores focus to its invoking control"
+      ],
+      "report_sha256": "0fa6d85cb656779b9936f7d4f63835cd073ede985e05c45c554691cfbb9a0d55"
     }
   },
   "google_play_submission": false,
   "play_package": {
-    "filename": "Torve-Google-Play-1.7.0-207.zip",
-    "bytes": 218385058,
-    "sha256": "7bea1576ad7e7a8bf077ff17f1e28469b9771828155e7af3b3c1e3f4169f0626",
+    "filename": "Torve-Google-Play-1.7.0-208.zip",
+    "bytes": 218429098,
+    "sha256": "2d5cca01616ccc04e91e98553b28b07f05b4d84939867670c7735471546be2fc",
     "support_files": {
       "native-debug-symbols.zip": {
         "sha256": "16b8fb3b26f92e7291b1cbc6d7febc7d9de3fa76b66a2cb7c7d4ec554e581ad8",
         "bytes": 67434533
       },
       "README.txt": {
-        "sha256": "9074db99f79fa0fea47444f6e4357800d36b774e6a50a6b03d964615deac4af0",
+        "sha256": "ed77dd6639e75ff095915ba0d80a6a70e2d74e019e6611036546797afca02bbf",
         "bytes": 599
       },
       "release-notes.txt": {
-        "sha256": "efb6681ed5da22d105b029057ad48cc88ee769e17ce9ec0c456358a8e3fcff79",
-        "bytes": 2904
+        "sha256": "bf5a7cf9e9d120d8ee92ef85e1f6ed7be779ea0dcccc7ef95e894817ada3ed09",
+        "bytes": 3354
       },
       "mobile/mapping.txt": {
         "sha256": "9ef9da1008686816441deb4970508f5d776698a0328a57a6ee95555156d739e6",
@@ -203,12 +267,12 @@
         "bytes": 61310919
       },
       "tv/mapping.txt": {
-        "sha256": "937df5d7539fb0dc656cc8f14bbc2038314dc4968f4e260751f2f71407710a91",
-        "bytes": 267648411
+        "sha256": "f832ef84b0deb266ff28cd36a55ae26a3db5eeefd55ddd5dfd18fd3c68a7fcc2",
+        "bytes": 267954008
       },
-      "tv/torve-google-play-tv-1.7.0-20207-20261028.aab": {
-        "sha256": "4072baabfa0ba20c5b76d585fa29066cb16f6e598f456087bfff47129c1df419",
-        "bytes": 65902832
+      "tv/torve-google-play-tv-1.7.0-20208-20261028.aab": {
+        "sha256": "988eadc7b69405bd3737d56d378f4f5b90552b908bbc539d4f45bbfa8bb58dba",
+        "bytes": 65928705
       }
     }
   }
