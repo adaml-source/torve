@@ -35,7 +35,7 @@ internal fun TvFocusPreviewGrid(
         headerFocusRequester = headerRequester, shouldAutoFocus = false, posterColumns = columns,
         browseLayout = TvBrowseLayout.POSTER_ONLY, forcePosterTitles = true,
         presentationMode = TvRailsPresentationMode.CatalogHero, focusExclusive = true,
-        compactPreviewRows = true, onExitUp = onExitUp,
+        compactPreviewRows = true, onExitUp = onExitUp, restoreFocusAcrossRows = true,
         heroOverlay = hero, showSeeAllCards = false, registerFocusHandle = registerFocusHandle,
         contextMenuActionsForItem = contextActions, onContextMenuAction = onContextAction,
         onMediaFocused = { item -> onFocused(item, items.indexOfFirst { it.id == item.id && it.type == item.type }.coerceAtLeast(0)) })

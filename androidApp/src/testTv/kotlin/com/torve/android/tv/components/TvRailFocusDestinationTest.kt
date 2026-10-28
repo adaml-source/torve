@@ -7,6 +7,18 @@ import org.junit.Assert.assertNull
 import org.junit.Test
 
 class TvRailFocusDestinationTest {
+    @Test fun aResortedGridFindsTheSameTitleInItsNewRow() {
+        val rows = listOf(row("grid:0", 1, 3), row("grid:1", 4, 2))
+        assertEquals(TvRailFocusDestination("grid:1", 1, 1),
+            tvRailFocusDestination(rows, "grid:0", item(2).tvRailItemKey(), 1, 0, searchAcrossRows = true))
+        assertEquals(TvRailFocusDestination("grid:0", 0, 1),
+            tvRailFocusDestination(rows, "grid:0", item(2).tvRailItemKey(), 1, 0))
+    }
+    @Test fun aDuplicateInTheOriginalRowKeepsItsContext() {
+        val rows = listOf(row("grid:0", 1, 2), row("grid:1", 2, 4))
+        assertEquals(TvRailFocusDestination("grid:1", 1, 0),
+            tvRailFocusDestination(rows, "grid:1", item(2).tvRailItemKey(), 1, 1, searchAcrossRows = true))
+    }
     @Test fun episodeIdentityRestoresTheRightAiringWhenTwoEpisodesBelongToOneShow() {
         val first = item(42).copy(type = MediaType.SERIES, id = "trakt-calendar:42:1:1:date")
         val second = first.copy(id = "trakt-calendar:42:1:2:date")

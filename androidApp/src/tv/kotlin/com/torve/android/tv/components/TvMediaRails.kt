@@ -331,6 +331,7 @@ internal fun TvMediaRails(
     onExpandedRowFocused: (Boolean) -> Unit = {},
     compactPreviewRows: Boolean = false,
     onExitUp: (() -> Unit)? = null,
+    restoreFocusAcrossRows: Boolean = false,
 ) {
     val catalogHeroMode = presentationMode == TvRailsPresentationMode.CatalogHero
     val libraryHeroMode = presentationMode == TvRailsPresentationMode.LibraryHero
@@ -652,7 +653,7 @@ internal fun TvMediaRails(
                 requestRestore = { origin, reason ->
                     modalFocusRestoreController.requestRestore(origin = origin, reason = reason)
                 },
-                isOriginFocused = modalFocusRestoreController::isOriginFocused,
+                isOriginFocused = { modalFocusRestoreController.isOriginFocused(it, restoreFocusAcrossRows) },
             ),
         )
         onDispose {
@@ -751,6 +752,7 @@ internal fun TvMediaRails(
         val destination = tvRailFocusDestination(
             rails, preferredRow, preferredRow?.let { focusMemory.lastFocusedItemKeyByRow[it] },
             preferredRow?.let { focusMemory.lastFocusedIndexByRow[it] } ?: 0,
+            searchAcrossRows = restoreFocusAcrossRows,
         ) ?: return@LaunchedEffect
         if (focusedCardKey == "${destination.rowKey}:${destination.itemIndex}") return@LaunchedEffect
         rowFocusJob?.cancel()
@@ -791,7 +793,7 @@ internal fun TvMediaRails(
         val origin = focusBeforeRailsUpdate ?: return@LaunchedEffect
         withFrameNanos { }
         if (contextMenuState != null || navigationSignal != navigationSignalBeforeRailsUpdate) return@LaunchedEffect
-        val destination = tvRailFocusDestination(rails, origin.rowKey, origin.itemKey, origin.itemIndex, origin.rowIndex)
+        val destination = tvRailFocusDestination(rails, origin.rowKey, origin.itemKey, origin.itemIndex, origin.rowIndex, restoreFocusAcrossRows)
             ?: return@LaunchedEffect
         if (effectiveFocusExclusive) activeExclusiveRowKey = destination.rowKey
         rowFocusJob?.cancel()
@@ -815,13 +817,16 @@ internal fun TvMediaRails(
         if (contextMenuState != null) return@LaunchedEffect
         val origin = modalFocusRestoreController.pendingRestore
         if (effectiveFocusExclusive && origin != null) {
-            val destination = tvRailFocusDestination(rails, origin.rowKey, origin.itemKey, origin.itemIndex, origin.rowIndex)
+            val destination = tvRailFocusDestination(rails, origin.rowKey, origin.itemKey, origin.itemIndex, origin.rowIndex, restoreFocusAcrossRows)
                 ?: return@LaunchedEffect
             rowFocusJob?.cancel()
             activeExclusiveRowKey = destination.rowKey
             withFrameNanos { }
             columnListState.scrollToItem(columnIndex(destination.rowIndex))
             withFrameNanos { }
+            if (restoreFocusAcrossRows) rowListStateByKey[destination.rowKey]?.let { state ->
+                if (state.layoutInfo.visibleItemsInfo.none { it.index == destination.itemIndex }) state.scrollToItem(destination.itemIndex)
+            }
         }
         modalFocusRestoreController.restorePendingFocus(
             screenId = screenId,
@@ -829,6 +834,7 @@ internal fun TvMediaRails(
             // destination in view instead of scrolling back to its old index.
             outerListState = columnListState.takeUnless { effectiveFocusExclusive },
             innerListStateForRowKey = { rowKey -> rowListStateByKey[rowKey] },
+            matchAcrossRows = restoreFocusAcrossRows,
         )
     }
 

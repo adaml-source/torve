@@ -9,6 +9,29 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class TvModalFocusRestoreControllerTest {
+    @Test fun gridRestorationPrefersTheMovedTitleOverItsOldNeighbour() {
+        val controller = TvModalFocusRestoreController()
+        val original = target("movie-42")
+        val neighbour = target("movie-43")
+        val moved = original.copy(rowKey = "grid:1", rowIndex = 1, itemIndex = 3)
+        controller.registerTarget(neighbour)
+        controller.registerTarget(moved)
+        assertSame(moved, controller.resolveCandidates(originFor(original), matchAcrossRows = true).first())
+        assertSame(neighbour, controller.resolveCandidates(originFor(original)).first())
+    }
+    @Test fun movedGridTitleCountsAsRestoredWithoutChangingOrdinaryRailSemantics() {
+        val controller = TvModalFocusRestoreController()
+        val original = target("movie-42")
+        controller.markFocused(original.copy(rowKey = "grid:1", rowIndex = 1))
+        assertTrue(controller.isOriginFocused(originFor(original), matchAcrossRows = true))
+        assertFalse(controller.isOriginFocused(originFor(original)))
+    }
+    @Test fun aTitleFromAnotherScreenCannotRestoreGridFocus() {
+        val controller = TvModalFocusRestoreController()
+        val original = target("movie-42")
+        controller.registerTarget(original.copy(screenId = "another-page"))
+        assertTrue(controller.resolveCandidates(originFor(original), matchAcrossRows = true).isEmpty())
+    }
     @Test
     fun pruneDropsOnlyInactiveTargetsOutsideTheCurrentContentModel() {
         val controller = TvModalFocusRestoreController()

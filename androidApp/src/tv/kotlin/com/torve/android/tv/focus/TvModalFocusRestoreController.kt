@@ -124,9 +124,13 @@ internal class TvModalFocusRestoreController {
     }
 
     fun isOriginFocused(origin: TvFocusOrigin): Boolean {
+        return isOriginFocused(origin, false)
+    }
+
+    fun isOriginFocused(origin: TvFocusOrigin, matchAcrossRows: Boolean): Boolean {
         val target = focusedTarget ?: return false
         return target.screenId == origin.screenId &&
-            target.rowKey == origin.rowKey &&
+            (matchAcrossRows || target.rowKey == origin.rowKey) &&
             target.itemKey == origin.itemKey &&
             target.targetType == origin.focusTargetType
     }
@@ -198,7 +202,7 @@ internal class TvModalFocusRestoreController {
         pendingRestore = null
     }
 
-    fun resolveCandidates(origin: TvFocusOrigin): List<TvFocusTargetId> {
+    fun resolveCandidates(origin: TvFocusOrigin, matchAcrossRows: Boolean = false): List<TvFocusTargetId> {
         val sameScreenTargets = activeTargets.keys
             .filter { it.screenId == origin.screenId }
             .distinct()
@@ -236,6 +240,11 @@ internal class TvModalFocusRestoreController {
 
         return buildList {
             exactTarget?.let { add(it) }
+            if (matchAcrossRows) sameScreenTargets.filter {
+                it.itemKey == origin.itemKey && it.targetType == origin.focusTargetType
+            }.sortedBy { abs(it.rowIndex - origin.rowIndex) }.forEach {
+                if (it !in this) add(it)
+            }
             sameRowTargets.forEach { candidate ->
                 if (candidate !in this) add(candidate)
             }
@@ -254,6 +263,7 @@ internal class TvModalFocusRestoreController {
         innerListStateForRowKey: (String) -> LazyListState? = { null },
         isScreenActive: () -> Boolean = { true },
         maxAttempts: Int = 8,
+        matchAcrossRows: Boolean = false,
     ): Boolean {
         val origin = pendingRestore?.takeIf { it.screenId == screenId } ?: return false
         if (!isScreenActive()) return false
@@ -290,7 +300,7 @@ internal class TvModalFocusRestoreController {
             withFrameNanos { }
             if (!isScreenActive()) return false
 
-            val candidates = resolveCandidates(origin)
+            val candidates = resolveCandidates(origin, matchAcrossRows)
             for (candidate in candidates) {
                 debugLog(
                     "restore_candidate screen=${candidate.screenId} row=${candidate.rowKey} rowIndex=${candidate.rowIndex} " +
