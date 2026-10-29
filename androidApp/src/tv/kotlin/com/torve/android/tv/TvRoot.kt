@@ -304,58 +304,11 @@ fun TvRoot(
     val rootScope = rememberCoroutineScope()
     val backgroundWorkStatus by rememberTvBackgroundWorkStatus(context)
 
-    // Resolve heavy singletons off the main thread so the first frame renders
-    // instantly.  The background pre-warm in TorveApp usually wins the race,
-    // but this guarantees the main thread never blocks on DB/VM creation.
-    data class RootDeps(
-        val homeViewModel: com.torve.presentation.home.HomeViewModel,
-        val accountCoordinator: com.torve.presentation.session.AccountSessionCoordinator,
-        val healthCoordinator: com.torve.presentation.providerhealth.ProviderHealthCoordinator,
-        val metadataRepo: MetadataRepository,
-        val ratingsEnricher: com.torve.data.mdblist.RatingsEnricher,
-        val preferencesRepository: com.torve.domain.repository.PreferencesRepository,
-        val integrationSecretStore: com.torve.domain.integrations.IntegrationSecretStore,
-        val watchlistViewModel: WatchlistViewModel,
-        val watchProgressRepo: WatchProgressRepository,
-        val watchHistoryRepo: WatchHistoryRepository,
-        val syncCoordinator: SyncCoordinator,
-        val syncRepository: SyncRepository,
-        val settingsViewModel: SettingsViewModel,
-        val subscriptionViewModel: SubscriptionViewModel,
-        val subscriptionRepository: SubscriptionRepository,
-        val authClient: AuthClient,
-        val mediaFavoritesRepository: MediaFavoritesRepository,
-        val transferRecoveryProvider: ProviderHealthRecoveryStateProvider,
-        val transferImportCompletionNotifier: TransferImportCompletionNotifier,
-    )
-
-    val deps by produceState<RootDeps?>(initialValue = null) {
-        value = withContext(Dispatchers.IO) {
-            val koin = org.koin.java.KoinJavaComponent.getKoin()
-            val home = koin.get<com.torve.presentation.home.HomeViewModel>()
-            com.torve.android.debug.StartupMetrics.record("STARTUP home_model_ready")
-            RootDeps(
-                homeViewModel = home,
-                accountCoordinator = koin.get(),
-                healthCoordinator = koin.get(),
-                metadataRepo = koin.get(),
-                ratingsEnricher = koin.get(),
-                preferencesRepository = koin.get(),
-                integrationSecretStore = koin.get(),
-                watchlistViewModel = koin.get(),
-                watchProgressRepo = koin.get(),
-                watchHistoryRepo = koin.get(),
-                syncCoordinator = koin.get(),
-                syncRepository = koin.get(),
-                settingsViewModel = koin.get(),
-                subscriptionViewModel = koin.get(),
-                subscriptionRepository = koin.get(),
-                authClient = koin.get(),
-                mediaFavoritesRepository = koin.get(),
-                transferRecoveryProvider = koin.get(),
-                transferImportCompletionNotifier = koin.get(),
-            )
-        }
+    // Cached Home starts preparing after local account restoration, alongside
+    // appearance/Family screen setup, instead of waiting for this root to load.
+    val deps by produceState<TvRootDependencies?>(initialValue = null) {
+        val preparation = (context as? com.torve.android.TvMainActivity)?.startupPreparation
+        value = preparation?.home?.await() ?: withContext(Dispatchers.IO) { loadTvRootDependencies() }
     }
 
     // Show a lightweight shell while singletons initialize on the background thread.
@@ -375,7 +328,6 @@ fun TvRoot(
     val watchlistViewModel = deps!!.watchlistViewModel
     LaunchedEffect(Unit) {
         withFrameNanos { }
-        (context.applicationContext as? com.torve.android.TorveApp)?.onTvUiReady()
         com.torve.android.debug.AnrDebugLogger.log("STARTUP TV browse dependencies ready")
     }
     val recommendationViewModel = deps!!.homeViewModel
@@ -522,6 +474,14 @@ fun TvRoot(
     var selectedTopRoute by remember { mutableStateOf(TvRoutes.HOME) }
     /** The tab confirmed for content display. Updated when user navigates into content. */
     var confirmedTopRoute by remember { mutableStateOf(TvRoutes.HOME) }
+
+    LaunchedEffect(selectedTopRoute, isSubRouteActive) {
+        // Search/app links may open another destination without drawing Home.
+        if (selectedTopRoute != TvRoutes.HOME || isSubRouteActive) {
+            withFrameNanos { }
+            (context.applicationContext as? com.torve.android.TorveApp)?.onTvUiReady()
+        }
+    }
 
     LaunchedEffect(selectedTopRoute, currentSubRoute) {
         AndroidDiagnosticsRecorder.recordScreen(currentSubRoute ?: selectedTopRoute)

@@ -1,0 +1,19 @@
+# Cold startup: compile the account/cache bootstrap and the Fire TV Home UI.
+# Library profiles already cover Compose, navigation and image loading.
+Lcom/torve/android/TorveApp;
+Lcom/torve/android/TvMainActivity;
+Lcom/torve/android/tv/TvRootKt;
+Lcom/torve/android/tv/screens/TvHomeScreenKt;
+Lcom/torve/android/tv/components/TvMediaRailsKt;
+HSPLcom/torve/android/TorveApp;->onCreate()V
+HSPLcom/torve/android/TvMainActivity;->**(**)**
+HSPLcom/torve/android/TvMainActivity$**;->**(**)**
+HSPLcom/torve/android/tv/TvRootKt**;->**(**)**
+HSPLcom/torve/android/tv/TvRootDependencies**;->**(**)**
+HSPLcom/torve/android/tv/TvStartupPreparation**;->**(**)**
+HSPLcom/torve/android/tv/screens/TvHomeScreenKt**;->**(**)**
+HSPLcom/torve/android/tv/screens/TvHomeServices**;->**(**)**
+HSPLcom/torve/android/tv/components/TvMediaRailsKt**;->**(**)**
+HSPLcom/torve/android/tv/components/TvNavRailKt**;->**(**)**
+HSPLcom/torve/android/ui/community/UiTextPattern**;->**(**)**
+HSPLcom/torve/presentation/home/HomeViewModel**;->**(**)**

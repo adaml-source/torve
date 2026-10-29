@@ -9,6 +9,13 @@ import java.io.File
 internal object StartupMetrics {
     private var file: File? = null
     private var firstPosterRecorded = false
+    private var firstHomeLayoutRecorded = false
+
+    @Synchronized fun homeContentLaidOut() {
+        if (!BuildConfig.STARTUP_METRICS || firstHomeLayoutRecorded) return
+        firstHomeLayoutRecorded = true
+        record("STARTUP home_content_laid_out")
+    }
 
     @Synchronized fun posterReady() {
         if (!BuildConfig.STARTUP_METRICS || firstPosterRecorded) return

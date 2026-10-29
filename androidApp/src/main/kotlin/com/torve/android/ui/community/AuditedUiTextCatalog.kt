@@ -4421,7 +4421,7 @@ private fun uiTextPart35(): Map<String, Int> = mapOf(
     "🇻🇳 Vietnamese (VI)" to R.string.ui_text_085cf3274aac,
 )
 
-private val uiTextPatterns = listOf(
+private val uiTextPatterns by lazy { listOf(
     UiTextPattern("Tokens for %1\$s are included, but their server URL is not set on this device. The receiver will need to fill it in manually.", R.string.transfer_companion_config_missing_body),
     UiTextPattern("Imported credentials but missing companion config for: %1\$s. Fill in the matching server URL in Settings to finish setup.", R.string.transfer_import_missing_companion_config),
     UiTextPattern("Your account can be active on up to %d devices at a time for security and sync integrity.", R.string.manage_devices_limit_info),
@@ -4802,7 +4802,7 @@ private val uiTextPatterns = listOf(
     UiTextPattern("App: %1\$s", R.string.ui_text_b0afc57ef334),
     UiTextPattern("TMDB%1\$s", R.string.ui_text_14037a75bb37),
     UiTextPattern("Add %1\$s", R.string.ui_text_df4fe91a7edb),
-)
+) }
 
 @Composable
 internal fun auditedUiText(value: String): String? {

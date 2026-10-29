@@ -1019,7 +1019,7 @@ private fun uiTextPart8(): Map<String, Int> = mapOf(
     "Fav" to R.string.ui_text_4bede8ceb84d,
 )
 
-private val uiTextPatterns = listOf(
+private val uiTextPatterns by lazy { listOf(
     UiTextPattern("No matches for %1\$s%2\$s. Try a wider date range or another search.", R.string.ui_text_62dba3b6f684),
     UiTextPattern("All counted activity currently comes from %1\$s.", R.string.ui_text_74593ff1dc41),
     UiTextPattern("Torve %1\$s is available and ready to download.", R.string.tv_update_available),
@@ -1139,7 +1139,7 @@ private val uiTextPatterns = listOf(
     UiTextPattern("%1\$s files", R.string.ui_text_ddef923b5d64),
     UiTextPattern("%1\$s grabs", R.string.ui_text_b2f2fe6dda74),
     UiTextPattern("Test %1\$s", R.string.tv_audit_test_device),
-)
+) }
 
 @Composable
 internal fun auditedTvUiText(value: String): String? {

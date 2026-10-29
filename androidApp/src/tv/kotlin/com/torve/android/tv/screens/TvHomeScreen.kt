@@ -51,15 +51,6 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.distinctUntilChanged
 import org.koin.compose.koinInject
 
-private data class TvHomeServices(
-    val outcomeViewModel: TvHomeOutcomeViewModel,
-    val playbackRouter: TvHomePlaybackRouter,
-    val networkMonitor: NetworkMonitor,
-    val lanLibraryConsumer: LanLibraryConsumer,
-    val catalogGroups: com.torve.data.catalog.CatalogGroupRepository,
-    val watching: com.torve.presentation.watching.WatchingHubViewModel,
-)
-
 private data class TvHomeWatchingState(
     val personalDataUserId: String? = null,
     val upNext: List<com.torve.presentation.watching.WatchingEpisode> = emptyList(),
@@ -81,6 +72,11 @@ private data class TvHomeRailsInputs(
     val availableNowTitle: String,
     val downloadsOnDesktopTitle: String,
     val recentlyAddedTitle: String,
+)
+
+private data class TvHomeRailsSnapshot(
+    val state: HomeUiState? = null,
+    val rails: List<TvContentRail> = emptyList(),
 )
 
 private sealed interface TvHomeRenderItem {
@@ -151,8 +147,7 @@ internal fun TvHomeScreen(
     val settingsViewModel: SettingsViewModel = koinInject()
     val services by androidx.compose.runtime.produceState<TvHomeServices?>(null) {
         value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-            val koin = org.koin.java.KoinJavaComponent.getKoin()
-            TvHomeServices(koin.get(), koin.get(), koin.get(), koin.get(), koin.get(), koin.get())
+            loadTvHomeServices()
         }
     }
     val emptyGroups = remember { kotlinx.coroutines.flow.MutableStateFlow(emptyList<com.torve.domain.model.CatalogGroup>()) }
@@ -205,8 +200,8 @@ internal fun TvHomeScreen(
         downloadsOnDesktopTitle,
         recentlyAddedTitle,
     )
-    val rails by androidx.compose.runtime.produceState<List<TvContentRail>>(emptyList(), railInputs) {
-        value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+    val railSnapshot by androidx.compose.runtime.produceState(TvHomeRailsSnapshot(), railInputs) {
+        val preparedRails = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
             // Read one immutable input snapshot, never Compose state from the worker.
             with(railInputs) {
                 val outcomeRails = buildOutcomeRails(
@@ -231,11 +226,26 @@ internal fun TvHomeScreen(
                 mergeTvHomePlaybackRails(configuredRails, outcomeRails)
             }
         }
+        value = TvHomeRailsSnapshot(railInputs.state, preparedRails)
+        if (com.torve.android.BuildConfig.STARTUP_METRICS) {
+            com.torve.android.debug.StartupMetrics.record("STARTUP home_rails_ready rows=${preparedRails.size} cards=${preparedRails.sumOf { it.items.size }}")
+        }
     }
+    val rails = railSnapshot.rails
+    val startupSnapshotReady = railSnapshot.state === state && !state.isLoading && sectionConfigs.isNotEmpty()
+    val application = androidx.compose.ui.platform.LocalContext.current.applicationContext as? com.torve.android.TorveApp
 
     val replayRails = if (replayState.enabled && replayState.owner == ids.currentDataUserId() && replayState.events.isNotEmpty()) listOf(
         TvContentRail("web_replays", "Sports Replays", replayState.events.take(20).map { it.mediaItem() },
             cardStyle = TvCardStyle.BACKDROP)) else emptyList()
+
+    LaunchedEffect(startupSnapshotReady, rails.isEmpty(), replayRails.isEmpty(), isActive) {
+        // A resolved empty/setup page is also usable. It has no card-layout callback.
+        if (isActive && startupSnapshotReady && rails.isEmpty() && replayRails.isEmpty()) {
+            androidx.compose.runtime.withFrameNanos { }
+            application?.onTvUiReady()
+        }
+    }
 
     if (!replayState.enabled && !settingsState.tmdbCatalogueEnabled && rails.isEmpty() && !state.isLoading &&
         sectionConfigs.isNotEmpty() && state.addonShelves.isEmpty() &&
@@ -413,6 +423,8 @@ internal fun TvHomeScreen(
                     )
         },
         shouldAutoFocus = shouldAutoFocus,
+        initialFocusFollowsTop = isActive,
+        onContentLaidOut = { if (isActive && startupSnapshotReady) application?.onTvUiReady() },
         browseLayout = browseLayout,
         progressResolver = progressResolver,
         contextMenuActionsForItem = contextMenuActionsForItem,

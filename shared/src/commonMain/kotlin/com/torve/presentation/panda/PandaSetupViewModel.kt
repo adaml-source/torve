@@ -1475,7 +1475,7 @@ class PandaSetupViewModel(
                                     runCatching { addonRepo.removeAddon(stale.manifestUrl) }
                                 }
                         }
-
+    
                         val existing = try { addonRepo.getAddon(newNormalizedUrl) } catch (_: Exception) { null }
                         if (existing == null) {
                             val installed = addonRepo.installAddon(manifestUrl)

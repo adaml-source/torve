@@ -135,3 +135,4 @@ internal fun List<MediaItem>.mergeScheduleVisualsFrom(previous: List<MediaItem>)
             )
         }
     }
+

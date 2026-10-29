@@ -2,11 +2,26 @@ package com.torve.android.ui.community
 
 /** A complete app-owned sentence, never a word replacement inside provider/user content. */
 internal class UiTextPattern(englishText: String, val resource: Int) {
+    private companion object {
+        val placeholder = Regex("%(?:(\\d+)\\$)?(?:0?\\d+)?([sdf])")
+    }
+
     val english = englishText.replace("%%", "%")
-    private val slots = Regex("%(?:(\\d+)\\$)?(?:0?\\d+)?([sdf])").findAll(english).toList()
-    private val anchor = english.split(Regex("%(?:(\\d+)\\$)?(?:0?\\d+)?[sdf]"))
-        .maxByOrNull { it.length }.orEmpty()
-    private val pattern = Regex(buildString {
+    private val slots = placeholder.findAll(english).toList()
+    private val anchor = run {
+        var longest = ""
+        var end = 0
+        slots.forEach { slot ->
+            val literal = english.substring(end, slot.range.first)
+            if (literal.length > longest.length) longest = literal
+            end = slot.range.last + 1
+        }
+        val tail = english.substring(end)
+        if (tail.length > longest.length) tail else longest
+    }
+    // Most catalog entries never match a Home label. Compile only after their
+    // literal anchor matches, instead of compiling every format at first use.
+    private val pattern by lazy { Regex(buildString {
         var end = 0
         slots.forEach { slot ->
             append(Regex.escape(english.substring(end, slot.range.first)))
@@ -14,10 +29,11 @@ internal class UiTextPattern(englishText: String, val resource: Int) {
             end = slot.range.last + 1
         }
         append(Regex.escape(english.substring(end)))
-    }, RegexOption.DOT_MATCHES_ALL)
+    }, RegexOption.DOT_MATCHES_ALL) }
 
     fun arguments(value: String): Array<Any>? {
         if (!value.contains(anchor)) return null
+        if (slots.isEmpty()) return if (value == english) emptyArray() else null
         val match = pattern.matchEntire(value) ?: return null
         val result = arrayOfNulls<Any>(slots.size)
         slots.forEachIndexed { index, slot ->

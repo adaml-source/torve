@@ -95,6 +95,9 @@ class TvMainActivity : AppCompatActivity() {
     }
     private val activityScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var composeStarted = false
+    internal var startupPreparation: com.torve.android.tv.TvStartupPreparation<
+        com.torve.presentation.settings.SettingsViewModel, com.torve.android.tv.TvRootDependencies>? = null
+        private set
     private var authEventCollectionStarted = false
     private var hasResumedBefore = false
     private var pendingAppLink by mutableStateOf<TorveAppLink?>(null)
@@ -320,18 +323,26 @@ class TvMainActivity : AppCompatActivity() {
     private fun showComposeContent() {
         com.torve.android.debug.AnrDebugLogger.log("STARTUP setContent BEGIN")
         startAuthEventCollection()
+        val preparation = com.torve.android.tv.TvStartupPreparation(
+            scope = activityScope,
+            restoreAccount = {
+                val cachedAccount = getKoin().get<AuthClient>().restoreCachedSessionUser()
+                android.util.Log.i("TvAuthRestore", "cached_account_restored=${cachedAccount != null}")
+                com.torve.android.debug.AnrDebugLogger.log("STARTUP local account ready")
+            },
+            loadAppearance = { getKoin().get<com.torve.presentation.settings.SettingsViewModel>() },
+            loadHome = {
+                com.torve.android.tv.loadTvRootDependencies().also {
+                    activityScope.launch(Dispatchers.IO) {
+                        runCatching { com.torve.android.tv.screens.loadTvHomeServices() }
+                    }
+                }
+            },
+        )
+        startupPreparation = preparation
         setContent {
             val settings by androidx.compose.runtime.produceState<com.torve.presentation.settings.SettingsViewModel?>(null) {
-                value = kotlinx.coroutines.withContext(Dispatchers.IO) {
-                    // Load the local account before any profile-scoped screen reads
-                    // its cache. Network session refresh continues independently.
-                    // Otherwise Home first renders guest data and replaces it only
-                    // after the background account bootstrap has finished.
-                    val cachedAccount = getKoin().get<AuthClient>().restoreCachedSessionUser()
-                    android.util.Log.i("TvAuthRestore", "cached_account_restored=${cachedAccount != null}")
-                    com.torve.android.debug.AnrDebugLogger.log("STARTUP local account ready")
-                    getKoin().get()
-                }
+                value = preparation.appearance.await()
             }
             val readySettings = settings
             if (readySettings == null) {

@@ -12,6 +12,7 @@ import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsFocused
 import androidx.compose.ui.test.hasClickAction
+import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithTag
@@ -22,7 +23,9 @@ import androidx.compose.ui.test.pressKey
 import com.torve.android.TorveApp
 import com.torve.android.test.TorveTestHostActivity
 import com.torve.android.tv.components.TvBrowseLayout
+import com.torve.android.tv.components.TvCardStyle
 import com.torve.android.tv.components.TvContentRail
+import com.torve.android.tv.components.TvFocusMemory
 import com.torve.android.tv.components.TvMediaRails
 import com.torve.android.tv.components.TvRailsPresentationMode
 import com.torve.domain.model.MediaItem
@@ -43,8 +46,10 @@ class TvHomeRailMutationTest {
     }
 
     private fun row(key: String, vararg ids: Int) = TvContentRail(key, key,
-        ids.map { MediaItem(it.toString(), tmdbId = it, type = MediaType.MOVIE, title = "Card $it") })
-    private fun node(id: Int) = rule.onNode(hasText("Card $id") and hasClickAction())
+        ids.map { MediaItem(if (key == "streaming_services") "provider:test:$it" else it.toString(),
+            tmdbId = it, type = MediaType.MOVIE, title = "Card $it") },
+        cardStyle = if (key == "streaming_services") TvCardStyle.SERVICE else TvCardStyle.POSTER)
+    private fun node(id: Int) = rule.onNode((hasText("Card $id") or hasContentDescription("Card $id")) and hasClickAction())
     private fun focused(id: Int) {
         try {
             rule.waitUntil(5_000) { runCatching { node(id).assertIsFocused().assertIsDisplayed(); true }.getOrDefault(false) }
@@ -101,5 +106,64 @@ class TvHomeRailMutationTest {
             node(4).performKeyInput { pressKey(Key.DirectionUp) }
             focused(2)
         }
+    }
+
+    private fun openStartupRows() {
+        rows = emptyList()
+        rule.setContent {
+            MaterialTheme {
+                var enter by remember { mutableStateOf(true) }
+                TvMediaRails(
+                    rails = rows, railFocusRequester = remember { FocusRequester() },
+                    onMediaClick = {}, onFirstContentRequester = {}, onContentFocused = { enter = false },
+                    screenId = "home_startup", presentationMode = TvRailsPresentationMode.CatalogHero,
+                    focusExclusive = true, shouldAutoFocus = enter, loading = rows.isEmpty(),
+                    initialFocusFollowsTop = true, browseLayout = TvBrowseLayout.POSTER_ONLY,
+                    heroOverlay = { Text("Home") },
+                )
+            }
+        }
+        rule.runOnIdle { rows = listOf(row("streaming_services", 8, 9)) }
+        focused(8)
+    }
+
+    @Test fun startupFollowsAllEarlierRowsAsTheyArriveInStages() {
+        openStartupRows()
+        rule.runOnIdle { rows = listOf(row("watchlist", 7), row("streaming_services", 8, 9)) }
+        focused(7)
+        rule.runOnIdle {
+            rows = listOf(row("continue", 1, 2), row("up_next", 3), row("upcoming_schedule", 4),
+                row("available", 5), row("downloads", 6), row("recently_added", 10),
+                row("watchlist", 7), row("streaming_services", 8, 9))
+        }
+        focused(1)
+    }
+
+    @Test fun startupStopsFollowingTheTopAsSoonAsTheViewerNavigates() {
+        openStartupRows()
+        node(8).performKeyInput { pressKey(Key.DirectionRight) }
+        focused(9)
+        rule.runOnIdle { rows = listOf(row("continue", 1, 2), row("streaming_services", 8, 9)) }
+        focused(9)
+    }
+
+    @Test fun returningToHomeKeepsTheRememberedRowAndCard() {
+        rows = listOf(row("continue", 1, 2), row("streaming_services", 8, 9))
+        rule.setContent {
+            MaterialTheme {
+                val memory = remember { TvFocusMemory().apply {
+                    lastFocusedRowKey = "streaming_services"
+                    lastFocusedIndexByRow["streaming_services"] = 1
+                } }
+                TvMediaRails(
+                    rails = rows, railFocusRequester = remember { FocusRequester() },
+                    onMediaClick = {}, onFirstContentRequester = {}, onContentFocused = {},
+                    screenId = "home_return", presentationMode = TvRailsPresentationMode.CatalogHero,
+                    focusExclusive = true, focusMemory = memory, initialFocusFollowsTop = true,
+                    browseLayout = TvBrowseLayout.POSTER_ONLY, heroOverlay = { Text("Home") },
+                )
+            }
+        }
+        focused(9)
     }
 }

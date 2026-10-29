@@ -39,7 +39,11 @@ class TorveApp : Application(), androidx.work.Configuration.Provider {
         get() = androidx.work.Configuration.Builder().build()
 
     internal val tvUiReady = kotlinx.coroutines.CompletableDeferred<Unit>()
-    internal fun onTvUiReady() { tvUiReady.complete(Unit) }
+    internal fun onTvUiReady() {
+        if (tvUiReady.complete(Unit)) {
+            com.torve.android.debug.AnrDebugLogger.log("STARTUP home_ui_ready")
+        }
+    }
 
     companion object {
         private const val NON_CRITICAL_STARTUP_DELAY_MS = 2_000L
@@ -107,6 +111,7 @@ class TorveApp : Application(), androidx.work.Configuration.Provider {
                 kotlinx.coroutines.withTimeoutOrNull(15_000L) { tvUiReady.await() }
                 kotlinx.coroutines.delay(1_000L)
             } else kotlinx.coroutines.delay(NON_CRITICAL_STARTUP_DELAY_MS)
+            com.torve.android.debug.AnrDebugLogger.log("STARTUP background_maintenance_begin")
             com.torve.android.launcher.AndroidTvPlayNext.start(this@TorveApp, appScope)
             if (BuildConfig.HAS_BILLING && !com.torve.android.billing.isStripeFireTvBillingBuild()) {
                 launch { runCatching { getKoin().get<BillingManager>().initialize() } }

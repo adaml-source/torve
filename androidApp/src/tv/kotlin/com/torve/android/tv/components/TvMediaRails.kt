@@ -332,6 +332,8 @@ internal fun TvMediaRails(
     compactPreviewRows: Boolean = false,
     onExitUp: (() -> Unit)? = null,
     restoreFocusAcrossRows: Boolean = false,
+    initialFocusFollowsTop: Boolean = false,
+    onContentLaidOut: (() -> Unit)? = null,
 ) {
     val catalogHeroMode = presentationMode == TvRailsPresentationMode.CatalogHero
     val libraryHeroMode = presentationMode == TvRailsPresentationMode.LibraryHero
@@ -422,6 +424,17 @@ internal fun TvMediaRails(
     var focusedCardKey by remember(screenId) { mutableStateOf<String?>(null) }
     var focusedSeeAllRowKey by remember(screenId) { mutableStateOf<String?>(null) }
     var navigationSignal by remember(screenId) { mutableIntStateOf(0) }
+    // A cold Home can render local service tiles before its saved/personal
+    // rows arrive. Follow the first row until the viewer uses the remote;
+    // afterwards, normal item restoration owns focus, including tab re-entry.
+    var initialTopEntryPending by rememberSaveable(screenId) {
+        mutableStateOf(initialFocusFollowsTop && focusMemory.lastFocusedRowKey == null)
+    }
+    val followInitialTop = initialFocusFollowsTop && initialTopEntryPending
+    val contentModifier = modifier.onPreviewKeyEvent { event ->
+        if (event.type == KeyEventType.KeyDown) initialTopEntryPending = false
+        false
+    }
     var rowFocusJob by remember(screenId) { mutableStateOf<Job?>(null) }
     val previewRowIndex = if (transitioningFromRowKey != null) activeRowIndex else focusedRowIndex
     val expandedRowFocused = (focusedCardKey != null || focusedSeeAllRowKey != null || transitioningFromRowKey != null) && previewRowIndex?.let { index ->
@@ -744,11 +757,11 @@ internal fun TvMediaRails(
     }
 
     val autoFocusNavigationSignal = remember(signature, shouldAutoFocus, autoFocusRequestNonce) { navigationSignal }
-    LaunchedEffect(signature, shouldAutoFocus, autoFocusRequestNonce) {
-        if (!shouldAutoFocus) return@LaunchedEffect
+    LaunchedEffect(signature, shouldAutoFocus, autoFocusRequestNonce, followInitialTop) {
+        if (!shouldAutoFocus && !followInitialTop) return@LaunchedEffect
         if (rails.isEmpty()) return@LaunchedEffect
         if (navigationSignal != autoFocusNavigationSignal) return@LaunchedEffect
-        val preferredRow = focusMemory.lastFocusedRowKey
+        val preferredRow = focusMemory.lastFocusedRowKey.takeUnless { followInitialTop }
         val destination = tvRailFocusDestination(
             rails, preferredRow, preferredRow?.let { focusMemory.lastFocusedItemKeyByRow[it] },
             preferredRow?.let { focusMemory.lastFocusedIndexByRow[it] } ?: 0,
@@ -790,6 +803,7 @@ internal fun TvMediaRails(
     }
 
     LaunchedEffect(signature) {
+        if (followInitialTop) return@LaunchedEffect
         val origin = focusBeforeRailsUpdate ?: return@LaunchedEffect
         withFrameNanos { }
         if (contextMenuState != null || navigationSignal != navigationSignalBeforeRailsUpdate) return@LaunchedEffect
@@ -843,7 +857,7 @@ internal fun TvMediaRails(
             val loadingRequester = remember { FocusRequester() }
             onFirstContentRequester(loadingRequester)
             Box(
-                modifier = modifier
+                modifier = contentModifier
                     .fillMaxSize()
                     .padding(horizontal = 44.dp)
                     .focusRequester(loadingRequester)
@@ -864,7 +878,7 @@ internal fun TvMediaRails(
             val emptyRequester = remember { FocusRequester() }
             onFirstContentRequester(emptyRequester)
             Box(
-                modifier = modifier
+                modifier = contentModifier
                     .fillMaxSize()
                     .padding(horizontal = 44.dp)
                     .focusRequester(emptyRequester)
@@ -892,7 +906,7 @@ internal fun TvMediaRails(
             androidx.compose.runtime.CompositionLocalProvider(
                 androidx.compose.foundation.gestures.LocalBringIntoViewSpec provides
                     if (stablePreviewRows) TvAnchoredPreviewBringIntoViewSpec else androidx.compose.foundation.gestures.LocalBringIntoViewSpec.current,
-            ) { BoxWithConstraints(modifier = modifier.fillMaxSize().padding(top = if (compactPreviewRows) 12.dp else 24.dp)) {
+            ) { BoxWithConstraints(modifier = contentModifier.fillMaxSize().padding(top = if (compactPreviewRows) 12.dp else 24.dp)) {
                 val availableRailWidth = maxWidth
                 val density = LocalDensity.current
                 val posterTitleStyle = if (compactPosterTitles) MaterialTheme.typography.labelMedium else MaterialTheme.typography.labelLarge
@@ -1336,6 +1350,12 @@ internal fun TvMediaRails(
                                 var cardHasFocus by remember { mutableStateOf(false) }
                                 LaunchedEffect(item) { if (cardHasFocus) onMediaFocused?.invoke(item) }
                                 val cardModifier = Modifier
+                                    .onGloballyPositioned {
+                                        if (rowIndex == 0 && itemIndex == 0 && it.size.height > 0) {
+                                            onContentLaidOut?.invoke()
+                                            if (screenId == "home") com.torve.android.debug.StartupMetrics.homeContentLaidOut()
+                                        }
+                                    }
                                     .focusRequester(focusRequester)
                                     .onFocusChanged { state ->
                                         cardHasFocus = state.isFocused
