@@ -88,6 +88,7 @@ fun TvClickToEditOutlinedTextField(
     var imeWasShown by remember { mutableStateOf(false) }
     var editingHadFocus by remember { mutableStateOf(false) }
     var restoreNavigationFocus by remember { mutableStateOf(false) }
+    var consumeBackUp by remember { mutableStateOf(false) }
     val outlineColor = MaterialTheme.colorScheme.outline
     val borderColor by animateColorAsState(
         targetValue = when {
@@ -144,6 +145,14 @@ fun TvClickToEditOutlinedTextField(
         modifier = modifier.tvSettingsFocusFrame(focused || editMode).focusRequester(navigationFocusRequester).focusProperties { canFocus = !editMode }
             .onFocusChanged { focused = it.hasFocus }
             .onPreviewKeyEvent { event ->
+                val isConfirm = event.key == Key.DirectionCenter || event.key == Key.Enter || event.key == Key.NumPadEnter
+                // Focus moves into the editor on key-down. Keep its matching
+                // key-up from activating the newly focused editor or its parent.
+                if (isConfirm && event.type == KeyEventType.KeyUp) return@onPreviewKeyEvent true
+                if (event.key == Key.Back && event.type == KeyEventType.KeyUp && consumeBackUp) {
+                    consumeBackUp = false
+                    return@onPreviewKeyEvent true
+                }
                 if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
                 when (event.key) {
                     Key.DirectionCenter, Key.Enter, Key.NumPadEnter -> {
@@ -158,6 +167,7 @@ fun TvClickToEditOutlinedTextField(
 
                     Key.Back -> {
                         if (editMode) {
+                            consumeBackUp = true
                             finishEditing()
                             true
                         } else {
@@ -211,6 +221,13 @@ fun TvClickToEditOutlinedTextField(
                     else if (editMode && editingHadFocus) finishEditing()
                 },
         )
+        if (!editMode) {
+            // A read-only TextField still handles taps and accessibility clicks.
+            // Route those gestures to entering edit mode, rather than letting the
+            // inactive editor consume them while it cannot receive focus.
+            Box(Modifier.matchParentSize().focusProperties { canFocus = false }
+                .clickable(interactionSource = interactionSource, indication = null) { editMode = true })
+        }
     }
 }
 
