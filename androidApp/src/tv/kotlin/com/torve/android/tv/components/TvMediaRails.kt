@@ -906,7 +906,7 @@ internal fun TvMediaRails(
             androidx.compose.runtime.CompositionLocalProvider(
                 androidx.compose.foundation.gestures.LocalBringIntoViewSpec provides
                     if (stablePreviewRows) TvAnchoredPreviewBringIntoViewSpec else androidx.compose.foundation.gestures.LocalBringIntoViewSpec.current,
-            ) { BoxWithConstraints(modifier = contentModifier.fillMaxSize().padding(top = if (compactPreviewRows) 12.dp else 24.dp)) {
+            ) { BoxWithConstraints(modifier = contentModifier.fillMaxSize().padding(top = if (compactPreviewRows || libraryHeroMode) 12.dp else 24.dp)) {
                 val availableRailWidth = maxWidth
                 val density = LocalDensity.current
                 val posterTitleStyle = if (compactPosterTitles) MaterialTheme.typography.labelMedium else MaterialTheme.typography.labelLarge
@@ -937,16 +937,16 @@ internal fun TvMediaRails(
                     (catalogRequestedPosterWidth ?: 104.dp).coerceAtMost(catalogPosterWidthLimit) * 1.5f + posterCaptionHeight,
                     230.dp * 0.5625f + 64.dp,
                 )
-                val railPageHeight = maxHeight
                 val fixedHeroRailViewport = heroOverlay != null &&
                     (catalogHeroMode || libraryHeroMode)
                 val railTop = if (fixedHeroRailViewport && !suppressHeroForPreview) {
                     if (libraryHeroMode) {
-                        // Library Watchlist/Favorites need a physical rail boundary.
-                        // Rail rows, poster cards, rating badges, and focus glow must
-                        // live below this clipped viewport so old rows cannot draw
-                        // through the hero when vertical focus scrolls between rails.
-                        (maxHeight * 0.255f).coerceIn(260.dp, 292.dp)
+                        // The tabs already own their height. Reserve a compact
+                        // title preview and keep a whole card, heading and focus
+                        // margin inside the remaining Library body.
+                        val caption = if (forcePosterTitles || showTitlesOnCards) posterCaptionHeight else 0.dp
+                        (maxHeight * .28f).coerceAtMost(144.dp)
+                            .coerceAtMost((maxHeight - 160.dp - caption - headingHeight - 102.dp).coerceAtLeast(0.dp))
                     } else {
                         // Home, Movies, and TV Shows keep the fixed hero contract:
                         // the hero is a sibling layer pinned at the top while rails
@@ -957,6 +957,7 @@ internal fun TvMediaRails(
                 } else {
                     0.dp
                 }
+                val railPageHeight = if (libraryHeroMode) maxHeight - railTop else maxHeight
 
                 Box(modifier = Modifier.fillMaxSize()) {
                     Column(

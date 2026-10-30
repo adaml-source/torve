@@ -68,6 +68,7 @@ fun TvHeroOverlay(
     topPadding: Dp = 56.dp,
     overviewMaxLines: Int = 3,
     modifier: Modifier = Modifier,
+    compact: Boolean = false,
 ) {
     val settingsViewModel: SettingsViewModel = koinInject()
     val settingsState by settingsViewModel.state.collectAsState()
@@ -90,13 +91,13 @@ fun TvHeroOverlay(
         ) { item ->
             Column(
                 modifier = Modifier
-                    .padding(start = 56.dp, end = TV_PAGE_END_GUTTER, bottom = 16.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
+                    .padding(start = 56.dp, end = TV_PAGE_END_GUTTER, bottom = if (compact) 8.dp else 16.dp),
+                verticalArrangement = Arrangement.spacedBy(if (compact) 6.dp else 8.dp),
             ) {
                 val logoUrl = item?.logoUrl?.takeIf { it.isNotBlank() }
                 var logoFailed by remember(logoUrl) { mutableStateOf(false) }
                 val artworkPending = !logoFailed && (!allowLogoArtwork || logoLookupInFlight)
-                Box(Modifier.fillMaxWidth().height(72.dp).testTag("tv.hero.title"), contentAlignment = Alignment.CenterStart) {
+                Box(Modifier.fillMaxWidth().height(if (compact) 48.dp else 72.dp).testTag("tv.hero.title"), contentAlignment = Alignment.CenterStart) {
                 if (allowLogoArtwork && !logoUrl.isNullOrBlank() && !logoFailed) {
                     AsyncImage(
                         model = logoUrl,
@@ -110,7 +111,7 @@ fun TvHeroOverlay(
                         },
                         modifier = Modifier
                             .fillMaxWidth(0.42f)
-                            .heightIn(min = 32.dp, max = 54.dp),
+                            .heightIn(min = 24.dp, max = if (compact) 40.dp else 54.dp),
                     )
                 } else if (!artworkPending) {
                     val titleText = item?.title ?: subtitle
@@ -118,8 +119,8 @@ fun TvHeroOverlay(
                         Text(
                             text = titleText,
                             style = MaterialTheme.typography.headlineMedium.copy(
-                                fontSize = 30.sp,
-                                lineHeight = 34.sp,
+                                fontSize = if (compact) 24.sp else 30.sp,
+                                lineHeight = if (compact) 28.sp else 34.sp,
                                 letterSpacing = 0.6.sp,
                                 shadow = Shadow(
                                     color = Color.Black.copy(alpha = 0.82f),
@@ -129,7 +130,7 @@ fun TvHeroOverlay(
                             ),
                             color = Snow,
                             fontWeight = FontWeight.SemiBold,
-                            maxLines = 2,
+                            maxLines = if (compact) 1 else 2,
                             overflow = TextOverflow.Ellipsis,
                             modifier = Modifier.fillMaxWidth(0.6f),
                         )
@@ -140,7 +141,7 @@ fun TvHeroOverlay(
 
                 }
 
-                Box(Modifier.height(24.dp)) {
+                Box(if (compact) Modifier.heightIn(min = 24.dp) else Modifier.height(24.dp)) {
                 if (item != null) {
                     Row(
                         horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -179,7 +180,7 @@ fun TvHeroOverlay(
                 }
 
                 val overview = item?.overview.orEmpty()
-                Box(Modifier.fillMaxWidth().height(48.dp).testTag("tv.hero.synopsis")) {
+                if (!compact) Box(Modifier.fillMaxWidth().height(48.dp).testTag("tv.hero.synopsis")) {
                 if (overview.isNotBlank()) {
                     Text(
                         text = overview,

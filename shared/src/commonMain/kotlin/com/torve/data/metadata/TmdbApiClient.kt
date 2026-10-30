@@ -220,7 +220,7 @@ class TmdbApiClient(
         val value = query.trim().lowercase().take(160)
         if (value.length < 2) return emptyList()
         return httpClient.get("https://v3.sg.media-imdb.com") {
-            url { appendPathSegments("suggestion", "x", "$value.json", encodeSlash = true) }
+            url { appendPathSegments("suggestion", "titles", "x", "$value.json", encodeSlash = true) }
         }.body<TitleCompletionResponse>().d
             .filter { it.id.matches(Regex("tt[0-9]+")) && it.mediaType != null }
             .distinctBy { it.id }.take(6)

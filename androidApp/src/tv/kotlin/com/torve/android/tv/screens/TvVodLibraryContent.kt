@@ -17,6 +17,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -114,7 +115,7 @@ private const val MAX_VOD_SHELF_ITEMS = 180
 
 private val VodCategoryColumnWidth = 252.dp
 private val VodContentGap = 26.dp
-private val VodPreviewHeight = 184.dp
+private val VodPreviewHeight = 112.dp
 private val VodPosterWidth = 156.dp
 private val VodPosterRowHeight = 320.dp
 private val VodCategoryRowHeight = 44.dp
@@ -508,7 +509,7 @@ internal fun TvVodLibraryContent(
                 Row(
                     modifier = Modifier
                         .fillMaxSize()
-                        .padding(start = 32.dp, end = 28.dp, top = TV_PAGE_TOP_GUTTER, bottom = 24.dp),
+                        .padding(start = 32.dp, end = 28.dp, top = 12.dp, bottom = 12.dp),
                     horizontalArrangement = Arrangement.spacedBy(if (focusZone == VodFocusZone.CATEGORIES) VodContentGap else 0.dp),
                 ) {
                     if (focusZone == VodFocusZone.CATEGORIES) {
@@ -666,7 +667,7 @@ internal fun TvVodLibraryContent(
                                     onVodItemPlay(entry.channel, entry.item)
                                 }
                             },
-                            modifier = Modifier.fillMaxWidth(),
+                            modifier = Modifier.fillMaxWidth().weight(1f),
                         )
                     }
                 }
@@ -1465,7 +1466,7 @@ private fun TvVodPreviewPanel(
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(horizontal = 20.dp, vertical = 16.dp),
+                .padding(horizontal = 16.dp, vertical = 10.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
             if (item == null) {
@@ -1479,29 +1480,6 @@ private fun TvVodPreviewPanel(
 
             VodHeroTitle(item = item)
             VodMetadataLine(item = item)
-            if (item.logoUrl.isNullOrBlank()) {
-                VodPeopleLine(item = item)
-            }
-            VodRatingLine(item = item)
-            item.overview?.takeIf { it.isNotBlank() }?.let { overview ->
-                Text(
-                    text = overview,
-                    color = Snow.copy(alpha = 0.82f),
-                    fontSize = 14.sp,
-                    lineHeight = 20.sp,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-            if (item.overview.isNullOrBlank()) {
-                Text(
-                    text = entry.category,
-                    color = Silver,
-                    style = MaterialTheme.typography.bodyMedium,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
         }
     }
 }
@@ -1519,7 +1497,7 @@ private fun VodHeroTitle(item: MediaItem) {
             onError = { logoFailed = true },
             modifier = Modifier
                 .width(360.dp)
-                .height(52.dp),
+                .height(32.dp),
         )
     } else {
         Text(
@@ -1642,10 +1620,12 @@ private fun TvVodPosterStrip(
                 ?.let { sourceId -> entries.indexOfFirst { it.sourceId == sourceId } }
                 ?.takeIf { it >= 0 }
                 ?: 0
+            BoxWithConstraints(modifier = modifier) {
+            // Include row padding and the focused card's scale in its budget.
+            val posterWidth = ((maxHeight - 46.dp) / 1.5f / 1.08f).coerceIn(72.dp, VodPosterWidth)
             LazyRow(
                 state = listState,
-                modifier = modifier
-                    .height(VodPosterRowHeight)
+                modifier = Modifier.fillMaxSize()
                     .onPreviewKeyEvent { event ->
                         if (focusZone != VodFocusZone.POSTERS || event.type != KeyEventType.KeyDown) {
                             return@onPreviewKeyEvent false
@@ -1671,7 +1651,7 @@ private fun TvVodPosterStrip(
                         entry = entry,
                         favorite = stableChannelId(entry.channel) in favoriteChannelIds,
                         modifier = Modifier
-                            .width(VodPosterWidth)
+                            .width(posterWidth)
                             .aspectRatio(2f / 3f)
                             .focusRequester(requester)
                             .focusProperties {
@@ -1697,6 +1677,7 @@ private fun TvVodPosterStrip(
                         onClick = { onClick(entry) },
                     )
                 }
+            }
             }
         }
     }

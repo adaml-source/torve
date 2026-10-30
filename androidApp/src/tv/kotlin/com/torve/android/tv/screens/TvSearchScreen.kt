@@ -140,8 +140,10 @@ import com.torve.domain.sourceavailability.SourceAvailabilityRecord
 import com.torve.domain.sourceavailability.SourceAvailabilityKind
 import com.torve.presentation.settings.SettingsViewModel
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.catch
 import kotlinx.serialization.decodeFromString
@@ -990,6 +992,7 @@ internal fun TvSearchScreen(
             return@LaunchedEffect
         }
         Log.d("TvSearchCache", "search_cache_miss loadKey=$loadStateKey")
+        lastLoadedSearchStateKey = null
         pagingRetryBlockedResultKey = null
         loading = true
         error = null
@@ -1029,18 +1032,40 @@ internal fun TvSearchScreen(
                 searchTotalPages = batch.totalPages
                 searchCanLoadMore = batch.canLoadMore
             } else {
-                val raw = if (trimmedQuery.length >= 2) {
-                    val page = metadataRepo.searchMultiPaged(
-                        tvSearchEffectiveQuery(trimmedQuery, selectedAvailabilityFilter),
-                        1,
-                        filterType,
-                    )
-                    nextSearchPage = page.page + 1
-                    searchTotalPages = page.totalPages
-                    searchCanLoadMore = page.page < page.totalPages &&
-                        page.items.isNotEmpty() &&
-                        page.items.size < TV_SEARCH_MAX_RESULTS
-                    page.items
+                fun publishResults(raw: List<MediaItem>) {
+                    val typed = if (filterType != null) raw.filter {
+                        when (filterType) {
+                            "movie" -> it.type == MediaType.MOVIE
+                            "tv" -> it.type == MediaType.SERIES
+                            else -> true
+                        }
+                    } else raw
+                    baseResults = typed
+                    results = typed.filterTvSearchItems(
+                        genreIds = selectedGenreIds, studioIds = selectedStudioIds,
+                        year = selectedYear, minRating = selectedMinRating,
+                        minImdbVotes = selectedMinImdbVotes, runtimeFilter = selectedRuntimeFilter,
+                        availabilityFilter = selectedAvailabilityFilter,
+                        sourceAvailabilityByTmdbId = sourceAvailabilityByTmdbId,
+                    ).take(TV_SEARCH_MAX_RESULTS)
+                    loading = false
+                }
+                if (trimmedQuery.length >= 2) {
+                    var initialKeys: Set<String>? = null
+                    var pagingInitialized = false
+                    searchCanLoadMore = false
+                    metadataRepo.searchTvTitles(tvSearchEffectiveQuery(trimmedQuery, selectedAvailabilityFilter), filterType) { items, page ->
+                        // Preserve pages the viewer reached while completions were resolving.
+                        val appended = initialKeys?.let { keys -> baseResults.filter { it.tvSearchStableKey() !in keys } }.orEmpty()
+                        initialKeys = items.map { it.tvSearchStableKey() }.toSet()
+                        publishResults((items + appended).distinctBy { it.tvSearchStableKey() })
+                        if (page != null && !pagingInitialized) {
+                            nextSearchPage = page.page + 1
+                            searchTotalPages = page.totalPages
+                            searchCanLoadMore = page.page < page.totalPages && page.items.isNotEmpty() && items.size < TV_SEARCH_MAX_RESULTS
+                            pagingInitialized = true
+                        }
+                    }
                 } else {
                     val page = metadataRepo.loadTvSearchBrowsePage(
                         filterType = filterType,
@@ -1057,36 +1082,18 @@ internal fun TvSearchScreen(
                     nextSearchPage = page.page + 1
                     searchTotalPages = page.totalPages
                     searchCanLoadMore = page.page < page.totalPages && page.items.isNotEmpty()
-                    page.items
+                    publishResults(page.items)
                 }
-                val typed = if (filterType != null) {
-                    raw.filter {
-                        when (filterType) {
-                            "movie" -> it.type == MediaType.MOVIE
-                            "tv" -> it.type == MediaType.SERIES
-                            else -> true
-                        }
-                    }
-                } else raw
-                baseResults = typed
-                results = typed.filterTvSearchItems(
-                    genreIds = selectedGenreIds,
-                    studioIds = selectedStudioIds,
-                    year = selectedYear,
-                    minRating = selectedMinRating,
-                    minImdbVotes = selectedMinImdbVotes,
-                    runtimeFilter = selectedRuntimeFilter,
-                    availabilityFilter = selectedAvailabilityFilter,
-                    sourceAvailabilityByTmdbId = sourceAvailabilityByTmdbId,
-                ).take(TV_SEARCH_MAX_RESULTS)
             }
             lastLoadedSearchStateKey = loadStateKey
+        } catch (e: CancellationException) {
+            throw e
         } catch (t: Throwable) {
             baseResults = emptyList()
             results = emptyList()
             error = tvSearchSafeError(t)
         } finally {
-            loading = false
+            if (isActive) loading = false
         }
     }
 
@@ -1848,6 +1855,7 @@ internal fun TvSearchScreen(
                 openSearchNonce = openSearchNonce,
                 onMoveDown = { requestSearchBodyFocus() },
                 onQueryCommitted = ::commitSearch,
+                suggestTitles = { metadataRepo.titleSuggestions(it, filterType) },
                 onRemoveRecent = { term -> replaceRecentSearches(recentSearches.filterNot { it.equals(term, true) }) },
                 onClearRecent = { replaceRecentSearches(emptyList()) },
                 onToggleAi = { if (hasAiKey) searchMode = if (searchMode == SearchMode.AI) SearchMode.STANDARD else SearchMode.AI },

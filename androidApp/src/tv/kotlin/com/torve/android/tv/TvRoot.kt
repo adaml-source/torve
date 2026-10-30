@@ -2769,6 +2769,7 @@ fun TvRoot(
                             else -> 56.dp
                         },
                         overviewMaxLines = 2,
+                        compact = contentTopRoute == TvRoutes.LIBRARY,
                     )
                 }
 

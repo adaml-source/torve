@@ -688,7 +688,7 @@ class MetadataRepositoryImpl(
     }
 
     override fun titleSuggestions(query: String, type: String?): Flow<List<MediaItem>> = channelFlow {
-        val key = metadataCacheKey("titleSuggestions:v1", query.trim().lowercase(), type)
+        val key = metadataCacheKey("titleSuggestions:v2", query.trim().lowercase(), type)
         val items = cachedMetadata(key, METADATA_LIST_TTL_MS) {
             kotlinx.coroutines.withTimeout(2_000) {
                 val completions = api.titleCompletions(query).filter { type == null || it.mediaType == type }

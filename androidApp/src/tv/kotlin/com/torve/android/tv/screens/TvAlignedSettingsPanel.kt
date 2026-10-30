@@ -28,6 +28,7 @@ import androidx.compose.ui.res.stringResource
 import com.torve.android.R
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.semantics.disabled
 import com.torve.domain.providerhealth.ProviderHealthStatus
 import kotlinx.coroutines.flow.first
 import com.torve.android.tv.components.tvSettingsFocusFrame
@@ -42,6 +43,7 @@ import org.koin.compose.koinInject
 
 /** One category shell for every setting. Service pages contain only that service's controls. */
 @Composable
+@OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
 internal fun TvAlignedSettingsPanel(
     rail: FocusRequester, entry: FocusRequester?, isActive: Boolean, railFocused: Boolean,
     publish: (FocusRequester) -> Unit, contentFocused: (FocusRequester) -> Unit, moveToRail: () -> Unit,
@@ -126,10 +128,15 @@ internal fun TvAlignedSettingsPanel(
                     requesters.entries.firstOrNull { it.value === requester }?.key?.let { savedControlIndex = it }
                     focused(requester)
                 }
+                fun Modifier.controlNavigation(requester: FocusRequester): Modifier = focusProperties {
+                    val index = requesters.entries.first { it.value === requester }.key
+                    up = enabledControls.filter { it < index }.maxOrNull()?.let(requesters::get) ?: FocusRequester.Cancel
+                    down = enabledControls.filter { it > index }.minOrNull()?.let(requesters::get) ?: FocusRequester.Cancel
+                }
                 @Composable fun action(title: String, detail: String? = null, enabled: Boolean = true,
                     status: ProviderHealthStatus? = null, navigates: Boolean = false, onClick: () -> Unit) {
                     val requester = next(enabled)
-                    TvSettingsActionRow(title, detail, enabled, Modifier.focusRequester(requester)
+                    TvSettingsActionRow(title, detail, enabled, Modifier.focusRequester(requester).controlNavigation(requester)
                         .onFocusChanged { if (it.isFocused) recordFocus(requester) }, status, navigates) {
                         choiceOrigin = requester
                         onClick()
@@ -138,7 +145,7 @@ internal fun TvAlignedSettingsPanel(
                 @Composable fun field(label: String, value: String, secure: Boolean = false, change: (String) -> Unit) {
                     val requester = next()
                     TvClickToEditOutlinedTextField(value, change, { Text(parityLabel(label)) }, true,
-                        modifier = Modifier.fillMaxWidth().focusRequester(requester)
+                        modifier = Modifier.fillMaxWidth().focusRequester(requester).controlNavigation(requester)
                             .onFocusChanged { if (it.hasFocus) recordFocus(requester) },
                         visualTransformation = if (secure) PasswordVisualTransformation() else androidx.compose.ui.text.input.VisualTransformation.None)
                 }
@@ -388,9 +395,11 @@ internal fun TvSettingsActionRow(title: String, detail: String? = null, enabled:
     var focused by remember { mutableStateOf(false) }
     val statusLabel = status?.let { parityLabel(tvConnectionStatusLabel(it)) }
     val shape = RoundedCornerShape(20.dp)
-    Surface(onClick, enabled = enabled, shape = shape,
+    // A save/check can disable its own row. Keep its focus owner alive until
+    // the viewer moves, and keep the action disabled during that interval.
+    Surface({ if (enabled) onClick() }, enabled = enabled || focused, shape = shape,
         color = Color.Transparent, contentColor = MaterialTheme.colorScheme.onSurface,
-        modifier = modifier.fillMaxWidth().onFocusChanged { focused = it.isFocused }
+        modifier = modifier.fillMaxWidth().semantics { if (!enabled) disabled() }.onFocusChanged { focused = it.isFocused }
             .padding(4.dp).tvLiquidGlass(focused, enabled = enabled)) {
         Row(Modifier.heightIn(min = 60.dp).padding(horizontal = 18.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {

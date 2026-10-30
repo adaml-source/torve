@@ -37,6 +37,7 @@ import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -71,6 +72,12 @@ import com.torve.android.ui.theme.Obsidian
 import com.torve.android.ui.theme.Silver
 import com.torve.android.ui.theme.Snow
 import com.torve.android.ui.theme.Steel
+import com.torve.domain.model.MediaItem
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.withTimeoutOrNull
 
 /** Keep the normal route to results short; history and view choices belong in popups. */
 @Composable
@@ -101,6 +108,7 @@ internal fun TvSearchToolbar(
     onOpenFilters: () -> Unit,
     onDensityChange: (TvSearchDensity) -> Unit,
     onContentFocused: (FocusRequester) -> Unit,
+    suggestTitles: (String) -> Flow<List<MediaItem>> = { flowOf(emptyList()) },
 ) {
     val controller = rememberTvModalFocusRestoreController("$screenId:toolbar")
     val searchTarget = remember(screenId) { TvFocusTargetId(screenId, "toolbar", "search", 0, 0, "button") }
@@ -158,7 +166,7 @@ internal fun TvSearchToolbar(
         TvSearchQueryPopup(query, aiMode, hasAiKey, recentSearches,
             onSubmit = { onQueryCommitted(it); dismiss() },
             onRemoveRecent = onRemoveRecent, onClearRecent = onClearRecent,
-            onToggleAi = onToggleAi, onDismiss = ::dismiss)
+            onToggleAi = onToggleAi, onDismiss = ::dismiss, suggestTitles = suggestTitles)
     }
     if (viewOpen) {
         TvSearchViewPopup(density, onSelect = { onDensityChange(it); dismiss() }, onDismiss = ::dismiss)
@@ -203,8 +211,23 @@ internal fun TvSearchQueryPopup(
     onClearRecent: () -> Unit,
     onToggleAi: () -> Unit,
     onDismiss: () -> Unit,
+    suggestTitles: (String) -> Flow<List<MediaItem>> = { flowOf(emptyList()) },
 ) {
     var draft by remember { mutableStateOf(query) }
+    var suggestions by remember(draft, aiMode) { mutableStateOf(emptyList<MediaItem>()) }
+    val suggestionSource by rememberUpdatedState(suggestTitles)
+    LaunchedEffect(draft, aiMode) {
+        val text = draft.trim()
+        if (aiMode || text.length < 2) return@LaunchedEffect
+        delay(250)
+        try {
+            withTimeoutOrNull(2_500) {
+                suggestionSource(text).collect { items ->
+                    suggestions = mergeTvTitleSearch(text, emptyList(), items).take(4)
+                }
+            }
+        } catch (e: CancellationException) { throw e } catch (_: Exception) { suggestions = emptyList() }
+    }
     val input = remember { FocusRequester() }
     val submit = remember { FocusRequester() }
     val cancel = remember { FocusRequester() }
@@ -213,6 +236,9 @@ internal fun TvSearchQueryPopup(
     val terms = remember { mutableMapOf<String, FocusRequester>() }
     val removes = remember { mutableMapOf<String, FocusRequester>() }
     val firstRecent = recentSearches.firstOrNull()?.let { terms.getOrPut(it) { FocusRequester() } }
+    val suggestionRequesters = remember { mutableMapOf<String, FocusRequester>() }
+    val firstSuggestion = suggestions.firstOrNull()?.let { suggestionRequesters.getOrPut(it.id) { FocusRequester() } }
+    val firstChoice = firstSuggestion ?: firstRecent ?: submit
     val context = LocalContext.current
     val view = LocalView.current
     DisposableEffect(Unit) {
@@ -226,10 +252,24 @@ internal fun TvSearchQueryPopup(
         Text(localizedUiText(if (aiMode) "Describe what you would like to watch" else "Find a movie or show by title"),
             color = Silver, style = MaterialTheme.typography.bodyMedium)
         TvSearchCompactInput(draft, { draft = it }, localizedUiText("Enter a title or description"),
-            onMoveDown = { (firstRecent ?: submit).requestFocus(); true }, restingFocusRequester = input,
-            modifier = Modifier.fillMaxWidth().height(48.dp).background(Gunmetal, RoundedCornerShape(10.dp))
-                .focusRequester(input).focusProperties { down = firstRecent ?: submit; right = if (hasAiKey) mode else cancel },
+            onMoveDown = { firstChoice.requestFocus(); true }, restingFocusRequester = input,
+            modifier = Modifier.testTag("search_query_input").fillMaxWidth().height(48.dp).background(Gunmetal, RoundedCornerShape(10.dp))
+                .focusRequester(input).focusProperties { down = firstChoice; right = if (hasAiKey) mode else cancel },
             onSubmit = { onSubmit(draft.trim()) })
+        if (suggestions.isNotEmpty()) {
+            Text(localizedUiText("Suggestions"), color = Silver, style = MaterialTheme.typography.labelLarge)
+            Column(Modifier.fillMaxWidth().heightIn(max = 174.dp).verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                suggestions.forEachIndexed { index, item -> key(item.id) {
+                    val requester = suggestionRequesters.getOrPut(item.id) { FocusRequester() }
+                    val up = suggestions.getOrNull(index - 1)?.let { suggestionRequesters.getOrPut(it.id) { FocusRequester() } } ?: input
+                    val down = suggestions.getOrNull(index + 1)?.let { suggestionRequesters.getOrPut(it.id) { FocusRequester() } } ?: (firstRecent ?: submit)
+                    TvSearchToolbarButton(item.title, Modifier.fillMaxWidth().testTag("search_suggestion:${item.id}")
+                        .focusRequester(requester).focusProperties { this.up = up; this.down = down; left = requester; right = requester },
+                        onMoveDown = { down.requestFocus() }, onFocused = {}, onClick = { onSubmit(item.title) })
+                } }
+            }
+        }
         if (recentSearches.isNotEmpty()) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically) {
@@ -244,7 +284,8 @@ internal fun TvSearchQueryPopup(
                 recentSearches.forEachIndexed { index, term -> key(term) {
                     val requester = terms.getOrPut(term) { FocusRequester() }
                     val remove = removes.getOrPut(term) { FocusRequester() }
-                    val up = recentSearches.getOrNull(index - 1)?.let { terms.getOrPut(it) { FocusRequester() } } ?: input
+                    val up = recentSearches.getOrNull(index - 1)?.let { terms.getOrPut(it) { FocusRequester() } }
+                        ?: suggestions.lastOrNull()?.let { suggestionRequesters.getOrPut(it.id) { FocusRequester() } } ?: input
                     val down = recentSearches.getOrNull(index + 1)?.let { terms.getOrPut(it) { FocusRequester() } } ?: submit
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         TvSearchToolbarButton(term, Modifier.weight(1f).focusRequester(requester)
@@ -259,7 +300,9 @@ internal fun TvSearchQueryPopup(
         }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
             TvActionButton(com.torve.android.tv.components.tvSettingsLabel("Search"), Modifier.focusRequester(submit).focusProperties {
-                up = firstRecent ?: input; right = cancel; left = submit; down = submit
+                up = recentSearches.lastOrNull()?.let { terms.getOrPut(it) { FocusRequester() } }
+                    ?: suggestions.lastOrNull()?.let { suggestionRequesters.getOrPut(it.id) { FocusRequester() } } ?: input
+                right = cancel; left = submit; down = submit
             }, isPrimary = true, onFocused = {}, onClick = { onSubmit(draft.trim()) })
             TvActionButton(com.torve.android.tv.components.tvSettingsLabel("Cancel"), Modifier.focusRequester(cancel).focusProperties {
                 up = input; left = submit; right = if (hasAiKey) mode else cancel; down = cancel

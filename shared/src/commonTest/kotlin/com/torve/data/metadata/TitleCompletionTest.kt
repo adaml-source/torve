@@ -23,6 +23,7 @@ class TitleCompletionTest {
             urls += request.url.toString()
             val body = if (request.url.host == "v3.sg.media-imdb.com") {
                 assertNull(request.url.parameters["api_key"], "Never send the catalogue credential to the completion host")
+                assertTrue(request.url.encodedPath.startsWith("/suggestion/titles/x/"), "Use title-only completions so person names cannot crowd out matching shows")
                 """{"d":[{"id":"nm99","qid":"person"},{"id":"tt2015381","qid":"movie","l":"Untrusted completion title"}]}"""
             } else """{"movie_results":[{"id":118340,"title":"Guardians of the Galaxy","adult":false,"poster_path":"/guardians.jpg"}]}"""
             respond(body, headers = headersOf(HttpHeaders.ContentType,"application/json"))

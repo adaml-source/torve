@@ -80,6 +80,7 @@ internal fun TvGroupedSettingsBrowser(
     var pageId by rememberSaveable { mutableStateOf(SettingsMenus.leafForAction(tvSettingsGroups, initialAction)?.id ?: "account") }
     var lastFocusId by rememberSaveable { mutableStateOf("root:account") }
     var focusByPage by rememberSaveable { mutableStateOf<Map<String, String>>(emptyMap()) }
+    var pageByGroup by rememberSaveable { mutableStateOf<Map<String, String>>(emptyMap()) }
     var history by rememberSaveable { mutableStateOf<List<String>>(emptyList()) }
     val pageState = rememberSaveableStateHolder()
     val page = SettingsMenus.find(tvSettingsGroups, pageId) ?: tvSettingsGroups.first()
@@ -90,12 +91,18 @@ internal fun TvGroupedSettingsBrowser(
     val rows = remember(pageId) { entries.associate { it.id to FocusRequester() } }
     val first = remember(pageId) { FocusRequester() }
     var lastFormRequester by remember(pageId) { mutableStateOf<FocusRequester?>(null) }
+    var contentHasFocus by remember { mutableStateOf(false) }
     var pendingFocus by remember { mutableStateOf(!railFocused && (leaf || lastFocusId in rows)) }
     val validEntry = if (leaf) lastFormRequester ?: first else rows[lastFocusId] ?: roots[group.id]!!
+    fun rememberPage(id: String) {
+        val owner = tvSettingsGroups.first { it.id == id || SettingsMenus.find(it.children, id) != null }
+        pageByGroup = pageByGroup + (owner.id to id)
+    }
 
     LaunchedEffect(initialAction, entryNonce) {
         SettingsMenus.leafForAction(tvSettingsGroups, initialAction)?.let {
             history = emptyList(); pageId = it.id; lastFocusId = ""; pendingFocus = true
+            rememberPage(it.id)
             onInitialActionHandled()
         }
     }
@@ -104,11 +111,19 @@ internal fun TvGroupedSettingsBrowser(
             publish(validEntry)
             if (pendingFocus) {
                 val target = if (leaf) lastFormRequester ?: first else rows[lastFocusId] ?: rows.values.firstOrNull() ?: roots.getValue(group.id)
-                withFrameNanos { }
-                pendingFocus = false
-                if (runCatching { target.requestFocus() }.isFailure) {
-                    roots.getValue(group.id).requestFocus()
+                // Forms may attach their controls after this page's first
+                // frame. Keep entry owned by the content while they attach.
+                repeat(12) {
+                    withFrameNanos { }
+                    if (contentHasFocus) {
+                        pendingFocus = false
+                        return@LaunchedEffect
+                    }
+                    // Let a form restore its saved control before requesting
+                    // its first child, which would scroll a restored page away.
+                    if (it > 0) runCatching { target.requestFocus() }
                 }
+                pendingFocus = false
             }
         }
     }
@@ -122,6 +137,7 @@ internal fun TvGroupedSettingsBrowser(
             if (previous != null) history = history.dropLast(1)
             if (parent.action == null) focusByPage = focusByPage + (parent.id to pageId)
             lastFocusId = focusByPage[parent.id].orEmpty(); pageId = parent.id
+            rememberPage(parent.id)
             pendingFocus = true
         }
     }
@@ -133,6 +149,7 @@ internal fun TvGroupedSettingsBrowser(
         if (item.action != null && openAction(item.action)) return
         history = history + pageId
         pageId = item.id
+        rememberPage(item.id)
         lastFocusId = focusByPage[item.id].orEmpty(); pendingFocus = true
     }
     fun openSetting(action: String) {
@@ -140,6 +157,7 @@ internal fun TvGroupedSettingsBrowser(
         if (openAction(action)) return
         history = history + pageId
         pageId = target.id; lastFocusId = ""; pendingFocus = true
+        rememberPage(target.id)
     }
     fun previewGroup(item: SettingsMenuEntry) {
         if (item.id != group.id) {
@@ -152,7 +170,7 @@ internal fun TvGroupedSettingsBrowser(
         lastFocusId = "root:${item.id}"
     }
     fun chooseGroup(item: SettingsMenuEntry) {
-        val destination = if (item.id == group.id) pageId else item.id
+        val destination = pageByGroup[item.id] ?: item.id
         pageId = destination
         lastFocusId = focusByPage[destination].orEmpty()
         pendingFocus = true
@@ -201,7 +219,7 @@ internal fun TvGroupedSettingsBrowser(
                     if (direction == FocusDirection.Up || direction == FocusDirection.Down) FocusRequester.Cancel
                     else FocusRequester.Default
                 }
-            }.focusGroup().testTag("settings.content")) {
+            }.onFocusChanged { contentHasFocus = it.hasFocus }.focusGroup().testTag("settings.content")) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f).padding(vertical = 8.dp)) {
                     if (page.id != group.id) Text(listOfNotNull(group.title,
@@ -215,7 +233,7 @@ internal fun TvGroupedSettingsBrowser(
             pageState.SaveableStateProvider(pageId) {
                 if (leaf) Box(Modifier.fillMaxSize().then(if (entry != null) Modifier.focusRequester(entry).focusGroup() else Modifier)
                     .focusProperties { left = roots.getValue(group.id) }
-                    .onPreviewKeyEvent { event ->
+                    .onKeyEvent { event ->
                         if (event.key != Key.DirectionLeft) false
                         else {
                             if (event.type == KeyEventType.KeyDown) roots.getValue(group.id).requestFocus()
