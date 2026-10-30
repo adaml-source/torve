@@ -110,8 +110,12 @@ fun TvClickToEditOutlinedTextField(
     }
 
     fun finishEditing() {
-        editMode = false
         editingHadFocus = false
+        // Move focus before disabling the editor. Clearing the currently focused
+        // node lets Compose fall back to the first Settings category (Account),
+        // whose focus handler navigates away and disposes this entire form.
+        runCatching { navigationFocusRequester.requestFocus() }
+        editMode = false
         restoreNavigationFocus = true
         hideKeyboard()
     }
@@ -142,7 +146,9 @@ fun TvClickToEditOutlinedTextField(
     }
 
     Box(
-        modifier = modifier.tvSettingsFocusFrame(focused || editMode).focusRequester(navigationFocusRequester).focusProperties { canFocus = !editMode }
+        // Keep the navigation target alive during the handoff to/from the editor.
+        // Making it unfocusable before the editor takes focus can select Account.
+        modifier = modifier.tvSettingsFocusFrame(focused || editMode).focusRequester(navigationFocusRequester)
             .onFocusChanged { focused = it.hasFocus }
             .onPreviewKeyEvent { event ->
                 val isConfirm = event.key == Key.DirectionCenter || event.key == Key.Enter || event.key == Key.NumPadEnter

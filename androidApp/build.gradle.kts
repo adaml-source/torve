@@ -146,7 +146,7 @@ android {
         create("tv") {
             dimension = "formFactor"
             val tvBaseVersionCode = providers.gradleProperty("torveUpdaterFixtureBaseVersionCode")
-                .orNull?.toIntOrNull() ?: 210
+                .orNull?.toIntOrNull() ?: 211
             versionCode = 20000 + tvBaseVersionCode
             proguardFile("proguard-tv-rules.pro")
         }
