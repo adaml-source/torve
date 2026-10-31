@@ -139,16 +139,16 @@ class TvSearchPresentationUiTest {
         }
         focus("View")
         key("View", Key.DirectionCenter)
-        waitForFocus("Medium · 4 per row", inPopup = true)
-        key("Medium · 4 per row", Key.DirectionDown)
-        key("Small · 5 per row", Key.DirectionDown)
-        key("Compact · 6 per row", Key.DirectionCenter)
+        waitForFocus("Medium · 8 per row", inPopup = true)
+        key("Medium · 8 per row", Key.DirectionDown)
+        key("Small · 10 per row", Key.DirectionDown)
+        key("Compact · 12 per row", Key.DirectionCenter)
         waitForFocus("View")
         composeRule.runOnIdle { assertEquals(TvSearchDensity.COMPACT, density) }
         repeat(3) {
             key("View", Key.DirectionCenter)
-            waitForFocus("Compact · 6 per row", inPopup = true)
-            key("Compact · 6 per row", Key.Back)
+            waitForFocus("Compact · 12 per row", inPopup = true)
+            key("Compact · 12 per row", Key.Back)
             waitForFocus("View")
         }
         key("View", Key.DirectionDown)

@@ -155,10 +155,10 @@ import java.util.Calendar
 private enum class SearchMode { STANDARD, AI }
 
 internal enum class TvSearchDensity(val columns: Int, val label: String) {
-    SHOWCASE(3, "Large"),
-    RELAXED(4, "Medium"),
-    BALANCED(5, "Small"),
-    COMPACT(6, "Compact"),
+    SHOWCASE(6, "Large"),
+    RELAXED(8, "Medium"),
+    BALANCED(10, "Small"),
+    COMPACT(12, "Compact"),
 }
 
 internal enum class TvSearchSort(val label: String) {
@@ -403,11 +403,11 @@ internal fun TvSearchScreen(
     var aiPagingPlan by remember { mutableStateOf(restoredContentCache?.aiPagingPlan) }
     var filtersVisible by rememberSaveable { mutableStateOf(restoredContentCache?.filtersVisible ?: false) }
     var showFilters by rememberSaveable { mutableStateOf(false) }
-    var density by rememberSaveable {
+    var density by rememberSaveable(key = "tv_search_density_v2:$screenId") {
         mutableStateOf(restoredContentCache?.density ?: runCatching {
             TvSearchDensity.valueOf(context.getSharedPreferences("tv_prefs", Context.MODE_PRIVATE)
-                .getString("tv_search_density_v1", TvSearchDensity.RELAXED.name).orEmpty())
-        }.getOrDefault(TvSearchDensity.RELAXED))
+                .getString("tv_search_density_v2", TvSearchDensity.BALANCED.name).orEmpty())
+        }.getOrDefault(TvSearchDensity.BALANCED))
     }
     val searchActionScope = rememberCoroutineScope()
     var openSearchNonce by remember { mutableStateOf(0) }
@@ -451,6 +451,7 @@ internal fun TvSearchScreen(
     val sortRequester = remember { FocusRequester() }
     val firstFilterRequester = remember { FocusRequester() }
     val firstResultRequester = remember { FocusRequester() }
+    var previewBodyRequester by remember { mutableStateOf<FocusRequester?>(null) }
     val firstExploreRequester = remember { FocusRequester() }
     val firstRecentRequester = remember { FocusRequester() }
     val resultRequesters = remember { mutableMapOf<String, FocusRequester>() }
@@ -483,6 +484,9 @@ internal fun TvSearchScreen(
     }
 
     fun requestSearchBodyFocus(): Boolean {
+        if (!showFilters && focusPreview && results.isNotEmpty()) {
+            return runCatching { (previewBodyRequester ?: firstResultRequester).requestFocus() }.isSuccess
+        }
         if (!showFilters && results.isNotEmpty()) {
             focusedResultKey = null
             resultFocusRequestNonce += 1
@@ -527,15 +531,13 @@ internal fun TvSearchScreen(
         if (resultFocusRequestNonce == 0 || results.isEmpty()) return@LaunchedEffect
 
         repeat(8) {
-            val visibleResultIndices = resultsGridState.layoutInfo.visibleItemsInfo
-                .map { it.index }
-                .filter { it in results.indices }
+            val visibleResultKeys = resultsGridState.layoutInfo.visibleItemsInfo
+                .mapNotNull { it.key as? String }
                 .distinct()
-                .ifEmpty { listOf(0) }
-            for (index in visibleResultIndices) {
-                val itemKey = results[index].tvSearchStableKey()
+                .ifEmpty { listOf(results.first().tvSearchStableKey()) }
+            for (itemKey in visibleResultKeys) {
                 val requester = resultRequesters[itemKey]
-                    ?: firstResultRequester.takeIf { index == 0 }
+                    ?: firstResultRequester.takeIf { itemKey == results.first().tvSearchStableKey() }
                     ?: continue
                 val requested = runCatching { requester.requestFocus() }.isSuccess
                 if (requested) {
@@ -1869,7 +1871,7 @@ internal fun TvSearchScreen(
                 onDensityChange = {
                     density = it
                     context.getSharedPreferences("tv_prefs", Context.MODE_PRIVATE).edit()
-                        .putString("tv_search_density_v1", it.name).apply()
+                        .putString("tv_search_density_v2", it.name).apply()
                 },
                 onContentFocused = {
                     lastVisibleFilterRequester = it
@@ -1888,7 +1890,7 @@ internal fun TvSearchScreen(
             }
             TvSearchResultsLayout(
                 modifier = Modifier.fillMaxWidth().weight(1f),
-                showPreview = previewItem != null && !focusPreview,
+                showPreview = previewItem != null && !focusPreview && density.columns < 10,
                 preview = { previewModifier ->
                     TvSearchSelectedPreviewV2(item = previewItem, history = previewHistory,
                         artworkLookupPending = previewItem?.let {
@@ -1968,17 +1970,27 @@ internal fun TvSearchScreen(
                             items = visibleResults, screenId = screenId, columns = density.columns,
                             railFocusRequester = railFocusRequester, entryRequester = firstResultRequester,
                             headerRequester = inputFocusRequester, modifier = Modifier.fillMaxSize(),
+                            wrapRows = true,
                             hero = { TvSearchSelectedPreviewV2(item = previewItem, history = previewHistory,
                                 modifier = Modifier.fillMaxWidth().height(180.dp)) },
-                            onContentFocused = onContentFocused, registerFocusHandle = registerFocusHandle,
-                            onFocused = { item, _ ->
+                            onContentFocused = {
+                                if (it !== inputFocusRequester && it !== railFocusRequester) previewBodyRequester = it
+                                onContentFocused(it)
+                            },
+                            registerFocusHandle = registerFocusHandle,
+                            onFocused = { item, index ->
                                 focusedResultKey = item.tvSearchStableKey(); selectedResult = item; selectedResultKey = item.tvSearchStableKey()
+                                if (index >= visibleResults.lastIndex - density.columns * 2 && searchCanLoadMore &&
+                                    !loading && !loadingMoreResults && !loadMoreRequestPending) {
+                                    loadMoreRequestPending = true
+                                    loadMoreRequestNonce += 1
+                                }
                             }, onClick = { saveRecentSearch(query); onMediaClick(it) })
                         else -> LazyVerticalGrid(
                             columns = GridCells.Fixed(density.columns),
                             state = resultsGridState,
                             verticalArrangement = Arrangement.spacedBy(18.dp),
-                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            horizontalArrangement = Arrangement.spacedBy(if (density.columns >= 10) 8.dp else 12.dp),
                             contentPadding = PaddingValues(top = 4.dp, bottom = 28.dp, start = 2.dp, end = 4.dp),
                             modifier = Modifier.fillMaxSize(),
                         ) {
@@ -1987,11 +1999,7 @@ internal fun TvSearchScreen(
                                 key = { _, item -> item.tvSearchStableKey() },
                             ) { index, item ->
                                 val itemKey = item.tvSearchStableKey()
-                                val activeRequester = if (index == 0) {
-                                    firstResultRequester.also { resultRequesters[itemKey] = it }
-                                } else {
-                                    resultRequesters.getOrPut(itemKey) { FocusRequester() }
-                                }
+                                val activeRequester = resultRequesters.getOrPut(itemKey) { FocusRequester() }
                                 val focusTarget = remember(screenId, itemKey, index, density.columns) {
                                     TvFocusTargetId(
                                         screenId = screenId,
@@ -2014,37 +2022,26 @@ internal fun TvSearchScreen(
                                     density = density,
                                     modifier = Modifier
                                         .focusRequester(registeredRequester)
+                                        .then(if (index == 0) Modifier.focusRequester(firstResultRequester) else Modifier)
                                         .aspectRatio(2f / 3f)
-                                        .onPreviewKeyEvent { event ->
-                                            when {
-                                                isLastResultRow && event.key == Key.DirectionDown -> {
-                                                    if (event.type == KeyEventType.KeyDown &&
-                                                        !loading &&
-                                                        !loadingMoreResults &&
-                                                        !loadMoreRequestPending
-                                                    ) {
-                                                        pagingRetryBlockedResultKey = null
-                                                        loadMoreRequestPending = true
-                                                        loadMoreRequestNonce += 1
-                                                    }
-                                                    true
+                                        .testTag("search_result:${item.id}")
+                                        .tvSearchGridNavigation(
+                                            index = index, count = visibleResults.size, columns = density.columns,
+                                            state = resultsGridState, scope = searchActionScope,
+                                            requesterAt = { targetIndex -> visibleResults.getOrNull(targetIndex)?.let { target ->
+                                                resultRequesters.getOrPut(target.tvSearchStableKey()) {
+                                                    FocusRequester()
                                                 }
-                                                isRightEdge && event.key == Key.DirectionRight -> {
-                                                    if (event.type == KeyEventType.KeyDown &&
-                                                        index == visibleResults.lastIndex &&
-                                                        !loading &&
-                                                        !loadingMoreResults &&
-                                                        !loadMoreRequestPending
-                                                    ) {
-                                                        pagingRetryBlockedResultKey = null
-                                                        loadMoreRequestPending = true
-                                                        loadMoreRequestNonce += 1
-                                                    }
-                                                    true
+                                            } },
+                                            rail = railFocusRequester, header = lastVisibleFilterRequester ?: inputFocusRequester,
+                                            onBottom = {
+                                                if (!loading && !loadingMoreResults && !loadMoreRequestPending) {
+                                                    pagingRetryBlockedResultKey = null
+                                                    loadMoreRequestPending = true
+                                                    loadMoreRequestNonce += 1
                                                 }
-                                                else -> false
-                                            }
-                                        }
+                                            },
+                                        )
                                         .focusProperties {
                                             if (index % density.columns == 0) {
                                                 left = railFocusRequester
@@ -4165,9 +4162,9 @@ private fun TvSearchMetaBadge(label: String) {
 }
 
 @Composable
-private fun TvSearchLoadingSkeletonGrid(columns: Int = 5) {
+private fun TvSearchLoadingSkeletonGrid(columns: Int = 10) {
     LazyVerticalGrid(
-        columns = GridCells.Fixed(columns.coerceIn(3, 6)),
+        columns = GridCells.Fixed(columns.coerceIn(6, 12)),
         verticalArrangement = Arrangement.spacedBy(18.dp),
         horizontalArrangement = Arrangement.spacedBy(12.dp),
         contentPadding = PaddingValues(top = 4.dp, bottom = 26.dp, start = 2.dp, end = 8.dp),
@@ -4554,7 +4551,9 @@ internal fun TvSearchResultCard(
 ) {
     var focused by remember { mutableStateOf(false) }
     val scale by animateFloatAsState(targetValue = if (focused) 1.025f else 1f, label = "resultScale")
-    val titleStyle = if (density == TvSearchDensity.COMPACT)
+    val titleStyle = if (density.columns >= 10)
+        MaterialTheme.typography.bodyMedium.copy(fontSize = 10.sp, lineHeight = 12.sp)
+        else if (density == TvSearchDensity.RELAXED)
         MaterialTheme.typography.bodyMedium.copy(fontSize = 12.sp, lineHeight = 16.sp)
         else MaterialTheme.typography.bodyMedium.copy(lineHeight = 18.sp)
     Box(
@@ -4584,7 +4583,7 @@ internal fun TvSearchResultCard(
         }
         Column(Modifier.align(Alignment.BottomStart).fillMaxWidth()
             .testTag("search_footer:${item.id}")
-            .background(Obsidian.copy(alpha = 0.94f)).padding(horizontal = 8.dp, vertical = 6.dp),
+            .background(Obsidian.copy(alpha = 0.94f)).padding(horizontal = if (density.columns >= 10) 4.dp else 8.dp, vertical = 6.dp),
             verticalArrangement = Arrangement.spacedBy(2.dp)) {
             // Always reserve two title lines, including one-line and missing-art titles.
             Text(item.title, color = Snow, style = titleStyle, fontWeight = FontWeight.SemiBold,

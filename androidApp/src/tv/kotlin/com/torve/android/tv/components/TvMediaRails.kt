@@ -333,6 +333,7 @@ internal fun TvMediaRails(
     onExitUp: (() -> Unit)? = null,
     restoreFocusAcrossRows: Boolean = false,
     initialFocusFollowsTop: Boolean = false,
+    wrapRowFocus: Boolean = false,
     onContentLaidOut: (() -> Unit)? = null,
 ) {
     val catalogHeroMode = presentationMode == TvRailsPresentationMode.CatalogHero
@@ -1340,7 +1341,7 @@ internal fun TvMediaRails(
                                 val isFirstItem = rowIndex == 0 && itemIndex == 0
                                 val isActiveEntryItem = effectiveFocusExclusive && rowIsActive && itemIndex == 0
                                 if (
-                                    (isFirstItem || isActiveEntryItem) &&
+                                    (if (wrapRowFocus) isActiveEntryItem else (isFirstItem || isActiveEntryItem)) &&
                                     (!showLeadingContentBeforeRails || !leadingContentVisible)
                                 ) {
                                     onFirstContentRequester(focusRequester)
@@ -1383,6 +1384,18 @@ internal fun TvMediaRails(
                                     }
                                     .onPreviewKeyEvent { event ->
                                         if (event.type == KeyEventType.KeyDown) navigationSignal += 1
+                                        if (wrapRowFocus && itemIndex == row.items.lastIndex && event.key == Key.DirectionRight) {
+                                            if (event.type == KeyEventType.KeyDown) coroutineScope.launch {
+                                                rowListState.scrollToItem(0)
+                                                repeat(8) {
+                                                    withFrameNanos { }
+                                                    if (requesterMap["${row.key}:0"]?.let {
+                                                        runCatching { it.requestFocus() }.isSuccess
+                                                    } == true) return@launch
+                                                }
+                                            }
+                                            return@onPreviewKeyEvent true
+                                        }
                                         if (!effectiveFocusExclusive) return@onPreviewKeyEvent false
                                         when {
                                             event.key == Key.DirectionDown && event.type == KeyEventType.KeyDown -> {

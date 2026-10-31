@@ -131,20 +131,23 @@ internal fun TvExtensionSearchContent(
     val manageRequester = remember { FocusRequester() }
     val scope = rememberCoroutineScope()
     var filtersOpen by remember { mutableStateOf(false) }
-    var density by remember { mutableStateOf(TvSearchDensity.RELAXED) }
+    var density by remember { mutableStateOf(TvSearchDensity.BALANCED) }
     var recent by remember { mutableStateOf(emptyList<String>()) }
     val results = filterTvExtensionSearch(items, model.filters)
-    val columns = if (density == TvSearchDensity.COMPACT) 6 else 5
+    val columns = density.columns
+    val gridState = rememberLazyGridState()
+    val requesters = remember { mutableMapOf<String, FocusRequester>() }
+    var previewEntry by remember { mutableStateOf<FocusRequester?>(null) }
     LaunchedEffect(Unit) { publish(toolbar[0]) }
     LaunchedEffect(autoFocus) { if (autoFocus) { withFrameNanos { }; toolbar[0].requestFocus() } }
     fun moveDown() { runCatching {
         when {
             model.error != null -> firstNoticeAction.requestFocus()
-            results.isNotEmpty() -> firstResult.requestFocus()
+            results.isNotEmpty() -> (if (focusPreview) previewEntry ?: firstResult else firstResult).requestFocus()
             model.sourceCount == 0 && !model.busy && model.query.isBlank() -> manageRequester.requestFocus()
         }
     } }
-    fun belowNotice() { if (results.isNotEmpty()) runCatching { firstResult.requestFocus() } }
+    fun belowNotice() { if (results.isNotEmpty()) moveDown() }
     fun closeFilters() {
         filtersOpen = false
         scope.launch { withFrameNanos { }; toolbar[4].requestFocus() }
@@ -193,15 +196,24 @@ internal fun TvExtensionSearchContent(
         if (focusPreview && results.isNotEmpty()) com.torve.android.tv.components.TvFocusPreviewGrid(
             items = results, screenId = "tv_search:extensions", columns = columns,
             railFocusRequester = rail, entryRequester = firstResult, headerRequester = toolbar[0],
-            modifier = Modifier.fillMaxWidth().weight(1f), onContentFocused = focused, onClick = onMedia)
+            modifier = Modifier.fillMaxWidth().weight(1f), wrapRows = true,
+            onContentFocused = {
+                if (it !== toolbar[0] && it !== rail) previewEntry = it
+                focused(it)
+            }, onClick = onMedia)
         else LazyVerticalGrid(GridCells.Fixed(columns),
-            Modifier.fillMaxWidth().weight(1f).testTag("search.extension.results"),
+            Modifier.fillMaxWidth().weight(1f).testTag("search.extension.results"), state = gridState,
             verticalArrangement = Arrangement.spacedBy(16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp),
             contentPadding = PaddingValues(top = 4.dp, bottom = 16.dp)) {
             itemsIndexed(results, key = { _, item -> item.tvSearchStableKey() }) { index, item ->
-                val requester = remember(item.tvSearchStableKey()) { FocusRequester() }
+                val requester = requesters.getOrPut(item.tvSearchStableKey()) { FocusRequester() }
                 TvSearchResultCard(item, density, Modifier.fillMaxWidth().aspectRatio(2f / 3f).focusRequester(requester)
                     .then(if (index == 0) Modifier.focusRequester(firstResult) else Modifier)
+                    .testTag("search_result:${item.id}")
+                    .tvSearchGridNavigation(index, results.size, columns, gridState, scope,
+                        requesterAt = { targetIndex -> results.getOrNull(targetIndex)?.let { target ->
+                            requesters.getOrPut(target.tvSearchStableKey()) { FocusRequester() }
+                        } }, rail = rail, header = toolbar[0])
                     .focusProperties { if (index < columns) up = toolbar[0]; if (index % columns == 0) left = rail },
                     onFocused = { focused(requester) }, onClick = { onMedia(item) }, ratingPrefs = ratingPrefs)
             }

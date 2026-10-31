@@ -22,6 +22,7 @@ internal fun TvFocusPreviewGrid(
     hero: (@Composable () -> Unit)? = null,
     onExitUp: (() -> Unit)? = null,
     singleRow: Boolean = false,
+    wrapRows: Boolean = false,
     onClick: (MediaItem) -> Unit,
 ) {
     val rows = remember(items, columns, screenId, singleRow) {
@@ -36,6 +37,7 @@ internal fun TvFocusPreviewGrid(
         browseLayout = TvBrowseLayout.POSTER_ONLY, forcePosterTitles = true,
         presentationMode = TvRailsPresentationMode.CatalogHero, focusExclusive = true,
         compactPreviewRows = true, onExitUp = onExitUp, restoreFocusAcrossRows = true,
+        wrapRowFocus = wrapRows,
         heroOverlay = hero, showSeeAllCards = false, registerFocusHandle = registerFocusHandle,
         contextMenuActionsForItem = contextActions, onContextMenuAction = onContextAction,
         onMediaFocused = { item -> onFocused(item, items.indexOfFirst { it.id == item.id && it.type == item.type }.coerceAtLeast(0)) })

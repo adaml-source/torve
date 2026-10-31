@@ -40,6 +40,38 @@ class TvSourceBrowserDeviceTest {
             directUrl = "https://fixture.invalid/$it.mkv", size = "2.67 GB", isCached = true)
     }
 
+    @Test fun confirmingSortFromAScrolledListFocusesTheFirstSource() {
+        val streams = releases.mapIndexed { index, stream -> stream.copy(size = "${index + 1}.0 GB") }
+        rule.runOnUiThread { rule.activity.window.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON) }
+        rule.setContent {
+            val scope = rememberCoroutineScope()
+            val picker = remember { SourceLanguagePicker(KoinPlatform.getKoin().get<AndroidSourceTrackInspector>(), scope) }
+            picker.preferredLanguage = ""; picker.streams = streams
+            var sort by remember { mutableStateOf(StreamSortMode.DEFAULT) }
+            TorveTheme { TvStreamBrowser("Sort regression", picker, sort, { sort = it }, false,
+                { tvStreamPresentation(it) }, {}, { _, _ -> }, {}) }
+        }
+        rule.onNodeWithTag("tv.sources.list").performScrollToIndex(14)
+        rule.onNodeWithTag("tv.source.${streams[14].streamUiKey()}")
+            .performSemanticsAction(androidx.compose.ui.semantics.SemanticsActions.RequestFocus) { it() }
+        fun selectSort(down: Boolean) {
+            rule.onNodeWithTag("tv.sources.sort").performSemanticsAction(androidx.compose.ui.semantics.SemanticsActions.RequestFocus) { it() }
+            rule.onNodeWithTag("tv.sources.sort").performKeyInput { pressKey(Key.DirectionCenter) }
+            rule.onNodeWithTag("settings.choice").assertIsDisplayed()
+            if (down) rule.onNodeWithTag("settings.choice").performKeyInput { pressKey(Key.DirectionDown) }
+            rule.onNodeWithTag("settings.choice").performKeyInput { pressKey(Key.DirectionCenter) }
+        }
+        selectSort(down = true)
+        val largest = "tv.source.${streams.last().streamUiKey()}"
+        rule.waitUntil(10_000) { runCatching { rule.onNodeWithTag(largest).assertIsFocused() }.isSuccess }
+        rule.onNodeWithTag(largest).assertIsDisplayed()
+        rule.onNodeWithTag("tv.sources.list").performScrollToIndex(12)
+        selectSort(down = true)
+        val smallest = "tv.source.${streams.first().streamUiKey()}"
+        rule.waitUntil(10_000) { runCatching { rule.onNodeWithTag(smallest).assertIsFocused() }.isSuccess }
+        rule.onNodeWithTag(smallest).assertIsDisplayed()
+    }
+
     @Test fun usenetSettingsShowsTheNativeFormWithoutTheRetiredWizard() {
         val first = FocusRequester()
         rule.setContent {

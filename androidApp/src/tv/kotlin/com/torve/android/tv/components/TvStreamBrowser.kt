@@ -9,6 +9,7 @@ import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -76,6 +77,9 @@ internal fun TvStreamBrowserContent(
     var choice by remember { mutableStateOf<TvSettingsChoice?>(null) }
     var origin by remember { mutableStateOf<FocusRequester?>(null) }
     val audio = remember { FocusRequester() }
+    val firstSource = remember { FocusRequester() }
+    val sourceList = rememberLazyListState()
+    var resetSourcesAfterSort by remember { mutableStateOf(false) }
     val window = LocalWindowInfo.current
     val locale = LocalConfiguration.current.locales[0]
     fun languageName(code: String) = Locale.forLanguageTag(code).getDisplayLanguage(locale)
@@ -103,7 +107,17 @@ internal fun TvStreamBrowserContent(
         audio.requestFocus()
     }
     LaunchedEffect(choice) {
-        if (choice == null) origin?.let {
+        if (choice == null && resetSourcesAfterSort) {
+            snapshotFlow { window.isWindowFocused }.first { it }
+            sourceList.scrollToItem(0)
+            origin = null
+            resetSourcesAfterSort = false
+            repeat(8) {
+                withFrameNanos { }
+                if (runCatching { firstSource.requestFocus() }.isSuccess) return@LaunchedEffect
+            }
+            audio.requestFocus()
+        } else if (choice == null) origin?.let {
             snapshotFlow { window.isWindowFocused }.first { it }
             withFrameNanos { }
             it.requestFocus(); origin = null
@@ -138,7 +152,10 @@ internal fun TvStreamBrowserContent(
             }
             TvSourceControl(sortOptions.first { it.first == sort }.second, Modifier.testTag("tv.sources.sort"), icon = Icons.Default.Sort) { req ->
                 origin = req; choice = TvSettingsChoice(sortTitle, sort.name,
-                    sortOptions.map { it.first.name to it.second }) { onSort(StreamSortMode.valueOf(it)) }
+                    sortOptions.map { it.first.name to it.second }) {
+                        resetSourcesAfterSort = true
+                        onSort(StreamSortMode.valueOf(it))
+                    }
             }
             TvSourceControl(quality.ifBlank { qualityLabel }, Modifier.testTag("tv.sources.quality"), quality.isNotBlank(), icon = Icons.Default.HighQuality) { req ->
                 origin = req; choice = TvSettingsChoice(qualityLabel, quality, qualityOptions) { quality = it }
@@ -161,10 +178,12 @@ internal fun TvStreamBrowserContent(
         }
         HorizontalDivider(color = Steel)
         errorMessage?.let { Text(localizedUiText(it), color = Ruby, style = MaterialTheme.typography.bodyMedium, maxLines = 2) }
-        LazyColumn(Modifier.weight(1f).testTag("tv.sources.list"), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        LazyColumn(Modifier.weight(1f).testTag("tv.sources.list"), state = sourceList, verticalArrangement = Arrangement.spacedBy(8.dp)) {
             items(visible, key = { it.streamUiKey() }) { stream ->
                 val requester = remember(stream.streamUiKey()) { FocusRequester() }
-                TvStreamResultRow(presentation(stream), Modifier.focusRequester(requester).testTag("tv.source.${stream.streamUiKey()}"),
+                TvStreamResultRow(presentation(stream), Modifier.focusRequester(requester)
+                    .then(if (stream === visible.firstOrNull()) Modifier.focusRequester(firstSource) else Modifier)
+                    .testTag("tv.source.${stream.streamUiKey()}"),
                     onClick = { onSelect(stream, requester) })
             }
             if (visible.isEmpty()) item {
