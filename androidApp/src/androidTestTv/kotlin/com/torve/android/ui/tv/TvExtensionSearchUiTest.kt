@@ -86,6 +86,31 @@ class TvExtensionSearchUiTest {
         rule.onNodeWithText("Filters (1)").performKeyInput { pressKey(Key.DirectionDown) }
         rule.onNodeWithContentDescription("High IMDb").assertIsFocused()
     }
+    @Test fun partialProviderErrorsAllowDownFromEveryNoticeActionIntoResults() {
+        val state = TvExtensionSearchState().apply {
+            query = "fixture"; hasAi = true
+            error = "A search extension took too long to respond."
+        }
+        fixture(state, navigationItems)
+        fun downFrom(label: String) {
+            rule.onNodeWithText(label).performKeyInput { pressKey(Key.DirectionDown) }
+            rule.onNodeWithTag("search_result:fixture0").assertIsFocused()
+            rule.onNodeWithTag("search_result:fixture0").performKeyInput { pressKey(Key.DirectionUp) }
+            rule.onNodeWithText("fixture").assertIsFocused()
+        }
+        rule.onNodeWithText("fixture").performKeyInput { pressKey(Key.DirectionDown) }
+        rule.onNodeWithText("Try again").assertIsFocused()
+        downFrom("Try again")
+        rule.onNodeWithText("fixture").performKeyInput { pressKey(Key.DirectionDown) }
+        rule.onNodeWithText("Try again").performKeyInput { pressKey(Key.DirectionRight) }
+        rule.onNodeWithText("Extensions").assertIsFocused()
+        downFrom("Extensions")
+        rule.runOnIdle { state.aiMode = true }
+        rule.onNodeWithText("fixture").performKeyInput { pressKey(Key.DirectionDown) }
+        rule.onNodeWithText("Use title search").assertIsFocused()
+        downFrom("Use title search")
+    }
+
     @Test fun providerErrorsUseWideReadablePanelAndOfferTitleSearch() {
         val state = TvExtensionSearchState().apply {
             query = "movies with an actor on a beach"; aiMode = true; hasAi = true

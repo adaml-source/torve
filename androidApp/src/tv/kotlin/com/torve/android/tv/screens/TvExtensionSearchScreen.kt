@@ -149,7 +149,7 @@ internal fun TvExtensionSearchContent(
             model.sourceCount == 0 && !model.busy && model.query.isBlank() -> manageRequester.requestFocus()
         }
     } }
-    fun belowNotice() { if (results.isNotEmpty()) moveDown() }
+    fun belowNotice() { if (results.isNotEmpty()) runCatching { firstResult.requestFocus() } }
     fun closeFilters() {
         filtersOpen = false
         scope.launch { withFrameNanos { }; toolbar[4].requestFocus() }
