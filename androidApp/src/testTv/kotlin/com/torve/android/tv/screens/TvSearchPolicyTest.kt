@@ -10,6 +10,29 @@ import org.junit.Test
 
 class TvSearchPolicyTest {
 
+    @Test fun ratingsCoverEveryVisiblePosterBeyondTheFirstTwelveWithoutFetchingOffscreenTitles() {
+        val items = (1..60).map { MediaItem(id = "tmdb:$it", tmdbId = it, title = "Movie $it", type = MediaType.MOVIE) }
+        val visible = items.slice(20..48)
+        val targets = tvSearchVisibleRatingTargets(items, visible.map { it.tvSearchStableKey() }, emptyMap(), 70_000)
+        assertEquals(visible.map { it.id }, targets.map { it.id })
+        val rated = items[22].copy(ratings = MediaRatings(imdbScore = 8f))
+        val recent = mapOf(items[23].tvSearchStableKey() to 69_000L)
+        val filtered = tvSearchVisibleRatingTargets(items.map { if (it.id == rated.id) rated else it },
+            visible.map { it.tvSearchStableKey() }, recent, 70_000)
+        assertEquals(27, filtered.size)
+        assertFalse(filtered.any { it.id == rated.id || it.id == items[23].id })
+    }
+
+    @Test fun slowerPartialRatingsCannotEraseTheVisiblePostersImdbScore() {
+        val rated = MediaItem("tmdb:1", tmdbId = 1, title = "Film", type = MediaType.MOVIE,
+            ratings = MediaRatings(imdbScore = 8.2f, imdbVotes = 1234))
+        val partial = rated.copy(ratings = MediaRatings(rottenTomatoesScore = 91))
+        val result = mergeTvSearchEnrichment(rated, partial)
+        assertEquals(8.2f, result.ratings?.imdbScore)
+        assertEquals(1234, result.ratings?.imdbVotes)
+        assertEquals(91, result.ratings?.rottenTomatoesScore)
+    }
+
     @Test
     fun stableKeyDoesNotChangeWhenMetadataIdsArrive() {
         val initial = item(

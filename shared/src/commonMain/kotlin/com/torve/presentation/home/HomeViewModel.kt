@@ -1,6 +1,8 @@
 package com.torve.presentation.home
 
 import com.torve.data.metadata.tmdbExtensionSelection
+import com.torve.data.metadata.metadataArtworkNeedsRefresh
+import com.torve.data.metadata.platformMetadataBackendBaseUrl
 
 import com.torve.domain.model.CatalogShelf
 import com.torve.domain.model.withoutAiRecommendations
@@ -45,6 +47,7 @@ import com.torve.domain.repository.AddonRepository
 import com.torve.domain.repository.WatchHistoryRepository
 import com.torve.domain.repository.WatchProgressRepository
 import com.torve.domain.repository.WatchlistRepository
+import com.torve.data.addon.streamingCatalogueSources
 import com.torve.data.addon.homeCatalogPlan
 import com.torve.data.addon.CatalogAggregator
 import com.torve.data.addon.catalogueShelfId
@@ -179,6 +182,7 @@ class HomeViewModel(
         val customShelves: Map<String, List<MediaItem>> = emptyMap(),
         val addonShelves: List<CatalogShelf> = emptyList(),
         val addonShelfVisibility: Map<String, Boolean> = emptyMap(),
+        val nativeCatalogueRevision: Int = 0,
         val mdbListShelves: List<CatalogShelf> = emptyList(),
     )
 
@@ -201,13 +205,15 @@ class HomeViewModel(
     val nowStreaming: NowStreamingCatalogue by lazy {
         NowStreamingCatalogue(metadataRepo, configuration = {
             contentPolicyFilter.awaitProfileBoundary()
+            val extensionSources = if (com.torve.data.addon.ExtensionRuntimePolicy.userMetadataOnly)
+                installedStreamingSources() else null
             NowStreamingConfiguration(
                 contentPolicyFilter.profileOwnerKey(),
                 prefsRepo.getString(SettingsViewModel.KEY_REGION_CODE)?.trim()?.uppercase()
                     ?.takeIf { it.matches(Regex("[A-Z]{2}")) } ?: "US",
                 prefsRepo.getString("app_language").orEmpty(), loadEnabledServiceIds(),
-                prefsRepo.tmdbExtensionSelection().catalogue,
-                profileRepo.getActiveProfile()?.maxContentRating, currentPolicy(),
+                if (extensionSources != null) extensionSources.isNotEmpty() else prefsRepo.tmdbExtensionSelection().catalogue,
+                profileRepo.getActiveProfile()?.maxContentRating, currentPolicy(), extensionSources,
             )
         }, owner = { contentPolicyFilter.profileOwnerKey() }, policyFilter = contentPolicyFilter,
             changes = kotlinx.coroutines.flow.merge(
@@ -218,6 +224,7 @@ class HomeViewModel(
                 contentPolicyRepository?.state?.map { Unit }
                     ?: kotlinx.coroutines.flow.emptyFlow(),
             ),
+            extensionPage = { source, offset -> catalogAggregator.shelfPage(listOf(source.addon), source.addon.catalogueShelfId(source.catalog), offset) },
             hydrateRatings = ratingsEnricher::hydrateListFromCache,
             enrichRatings = { items ->
                 val key = try {
@@ -416,10 +423,19 @@ class HomeViewModel(
         return result
     }
 
+    private suspend fun installedStreamingSources() = streamingCatalogueSources(addonRepo.getEnabledAddons().map {
+        it.copy(policyFlags = it.policyFlags ?: addonPolicyRepository?.getFlags(it.manifestUrl))
+    })
+
     private fun loadProviderLogos() {
         scope.launch {
             try {
                 val owner = contentPolicyFilter.profileOwnerKey()
+                if (com.torve.data.addon.ExtensionRuntimePolicy.userMetadataOnly) {
+                    val logos = installedStreamingSources().associate { it.service.id to it.service.logoUrl }
+                    if (owner == contentPolicyFilter.profileOwnerKey()) _providerLogos.value = logos
+                    return@launch
+                }
                 val region = prefsRepo.getString(SettingsViewModel.KEY_REGION_CODE)?.trim()?.uppercase()
                     ?.takeIf { it.matches(Regex("[A-Z]{2}")) } ?: "US"
                 val logos = metadataRepo.getWatchProviderLogos(region = region)
@@ -442,7 +458,7 @@ class HomeViewModel(
     private suspend fun loadSectionConfigs(): List<HomeSectionConfig> {
         val key = layoutSourceSelector.sectionConfigsKey()
         val saved = try { prefsRepo.getString(key) } catch (_: Exception) { null }
-        return if (saved != null) {
+        val loaded = if (saved != null) {
             try {
                 val decoded = json.decodeFromString<List<HomeSectionConfig>>(saved)
                 val migrated = migrateLegacyBecauseYouWatchedConfigs(decoded)
@@ -474,6 +490,21 @@ class HomeViewModel(
         } else {
             defaultSectionConfigs()
         }
+        // Older Home used built-in discovery while ADDON_SHELVES defaulted off.
+        // Activate the replacement catalogue group once, preserving individually
+        // edited catalogue settings and every subsequent user toggle.
+        val migrationKey = key + "_user_extension_catalogues_v1"
+        if (com.torve.data.addon.ExtensionRuntimePolicy.userMetadataOnly && prefsRepo.getString(migrationKey) != "true") {
+            val installed = addonRepo.getInstalledAddons().any { it.isEnabled && it.manifest.catalogs.isNotEmpty() }
+            val migrated = loaded.map { config ->
+                if (installed && config.section == HomeSection.ADDON_SHELVES && !config.enabled && config.catalogueRows.isEmpty())
+                    config.copy(enabled = true) else config
+            }
+            if (migrated != loaded) prefsRepo.setString(key, json.encodeToString(migrated))
+            prefsRepo.setString(migrationKey, "true")
+            return migrated
+        }
+        return loaded
     }
 
     private fun defaultSectionConfigs(): List<HomeSectionConfig> =
@@ -484,7 +515,9 @@ class HomeViewModel(
             // strip) while every other shelf shows portrait posters via
             // the global default.
             val presetId = if (section == HomeSection.CONTINUE_WATCHING) "landscape-default" else null
-            HomeSectionConfig(section, section.defaultEnabled, section.defaultOrder, presetId = presetId)
+            val enabled = section.defaultEnabled || (section == HomeSection.ADDON_SHELVES &&
+                com.torve.data.addon.ExtensionRuntimePolicy.userMetadataOnly)
+            HomeSectionConfig(section, enabled, section.defaultOrder, presetId = presetId)
         }
 
     fun updateSectionOrder(configs: List<HomeSectionConfig>) {
@@ -672,8 +705,10 @@ class HomeViewModel(
     private fun ensureAddonShelvesInLayout(addonShelves: List<CatalogShelf>) {
         // Split legacy movie/TV collisions without losing the user's hidden rows,
         // appearance or layout position. Explicit new preferences always win.
-        val aliases = addonShelves.filter { it.id != it.id.legacyAddonShelfId() }
-            .groupBy { it.id.legacyAddonShelfId() }
+        val aliases = addonShelves.flatMap { shelf ->
+            listOf(shelf.id.substringBefore("::source="), shelf.id.legacyAddonShelfId()).distinct()
+                .filter { it != shelf.id }.map { it to shelf }
+        }.groupBy({ it.first }, { it.second })
         if (aliases.isNotEmpty()) {
             val visibility = _addonShelfVisibility.value.toMutableMap()
             aliases.forEach { (legacy, shelves) ->
@@ -792,6 +827,7 @@ class HomeViewModel(
                 _addonShelfVisibility.value, _homeLayoutOrder.value).map { it.shelfId }.toSet()
         }
         val restoredAddonShelves = snapshot.addonShelves.withoutProviderOwnedHomeCatalogs()
+            .migratedNativeCatalogueShelves(snapshot.nativeCatalogueRevision)
             .filter { it.id in availableAddonIds }
         if (
             snapshot.shelves.isEmpty() &&
@@ -862,6 +898,7 @@ class HomeViewModel(
     }
 
     private fun homeSnapshot(state: HomeUiState, owner: String) = HomeSnapshot(
+            nativeCatalogueRevision = 2,
             savedAtMs = currentTimeMillis(),
             profileOwner = owner,
             shelves = state.shelves,
@@ -1037,6 +1074,12 @@ class HomeViewModel(
         homeLoadJob = scope.launch(Dispatchers.Default) {
             contentPolicyFilter.awaitProfileBoundary()
             val loadingOwner = contentPolicyFilter.profileOwnerKey()
+            // Policy/settings events can arrive before the startup coroutine has
+            // restored layout preferences. Read them before planning any feeds,
+            // otherwise disabled Home shelves briefly issue duplicate requests.
+            _sectionConfigs.value = loadSectionConfigs()
+            _addonShelfVisibility.value = loadAddonShelfVisibility()
+            _homeLayoutOrder.value = ensureAllSectionsInLayoutOrder(loadHomeLayoutOrder())
             torveVerboseLog { "HOME_TAB bootstrap_start" }
             if (keepContentVisible) {
                 updateHomeFor(loadingOwner) { it.copy(isLoading = false, error = null) }
@@ -1071,6 +1114,9 @@ class HomeViewModel(
                         try { libraryOverlayService.getContinueWatching(20) } catch (_: Exception) { emptyList() }
                     }
                     val recommendationsDeferred = async {
+                        // These built-in rows are not displayed in user-extension mode.
+                        // Don't consume catalogue request lanes behind the visible extension hub.
+                        if (com.torve.data.addon.ExtensionRuntimePolicy.userMetadataOnly) return@async emptyList<ScoredMediaItem>()
                         firstDiscoveryReady.await()
                         try {
                             recommendationsUseCase.execute().also { items ->
@@ -1110,6 +1156,7 @@ class HomeViewModel(
                         }
                     }
                     val hiddenGemsDeferred = async {
+                        if (com.torve.data.addon.ExtensionRuntimePolicy.userMetadataOnly) return@async emptyList<MediaItem>()
                         firstDiscoveryReady.await()
                         try {
                             metadataRepo.discover(
@@ -1191,7 +1238,9 @@ class HomeViewModel(
                                 val plan = homeCatalogPlan(addons,
                                     _sectionConfigs.value.firstOrNull { it.section == HomeSection.ADDON_SHELVES },
                                     _addonShelfVisibility.value, _homeLayoutOrder.value)
-                                catalogAggregator.fetchHomeCatalogs(plan).also { publishOptionalAddonRows(it, addons, loadingOwner) }
+                                catalogAggregator.fetchHomeCatalogs(plan) { ready ->
+                                    publishOptionalAddonRows(ready, addons, loadingOwner)
+                                }
                             }
                         } catch (_: Exception) {
                             emptyList()
@@ -2023,31 +2072,34 @@ class HomeViewModel(
                 previous == null || now - previous >= 300_000L
             }
             if (requests.isEmpty()) return@launch
-            requests.forEach { artworkBackfillAttempts[artworkBackfillKey(it.type, it.tmdbId)] = now }
-
-            val backfilledArtwork = coroutineScope {
-                requests.map { request ->
-                    async {
-                        try {
-                            val detail = metadataRepo.getDetail(request.type.toMetadataType(), request.tmdbId)
-                            if (detail.posterUrl.isNullOrBlank() && detail.backdropUrl.isNullOrBlank()) {
+            val appleBackend = platformMetadataBackendBaseUrl() != null
+            // Paint each small Apple batch immediately instead of waiting for
+            // forty full-detail responses before repairing the first card.
+            for (batch in requests.chunked(if (appleBackend) 2 else 40)) {
+                batch.forEach { artworkBackfillAttempts[artworkBackfillKey(it.type, it.tmdbId)] = currentTimeMillis() }
+                val backfilledArtwork = coroutineScope {
+                    batch.map { request ->
+                        async {
+                            try {
+                                val detail = if (appleBackend) metadataRepo.getPresentation(request.type.toMetadataType(), request.tmdbId)
+                                    else metadataRepo.getDetail(request.type.toMetadataType(), request.tmdbId)
+                                if (detail.posterUrl.isNullOrBlank() && detail.backdropUrl.isNullOrBlank()) {
+                                    null
+                                } else {
+                                    artworkBackfillKey(request.type, request.tmdbId) to detail
+                                }
+                            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                                throw cancelled
+                            } catch (_: Exception) {
                                 null
-                            } else {
-                                artworkBackfillKey(request.type, request.tmdbId) to detail
                             }
-                        } catch (cancelled: kotlinx.coroutines.CancellationException) {
-                            throw cancelled
-                        } catch (_: Exception) {
-                            null
                         }
-                    }
-                }.mapNotNull { it.await() }.toMap()
-            }
+                    }.mapNotNull { it.await() }.toMap()
+                }
 
-            if (backfilledArtwork.isEmpty()) return@launch
+                if (backfilledArtwork.isEmpty()) continue
 
-            _state.update { current ->
-                current.applyArtworkBackfill(backfilledArtwork)
+                _state.update { current -> current.applyArtworkBackfill(backfilledArtwork) }
             }
             persistHomeSnapshot(_state.value)
         }
@@ -2307,7 +2359,7 @@ class HomeViewModel(
             .prioritizeHomeArtwork().asSequence()
             .filter { it.needsArtworkBackfill() }
             .mapNotNull { item ->
-                item.tmdbId?.let { tmdbId ->
+                (item.tmdbId ?: item.id.extractTmdbIdOrNull())?.let { tmdbId ->
                     ArtworkBackfillRequest(type = item.type, tmdbId = tmdbId)
                 }
             }
@@ -2328,8 +2380,8 @@ class HomeViewModel(
                 val id = progress.mediaId.extractTmdbIdOrNull()
                 val detail = id?.let { backfilledArtwork[artworkBackfillKey(progress.mediaType, it)] }
                 if (detail == null) progress else progress.copy(
-                    posterUrl = progress.posterUrl.takeUnless { it.isNullOrBlank() } ?: detail.posterUrl,
-                    backdropUrl = progress.backdropUrl.takeUnless { it.isNullOrBlank() } ?: detail.backdropUrl,
+                    posterUrl = progress.posterUrl.takeUnless { metadataArtworkNeedsRefresh(it) } ?: detail.posterUrl,
+                    backdropUrl = progress.backdropUrl.takeUnless { metadataArtworkNeedsRefresh(it) } ?: detail.backdropUrl,
                 )
             },
             heroItem = heroItem?.applyArtworkBackfill(backfilledArtwork)
@@ -2360,14 +2412,14 @@ class HomeViewModel(
     }
 
     private fun MediaItem.applyArtworkBackfill(backfilledArtwork: Map<String, MediaItem>): MediaItem {
-        val tmdbId = tmdbId ?: return this
+        val tmdbId = tmdbId ?: id.extractTmdbIdOrNull() ?: return this
         if (isContentPlaceholder || isStubDetail) return this
         if (!needsArtworkBackfill()) return this
         val detail = backfilledArtwork[artworkBackfillKey(type, tmdbId)] ?: return this
         return copy(
-            posterUrl = posterUrl.takeUnless { it.isNullOrBlank() } ?: detail.posterUrl,
-            backdropUrl = backdropUrl.takeUnless { it.isNullOrBlank() } ?: detail.backdropUrl,
-            logoUrl = logoUrl.takeUnless { it.isNullOrBlank() } ?: detail.logoUrl,
+            posterUrl = posterUrl.takeUnless { metadataArtworkNeedsRefresh(it) } ?: detail.posterUrl,
+            backdropUrl = backdropUrl.takeUnless { metadataArtworkNeedsRefresh(it) } ?: detail.backdropUrl,
+            logoUrl = logoUrl.takeUnless { metadataArtworkNeedsRefresh(it) } ?: detail.logoUrl,
             overview = overview.takeUnless { it.isNullOrBlank() } ?: detail.overview,
             rating = rating ?: detail.rating,
             ratings = ratings ?: detail.ratings,
@@ -2379,8 +2431,8 @@ class HomeViewModel(
     private fun MediaItem.needsArtworkBackfill(): Boolean {
         return !isContentPlaceholder &&
             !isStubDetail &&
-            tmdbId != null &&
-            (posterUrl.isNullOrBlank() || backdropUrl.isNullOrBlank() || overview.isNullOrBlank())
+            (tmdbId != null || id.extractTmdbIdOrNull() != null) &&
+            (metadataArtworkNeedsRefresh(posterUrl) || metadataArtworkNeedsRefresh(backdropUrl) || overview.isNullOrBlank())
     }
 
     private fun hydrateItemsFromCache(items: List<MediaItem>): List<MediaItem> {
@@ -2504,7 +2556,7 @@ class HomeViewModel(
         return addons.flatMap { addon ->
             val flags = addon.policyFlags ?: addonPolicyRepository?.getFlags(addon.manifestUrl)
             addon.manifest.catalogs.map { catalog ->
-                addon.manifest.catalogueShelfId(catalog) to flags
+                addon.catalogueShelfId(catalog) to flags
             }
         }.toMap()
     }
@@ -2567,7 +2619,7 @@ class HomeViewModel(
         // v4 rebuilds watched-source rails from independently bounded movie
         // and TV history, instead of restoring the old raw 80-row window.
         // v4 could already have converted sports/file hashes into apparent TMDB IDs.
-        private const val HOME_SNAPSHOT_KEY = "home_snapshot_v5"
+        private val HOME_SNAPSHOT_KEY get() = HOME_COMPLETE_SNAPSHOT_KEY
         private const val MAX_RECENTLY_WATCHED_ITEMS = 80
         private const val MAX_WATCHED_SOURCES_PER_TYPE = 80
         private const val HOME_SNAPSHOT_MAX_STALE_AGE_MS = 30L * 24L * 60L * 60L * 1000L

@@ -264,6 +264,7 @@ class SeeAllViewModel(
     private val integrationSecretStore: IntegrationSecretStore? = null,
     private val traktApi: TraktAuthorizedApi? = null,
     private val searchLists: com.torve.data.trakt.SearchListsRepository? = null,
+    private val addonCatalogPage: (suspend (String, Int) -> com.torve.data.addon.AddonShelfPage)? = null,
 ) {
     companion object {
         private const val TMDB_PAGE_SIZE = 20
@@ -382,6 +383,14 @@ class SeeAllViewModel(
         if (discoveryType(previous.sectionId) != null) loadSection(previous.sectionId, force = true)
     }
 
+    private var discoveryRail = false
+
+    /** A horizontal rail fetches its next page when approached horizontally. */
+    fun loadDiscoveryRail(sectionId: String, force: Boolean = false) {
+        discoveryRail = true
+        loadSection(sectionId, force)
+    }
+
     fun loadSection(sectionId: String, force: Boolean = false) {
         val current = _state.value
         if (!force && current.sectionId == sectionId && current.items.isNotEmpty()) {
@@ -416,7 +425,9 @@ class SeeAllViewModel(
                 // didn't call enrichRatings itself.
                 enrichPillsAsync(filteredItems)
                 hydrateTvMetadataAsync(filteredItems)
-                if (filteredItems.size < TMDB_PAGE_SIZE && result.hasMore) requestFilterBackfill(target = 20, maxPages = if (contentPolicyFilter.familyKidsProfile) 2 else 19)
+                if ((!discoveryRail || filteredItems.isEmpty()) && filteredItems.size < TMDB_PAGE_SIZE && result.hasMore) {
+                    requestFilterBackfill(target = if (discoveryRail) 1 else 20, maxPages = if (contentPolicyFilter.familyKidsProfile) 2 else 19)
+                }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -462,8 +473,9 @@ class SeeAllViewModel(
      * blocking first paint.
      */
     private fun hydrateTvMetadataAsync(items: List<MediaItem>) {
+        val needsLegacyStudios = com.torve.data.metadata.platformMetadataBackendBaseUrl() == null
         val targets = items
-            .filter { it.tmdbId != null && ((it.type == MediaType.SERIES && (it.studios.isEmpty() || it.genres.isEmpty())) ||
+            .filter { it.tmdbId != null && ((it.type == MediaType.SERIES && (it.genres.isEmpty() || (needsLegacyStudios && it.studios.isEmpty()))) ||
                 (_state.value.filterRuntime != null && !_state.value.runtimeFilteredBySource && it.runtime == null) ||
                 (_state.value.filterGenreIds.isNotEmpty() && it.genres.isEmpty() && it.genreIds.isEmpty()) ||
                 ((_state.value.filterYearFrom != null || _state.value.filterYearTo != null) && it.year == null)) }
@@ -476,7 +488,7 @@ class SeeAllViewModel(
                     async(ioDispatcher) {
                         metadataPermits.withPermit {
                             if (generation != sectionGeneration) return@withPermit null
-                            val detail = try { metadataRepo.getDetail(if (item.type == MediaType.SERIES) "tv" else "movie", item.tmdbId!!) }
+                            val detail = try { metadataRepo.getPresentation(if (item.type == MediaType.SERIES) "tv" else "movie", item.tmdbId!!) }
                             catch (e: CancellationException) { throw e }
                             catch (_: Exception) { return@withPermit null }
                             "${item.type}:${item.id}" to detail
@@ -608,6 +620,25 @@ class SeeAllViewModel(
                 hasMore = recommendations.size >= TMDB_PAGE_SIZE || similar.size >= TMDB_PAGE_SIZE,
                 totalResults = 0,
             )
+        }
+
+        if (sectionId.startsWith("addon:")) {
+            val title = pendingItems[sectionId]?.first.orEmpty()
+            val seed = pendingItems[sectionId]?.second.orEmpty()
+            if (page == 1 && seed.isNotEmpty()) {
+                // Home can trim or de-duplicate its preview. Its visible count
+                // is not an upstream cursor. Read the source's first full page
+                // once, merge by identity, then continue using raw source counts.
+                return SeeAllFetchPage(title, seed, addonCatalogPage != null, 0, 2)
+            }
+            val result = addonCatalogPage?.invoke(sectionId.removePrefix("addon:"), page - 2)
+                ?: return SeeAllFetchPage(title, emptyList(), false, 0)
+            val existing = _state.value.items.map { "${it.type}:${it.id}" }.toSet()
+            // Some extensions advertise skip but ignore it. Stop a repeated page
+            // without dropping the buffered remainder of an unpaginated response.
+            val advances = result.items.any { "${it.type}:${it.id}" !in existing }
+            val initialSourcePage = page == 2 && result.nextOffset > 0
+            return SeeAllFetchPage(title, result.items, result.hasMore && (advances || initialSourcePage), 0, result.nextOffset + 2)
         }
 
         if (sectionId.startsWith("shelf:")) {
@@ -948,14 +979,14 @@ class SeeAllViewModel(
      * pills render. Failures are non-fatal â€” items keep their original fields.
      */
     private suspend fun enrichRatings(items: List<MediaItem>): List<MediaItem> {
-        val needsEnrichment = items.filter { it.rating == null && it.tmdbId != null }
+        val needsEnrichment = items.filter { it.rating == null && it.ratings == null && it.tmdbId != null }
         if (needsEnrichment.isEmpty()) return items
         val enriched = coroutineScope {
             needsEnrichment.map { item ->
                 async {
                     runCatching {
                         val type = if (item.type == MediaType.SERIES) "tv" else "movie"
-                        metadataRepo.getDetail(type, item.tmdbId!!)
+                        metadataRepo.getPresentation(type, item.tmdbId!!)
                     }.getOrNull()?.let { detail ->
                         item.copy(
                             rating = detail.rating ?: item.rating,

@@ -5,6 +5,8 @@ import io.ktor.client.HttpClient
 import io.ktor.client.request.prepareGet
 import io.ktor.client.request.get
 import io.ktor.client.request.header
+import io.ktor.client.request.parameter
+import io.ktor.http.Url
 import io.ktor.http.encodeURLPathPart
 import kotlinx.serialization.json.Json
 import kotlinx.coroutines.Dispatchers
@@ -12,8 +14,9 @@ import kotlinx.coroutines.withContext
 
 private const val ADDON_MANIFEST_MAX_BYTES = 256 * 1024
 private const val ADDON_STREAM_MAX_BYTES = 2 * 1024 * 1024
-private const val ADDON_CATALOG_MAX_BYTES = 2 * 1024 * 1024
-private const val ADDON_META_MAX_BYTES = 512 * 1024
+private const val ADDON_CATALOG_MAX_BYTES = 8 * 1024 * 1024
+// Long-running shows can supply all episodes in one Stremio metadata response.
+private const val ADDON_META_MAX_BYTES = 4 * 1024 * 1024
 private const val ADDON_SUBTITLE_MAX_BYTES = 512 * 1024
 
 /**
@@ -24,6 +27,8 @@ class StremioAddonClient(
     private val httpClient: HttpClient,
     private val json: Json,
     private val family: com.torve.data.profile.FamilyControls? = null,
+    private val nativeCatalogueBaseUrl: String? = com.torve.data.metadata.platformMetadataBackendBaseUrl(),
+    private val nativeCatalogueLanguage: () -> String = { "en" },
 ) {
     private val manifestNames = mutableMapOf<String, String>()
     /**
@@ -108,6 +113,23 @@ class StremioAddonClient(
     /**
      * Fetch streams from multiple addons in parallel-style (sequentially for simplicity).
      */
+    suspend fun fetchRatingStreams(baseUrl: String, type: String, imdbId: String): List<StremioStream> {
+        require(type in setOf("movie", "series") && imdbId.matches(Regex("tt[0-9]+")))
+        family?.initialize()
+        val source = family?.extensionSource(baseUrl)
+        if (family?.state?.value?.configuration?.enabled == true && family.state.value.isKids &&
+            (source == null || !family.allowsSource(source))) return emptyList()
+        val stamp = family?.sessionKey()
+        return httpClient.prepareGet("${baseUrl.trimEnd('/')}/stream/$type/$imdbId.json") {
+            header("User-Agent", "Mozilla/5.0 (Torve; compatible Stremio client)")
+            header("Accept", "application/json")
+        }.execute { response ->
+            if (response.status.value !in 200..299) return@execute emptyList()
+            val rows = response.readAddonStreams(json, 64 * 1024) {}
+            if (stamp != family?.sessionKey()) emptyList() else rows
+        }
+    }
+
     suspend fun fetchAllStreams(
         addonUrls: List<String>,
         type: MediaType,
@@ -140,19 +162,25 @@ class StremioAddonClient(
         family?.initialize()
         val familySource = family?.extensionSource(baseUrl)
         if (family?.state?.value?.configuration?.enabled == true && family.state.value.isKids && (familySource == null || !family.allowsSource(familySource))) return@withContext StremioCatalogResponse()
-        val base = baseUrl.trimEnd('/')
+        val nativeId = nativeCatalogueId(baseUrl, catalogId).takeIf { nativeCatalogueBaseUrl != null }
+        val native = nativeId != null
+        val routedCatalogId = nativeId ?: catalogId
+        val base = if (native) nativeCatalogueBaseUrl!!.trimEnd('/') + "/native" else baseUrl.trimEnd('/')
         val extras = buildList {
             genre?.let { add("genre=${it.encodeURLPathPart()}") }
             search?.let { add("search=${it.encodeURLPathPart()}") }
             skip?.let { add("skip=$it") }
         }
         val url = if (extras.isNotEmpty()) {
-            "$base/catalog/$type/$catalogId/${extras.joinToString("&")}.json"
+            "$base/catalog/$type/$routedCatalogId/${extras.joinToString("&")}.json"
         } else {
-            "$base/catalog/$type/$catalogId.json"
+            "$base/catalog/$type/$routedCatalogId.json"
         }
         try {
-            val response = httpClient.get(url)
+            val response = httpClient.get(url) {
+                header("User-Agent", "Mozilla/5.0 (Torve; compatible Stremio client)")
+                if (native) parameter("language", nativeCatalogueLanguage().ifBlank { "en" })
+            }
             check(response.status.value in 200..299) { "Catalogue returned HTTP ${response.status.value}" }
             val parsed = json.decodeFromString<StremioCatalogResponse>(response.safeAddonBodyAsText(maxBytes = ADDON_CATALOG_MAX_BYTES))
             if (family?.state?.value?.configuration?.enabled == true && family.state.value.isKids) {
@@ -183,7 +211,9 @@ class StremioAddonClient(
         val stamp = family?.sessionKey()
         val url = "${baseUrl.trimEnd('/')}/meta/$type/$id.json"
         return try {
-            val response = httpClient.get(url)
+            val response = httpClient.get(url) {
+                header("User-Agent", "Mozilla/5.0 (Torve; compatible Stremio client)")
+            }
             val parsed = json.decodeFromString<StremioMetaResponse>(response.safeAddonBodyAsText(maxBytes = ADDON_META_MAX_BYTES))
             if (family?.state?.value?.configuration?.enabled == true && family.state.value.isKids) {
                 val meta = parsed.meta ?: return StremioMetaResponse()
@@ -209,6 +239,26 @@ class StremioAddonClient(
             StremioSubtitleResponse()
         }
     }
+}
+
+/** Only the explicitly migrated addon rows change provider on Apple. */
+internal fun usesNativeCatalogue(baseUrl: String, catalogId: String): Boolean {
+    return nativeCatalogueId(baseUrl, catalogId) != null
+}
+
+/** AIOStreams namespaces its installed TMDB catalogues with a source hash. */
+internal fun nativeCatalogueId(baseUrl: String, catalogId: String): String? {
+    if (ExtensionRuntimePolicy.userMetadataOnly) return null
+    val supported = setOf("tmdb.year", "tmdb.language", "tmdb.top", "tmdb.trending", "tmdb.latest", "tmdb.search")
+    val host = runCatching { Url(baseUrl).host.lowercase() }.getOrNull() ?: return null
+    if (host.endsWith("-tmdb-addon.baby-beamup.club") || host == "tmdb-addon.baby-beamup.club") {
+        return catalogId.takeIf { it in supported }
+    }
+    if (host.startsWith("aiostreams.")) {
+        val canonical = Regex("^[a-f0-9]{7}\\.(tmdb\\.[a-z]+)$").matchEntire(catalogId)?.groupValues?.get(1)
+        return canonical?.takeIf { it in supported }
+    }
+    return null
 }
 
 private fun addonOriginForStream(baseUrl: String): String {

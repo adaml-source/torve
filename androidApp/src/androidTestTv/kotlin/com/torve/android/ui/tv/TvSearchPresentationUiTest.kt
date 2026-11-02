@@ -59,22 +59,25 @@ class TvSearchPresentationUiTest {
     @get:Rule val composeRule = createAndroidComposeRule<TorveTestHostActivity>()
 
     @Test
-    fun titlesYearsAndTypeSymbolsStayVisibleAtEveryPosterSize() {
+    fun postersShowOnlyYearAndImdbAtEverySizeAndRemainSelectable() {
         var selections = 0
         composeRule.setContent {
             MaterialTheme {
                 Row {
                     TvSearchDensity.entries.forEach { density ->
                         TvSearchResultCard(MediaItem(id = density.name, title = density.label, year = 2024,
-                            type = MediaType.SERIES), density, Modifier.width(150.dp).aspectRatio(2f / 3f),
+                            type = MediaType.SERIES, ratings = MediaRatings(imdbScore = 8.1f, tmdbScore = 9.9f)), density, Modifier.width(150.dp).aspectRatio(2f / 3f),
                             onFocused = {}, onClick = { selections++ })
                     }
                 }
             }
         }
-        TvSearchDensity.entries.forEach { composeRule.onNodeWithText(it.label).assertIsDisplayed() }
+        TvSearchDensity.entries.forEach { composeRule.onNodeWithText(it.label).assertDoesNotExist() }
         composeRule.onAllNodesWithText("2024", useUnmergedTree = true).assertCountEquals(4)
-        composeRule.onAllNodesWithContentDescription("TV series", useUnmergedTree = true).assertCountEquals(4)
+        composeRule.onAllNodesWithText("8.1", useUnmergedTree = true).assertCountEquals(4)
+        composeRule.onAllNodesWithText("9.9", useUnmergedTree = true).assertCountEquals(0)
+        composeRule.onAllNodesWithContentDescription("IMDb", useUnmergedTree = true).assertCountEquals(4)
+        composeRule.onAllNodesWithContentDescription("TV series", useUnmergedTree = true).assertCountEquals(0)
         focus("Compact")
         key("Compact", Key.DirectionCenter)
         composeRule.runOnIdle { assertEquals(1, selections) }
@@ -123,8 +126,12 @@ class TvSearchPresentationUiTest {
         val long = composeRule.onNodeWithTag("search_footer:long", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
         assertEquals(short.height, long.height, 1f)
         assertEquals(short.top, long.top, 1f)
-        composeRule.onNodeWithText("Fallout", useUnmergedTree = true).assertIsDisplayed()
+        composeRule.onNodeWithText("Fallout", useUnmergedTree = true).assertDoesNotExist()
+        val poster = composeRule.onNodeWithContentDescription("Fallout").fetchSemanticsNode().boundsInRoot
+        org.junit.Assert.assertTrue("Metadata must not cover the poster", short.height < poster.height * 0.2f)
         composeRule.onAllNodesWithText("2026", useUnmergedTree = true).assertCountEquals(2)
+        composeRule.onAllNodesWithContentDescription("IMDb", useUnmergedTree = true).assertCountEquals(2)
+        composeRule.onAllNodesWithText("—", useUnmergedTree = true).assertCountEquals(2)
     }
 
     @Test
@@ -152,7 +159,7 @@ class TvSearchPresentationUiTest {
             waitForFocus("View")
         }
         key("View", Key.DirectionDown)
-        composeRule.onNodeWithText("The Gentlemen").assertIsFocused()
+        composeRule.onNodeWithContentDescription("The Gentlemen").assertIsFocused()
         key("The Gentlemen", Key.DirectionUp)
         composeRule.onNodeWithText("View").assertIsFocused()
         composeRule.runOnIdle { assertEquals(0, backCalls) }
@@ -176,7 +183,7 @@ class TvSearchPresentationUiTest {
         composeRule.onNodeWithText("Recent searches").assertDoesNotExist()
         composeRule.runOnIdle { assertEquals(1, submitted) }
         key("gentlemen", Key.DirectionDown)
-        composeRule.onNodeWithText("The Gentlemen").assertIsFocused()
+        composeRule.onNodeWithContentDescription("The Gentlemen").assertIsFocused()
     }
 
     @Test
@@ -269,8 +276,9 @@ class TvSearchPresentationUiTest {
 
     private fun ratedItem() = MediaItem(id = "gentlemen", title = "The Gentlemen", year = 2024, type = MediaType.SERIES,
         ratings = MediaRatings(imdbScore = 8.1f, rottenTomatoesScore = 90, rtAudienceScore = 95, tmdbScore = 8.0f))
-    private fun focus(label: String) { composeRule.onNodeWithText(label).performSemanticsAction(SemanticsActions.RequestFocus) { it() } }
-    private fun key(label: String, key: Key) { composeRule.onNodeWithText(label).performKeyInput { pressKey(key) } }
+    private fun node(label: String) = composeRule.onNode(androidx.compose.ui.test.hasText(label) or androidx.compose.ui.test.hasContentDescription(label))
+    private fun focus(label: String) { node(label).performSemanticsAction(SemanticsActions.RequestFocus) { it() } }
+    private fun key(label: String, key: Key) { node(label).performKeyInput { pressKey(key) } }
     private fun waitForFocus(label: String, inPopup: Boolean = false) {
         composeRule.waitUntil(10_000) { runCatching {
             composeRule.onNodeWithText(label).assertIsFocused()

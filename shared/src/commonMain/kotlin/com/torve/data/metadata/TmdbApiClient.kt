@@ -3,17 +3,22 @@ package com.torve.data.metadata
 import com.torve.data.network.HttpClientFactory
 import com.torve.data.network.sanitizeNetworkDiagnosticText
 import com.torve.platform.torveVerboseLog
+import com.torve.domain.model.extractTmdbIdOrNull
+import com.torve.domain.model.extractImdbIdOrNull
 import io.ktor.client.HttpClient
 import io.ktor.client.call.body
 import io.ktor.client.plugins.HttpRequestTimeoutException
 import io.ktor.client.request.get
 import io.ktor.client.request.parameter
+import io.ktor.client.request.header
 import io.ktor.client.statement.HttpResponse
+import io.ktor.client.statement.bodyAsText
 import io.ktor.http.isSuccess
 import io.ktor.http.appendPathSegments
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.datetime.Clock
@@ -68,6 +73,8 @@ data class TmdbRequestDiagnostic(
     }
 }
 
+class MetadataHttpException(val statusCode: Int) : IllegalStateException("Metadata request failed (HTTP $statusCode)")
+
 class TmdbApiClient(
     private val httpClient: HttpClient,
     private val apiKeyProvider: suspend () -> String = { tmdbApiKey() },
@@ -78,7 +85,11 @@ class TmdbApiClient(
     /** Returns a TMDB language tag (e.g. "de", "es", "fr") or null for the TMDB default (English). */
     private val languageProvider: () -> String? = { null },
     private val requestAllowed: suspend (String) -> Boolean = { true },
+    private val baseUrl: String = platformMetadataBackendBaseUrl() ?: BASE_URL,
 ) {
+
+    val usesTorveBackend: Boolean get() = baseUrl != BASE_URL
+    private val metadataHost: String get() = io.ktor.http.Url(baseUrl).host
 
     companion object {
         const val BASE_URL = "https://api.themoviedb.org/3"
@@ -87,6 +98,11 @@ class TmdbApiClient(
         internal const val MAX_CONCURRENT_REQUESTS = 3
 
         private val requestLimiter = Semaphore(MAX_CONCURRENT_REQUESTS)
+        private val applePresentationLimiter = Semaphore(2)
+        private val appleCachedBatchLimiter = Semaphore(2)
+        private val appleSeasonLimiter = Semaphore(1)
+        private val appleRatingsLimiter = Semaphore(1)
+        private val appleDetailLimiter = Semaphore(2)
     }
 
     private var resolvedHostCache: String? = null
@@ -96,9 +112,23 @@ class TmdbApiClient(
 
     fun resolvedContentLanguage(): String = (contentLanguage ?: languageProvider()).orEmpty().ifBlank { "en" }
 
+    /** Native provider ratings are already merged and cached by the Apple backend. */
+    suspend fun getBackendRatings(items: List<com.torve.domain.model.MediaItem>): List<BackendCatalogRating> {
+        if (com.torve.data.addon.ExtensionRuntimePolicy.userMetadataOnly || !usesTorveBackend || items.isEmpty()) return emptyList()
+        val keys = items.mapNotNull { item ->
+            val id = item.tmdbId ?: item.id.extractTmdbIdOrNull()
+            val identity = id?.takeIf { it > 0 }?.toString()
+                ?: item.imdbId?.extractImdbIdOrNull() ?: item.id.extractImdbIdOrNull()
+            identity?.let { (if (item.type == com.torve.domain.model.MediaType.SERIES) "tv" else "movie") + ":$it" }
+        }.distinct()
+        return keys.chunked(12).flatMap { batch ->
+            get<BackendCatalogRatings>("/ratings", "metadata.native_ratings", baseParams() + listOf("ids" to batch.joinToString(","))).items
+        }
+    }
+
     /** Base params included in every TMDB call: API key + language (if set). */
     private suspend fun baseParams(language: String? = null): List<Pair<String, Any>> = buildList {
-        add("api_key" to apiKeyProvider())
+        if (!usesTorveBackend) add("api_key" to apiKeyProvider())
         val lang = language ?: contentLanguage ?: languageProvider()
         torveVerboseLog { "TMDB_BASE_PARAMS contentLanguage=$contentLanguage languageProvider=${languageProvider()} resolved=$lang" }
         lang?.takeIf { it.isNotBlank() && (language != null || it != "en") }?.let {
@@ -106,16 +136,16 @@ class TmdbApiClient(
         }
     }
 
-    private fun imageLanguageParam(): String {
-        val lang = contentLanguage ?: languageProvider()
+    private fun imageLanguageParam(language: String? = null): String {
+        val lang = language ?: contentLanguage ?: languageProvider()
         return listOf(lang, "en", "null")
             .mapNotNull { it?.takeIf(String::isNotBlank) }
             .distinct()
             .joinToString(",")
     }
 
-    private fun videoLanguageParam(): String {
-        val lang = contentLanguage ?: languageProvider()
+    private fun videoLanguageParam(language: String? = null): String {
+        val lang = language ?: contentLanguage ?: languageProvider()
         return listOf(lang, "en")
             .mapNotNull { it?.takeIf(String::isNotBlank) }
             .distinct()
@@ -215,8 +245,9 @@ class TmdbApiClient(
     }
 
     internal suspend fun titleCompletions(query: String): List<TitleCompletion> {
+        if (usesTorveBackend) return emptyList()
         // Use the same explicit catalogue permission as normal text search.
-        if (!requestAllowed("/search/multi")) throw TmdbExtensionDisabledException()
+        if (com.torve.data.addon.ExtensionRuntimePolicy.userMetadataOnly || !requestAllowed("/search/multi")) throw TmdbExtensionDisabledException()
         val value = query.trim().lowercase().take(160)
         if (value.length < 2) return emptyList()
         return httpClient.get("https://v3.sg.media-imdb.com") {
@@ -272,15 +303,24 @@ class TmdbApiClient(
 
     /** Small, explicitly scoped presentation lookups also repair imported library cards. */
     suspend fun getMoviePresentation(id: Int, language: String, includeCast: Boolean = false): TmdbMovie = get(
-        endpoint = "/movie/$id", requestCategory = "tmdb.presentation.movie",
+        endpoint = "/movie/$id", requestCategory = if (usesTorveBackend && includeCast) "tmdb.detail.movie" else "tmdb.presentation.movie",
         parameters = baseParams(language) + listOf(
             "append_to_response" to if (includeCast) "images,credits" else "images",
             "include_image_language" to listOf(language, "en", "null").distinct().joinToString(","),
         ),
     )
 
+    suspend fun cachedMoviePresentations(ids: List<Int>, language: String): TmdbResponse<TmdbMovie> = get(
+        endpoint = "/presentations/movie", requestCategory = "metadata.cached_presentations.movie",
+        parameters = baseParams(language) + listOf("ids" to ids.distinct().take(12).joinToString(","), "artwork_fallback" to "true", "preview_scope" to "primary"),
+    )
+    suspend fun cachedTvPresentations(ids: List<Int>, language: String): TmdbResponse<TmdbTv> = get(
+        endpoint = "/presentations/tv", requestCategory = "metadata.cached_presentations.tv",
+        parameters = baseParams(language) + listOf("ids" to ids.distinct().take(12).joinToString(","), "artwork_fallback" to "true", "preview_scope" to "primary"),
+    )
+
     suspend fun getTvPresentation(id: Int, language: String, includeCast: Boolean = false): TmdbTv = get(
-        endpoint = "/tv/$id", requestCategory = "tmdb.presentation.tv",
+        endpoint = "/tv/$id", requestCategory = if (usesTorveBackend && includeCast) "tmdb.detail.tv" else "tmdb.presentation.tv",
         parameters = baseParams(language) + listOf(
             "append_to_response" to if (includeCast) "images,credits" else "images",
             "include_image_language" to listOf(language, "en", "null").distinct().joinToString(","),
@@ -308,40 +348,40 @@ class TmdbApiClient(
         }
     }
 
-    suspend fun getMovieDetail(id: Int): TmdbMovie {
+    suspend fun getMovieDetail(id: Int, language: String? = null): TmdbMovie {
         return get(
             endpoint = "/movie/$id",
             requestCategory = "tmdb.detail.movie",
-            parameters = baseParams() + listOf(
+            parameters = baseParams(language) + listOf(
                 "append_to_response" to "credits,videos,similar,external_ids,images,release_dates",
-                "include_image_language" to imageLanguageParam(),
+                "include_image_language" to imageLanguageParam(language),
                 // Fetch trailers in the user's language and English as a
                 // fallback so the trailer mapper has options. TMDB returns
                 // every video for the title regardless when no filter is
                 // set; we constrain to two locales to keep payloads small.
-                "include_video_language" to videoLanguageParam(),
+                "include_video_language" to videoLanguageParam(language),
             ),
         )
     }
 
-    suspend fun getTvDetail(id: Int): TmdbTv {
+    suspend fun getTvDetail(id: Int, language: String? = null): TmdbTv {
         return get(
             endpoint = "/tv/$id",
             requestCategory = "tmdb.detail.tv",
-            parameters = baseParams() + listOf(
+            parameters = baseParams(language) + listOf(
                 "append_to_response" to "credits,videos,similar,external_ids,images,content_ratings",
-                "include_image_language" to imageLanguageParam(),
-                "include_video_language" to videoLanguageParam(),
+                "include_image_language" to imageLanguageParam(language),
+                "include_video_language" to videoLanguageParam(language),
             ),
         )
     }
 
-    suspend fun getImages(type: String, id: Int): TmdbImages {
+    suspend fun getImages(type: String, id: Int, language: String? = null): TmdbImages {
         return get(
             endpoint = "/$type/$id/images",
             requestCategory = "tmdb.images.$type",
-            parameters = baseParams() + listOf(
-                "include_image_language" to imageLanguageParam(),
+            parameters = baseParams(language) + listOf(
+                "include_image_language" to imageLanguageParam(language),
             ),
         )
     }
@@ -616,7 +656,7 @@ class TmdbApiClient(
         return get(
             endpoint = "/tv/$tvId/season/$seasonNumber",
             requestCategory = "tmdb.season.detail.tv",
-            parameters = baseParams(language),
+            parameters = baseParams(language) + if (usesTorveBackend) listOf("progressive" to "true") else emptyList(),
         )
     }
 
@@ -653,7 +693,7 @@ class TmdbApiClient(
         type: String,
         region: String,
     ): Map<Int, String> {
-        if (!requestAllowed("/watch/providers/$type")) throw TmdbExtensionDisabledException()
+        if (com.torve.data.addon.ExtensionRuntimePolicy.userMetadataOnly || !requestAllowed("/watch/providers/$type")) throw TmdbExtensionDisabledException()
         val response: Map<String, String> = httpClient.get(baseUrl) {
             url { appendPathSegments("tmdb", "providers", "logos") }
             parameter("type", type)
@@ -670,24 +710,24 @@ class TmdbApiClient(
         parameters: List<Pair<String, Any?>>,
     ): T {
         // Check before DNS, queueing or HTTP, and again after waiting for a permit.
-        if (!requestAllowed(endpoint)) throw TmdbExtensionDisabledException()
+        if (com.torve.data.addon.ExtensionRuntimePolicy.userMetadataOnly || !requestAllowed(endpoint)) throw TmdbExtensionDisabledException()
         val queuedAtMs = Clock.System.now().toEpochMilliseconds()
         val queueMark = TimeSource.Monotonic.markNow()
         val requestId = "$requestCategory@$queuedAtMs"
-        val resolvedHost = resolvedHostCache ?: resolvedHostProvider(BASE_HOST)
+        val resolvedHost = resolvedHostCache ?: resolvedHostProvider(metadataHost)
             ?.joinToString(",")
             ?.also { resolvedHostCache = it }
         diagnostics(
             TmdbRequestDiagnostic(
                 requestId = requestId,
                 category = requestCategory,
-                host = BASE_HOST,
+                host = metadataHost,
                 resolvedHost = resolvedHost,
                 endpoint = endpoint,
                 params = sanitizeParameters(parameters),
-                requestTimeoutMs = HttpClientFactory.DEFAULT_REQUEST_TIMEOUT_MS,
+                requestTimeoutMs = if (usesTorveBackend) 90_000L else HttpClientFactory.DEFAULT_REQUEST_TIMEOUT_MS,
                 connectTimeoutMs = HttpClientFactory.DEFAULT_CONNECT_TIMEOUT_MS,
-                socketTimeoutMs = HttpClientFactory.DEFAULT_SOCKET_TIMEOUT_MS,
+                socketTimeoutMs = if (usesTorveBackend) 90_000L else HttpClientFactory.DEFAULT_SOCKET_TIMEOUT_MS,
                 queuedAtMs = queuedAtMs,
                 outcome = "queued",
                 executed = false,
@@ -696,8 +736,17 @@ class TmdbApiClient(
 
         var startedAtMs: Long? = null
         try {
-            return requestLimiter.withPermit {
-                if (!requestAllowed(endpoint)) throw TmdbExtensionDisabledException()
+            // Card repairs cannot occupy the lanes needed by a selected season.
+            val limiter = when {
+                usesTorveBackend && requestCategory.startsWith("metadata.cached_presentations.") -> appleCachedBatchLimiter
+                usesTorveBackend && requestCategory.startsWith("tmdb.season.") -> appleSeasonLimiter
+                usesTorveBackend && requestCategory.startsWith("tmdb.presentation.") -> applePresentationLimiter
+                usesTorveBackend && requestCategory == "metadata.native_ratings" -> appleRatingsLimiter
+                usesTorveBackend && requestCategory.startsWith("tmdb.detail.") -> appleDetailLimiter
+                else -> requestLimiter
+            }
+            return limiter.withPermit {
+                if (com.torve.data.addon.ExtensionRuntimePolicy.userMetadataOnly || !requestAllowed(endpoint)) throw TmdbExtensionDisabledException()
                 val startedMs = Clock.System.now().toEpochMilliseconds()
                 startedAtMs = startedMs
                 val runMark = TimeSource.Monotonic.markNow()
@@ -706,13 +755,13 @@ class TmdbApiClient(
                     TmdbRequestDiagnostic(
                         requestId = requestId,
                         category = requestCategory,
-                        host = BASE_HOST,
+                        host = metadataHost,
                         resolvedHost = resolvedHost,
                         endpoint = endpoint,
                         params = sanitizeParameters(parameters),
-                        requestTimeoutMs = HttpClientFactory.DEFAULT_REQUEST_TIMEOUT_MS,
+                        requestTimeoutMs = if (usesTorveBackend) 90_000L else HttpClientFactory.DEFAULT_REQUEST_TIMEOUT_MS,
                         connectTimeoutMs = HttpClientFactory.DEFAULT_CONNECT_TIMEOUT_MS,
-                        socketTimeoutMs = HttpClientFactory.DEFAULT_SOCKET_TIMEOUT_MS,
+                        socketTimeoutMs = if (usesTorveBackend) 90_000L else HttpClientFactory.DEFAULT_SOCKET_TIMEOUT_MS,
                         queuedAtMs = queuedAtMs,
                         startedAtMs = startedMs,
                         queueDelayMs = queuedMs,
@@ -723,6 +772,7 @@ class TmdbApiClient(
                 try {
                     val response = request(endpoint, parameters)
                     val statusCode = response.status.value
+                    if (!response.status.isSuccess()) throw MetadataHttpException(statusCode)
                     // Ktor resumes body conversion on the caller's dispatcher.
                     // Large season responses must never decode on the UI thread.
                     val body = withContext(Dispatchers.Default) { response.body<T>() }
@@ -730,13 +780,13 @@ class TmdbApiClient(
                         TmdbRequestDiagnostic(
                             requestId = requestId,
                             category = requestCategory,
-                            host = BASE_HOST,
+                            host = metadataHost,
                             resolvedHost = resolvedHost,
                             endpoint = endpoint,
                             params = sanitizeParameters(parameters),
-                            requestTimeoutMs = HttpClientFactory.DEFAULT_REQUEST_TIMEOUT_MS,
+                            requestTimeoutMs = if (usesTorveBackend) 90_000L else HttpClientFactory.DEFAULT_REQUEST_TIMEOUT_MS,
                             connectTimeoutMs = HttpClientFactory.DEFAULT_CONNECT_TIMEOUT_MS,
-                            socketTimeoutMs = HttpClientFactory.DEFAULT_SOCKET_TIMEOUT_MS,
+                            socketTimeoutMs = if (usesTorveBackend) 90_000L else HttpClientFactory.DEFAULT_SOCKET_TIMEOUT_MS,
                             queuedAtMs = queuedAtMs,
                             startedAtMs = startedMs,
                             completedAtMs = Clock.System.now().toEpochMilliseconds(),
@@ -754,13 +804,13 @@ class TmdbApiClient(
                             TmdbRequestDiagnostic(
                                 requestId = requestId,
                                 category = requestCategory,
-                                host = BASE_HOST,
+                                host = metadataHost,
                                 resolvedHost = resolvedHost,
                                 endpoint = endpoint,
                                 params = sanitizeParameters(parameters),
-                                requestTimeoutMs = HttpClientFactory.DEFAULT_REQUEST_TIMEOUT_MS,
+                                requestTimeoutMs = if (usesTorveBackend) 90_000L else HttpClientFactory.DEFAULT_REQUEST_TIMEOUT_MS,
                                 connectTimeoutMs = HttpClientFactory.DEFAULT_CONNECT_TIMEOUT_MS,
-                                socketTimeoutMs = HttpClientFactory.DEFAULT_SOCKET_TIMEOUT_MS,
+                                socketTimeoutMs = if (usesTorveBackend) 90_000L else HttpClientFactory.DEFAULT_SOCKET_TIMEOUT_MS,
                                 queuedAtMs = queuedAtMs,
                                 completedAtMs = Clock.System.now().toEpochMilliseconds(),
                                 queueDelayMs = queueMark.elapsedNow().inWholeMilliseconds,
@@ -777,13 +827,13 @@ class TmdbApiClient(
                         TmdbRequestDiagnostic(
                             requestId = requestId,
                             category = requestCategory,
-                            host = BASE_HOST,
+                            host = metadataHost,
                             resolvedHost = resolvedHost,
                             endpoint = endpoint,
                             params = sanitizeParameters(parameters),
-                            requestTimeoutMs = HttpClientFactory.DEFAULT_REQUEST_TIMEOUT_MS,
+                            requestTimeoutMs = if (usesTorveBackend) 90_000L else HttpClientFactory.DEFAULT_REQUEST_TIMEOUT_MS,
                             connectTimeoutMs = HttpClientFactory.DEFAULT_CONNECT_TIMEOUT_MS,
-                            socketTimeoutMs = HttpClientFactory.DEFAULT_SOCKET_TIMEOUT_MS,
+                            socketTimeoutMs = if (usesTorveBackend) 90_000L else HttpClientFactory.DEFAULT_SOCKET_TIMEOUT_MS,
                             queuedAtMs = queuedAtMs,
                             startedAtMs = startedMs,
                             completedAtMs = Clock.System.now().toEpochMilliseconds(),
@@ -805,13 +855,13 @@ class TmdbApiClient(
                     TmdbRequestDiagnostic(
                         requestId = requestId,
                         category = requestCategory,
-                        host = BASE_HOST,
+                        host = metadataHost,
                         resolvedHost = resolvedHost,
                         endpoint = endpoint,
                         params = sanitizeParameters(parameters),
-                        requestTimeoutMs = HttpClientFactory.DEFAULT_REQUEST_TIMEOUT_MS,
+                        requestTimeoutMs = if (usesTorveBackend) 90_000L else HttpClientFactory.DEFAULT_REQUEST_TIMEOUT_MS,
                         connectTimeoutMs = HttpClientFactory.DEFAULT_CONNECT_TIMEOUT_MS,
-                        socketTimeoutMs = HttpClientFactory.DEFAULT_SOCKET_TIMEOUT_MS,
+                        socketTimeoutMs = if (usesTorveBackend) 90_000L else HttpClientFactory.DEFAULT_SOCKET_TIMEOUT_MS,
                         queuedAtMs = queuedAtMs,
                         completedAtMs = Clock.System.now().toEpochMilliseconds(),
                         queueDelayMs = queueMark.elapsedNow().inWholeMilliseconds,
@@ -831,13 +881,22 @@ class TmdbApiClient(
         endpoint: String,
         parameters: List<Pair<String, Any?>>,
     ): HttpResponse {
-        return httpClient.get("$BASE_URL$endpoint") {
+        suspend fun send(): HttpResponse = httpClient.get("$baseUrl$endpoint") {
+            if (usesTorveBackend) header("X-Torve-Platform", "apple")
             parameters.forEach { (name, value) ->
-                if (value != null) {
+                if (value != null && (!usesTorveBackend || name != "api_key")) {
                     parameter(name, value)
                 }
             }
         }
+        val first = send()
+        if (!usesTorveBackend || first.status.value != 429) return first
+        val waitSeconds = first.headers["Retry-After"]?.toLongOrNull()?.coerceAtLeast(1) ?: 1
+        if (waitSeconds > 10) return first
+        first.bodyAsText() // Consume the small backend error before reusing its connection.
+        delay(waitSeconds * 1_000)
+        if (com.torve.data.addon.ExtensionRuntimePolicy.userMetadataOnly || !requestAllowed(endpoint)) throw TmdbExtensionDisabledException()
+        return send() // One bounded recovery attempt; never a retry loop.
     }
 
     private fun sanitizeParameters(parameters: List<Pair<String, Any?>>): String {
@@ -851,6 +910,7 @@ class TmdbApiClient(
         return when (throwable) {
             is HttpRequestTimeoutException -> "timeout"
             is CancellationException -> "cancelled"
+            is MetadataHttpException -> "http_${throwable.statusCode}"
             else -> "exception"
         }
     }

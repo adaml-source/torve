@@ -65,6 +65,9 @@ class CatalogTopCacheWorker(
     }
 
     private suspend fun runOnce() {
+        // Apple browse data is cached once on the backend. Warming every genre
+        // on every phone adds thousands of requests ahead of visible content.
+        if (!repository.supportsBackgroundWarmup) return
         val movieGenres = TmdbGenres.MOVIE_GENRES.entries
         val tvGenres = TmdbGenres.TV_GENRES.entries
 

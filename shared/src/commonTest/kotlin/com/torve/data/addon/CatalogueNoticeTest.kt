@@ -5,6 +5,15 @@ import com.torve.presentation.apple.ApplePlaybackSynopsisPolicy
 import kotlin.test.*
 
 class CatalogueNoticeTest {
+    @Test fun currentTranslationReplacesALongerSavedPlotWithoutChangingIdentity() {
+        val saved = ApplePlaybackSynopsis("Dövüş Kulübü", "A much longer saved English plot from another catalogue.")
+        val result = ApplePlaybackSynopsisPolicy.preferCurrentLanguage(saved, "Türkçe özet.", "TheTVDB / Trakt")
+        assertEquals("Türkçe özet.", result.overview)
+        assertEquals(saved.title, result.title)
+        assertEquals("TheTVDB / Trakt", result.source)
+        assertEquals(result, ApplePlaybackSynopsisPolicy.preferCurrentLanguage(result, "N/A", "Other"))
+        assertEquals(result, ApplePlaybackSynopsisPolicy.preferCurrentLanguage(result, "  ", "Other"))
+    }
     @Test fun configurationResponseIsANoticeRatherThanAMovie() {
         val item = StremioMeta(id="ai-error", type="movie", name="AI Error",
             description="The selected Gemini Model is invalid or not found. Please try a different model in the settings.").toMediaItem()

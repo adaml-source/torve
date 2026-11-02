@@ -177,8 +177,13 @@ val sharedModule = module {
             it.contentLanguage = initialLang
         }
     }
-    single<MetadataRepository> { MetadataRepositoryImpl(get(), family = get()) }
-    single { com.torve.data.metadata.LocalizedMediaRepository(get(), enrichmentAllowed = {
+    single { com.torve.data.metadata.ExtensionMetadataRepository(get(), get(),
+        owner = { get<UserIdProvider>().currentDataUserId() }, language = { get<TmdbApiClient>().resolvedContentLanguage() }) }
+    single<MetadataRepository> {
+        if (com.torve.data.addon.ExtensionRuntimePolicy.userMetadataOnly) get<com.torve.data.metadata.ExtensionMetadataRepository>()
+        else MetadataRepositoryImpl(get(), family = get())
+    }
+    single { com.torve.data.metadata.LocalizedMediaRepository(get(), presentations = get<MetadataRepository>(), enrichmentAllowed = {
         get<PreferencesRepository>().tmdbExtensionSelection().enrichment
     }) }
     single<AvailabilityProvider> { TmdbAvailabilityProvider(get()) }
@@ -189,7 +194,8 @@ val sharedModule = module {
     single { KeywordSearchService(get(), get()) }
 
     // Stremio Addons
-    single { StremioAddonClient(get(), get(), family = get()) }
+    single { StremioAddonClient(get(), get(), family = get(),
+        nativeCatalogueLanguage = { get<TmdbApiClient>().resolvedContentLanguage() }) }
 
     single {
         AccelerationApi(
@@ -257,7 +263,7 @@ val sharedModule = module {
     // Trakt
     single<TraktAuthScopeProvider> { PersistedTraktAuthScopeProvider(get()) }
     single { TraktClient(get(), get(), authScopeProvider = get()) }
-    single { com.torve.presentation.detail.ContentCommunity(get(), get()) }
+    single { com.torve.presentation.detail.ContentCommunity(get(), get(), get()) }
     single { TraktTokenStore(get(), get()) }
     single { com.torve.data.profile.SharedTraktConnection(get(), get(), get(), get()) }
     single { TraktAuthorizedApi(get(), get(), authScopeProvider = get(),
@@ -1234,6 +1240,10 @@ val sharedModule = module {
             ratingsEnricher = getOrNull(),
             integrationSecretStore = getOrNull(),
             traktApi = getOrNull(), searchLists = get(),
+            addonCatalogPage = { shelfId, offset ->
+                get<com.torve.data.addon.CatalogAggregator>().shelfPage(
+                    get<com.torve.domain.repository.AddonRepository>().getInstalledAddons(), shelfId, offset)
+            },
         )
     }
     factory { SensitiveMaterialSettingsViewModel(get()) }

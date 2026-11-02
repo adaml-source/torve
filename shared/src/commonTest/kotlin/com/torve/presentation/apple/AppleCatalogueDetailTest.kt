@@ -7,6 +7,28 @@ import kotlinx.coroutines.test.runTest
 import kotlin.test.*
 
 class AppleCatalogueDetailTest {
+    @Test fun tmdbAddonCatalogueRatingIsTmdbWhileDetailAddsSeparateImdb() = runTest {
+        val seed = AppleCatalogueDetail.decode(AppleCatalogueDetail.extensionCatalogueSeed(
+            """{"id":"tt45368240","type":"movie","name":"You Can See Everything","imdbRating":"9.1"}""", "movie", "tmdb-addon"))
+        assertEquals(9.1f, seed.ratings?.tmdbScore)
+        assertNull(seed.ratings?.imdbScore)
+        val result = AppleCatalogueDetail.resolve(seed, listOf(addon("metadata")),
+            { _, _, id -> StremioMeta(id, "movie", seed.title, imdbRating = "7.9") }, { null }, extensionAuthoritative = true)
+        assertEquals(7.9f, result.ratings?.imdbScore)
+        assertEquals(9.1f, result.ratings?.tmdbScore)
+        assertEquals(seed.id, result.id)
+    }
+
+    @Test fun ordinaryExtensionsAndExplicitRatingsKeepTheirDeclaredSources() {
+        val raw = """{"id":"tt41368989","type":"movie","name":"Finding Harry","imdbRating":"7.7"}"""
+        val ordinary = AppleCatalogueDetail.decode(AppleCatalogueDetail.extensionCatalogueSeed(raw, "movie", "other-addon"))
+        assertEquals(7.7f, ordinary.ratings?.imdbScore); assertNull(ordinary.ratings?.tmdbScore)
+        val explicit = raw.dropLast(1) + """, "torve_ratings":{"imdbScore":6.9,"tmdbScore":7.7}}"""
+        val item = AppleCatalogueDetail.decode(AppleCatalogueDetail.extensionCatalogueSeed(explicit, "movie", "tmdb-addon"))
+        assertEquals(6.9f, item.ratings?.imdbScore); assertEquals(7.7f, item.ratings?.tmdbScore)
+        assertEquals(7.7f, AppleCatalogueDetail.decode(AppleCatalogueDetail.extensionSeed(raw, "movie")).ratings?.imdbScore)
+    }
+
     private val film = MediaItem("tt0000001", imdbId = "tt0000001", type = MediaType.MOVIE,
         title = "Catalogue film", posterUrl = "https://example.invalid/poster.jpg")
     private fun addon(id: String, resources: List<String> = listOf("meta"), enabled: Boolean = true,
@@ -66,5 +88,23 @@ class AppleCatalogueDetailTest {
             AppleCatalogueDetail.resolve(film, listOf(addon("metadata")),
                 { _, _, _ -> throw CancellationException("Account changed") }, { null })
         }
+    }
+
+    @Test fun nativeLocaleReplacesOldEnglishCardTextWithoutWaitingForInstalledProviders() = runTest {
+        val english = film.copy(tmdbId = 42, overview = "English plot")
+        val result = AppleCatalogueDetail.resolve(english, listOf(addon("slow")),
+            { _, _, _ -> error("Native identity must not wait for an extension") },
+            { english.copy(id = "42", title = "Deutscher Titel", overview = "Deutsche Handlung") }, nativeFirst = true)
+        assertEquals(english.id, result.id)
+        assertEquals("Deutscher Titel", result.title)
+        assertEquals("Deutsche Handlung", result.overview)
+        assertEquals(42, result.tmdbId)
+    }
+
+    @Test fun nativeIdentityMismatchCannotReplaceTheSelectedTitle() = runTest {
+        val selected = film.copy(tmdbId = 42)
+        val result = AppleCatalogueDetail.resolve(selected, emptyList(), { _, _, _ -> null },
+            { selected.copy(tmdbId = 999, title = "Wrong title") }, nativeFirst = true)
+        assertEquals(selected, result)
     }
 }

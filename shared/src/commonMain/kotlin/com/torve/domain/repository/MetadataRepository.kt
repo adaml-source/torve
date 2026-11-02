@@ -23,6 +23,9 @@ interface MetadataRepository {
     suspend fun searchMulti(query: String, page: Int = 1): List<MediaItem>
     suspend fun findByImdbId(imdbId: String, preferredType: String? = null): MediaItem?
     suspend fun getDetail(type: String, id: Int): MediaItem
+    /** Artwork/text only; background cards must not fetch cast, releases or seasons. */
+    suspend fun getPresentation(type: String, id: Int, language: String? = null): MediaItem = getDetail(type, id)
+    suspend fun cachedPresentations(type: String, ids: List<Int>, language: String): List<MediaItem> = emptyList()
     suspend fun getSimilar(type: String, id: Int, page: Int = 1): List<MediaItem>
     suspend fun getRecommendations(type: String, id: Int, page: Int = 1): List<MediaItem>
     suspend fun getHomeShelves(): List<CatalogShelf>
@@ -34,6 +37,7 @@ interface MetadataRepository {
     suspend fun getPersonDetail(personId: Int): TmdbPerson
     suspend fun getPersonImageUrls(personId: Int): List<String> = emptyList()
     suspend fun getMediaImageUrls(type: String, id: Int): List<String> = emptyList()
+    suspend fun getArtworkCandidates(type: String, id: Int, landscape: Boolean, language: String? = null): List<String> = getMediaImageUrls(type, id)
     suspend fun getSeasonDetail(tvId: Int, seasonNumber: Int): Season
 
     suspend fun getTrendingPaged(type: String, page: Int = 1): PagedResult

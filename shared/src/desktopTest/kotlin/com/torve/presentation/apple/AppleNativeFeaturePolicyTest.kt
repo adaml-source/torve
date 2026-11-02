@@ -7,6 +7,19 @@ import org.koin.core.Koin
 import kotlin.test.*
 
 class AppleNativeFeaturePolicyTest {
+    @kotlin.test.Test fun extensionImdbRatingIsNotInventedAsASecondTmdbRating() {
+        val old = com.torve.data.addon.ExtensionRuntimePolicy.userMetadataOnly
+        com.torve.data.addon.ExtensionRuntimePolicy.userMetadataOnly = true
+        try {
+            val item = com.torve.data.addon.StremioMeta("tmdb:155", "movie", "Film", imdbRating = "9.1").let {
+                com.torve.presentation.apple.AppleCatalogueDetail.decode(
+                    com.torve.presentation.apple.AppleCatalogueDetail.extensionSeed(kotlinx.serialization.json.Json.encodeToString(com.torve.data.addon.StremioMeta.serializer(), it), "movie"))
+            }
+            val prefs = com.torve.domain.model.RatingDisplayPrefs(enabledProviders = listOf(com.torve.domain.model.RatingSource.IMDB, com.torve.domain.model.RatingSource.TMDB))
+            kotlin.test.assertEquals(listOf("IMDB"), displayAppleRatings(item, prefs, true).map { it.provider })
+        } finally { com.torve.data.addon.ExtensionRuntimePolicy.userMetadataOnly = old }
+    }
+
     private val features = AppleNativeFeatures(Koin())
     private fun stream(title: String, quality: String, size: String? = null, cached: Boolean = false) =
         ParsedStream("Provider", quality, title, size = size, isCached = cached)

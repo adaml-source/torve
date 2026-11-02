@@ -59,9 +59,9 @@ object HttpClientFactory {
         }
 
         install(HttpTimeout) {
-            requestTimeoutMillis = DEFAULT_REQUEST_TIMEOUT_MS
+            requestTimeoutMillis = if (com.torve.data.metadata.platformMetadataBackendBaseUrl() != null) 90_000L else DEFAULT_REQUEST_TIMEOUT_MS
             connectTimeoutMillis = DEFAULT_CONNECT_TIMEOUT_MS
-            socketTimeoutMillis = DEFAULT_SOCKET_TIMEOUT_MS
+            socketTimeoutMillis = if (com.torve.data.metadata.platformMetadataBackendBaseUrl() != null) 90_000L else DEFAULT_SOCKET_TIMEOUT_MS
         }
 
         install(Logging) {

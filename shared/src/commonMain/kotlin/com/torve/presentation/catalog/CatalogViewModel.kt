@@ -441,7 +441,7 @@ class CatalogViewModel(
             val enriched = items.mapNotNull { item ->
                 runCatching {
                     val type = if (item.type == MediaType.SERIES) "tv" else "movie"
-                    metadataRepo.getDetail(type, item.tmdbId ?: return@mapNotNull null)
+                    metadataRepo.getPresentation(type, item.tmdbId ?: return@mapNotNull null)
                 }.getOrNull()
             }
             enriched.filter { genreId in it.genreIds }
@@ -1008,7 +1008,7 @@ class CatalogViewModel(
             val backfilled: Map<Int, MediaItem> = supervisorScope {
                 candidates.map { (id, _) ->
                     async {
-                        runCatching { id to metadataRepo.getDetail(mediaType, id) }.getOrNull()
+                        runCatching { id to metadataRepo.getPresentation(mediaType, id) }.getOrNull()
                     }
                 }.mapNotNull { it.await() }.toMap()
             }

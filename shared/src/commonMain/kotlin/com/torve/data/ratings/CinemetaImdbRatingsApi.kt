@@ -17,7 +17,7 @@ import kotlinx.serialization.json.JsonPrimitive
 
 data class CinemetaImdbRating(val score: Float, val votes: Int?)
 
-/** One public metadata lookup on Detail, never a per-card browsing fan-out. */
+/** Cached IMDb metadata; network requests are serialized, including visible Search batches. */
 class CinemetaImdbRatingsApi(
     private val httpClient: HttpClient,
     private val now: () -> Long = { Clock.System.now().toEpochMilliseconds() },

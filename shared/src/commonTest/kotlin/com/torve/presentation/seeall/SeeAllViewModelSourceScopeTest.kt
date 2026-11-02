@@ -37,6 +37,100 @@ import kotlin.test.assertTrue
 class SeeAllViewModelSourceScopeTest {
     private val dispatcher = StandardTestDispatcher()
 
+    @Test fun exactTwelveCardNativePreviewContinuesPastTheDuplicateInitialSourcePage() = runTest(dispatcher) {
+        SeeAllViewModel.pendingItems["addon:native-language"] = "Language" to (1..12).map { media("$it", "Movie $it") }
+        val offsets = mutableListOf<Int>()
+        val vm = viewModel(addonPage = { _, offset ->
+            offsets += offset
+            com.torve.data.addon.AddonShelfPage((offset+1..offset+12).map { media("$it", "Movie $it") }, offset+12, offset < 24)
+        })
+        try {
+            vm.loadSection("addon:native-language"); advanceUntilIdle()
+            repeat(3) { vm.loadMore(); advanceUntilIdle() }
+            assertEquals(listOf(0, 12, 24), offsets)
+            assertEquals((1..36).map { "$it" }, vm.state.value.items.map { it.id })
+            assertTrue(!vm.state.value.hasMore)
+        } finally { vm.close() }
+    }
+
+    @Test fun addonPreviewContinuesFromItsOwnSourceBeyondTwentyTitles() = runTest(dispatcher) {
+        val offsets = mutableListOf<Int>()
+        SeeAllViewModel.pendingItems["addon:language-movie"] = "Language · Movies" to (1..20).map { media("$it", "Movie $it") }
+        val vm = viewModel(addonPage = { id, offset ->
+            assertEquals("language-movie", id); offsets += offset
+            com.torve.data.addon.AddonShelfPage((offset+1..offset+40).map { media("$it", "Movie $it") }, offset+40, offset < 100)
+        })
+        try {
+            vm.loadSection("addon:language-movie"); advanceUntilIdle()
+            assertEquals(20, vm.state.value.items.size); assertTrue(vm.state.value.hasMore)
+            repeat(4) { vm.loadMore(); advanceUntilIdle() }
+            assertEquals(listOf(0,40,80,120), offsets)
+            assertEquals((1..160).map { "$it" }, vm.state.value.items.map { it.id })
+            assertTrue(!vm.state.value.hasMore)
+        } finally { vm.close() }
+    }
+
+    @Test fun addonIgnoringSkipStopsWithoutDiscardingItsBufferedRemainder() = runTest(dispatcher) {
+        SeeAllViewModel.pendingItems["addon:buffer"] = "Buffer" to (1..20).map { media("$it", "Movie $it") }
+        val vm = viewModel(addonPage = { _, offset ->
+            com.torve.data.addon.AddonShelfPage((1..100).map { media("$it", "Movie $it") },offset+100,true)
+        })
+        try {
+            vm.loadSection("addon:buffer"); advanceUntilIdle()
+            vm.loadMore(); advanceUntilIdle(); assertEquals(100,vm.state.value.items.size)
+            vm.loadMore(); advanceUntilIdle(); assertEquals(100,vm.state.value.items.size)
+            assertTrue(!vm.state.value.hasMore)
+        } finally { vm.close() }
+    }
+
+    @Test fun failedAddonPageRetainsPostersAndRetriesTheSameOffset() = runTest(dispatcher) {
+        SeeAllViewModel.pendingItems["addon:retry"] = "Retry" to (1..20).map { media("$it", "Movie $it") }
+        val offsets=mutableListOf<Int>()
+        val vm=viewModel(addonPage={_,offset ->
+            offsets+=offset
+            if(offsets.size==1) error("temporary outage")
+            com.torve.data.addon.AddonShelfPage(listOf(media("21","Next")),21,false)
+        })
+        try {
+            vm.loadSection("addon:retry");advanceUntilIdle();vm.loadMore();advanceUntilIdle()
+            assertEquals(20,vm.state.value.items.size);assertTrue(vm.state.value.hasMore)
+            vm.loadMore();advanceUntilIdle();assertEquals(listOf(0,0),offsets)
+            assertEquals(21,vm.state.value.items.size)
+        } finally { vm.close() }
+    }
+
+    @Test fun filteredHomePreviewNeverBecomesASourceOffsetOrDropsEarlierTitles() = runTest(dispatcher) {
+        SeeAllViewModel.pendingItems["addon:filtered"]="Filtered preview" to listOf(media("35","Movie 35"),media("70","Movie 70"))
+        val offsets=mutableListOf<Int>()
+        val vm=viewModel(addonPage={_,offset ->
+            offsets+=offset
+            com.torve.data.addon.AddonShelfPage((offset+1..offset+40).map { media("$it","Movie $it") },offset+40,offset<40)
+        })
+        try {
+            vm.loadSection("addon:filtered");advanceUntilIdle()
+            vm.loadMore();advanceUntilIdle();vm.loadMore();advanceUntilIdle()
+            assertEquals(listOf(0,40),offsets)
+            assertEquals((1..80).map { "$it" }.toSet(),vm.state.value.items.map { it.id }.toSet())
+        } finally { vm.close() }
+    }
+
+    @Test fun discoveryRailDoesNotBackfillUntilHorizontalPagingRequestsIt() = runTest(dispatcher) {
+        fun page(number: Int) = PagedResult((1..12).map { media("${number}_$it", "Title $number $it") }, number, 4, 48)
+        val repo = ScopedMetadataRepository(discoverPages = mapOf("movie:35:1" to page(1), "movie:35:2" to page(2)))
+        val vm = viewModel(metadata = repo)
+        try {
+            vm.loadDiscoveryRail("MOVIE_GENRE_35"); advanceUntilIdle()
+            assertEquals(12, vm.state.value.items.size)
+            assertEquals(listOf("movie:35:1"), repo.discoverPageCalls)
+            vm.loadMore(); advanceUntilIdle()
+            assertEquals(24, vm.state.value.items.size)
+            assertEquals(listOf("movie:35:1", "movie:35:2"), repo.discoverPageCalls)
+            vm.loadSection("MOVIE_GENRE_35", force = true); advanceUntilIdle()
+            assertEquals(12, vm.state.value.items.size)
+            assertEquals(3, repo.discoverPageCalls.size)
+        } finally { vm.close() }
+    }
+
     @BeforeTest
     fun setUp() {
         Dispatchers.setMain(dispatcher)
@@ -134,6 +228,22 @@ class SeeAllViewModelSourceScopeTest {
         assertEquals(listOf("tmdb:301"), viewModel.state.value.displayedItems.map { it.id })
         assertEquals(0, metadata.discoverCalls)
         assertEquals(0, metadata.searchCalls)
+    }
+
+    @Test
+    fun populatedContinueWatchingGridUsesPresentationWithoutFullDetailFanout() = runTest(dispatcher) {
+        val metadata = ScopedMetadataRepository()
+        val progress = FakeWatchProgressRepository(items = (1..36).map { id ->
+            WatchProgress(mediaId = "tmdb:$id", mediaType = MediaType.MOVIE,
+                title = "Saved $id", updatedAt = id.toLong())
+        })
+        val vm = viewModel(metadata = metadata, watchProgress = progress)
+        vm.loadSection("continue_watching")
+        advanceUntilIdle()
+        assertEquals(36, vm.state.value.items.size)
+        assertEquals(36, metadata.presentationCalls)
+        assertEquals(0, metadata.fullDetailCalls)
+        assertTrue(vm.state.value.items.all { it.id.startsWith("tmdb:") && it.rating == 7.0 })
     }
 
     @Test
@@ -421,12 +531,14 @@ class SeeAllViewModelSourceScopeTest {
         watchlist: WatchlistRepository = FakeWatchlistRepository(),
         watchProgress: WatchProgressRepository = FakeWatchProgressRepository(),
         history: WatchHistoryRepository = FakeWatchHistoryRepository(),
+        addonPage: (suspend (String, Int) -> com.torve.data.addon.AddonShelfPage)? = null,
     ): SeeAllViewModel = SeeAllViewModel(
         metadataRepo = metadata,
         watchHistoryRepo = history,
         watchlistRepo = watchlist,
         prefsRepo = FakePreferencesRepository(),
         watchProgressRepo = watchProgress,
+        addonCatalogPage = addonPage,
     )
 
     @Test fun applyingUnchangedDefaultsKeepsTheOriginalTrendingSource() = runTest(dispatcher) {
@@ -550,8 +662,16 @@ class SeeAllViewModelSourceScopeTest {
             return emptyList()
         }
         override suspend fun findByImdbId(imdbId: String, preferredType: String?): MediaItem? = null
-        override suspend fun getDetail(type: String, id: Int): MediaItem =
-            detailItems[id] ?: media("tmdb:$id", "Detail $id", tmdbId = id, rating = 7.0)
+        var fullDetailCalls = 0
+        var presentationCalls = 0
+        override suspend fun getDetail(type: String, id: Int): MediaItem {
+            fullDetailCalls++
+            return detailItems[id] ?: media("tmdb:$id", "Detail $id", tmdbId = id, rating = 7.0)
+        }
+        override suspend fun getPresentation(type: String, id: Int, language: String?): MediaItem {
+            presentationCalls++
+            return detailItems[id] ?: media("tmdb:$id", "Detail $id", tmdbId = id, rating = 7.0)
+        }
         override suspend fun getSimilar(type: String, id: Int, page: Int): List<MediaItem> {
             val key = "$type:$id:$page"
             similarCalls += key

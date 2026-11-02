@@ -63,9 +63,10 @@ class XtreamClient(
     @Suppress("unused")
     private val httpClient: HttpClient,
     private val json: Json,
+    private val streamingHttpClient: HttpClient? = null,
 ) {
     private val xtreamHttpClient: HttpClient by lazy {
-        HttpClientFactory.createEpgStreamingClient(forceIdentityEncoding = false)
+        streamingHttpClient ?: HttpClientFactory.createEpgStreamingClient(forceIdentityEncoding = false)
     }
 
     /**

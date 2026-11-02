@@ -58,6 +58,14 @@ data class MediaItem(
     val collectionName: String? = null,
     val ageCertifications: List<AgeCertification> = emptyList(),
     val familySourceKey: String? = null,
+    val posterPreviewBase64: String? = null,
+    val artworkPreviews: Map<String, String> = emptyMap(),
+    /** A cache-only artwork fallback; localized metadata must still refresh. */
+    val presentationPending: Boolean = false,
+    /** Untagged title graphics require on-device text verification before display. */
+    val logoCandidates: List<TitleLogoCandidate> = emptyList(),
+    /** Opaque installed-manifest identity; keeps detail routing with the selected catalogue/language. */
+    val metadataSourceKey: String? = null,
 ) {
     /** Preserves the existing full Swift initializer while new policy fields default safely. */
     constructor(
@@ -141,6 +149,9 @@ data class MediaItem(
 }
 
 @Serializable
+data class TitleLogoCandidate(val url: String, val titles: List<String> = emptyList())
+
+@Serializable
 data class Genre(
     val id: Int,
     val name: String,
@@ -170,6 +181,7 @@ data class Season(
     val overview: String? = null,
     val airDate: String? = null,
     val episodes: List<Episode> = emptyList(),
+    val metadataPending: Boolean = false,
 )
 
 @Serializable
@@ -223,6 +235,7 @@ private fun mergeMediaItems(primary: MediaItem, other: MediaItem): MediaItem {
         posterUrl = preferString(primary.posterUrl, other.posterUrl),
         backdropUrl = preferString(primary.backdropUrl, other.backdropUrl),
         logoUrl = preferString(primary.logoUrl, other.logoUrl),
+        logoCandidates = primary.logoCandidates.ifEmpty { other.logoCandidates },
         rating = preferDouble(primary.rating, other.rating),
         voteCount = preferInt(primary.voteCount, other.voteCount),
         runtime = preferInt(primary.runtime, other.runtime),

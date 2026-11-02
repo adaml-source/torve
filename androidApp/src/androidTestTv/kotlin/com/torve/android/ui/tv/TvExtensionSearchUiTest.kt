@@ -15,10 +15,10 @@ import org.junit.Test
 @OptIn(ExperimentalTestApi::class)
 class TvExtensionSearchUiTest {
     @get:Rule val rule = createAndroidComposeRule<TorveTestHostActivity>()
-    private fun fixture(model: TvExtensionSearchState, items: List<MediaItem> = emptyList(), preview: Boolean = false) {
+    private fun fixture(model: TvExtensionSearchState, items: List<MediaItem> = emptyList()) {
         model.sourceCount = 1
         rule.runOnUiThread { rule.activity.window.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON) }
-        rule.setContent { MaterialTheme { TvExtensionSearchContent(model, items, FocusRequester(), {}, {}, {}, true, {}, focusPreview = preview) } }
+        rule.setContent { MaterialTheme { TvExtensionSearchContent(model, items, FocusRequester(), {}, {}, {}, true, {}) } }
     }
     private val navigationItems = (0..36).map { MediaItem("fixture$it", type = MediaType.MOVIE, title = "Fixture $it", year = 2026) }
 
@@ -47,25 +47,14 @@ class TvExtensionSearchUiTest {
         poster(0).assertIsFocused()
     }
 
-    @Test fun previewRowsWrapAndHeaderReturnsToTheActiveRow() {
-        fixture(TvExtensionSearchState().apply { query = "fixture" }, navigationItems, preview = true)
-        fun poster(index: Int) = rule.onNodeWithTag("catalog_poster_card:fixture$index")
-        fun waitFor(index: Int) { rule.waitUntil(10_000) { runCatching { poster(index).assertIsFocused() }.isSuccess } }
-        fun key(index: Int, key: Key) { poster(index).performKeyInput { pressKey(key) }; rule.waitForIdle() }
-        rule.onNodeWithText("fixture").performKeyInput { pressKey(Key.DirectionDown) }; waitFor(0)
-        for (index in 0..8) { key(index, Key.DirectionRight); waitFor(index + 1) }
-        key(9, Key.DirectionUp); rule.onNodeWithText("fixture").assertIsFocused()
-        rule.onNodeWithText("fixture").performKeyInput { pressKey(Key.DirectionDown) }; waitFor(9)
-        key(9, Key.DirectionRight); waitFor(0)
-        key(0, Key.DirectionDown); waitFor(10)
-        // A header focus request must target the expanded row, even after row 0 collapsed.
-        rule.onNodeWithText("fixture").performSemanticsAction(androidx.compose.ui.semantics.SemanticsActions.RequestFocus) { it() }
-        rule.onNodeWithText("fixture").performKeyInput { pressKey(Key.DirectionDown) }; waitFor(10)
-        key(10, Key.DirectionDown); waitFor(20)
-        key(20, Key.DirectionDown); waitFor(30)
-        for (index in 30..35) { key(index, Key.DirectionRight); waitFor(index + 1) }
-        key(36, Key.DirectionRight); waitFor(30)
-        key(30, Key.DirectionUp); waitFor(20)
+    @Test fun posterMetadataKeepsOnlyYearAndImdb() {
+        fixture(TvExtensionSearchState().apply { query = "fixture" }, listOf(
+            navigationItems.first().copy(ratings = MediaRatings(imdbScore = 8.2f, tmdbScore = 9.9f))))
+        rule.onNodeWithText("Fixture 0").assertDoesNotExist()
+        rule.onNodeWithContentDescription("Movie").assertDoesNotExist()
+        rule.onNodeWithText("2026").assertIsDisplayed()
+        rule.onNodeWithText("8.2").assertIsDisplayed()
+        rule.onNodeWithText("9.9").assertDoesNotExist()
     }
     @Test fun filtersAreAvailableBeforeSearchingAndPickerBackKeepsFocus() {
         fixture(TvExtensionSearchState())
@@ -95,7 +84,7 @@ class TvExtensionSearchUiTest {
         rule.onNodeWithText("Filters (1)").assertIsFocused()
         rule.onNodeWithText("Only TMDB").assertDoesNotExist()
         rule.onNodeWithText("Filters (1)").performKeyInput { pressKey(Key.DirectionDown) }
-        rule.onNodeWithText("High IMDb").assertIsFocused()
+        rule.onNodeWithContentDescription("High IMDb").assertIsFocused()
     }
     @Test fun providerErrorsUseWideReadablePanelAndOfferTitleSearch() {
         val state = TvExtensionSearchState().apply {

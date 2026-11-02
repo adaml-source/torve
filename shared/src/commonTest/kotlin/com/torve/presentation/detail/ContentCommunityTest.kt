@@ -63,4 +63,44 @@ class ContentCommunityTest {
             assertEquals(0, calls)
         } finally { http.close() }
     }
+    @Test fun extensionOnlyCommentsUseTheConnectedUsersTokenAndNeverMetadataFallback() = runTest {
+        val old = com.torve.data.addon.ExtensionRuntimePolicy.userMetadataOnly
+        com.torve.data.addon.ExtensionRuntimePolicy.userMetadataOnly = true
+        var calls = 0
+        val http = HttpClient(MockEngine { request ->
+            calls++
+            assertEquals("api.trakt.tv", request.url.host)
+            assertEquals("/movies/tt4034228/comments/newest", request.url.encodedPath)
+            assertEquals("Bearer connected-test-token", request.headers[HttpHeaders.Authorization])
+            respond("""[{"id":17,"comment":"A connected account review","user":{"username":"viewer"}}]""", HttpStatusCode.OK,
+                headersOf("Content-Type" to listOf("application/json"), "X-Pagination-Page-Count" to listOf("1")))
+        })
+        try {
+            val tokens = com.torve.data.trakt.auth.TraktTokenStore(MemorySecrets(), json)
+            val client = TraktClient(http,json)
+            val authorized = com.torve.data.trakt.api.TraktAuthorizedApi(client,tokens)
+            val service = ContentCommunity(TmdbApiClient(http), client, authorized)
+            val item = com.torve.domain.model.MediaItem("tt4034228",type=com.torve.domain.model.MediaType.MOVIE,title="Manchester by the Sea")
+            assertTrue(service.comments(item,1).items.isEmpty())
+            assertEquals(0,calls, "No automatic public Trakt request when disconnected")
+            tokens.write(com.torve.data.trakt.TraktTokens("connected-test-token","refresh",3600,kotlinx.datetime.Clock.System.now().epochSeconds))
+            assertEquals("viewer", service.comments(item,1).items.single().author)
+            assertEquals(1,calls)
+            assertTrue(service.comments(item.copy(id="334541",tmdbId=334541),1).items.isEmpty())
+            assertEquals(1,calls, "No native ID lookup in extension-only mode")
+            tokens.clear()
+            assertTrue(service.comments(item,1).items.isEmpty())
+            assertEquals(1,calls, "Disconnect takes effect immediately")
+        } finally { http.close(); com.torve.data.addon.ExtensionRuntimePolicy.userMetadataOnly = old }
+    }
+    private class MemorySecrets : com.torve.domain.integrations.IntegrationSecretStore {
+        private val entries = mutableMapOf<Pair<com.torve.domain.integrations.IntegrationSecretKey,String?>,String>()
+        override suspend fun put(key:com.torve.domain.integrations.IntegrationSecretKey,value:String,subKey:String?) { entries[key to subKey]=value }
+        override suspend fun get(key:com.torve.domain.integrations.IntegrationSecretKey,subKey:String?)=entries[key to subKey]
+        override suspend fun remove(key:com.torve.domain.integrations.IntegrationSecretKey,subKey:String?) { entries.remove(key to subKey) }
+        override suspend fun setStorageMode(key:com.torve.domain.integrations.IntegrationSecretKey,mode:com.torve.domain.integrations.IntegrationStorageMode) {}
+        override suspend fun getStorageMode(key:com.torve.domain.integrations.IntegrationSecretKey)=com.torve.domain.integrations.IntegrationStorageMode.DEVICE_ONLY
+        override suspend fun clearAllSecrets() { entries.clear() }
+    }
+
 }

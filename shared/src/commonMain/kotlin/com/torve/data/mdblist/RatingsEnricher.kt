@@ -34,6 +34,33 @@ class RatingsEnricher(
 ) {
 
     private val imdbCache = mutableMapOf<String, String?>()
+
+    private suspend fun nativeBackendRatings(items: List<MediaItem>, refresh: Boolean = false): List<MediaItem> {
+        val missing = items.filter { refresh || it.ratings?.imdbScore == null || it.ratings?.imdbVotes == null }
+        val rows = try {
+            tmdbApi.getBackendRatings(missing)
+        } catch (cancelled: kotlinx.coroutines.CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            emptyList()
+        }
+        val byIdentity = rows.associateBy { "${it.mediaType}:${it.id}" }
+        val byImdb = rows.filter { it.imdbId != null }.associateBy { "${it.mediaType}:${it.imdbId}" }
+        return items.map { item ->
+            val id = item.tmdbId ?: item.id.extractTmdbIdOrNull()
+            val type = if (item.type == MediaType.SERIES) "tv" else "movie"
+            val imdb = item.imdbId?.extractImdbIdOrNull() ?: item.id.extractImdbIdOrNull()
+            val remote = id?.let { byIdentity["$type:$it"] } ?: imdb?.let { byImdb["$type:$it"] }
+            val enriched = if (remote == null) item else item.copy(
+                tmdbId = item.tmdbId ?: remote.id,
+                imdbId = remote.imdbId ?: item.imdbId,
+                ratings = mergeFreshRatings(item.ratings, remote.ratings),
+            )
+            val resolvedId = enriched.tmdbId ?: id
+            if (resolvedId != null && enriched.ratings != null) cacheRepo.put("${item.type.name}:$resolvedId", enriched.ratings)
+            enriched
+        }
+    }
     private val imdbCacheMutex = Mutex()
     private val primaryAttempts = mutableMapOf<String, Long>()
     private val primaryAttemptsMutex = Mutex()
@@ -97,6 +124,8 @@ class RatingsEnricher(
         requirePrimaryProviders: Boolean = true,
         forceRefresh: Boolean = false,
     ): MediaItem {
+        if (com.torve.data.addon.ExtensionRuntimePolicy.userMetadataOnly) return item
+        if (tmdbApi.usesTorveBackend) return nativeBackendRatings(listOf(item), refresh = forceRefresh).first()
         // Addon catalog items (Trending, Latest Releases, Popular, Language,
         // Year, …) arrive with namespaced ids like "tmdb:1523145" or "tt0111161"
         // while `tmdbId` / `imdbId` are left unset. Without recovering those,
@@ -274,6 +303,8 @@ class RatingsEnricher(
     /** Refresh only the settled focused title, even when its saved ratings are complete.
      * Uses the same bounded, hour-cached IMDb lookup as Detail, without a rail-wide fan-out. */
     suspend fun refreshImdb(item: MediaItem): MediaItem? = withContext(Dispatchers.Default) {
+        if (com.torve.data.addon.ExtensionRuntimePolicy.userMetadataOnly) return@withContext item
+        if (tmdbApi.usesTorveBackend) return@withContext nativeBackendRatings(listOf(item), refresh = true).first()
         val api = detailImdbApi ?: return@withContext null
         val tmdbId = item.tmdbId ?: item.id.extractTmdbIdOrNull()
         val imdbId = item.imdbId?.takeIf { it.matches(Regex("tt[0-9]+")) }
@@ -296,6 +327,12 @@ class RatingsEnricher(
         apiKey: String,
         onUpdate: ((MediaItem) -> Unit)? = null,
     ): MediaItem = withContext(Dispatchers.Default) {
+        if (com.torve.data.addon.ExtensionRuntimePolicy.userMetadataOnly) return@withContext item
+        if (tmdbApi.usesTorveBackend) {
+            val result = nativeBackendRatings(listOf(item)).first()
+            onUpdate?.invoke(result)
+            return@withContext result
+        }
         coroutineScope {
             val hydrated = hydrateFromCache(item)
             val tmdbId = item.tmdbId ?: item.id.extractTmdbIdOrNull()
@@ -335,7 +372,9 @@ class RatingsEnricher(
         apiKey: String,
         requirePrimaryProviders: Boolean = true,
     ): List<MediaItem> = withContext(Dispatchers.Default) {
+        if (com.torve.data.addon.ExtensionRuntimePolicy.userMetadataOnly) return@withContext items
         if (items.isEmpty()) return@withContext items
+        if (tmdbApi.usesTorveBackend) return@withContext nativeBackendRatings(items)
         val backend = backendRatingsApi?.fetch(items)
         var hydrated = hydrateListFromCache(items)
         if (backend != null && backend.ratings.isNotEmpty()) {
@@ -392,8 +431,33 @@ class RatingsEnricher(
         }
     }
 
+    /** Fill missing IMDb scores for a settled, visible batch; reuse saved scores first. */
+    suspend fun enrichVisibleImdbList(items: List<MediaItem>): List<MediaItem> = withContext(Dispatchers.Default) {
+        if (com.torve.data.addon.ExtensionRuntimePolicy.userMetadataOnly) return@withContext items
+        val hydrated = hydrateListFromCache(items)
+        val api = detailImdbApi ?: return@withContext hydrated
+        coroutineScope {
+            hydrated.map { item -> async {
+                if (item.ratings?.imdbScore?.let { it.isFinite() && it > 0f && it <= 10f } == true) return@async item
+                globalSemaphore.withPermit {
+                    val tmdbId = item.tmdbId ?: item.id.extractTmdbIdOrNull()
+                    val imdbId = item.imdbId?.extractImdbIdOrNull() ?: item.id.extractImdbIdOrNull()
+                        ?: tmdbId?.let { resolveImdbIdForTmdb(item.type, it) }
+                        ?: return@withPermit item
+                    val current = api.fetch(imdbId, item.type) ?: return@withPermit item
+                    val result = item.copy(tmdbId = tmdbId, imdbId = imdbId,
+                        ratings = (item.ratings ?: MediaRatings()).copy(imdbScore = current.score, imdbVotes = current.votes))
+                    cacheRepo.put("${item.type.name}:${tmdbId ?: imdbId}", result.ratings!!)
+                    result
+                }
+            } }.awaitAll()
+        }
+    }
+
     /** Fetch only the IMDb fields needed by search filters. */
     suspend fun enrichImdbList(items: List<MediaItem>, apiKey: String): List<MediaItem> = withContext(Dispatchers.Default) {
+        if (com.torve.data.addon.ExtensionRuntimePolicy.userMetadataOnly) return@withContext items
+        if (tmdbApi.usesTorveBackend) return@withContext nativeBackendRatings(items)
         if (items.isEmpty()) return@withContext items
         coroutineScope {
             items.map { item ->
@@ -454,6 +518,7 @@ class RatingsEnricher(
      * rail until refreshRatings catches up seconds later.
      */
     fun hydrateFromCache(item: MediaItem): MediaItem {
+        if (com.torve.data.addon.ExtensionRuntimePolicy.userMetadataOnly) return item
         val tmdbId = item.tmdbId ?: item.id.extractTmdbIdOrNull()
         val imdbId = item.imdbId?.takeIf { it.startsWith("tt") } ?: item.id.extractImdbIdOrNull()
         val cacheKey = tmdbId?.let { "${item.type.name}:$it" }
@@ -480,6 +545,7 @@ class RatingsEnricher(
 
     /** Check if an item has any cached ratings (for background enrichment scheduling). */
     fun hasCachedRatings(item: MediaItem): Boolean {
+        if (com.torve.data.addon.ExtensionRuntimePolicy.userMetadataOnly) return true
         val tmdbId = item.tmdbId ?: return false
         val cacheKey = "${item.type.name}:$tmdbId"
         return cacheRepo.getCached(cacheKey) != null
@@ -502,10 +568,12 @@ class RatingsEnricher(
                         ?: tmdbApi.getTvDetail(tmdbId).externalIds?.imdbId
                 }
             }
+        } catch (cancelled: kotlinx.coroutines.CancellationException) {
+            throw cancelled
         } catch (_: Exception) {
             null
         }
-        imdbCacheMutex.withLock { imdbCache[cacheKey] = imdbId }
+        if (imdbId != null) imdbCacheMutex.withLock { imdbCache[cacheKey] = imdbId }
         return imdbId
     }
 

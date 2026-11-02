@@ -12,13 +12,15 @@ data class TmdbExtensionSelection(
     val enrichment: Boolean = false,
 ) {
     fun permits(endpoint: String): Boolean = catalogue || (enrichment && (
+        endpoint == "/ratings" || endpoint in setOf("/presentations/movie", "/presentations/tv") ||
         endpoint.matches(Regex("^/(movie|tv|person|collection|list)/[1-9][0-9]*(/.*)?$")) ||
             endpoint.matches(Regex("^/find/tt[0-9]+$"))
         ))
 }
 
 suspend fun PreferencesRepository.tmdbExtensionSelection(): TmdbExtensionSelection =
-    if (!ExtensionRuntimePolicy.optionalMetadataExtensions) TmdbExtensionSelection(true, true)
+    if (ExtensionRuntimePolicy.userMetadataOnly) TmdbExtensionSelection(false, false)
+    else if (!ExtensionRuntimePolicy.optionalMetadataExtensions) TmdbExtensionSelection(true, true)
     else TmdbExtensionSelection(
         // Only an explicit user choice enables TMDB, including on older installations
         // which browsed under the previous implicit default without saving a choice.
@@ -27,5 +29,6 @@ suspend fun PreferencesRepository.tmdbExtensionSelection(): TmdbExtensionSelecti
     )
 
 class TmdbExtensionDisabledException : IllegalStateException(
-    "Choose the TMDB catalogue or enable TMDB metadata enrichment in Extensions."
+    if (platformMetadataBackendBaseUrl() != null) "Choose a catalogue or enable metadata enrichment in Extensions."
+    else "Choose the TMDB catalogue or enable TMDB metadata enrichment in Extensions."
 )

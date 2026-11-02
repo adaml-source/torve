@@ -4,7 +4,7 @@ import com.torve.db.TorveQueries
 
 /** SQLite slices avoid Android's per-row CursorWindow limit, including existing saved rows. */
 internal fun TorveQueries.readPreferenceSafely(userId: String, key: String): String? {
-    val size = 131_072L // At most 512 KiB of UTF-8 even for four-byte code points.
+    val size = 16_384L // Fits a 128 KiB Android window, including UTF-16 supplementary characters.
     val first = getPreferenceSlice(start = "1", count = size.toString(), userId = userId, key = key).executeAsOneOrNull() ?: return null
     if ((first.characters ?: 0L) <= size) return first.part
     // Keep all slices in one snapshot if another coroutine updates this preference.

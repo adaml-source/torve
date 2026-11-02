@@ -10,6 +10,17 @@ import com.torve.domain.model.CastMember
 /**
  * Maps Stremio catalog meta objects to the app's MediaItem domain model.
  */
+fun StremioMeta.toCatalogueMediaItem(manifestId: String): MediaItem {
+    val item = toMediaItem()
+    // TMDB Addon 3.x parseMedia puts TMDB vote_average in imdbRating.
+    // Its /meta response instead performs an IMDb lookup. Scope the workaround
+    // to catalogue records from that manifest; explicit provider ratings win.
+    return if (manifestId == "tmdb-addon" && nativeRatings == null) item.copy(
+        ratings = item.rating?.takeIf { it > 0 && it <= 10 }?.let {
+            com.torve.domain.model.MediaRatings(tmdbScore = it.toFloat())
+        }) else item
+}
+
 fun StremioMeta.toMediaItem(): MediaItem {
     val notice = catalogueNoticeOrNull()
     val mediaType = when (type.lowercase()) {
@@ -35,6 +46,7 @@ fun StremioMeta.toMediaItem(): MediaItem {
 
     return MediaItem(
         id = id,
+        tmdbId = id.takeIf { it.startsWith("tmdb:") }?.removePrefix("tmdb:")?.toIntOrNull()?.takeIf { it > 0 },
         imdbId = imdbId,
         type = mediaType,
         title = name,
@@ -45,7 +57,8 @@ fun StremioMeta.toMediaItem(): MediaItem {
         posterUrl = poster,
         backdropUrl = background ?: poster,
         rating = parsedRating,
-        ratings = parsedRating?.let { com.torve.domain.model.MediaRatings(imdbScore = it.toFloat()) },
+        ratings = nativeRatings ?: parsedRating?.let { com.torve.domain.model.MediaRatings(imdbScore = it.toFloat()) },
+        presentationPending = presentationPending,
         genres = genreObjects,
         releaseDate = releaseInfo,
         director = director.firstOrNull(),
@@ -55,6 +68,16 @@ fun StremioMeta.toMediaItem(): MediaItem {
             CastMember(id = -index - 1, name = credit.name, character = credit.character, profileUrl = credit.photo)
         },
         logoUrl = logo,
+        trailerKey = (trailerStreams + trailers).firstNotNullOfOrNull { trailer ->
+            val value = trailer.ytId ?: trailer.source
+            val key = when {
+                value.startsWith("https://youtu.be/") -> value.substringAfter("youtu.be/").substringBefore('?')
+                value.startsWith("https://www.youtube.com/watch?") || value.startsWith("https://youtube.com/watch?") ->
+                    value.substringAfter("v=", "").substringBefore('&')
+                else -> value
+            }
+            key.takeIf { it.matches(Regex("[A-Za-z0-9_-]{6,64}")) }
+        },
         runtime = runtime?.substringBefore(' ')?.toIntOrNull(),
         seasons = videos.filter { (it.season ?: 0) > 0 && (it.episode ?: 0) > 0 }
             .groupBy { it.season!! }.toList().sortedBy { it.first }.map { (number, entries) ->

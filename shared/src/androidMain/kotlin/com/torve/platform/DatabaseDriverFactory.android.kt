@@ -75,7 +75,7 @@ actual class DatabaseDriverFactory(private val context: Context) {
         // behind long IPTV reads.
         openHelper.setWriteAheadLoggingEnabled(true)
         return AndroidSqliteDriver(
-            openHelper = openHelper,
+            openHelper = PreferenceWindowOpenHelper(openHelper),
         )
     }
 

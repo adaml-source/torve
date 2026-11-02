@@ -80,7 +80,7 @@ object AppleHomeLayoutPolicy {
                 visible.forEachIndexed { index, shelf ->
                     val options = config.catalogueRows[shelf.id]
                     add(AppleHomeLayoutRow("addon:${shelf.id}", options?.customTitle ?: catalogueTitle(shelf), items = shelf.items,
-                        presetId = options?.presetId ?: config.presetId, seeAllSection = "shelf:${shelf.id}"), config.order + index)
+                        presetId = options?.presetId ?: config.presetId, seeAllSection = "addon:${shelf.id}"), config.order + index)
                 }
             } else if (section == HomeSection.MDBLIST_SHELVES && state.mdbListShelves.isNotEmpty()) {
                 state.mdbListShelves.forEachIndexed { index, shelf ->

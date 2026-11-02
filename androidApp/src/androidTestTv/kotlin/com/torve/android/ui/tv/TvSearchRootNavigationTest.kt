@@ -24,9 +24,10 @@ import java.io.File
 class TvSearchRootNavigationTest {
     @get:Rule val rule = createAndroidComposeRule<TvMainActivity>()
     @Test fun defaultGridHasTenPostersWrapsAndReturnsFromHeader() = checkSearch(false)
-    @Test fun previewGridWrapsAndReentersTheExpandedRow() = checkSearch(true)
+    @Test fun legacySearchPreviewStillUsesNavigablePosterGrid() = checkSearch(true)
+    @Test fun globalFocusPreviewStillUsesNavigableSearchPosterGrid() = checkSearch(true, global = true)
 
-    private fun checkSearch(preview: Boolean) {
+    private fun checkSearch(preview: Boolean, global: Boolean = false) {
         val nav = "tv_nav_item_${TvRoutes.SEARCH}"
         rule.waitUntil(30_000) { rule.onAllNodesWithTag(nav).fetchSemanticsNodes().isNotEmpty() }
         val settings = KoinPlatform.getKoin().get<SettingsViewModel>()
@@ -41,17 +42,23 @@ class TvSearchRootNavigationTest {
             rule.runOnUiThread {
                 rule.activity.window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
                 TvScreenCache.clear()
-                setTvFocusPreview(rule.activity, owner, "global", false)
+                setTvFocusPreview(rule.activity, owner, "global", global)
                 setTvFocusPreview(rule.activity, owner, "page:search", preview)
                 prefs.edit().remove("tv_search_density_v2").commit()
                 settings.setTmdbCatalogueEnabled(true)
             }
             rule.onNodeWithTag(nav).performClick()
-            val cardPrefix = if (preview) "catalog_poster_card:" else "search_result:"
+            val cardPrefix = "search_result:"
             val cards = SemanticsMatcher("Search poster") {
                 it.config.getOrElse(SemanticsProperties.TestTag) { "" }.startsWith(cardPrefix)
             }
             rule.waitUntil(90_000) { rule.onAllNodes(cards).fetchSemanticsNodes().size >= 10 }
+            rule.onNodeWithTag(nav).performSemanticsAction(SemanticsActions.RequestFocus) { it() }
+            rule.onNodeWithTag(nav).performKeyInput { pressKey(Key.DirectionRight) }
+            rule.waitUntil(10_000) {
+                rule.onAllNodes(isFocused() and hasAnyAncestor(hasTestTag("search_toolbar")))
+                    .fetchSemanticsNodes().isNotEmpty()
+            }
             val view = rule.onNode(hasText("View") and hasAnyAncestor(hasTestTag("search_toolbar")))
             view.performSemanticsAction(SemanticsActions.RequestFocus) { it() }
             view.performKeyInput { pressKey(Key.DirectionDown) }
@@ -60,7 +67,7 @@ class TvSearchRootNavigationTest {
             val first = focusedTag()
             val firstBounds = rule.onNodeWithTag(first).fetchSemanticsNode().boundsInRoot
             repeat(9) { rule.onNode(cards and isFocused()).performKeyInput { pressKey(Key.DirectionRight) } }
-            if (!preview) assertEquals("Ten posters must be in the same row", firstBounds.top,
+            assertEquals("Ten posters must be in the same row", firstBounds.top,
                 rule.onNode(cards and isFocused()).fetchSemanticsNode().boundsInRoot.top, 2f)
             val last = focusedTag()
             rule.onNodeWithTag(last).performKeyInput { pressKey(Key.DirectionUp) }
@@ -68,8 +75,7 @@ class TvSearchRootNavigationTest {
             rule.waitUntil(10_000) { rule.onAllNodes(toolbarFocus).fetchSemanticsNodes().isNotEmpty() }
             rule.onNode(toolbarFocus).performKeyInput { pressKey(Key.DirectionDown) }
             rule.waitUntil(10_000) { rule.onAllNodes(cards and isFocused()).fetchSemanticsNodes().isNotEmpty() }
-            if (preview) rule.onNodeWithTag(last).assertIsFocused()
-            else rule.onNodeWithTag(last).performSemanticsAction(SemanticsActions.RequestFocus) { it() }
+            rule.onNodeWithTag(last).performSemanticsAction(SemanticsActions.RequestFocus) { it() }
             rule.onNode(cards and isFocused()).performKeyInput { pressKey(Key.DirectionRight) }
             rule.waitUntil(10_000) { runCatching { rule.onNodeWithTag(first).assertIsFocused() }.isSuccess }
             File(rule.activity.getExternalFilesDir(null), "search-ten-posters-$preview.png").outputStream().use {

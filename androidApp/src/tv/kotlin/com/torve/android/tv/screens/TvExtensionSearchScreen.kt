@@ -108,8 +108,7 @@ internal fun TvExtensionSearchScreen(
     @Suppress("UNUSED_VARIABLE") val visibilityVersion = watchedRevision
     val permitted = filter.filterItems(policyState, ContentAccessContext.DIRECT_SEARCH, enriched, ContentSourceType.ADDON).items
     TvExtensionSearchContent(model, permitted, railFocusRequester, onMediaClick, onFirstContentRequester,
-        onContentFocused, shouldAutoFocus, onManage, preferences.ratingPrefs,
-        com.torve.android.tv.settings.rememberTvFocusPreviewPolicy(preferences.personalDataUserId).hasPreview("search"))
+        onContentFocused, shouldAutoFocus, onManage)
 }
 
 @Composable
@@ -122,8 +121,6 @@ internal fun TvExtensionSearchContent(
     focused: (FocusRequester) -> Unit,
     autoFocus: Boolean,
     manage: () -> Unit,
-    ratingPrefs: RatingDisplayPrefs = RatingDisplayPrefs(),
-    focusPreview: Boolean = false,
 ) {
     val toolbar = remember { List(6) { FocusRequester() } }
     val firstResult = remember { FocusRequester() }
@@ -133,17 +130,22 @@ internal fun TvExtensionSearchContent(
     var filtersOpen by remember { mutableStateOf(false) }
     var density by remember { mutableStateOf(TvSearchDensity.BALANCED) }
     var recent by remember { mutableStateOf(emptyList<String>()) }
-    val results = filterTvExtensionSearch(items, model.filters)
+    val posterScores = remember(model) { mutableStateMapOf<String, MediaRatings>() }
+    val results = filterTvExtensionSearch(items.map { item ->
+        posterScores[item.tvSearchStableKey()]?.let { score -> item.copy(ratings = score) } ?: item
+    }, model.filters)
     val columns = density.columns
     val gridState = rememberLazyGridState()
+    TvSearchPosterRatingsEffect(results, gridState, model) { enriched ->
+        enriched.forEach { item -> item.ratings?.let { posterScores[item.tvSearchStableKey()] = it } }
+    }
     val requesters = remember { mutableMapOf<String, FocusRequester>() }
-    var previewEntry by remember { mutableStateOf<FocusRequester?>(null) }
     LaunchedEffect(Unit) { publish(toolbar[0]) }
     LaunchedEffect(autoFocus) { if (autoFocus) { withFrameNanos { }; toolbar[0].requestFocus() } }
     fun moveDown() { runCatching {
         when {
             model.error != null -> firstNoticeAction.requestFocus()
-            results.isNotEmpty() -> (if (focusPreview) previewEntry ?: firstResult else firstResult).requestFocus()
+            results.isNotEmpty() -> firstResult.requestFocus()
             model.sourceCount == 0 && !model.busy && model.query.isBlank() -> manageRequester.requestFocus()
         }
     } }
@@ -193,15 +195,7 @@ internal fun TvExtensionSearchContent(
             TvSearchToolbarButton(localizedUiText("Manage extensions"), Modifier.focusRequester(manageRequester).focusProperties { up = toolbar[0]; left = rail },
                 onFocused = {}, onClick = manage, onMoveDown = {})
         }
-        if (focusPreview && results.isNotEmpty()) com.torve.android.tv.components.TvFocusPreviewGrid(
-            items = results, screenId = "tv_search:extensions", columns = columns,
-            railFocusRequester = rail, entryRequester = firstResult, headerRequester = toolbar[0],
-            modifier = Modifier.fillMaxWidth().weight(1f), wrapRows = true,
-            onContentFocused = {
-                if (it !== toolbar[0] && it !== rail) previewEntry = it
-                focused(it)
-            }, onClick = onMedia)
-        else LazyVerticalGrid(GridCells.Fixed(columns),
+        LazyVerticalGrid(GridCells.Fixed(columns),
             Modifier.fillMaxWidth().weight(1f).testTag("search.extension.results"), state = gridState,
             verticalArrangement = Arrangement.spacedBy(16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp),
             contentPadding = PaddingValues(top = 4.dp, bottom = 16.dp)) {
@@ -215,7 +209,7 @@ internal fun TvExtensionSearchContent(
                             requesters.getOrPut(target.tvSearchStableKey()) { FocusRequester() }
                         } }, rail = rail, header = toolbar[0])
                     .focusProperties { if (index < columns) up = toolbar[0]; if (index % columns == 0) left = rail },
-                    onFocused = { focused(requester) }, onClick = { onMedia(item) }, ratingPrefs = ratingPrefs)
+                    onFocused = { focused(requester) }, onClick = { onMedia(item) })
             }
         }
     }

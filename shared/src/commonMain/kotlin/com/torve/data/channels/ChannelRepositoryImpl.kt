@@ -612,17 +612,18 @@ class ChannelRepositoryImpl(
         password: String,
         playlistId: String,
         liveCategories: List<XtreamCategory>,
-    ): List<Channel> {
+        writer: BoundedChannelBatchWriter,
+    ) {
         val categoryMap = liveCategories.associateBy { it.categoryId }
-        val channels = mutableListOf<Channel>()
-        val seenIds = HashSet<String>(8192)
         try {
             xtreamClient.streamLiveStreams(server, username, password) { stream ->
                 val key = stream.streamId.ifBlank { "${stream.name.orEmpty()}:${stream.categoryId.orEmpty()}" }
-                if (seenIds.add(key)) {
-                    channels += xtreamClient.mapLiveStreamToChannel(stream, categoryMap, server, username, password, playlistId)
-                }
+                writer.add(key, xtreamClient.mapLiveStreamToChannel(stream, categoryMap, server, username, password, playlistId))
             }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (failed: ChannelBatchWriteException) {
+            throw failed
         } catch (t: XtreamResponseTooLargeException) {
             println(
                 "XtreamLiveCatalog: playlistId=$playlistId mode=all-too-large " +
@@ -631,8 +632,8 @@ class ChannelRepositoryImpl(
         } catch (t: Exception) {
             channelDebugLog("Xtream live fetch failed for playlist $playlistId: ${t.message}")
         }
-        println("XtreamLiveCatalog: playlistId=$playlistId mode=all rows=${channels.size} categories=${liveCategories.size}")
-        return channels
+        writer.flush()
+        println("XtreamLiveCatalog: playlistId=$playlistId mode=all rows=${writer.count} categories=${liveCategories.size}")
     }
 
     private suspend fun fetchXtreamVodChannels(
@@ -641,34 +642,37 @@ class ChannelRepositoryImpl(
         password: String,
         playlistId: String,
         vodCategories: List<XtreamCategory>,
-    ): List<Channel> {
+        writer: BoundedChannelBatchWriter,
+        discardStagedVod: () -> Unit,
+    ) {
         val categoryMap = vodCategories.associateBy { it.categoryId }
-        val channels = mutableListOf<Channel>()
-        val seenIds = HashSet<String>(4096)
         val fetchedAll = try {
             xtreamClient.streamVodStreams(server, username, password) { stream ->
                 val key = stream.streamId.ifBlank { "${stream.name.orEmpty()}:${stream.categoryId.orEmpty()}" }
-                if (seenIds.add(key)) {
-                    channels += xtreamClient.mapVodStreamToChannel(stream, categoryMap, server, username, password, playlistId)
-                }
+                writer.add(key, xtreamClient.mapVodStreamToChannel(stream, categoryMap, server, username, password, playlistId))
             }
-            println("XtreamVodCatalog: playlistId=$playlistId mode=all rows=${channels.size} categories=${vodCategories.size}")
+            println("XtreamVodCatalog: playlistId=$playlistId mode=all rows=${writer.count} categories=${vodCategories.size}")
             true
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (failed: ChannelBatchWriteException) {
+            throw failed
         } catch (t: XtreamResponseTooLargeException) {
             println(
                 "XtreamVodCatalog: playlistId=$playlistId mode=all-too-large " +
                     "limitBytes=${t.limitBytes} contentLength=${t.contentLength ?: -1}; falling back to category fetch",
             )
-            channels.clear(); seenIds.clear()
             false
         } catch (t: Exception) {
             channelDebugLog("Xtream VOD movie fetch failed for playlist $playlistId: ${t.message}; falling back to category fetch")
-            channels.clear(); seenIds.clear()
             false
         }
-        if (fetchedAll) return channels
-
-        return fetchXtreamVodChannelsByCategory(server, username, password, playlistId, vodCategories, categoryMap)
+        if (!fetchedAll) {
+            writer.reset()
+            discardStagedVod()
+            fetchXtreamVodChannelsByCategory(server, username, password, playlistId, vodCategories, categoryMap, writer)
+        }
+        writer.flush()
     }
 
     private suspend fun fetchXtreamVodChannelsByCategory(
@@ -678,20 +682,21 @@ class ChannelRepositoryImpl(
         playlistId: String,
         vodCategories: List<XtreamCategory>,
         categoryMap: Map<String, XtreamCategory>,
-    ): List<Channel> {
-        if (vodCategories.isEmpty()) return emptyList()
-        val channels = mutableListOf<Channel>()
-        val seenIds = HashSet<String>(4096)
+        writer: BoundedChannelBatchWriter,
+    ) {
+        if (vodCategories.isEmpty()) return
         var failedCategories = 0
         for (category in vodCategories) {
             val categoryId = category.categoryId.takeIf { it.isNotBlank() } ?: continue
             try {
                 xtreamClient.streamVodStreams(server, username, password, categoryId = categoryId) { stream ->
                     val key = stream.streamId.ifBlank { "${stream.name.orEmpty()}:${stream.categoryId.orEmpty()}" }
-                    if (seenIds.add(key)) {
-                        channels += xtreamClient.mapVodStreamToChannel(stream, categoryMap, server, username, password, playlistId)
-                    }
+                    writer.add(key, xtreamClient.mapVodStreamToChannel(stream, categoryMap, server, username, password, playlistId))
                 }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (failed: ChannelBatchWriteException) {
+                throw failed
             } catch (t: XtreamResponseTooLargeException) {
                 failedCategories++
                 channelDebugLog(
@@ -704,10 +709,9 @@ class ChannelRepositoryImpl(
             }
         }
         println(
-            "XtreamVodCatalog: playlistId=$playlistId mode=category rows=${channels.size} " +
+            "XtreamVodCatalog: playlistId=$playlistId mode=category rows=${writer.count} " +
                 "categories=${vodCategories.size} failedCategories=$failedCategories",
         )
-        return channels
     }
 
     private suspend fun fetchXtreamSeriesChannels(
@@ -1948,9 +1952,8 @@ class ChannelRepositoryImpl(
         }
     }
 
-    // Fetches and persists Xtream channels type-by-type so each group's Channel objects
-    // can be released before the next group is fetched. Peak heap consumption drops from
-    // sum(live + VOD + series) to max(live, VOD, series).
+    // Live/VOD are written while decoding, retaining at most one small batch.
+    // The staged generation remains invisible until every group is complete.
     private suspend fun persistXtreamChannelsStreaming(
         playlistId: String,
         playlistName: String,
@@ -1982,25 +1985,33 @@ class ChannelRepositoryImpl(
             var lastChannelForNotify: Channel? = null
             var lastSortIndexForNotify = -1
 
-            // --- Live: fetch, insert in one transaction, then release ---
-            var liveChannels = fetchXtreamLiveChannels(server, username, password, playlistId, liveCategories)
-            val liveCount = liveChannels.size
+            fun writer(sortBase: Int) = BoundedChannelBatchWriter(CHANNEL_INSERT_BATCH_SIZE) { batch, offset ->
+                database.transaction {
+                    insertChannelGroupAllRaw(ownerId, playlistId, newGeneration, batch, sortBase + offset, updatedAt)
+                }
+            }
+            // A writer's deduplication IDs are released before the next group starts.
+            val liveCount = writer(0).let { live ->
+                fetchXtreamLiveChannels(server, username, password, playlistId, liveCategories, live)
+                lastChannelForNotify = live.last
+                live.count
+            }
             if (liveCount > 0) {
-                database.transaction { insertChannelGroupAllRaw(ownerId, playlistId, newGeneration, liveChannels, 0, updatedAt) }
-                lastChannelForNotify = liveChannels.last()
                 lastSortIndexForNotify = liveCount - 1
             }
-            liveChannels = emptyList() // allow GC before VOD fetch
-
-            // --- VOD: fetch, insert, release ---
-            var vodChannels = fetchXtreamVodChannels(server, username, password, playlistId, vodCategories)
-            val vodCount = vodChannels.size
+            val vodCount = writer(liveCount).let { vod ->
+                fetchXtreamVodChannels(server, username, password, playlistId, vodCategories, vod) {
+                    sqlDriver.execute(null, """DELETE FROM iptv_channel
+                        WHERE user_id = ? AND playlist_id = ? AND generation_id = ? AND content_type = 'VOD_MOVIE'""", 3) {
+                        bindString(0, ownerId); bindString(1, playlistId); bindLong(2, newGeneration)
+                    }
+                }
+                if (vod.count > 0) lastChannelForNotify = vod.last
+                vod.count
+            }
             if (vodCount > 0) {
-                database.transaction { insertChannelGroupAllRaw(ownerId, playlistId, newGeneration, vodChannels, liveCount, updatedAt) }
-                lastChannelForNotify = vodChannels.last()
                 lastSortIndexForNotify = liveCount + vodCount - 1
             }
-            vodChannels = emptyList() // allow GC before series fetch
 
             // --- Series: still needs full in-memory dedup, but live+VOD are already GC-eligible ---
             var seriesChannels = fetchXtreamSeriesChannels(server, username, password, playlistId, seriesCategories)

@@ -311,8 +311,11 @@ data class StremioMeta(
     val videos: List<StremioVideo> = emptyList(),
     val links: List<StremioLink> = emptyList(),
     val trailers: List<StremioTrailer> = emptyList(),
+    val trailerStreams: List<StremioTrailer> = emptyList(),
     @SerialName("imdb_id") val imdbId: String? = null,
     @SerialName("app_extras") val appExtras: StremioAppExtras? = null,
+    @SerialName("torve_ratings") val nativeRatings: com.torve.domain.model.MediaRatings? = null,
+    @SerialName("torve_presentation_pending") val presentationPending: Boolean = false,
 )
 
 @Serializable
@@ -324,7 +327,7 @@ data class StremioAppCast(val name: String = "", val character: String? = null, 
 @Serializable
 data class StremioVideo(
     val id: String,
-    val title: String = "",
+    @kotlinx.serialization.json.JsonNames("name") val title: String = "",
     val season: Int? = null,
     val episode: Int? = null,
     val released: String? = null,
@@ -343,6 +346,7 @@ data class StremioLink(
 data class StremioTrailer(
     val source: String = "",
     val type: String = "",
+    val ytId: String? = null,
 )
 
 // ── Subtitle Models ──

@@ -16,7 +16,7 @@ import kotlin.test.*
 class TmdbExtensionPolicyTest {
     @Test fun catalogueAndEnrichmentAreIndependent() {
         val discovery = listOf("/search/multi", "/discover/movie", "/trending/tv/week", "/movie/popular", "/person/popular")
-        val details = listOf("/movie/123", "/tv/123/season/1", "/find/tt1234567", "/movie/123/recommendations", "/person/42", "/list/501", "/movie/123/lists")
+        val details = listOf("/movie/123", "/tv/123/season/1", "/find/tt1234567", "/movie/123/recommendations", "/person/42", "/list/501", "/movie/123/lists", "/presentations/movie", "/presentations/tv")
         for (endpoint in discovery + details) assertFalse(TmdbExtensionSelection().permits(endpoint))
         for (endpoint in discovery) assertFalse(TmdbExtensionSelection(enrichment = true).permits(endpoint), endpoint)
         for (endpoint in details) assertTrue(TmdbExtensionSelection(enrichment = true).permits(endpoint), endpoint)

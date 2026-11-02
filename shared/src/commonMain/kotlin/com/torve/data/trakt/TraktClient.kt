@@ -128,9 +128,9 @@ class TraktClient(
             .distinct().singleOrNull()
     }
 
-    suspend fun getContentComments(imdbId: String, series: Boolean, page: Int): com.torve.presentation.detail.ContentCommentPage {
+    suspend fun getContentComments(imdbId: String, series: Boolean, page: Int, accessToken: String? = null): com.torve.presentation.detail.ContentCommentPage {
         require(Regex("tt[0-9]+").matches(imdbId))
-        val response = getRaw("/${if (series) "shows" else "movies"}/$imdbId/comments/newest", null,
+        val response = getRaw("/${if (series) "shows" else "movies"}/$imdbId/comments/newest", accessToken,
             query = listOf("page" to page.coerceAtLeast(1).toString(), "limit" to "10"))
         val comments = decodeTraktBody<List<com.torve.presentation.detail.ContentComment>>(response)
         val pages = response.headers.entries.firstOrNull { it.key.equals("X-Pagination-Page-Count", true) }?.value?.toIntOrNull()

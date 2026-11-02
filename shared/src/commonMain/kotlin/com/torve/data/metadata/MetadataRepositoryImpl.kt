@@ -115,7 +115,8 @@ class MetadataRepositoryImpl(
             val value = deferred.await()
             if (created) {
                 metadataCacheMutex.withLock {
-                    metadataCache[key] = MetadataCacheEntry(value, Clock.System.now().toEpochMilliseconds())
+                    val artworklessPresentation = key.startsWith("presentation|") && value is MediaItem && value.posterUrl == null && value.backdropUrl == null
+                    if (!artworklessPresentation && !(value is MediaItem && value.presentationPending) && !(value is Season && value.metadataPending)) metadataCache[key] = MetadataCacheEntry(value, Clock.System.now().toEpochMilliseconds())
                     while (metadataCache.size > METADATA_CACHE_MAX_ENTRIES) {
                         val evictedKey = metadataCache.keys.firstOrNull() ?: break
                         metadataCache.remove(evictedKey)
@@ -295,12 +296,13 @@ class MetadataRepositoryImpl(
     }
 
     override suspend fun getDetail(type: String, id: Int): MediaItem {
-        val cacheKey = metadataCacheKey("getDetail:v2", type, id)
+        val locale = api.resolvedContentLanguage()
+        val cacheKey = metadataCacheKey("getDetail:v3", type, id)
         return cachedMetadata(cacheKey, METADATA_DETAIL_TTL_MS) {
         if (type == "movie") {
-            TmdbMappers.movieToMediaItem(api.getMovieDetail(id), api.resolvedContentLanguage())
+            TmdbMappers.movieToMediaItem(api.getMovieDetail(id, locale), locale)
         } else {
-            TmdbMappers.tvToMediaItem(api.getTvDetail(id), api.resolvedContentLanguage())
+            TmdbMappers.tvToMediaItem(api.getTvDetail(id, locale), locale)
         }
         }
     }
@@ -360,6 +362,33 @@ class MetadataRepositoryImpl(
         }
     }
 
+    override suspend fun getPresentation(type: String, id: Int, language: String?): MediaItem {
+        if (!api.usesTorveBackend) return getDetail(type, id)
+        val locale = language ?: api.resolvedContentLanguage()
+        return cachedMetadata("presentation|$type|$id|$locale", METADATA_DETAIL_TTL_MS) {
+            if (type == "tv" || type == "series") {
+                TmdbMappers.tvToMediaItem(api.getTvPresentation(id, locale), locale)
+            } else {
+                TmdbMappers.movieToMediaItem(api.getMoviePresentation(id, locale), locale)
+            }
+        }
+    }
+
+    override suspend fun cachedPresentations(type: String, ids: List<Int>, language: String): List<MediaItem> {
+        if (!api.usesTorveBackend || ids.isEmpty()) return emptyList()
+        val requested = ids.filter { it > 0 }.distinct().take(12).toSet()
+        val items = if (type == "tv") api.cachedTvPresentations(requested.toList(), language).results
+            .map { TmdbMappers.tvToMediaItem(it, language) }
+        else api.cachedMoviePresentations(requested.toList(), language).results
+            .map { TmdbMappers.movieToMediaItem(it, language) }
+        val visible = prepareFamilyValue(items.filter { it.tmdbId in requested }) as List<MediaItem>
+        metadataCacheMutex.withLock {
+            for (item in visible.filter { !it.presentationPending && (it.posterUrl != null || it.backdropUrl != null) }) metadataCache["presentation|$type|${item.tmdbId}|$language"] = MetadataCacheEntry(item, Clock.System.now().toEpochMilliseconds())
+            while (metadataCache.size > METADATA_CACHE_MAX_ENTRIES) metadataCache.remove(metadataCache.keys.first())
+        }
+        return visible
+    }
+
     override suspend fun getMediaImageUrls(type: String, id: Int): List<String> {
         val cacheKey = metadataCacheKey("getMediaImageUrls", type, id)
         return cachedMetadata(cacheKey, METADATA_DETAIL_TTL_MS) {
@@ -380,12 +409,28 @@ class MetadataRepositoryImpl(
         }
     }
 
+    override suspend fun getArtworkCandidates(type: String, id: Int, landscape: Boolean, language: String?): List<String> {
+        val locale = language ?: api.resolvedContentLanguage()
+        val key = "artworkCandidates|$type|$id|$landscape|$locale"
+        return cachedMetadata(key, METADATA_DETAIL_TTL_MS) {
+            val images = api.getImages(type, id, locale)
+            val preferred = if (landscape) images.backdrops else images.posters
+            val secondary = if (landscape) images.posters else images.backdrops
+            // The backend supplies one selected-language bucket per group.
+            // Bound automatic fallback; the full gallery remains available to the picker.
+            (preferred.take(6) + secondary.take(2)).mapNotNull {
+                if (landscape) TmdbMappers.backdropUrl(it.filePath) else TmdbMappers.posterUrl(it.filePath)
+            }.distinct()
+        }
+    }
+
     override suspend fun getSeasonDetail(tvId: Int, seasonNumber: Int): Season {
         val cacheKey = metadataCacheKey("getSeasonDetail", tvId, seasonNumber)
         return cachedMetadata(cacheKey, METADATA_DETAIL_TTL_MS) {
         val detail = api.getTvSeasonDetail(tvId, seasonNumber)
         Season(
             seasonNumber = detail.seasonNumber,
+            metadataPending = detail.metadataPending,
             episodeCount = detail.episodes.size,
             name = detail.name,
             posterUrl = TmdbMappers.posterUrl(detail.posterPath),
@@ -876,7 +921,7 @@ class MetadataRepositoryImpl(
             request("popular-tv", "Popular TV Shows") { api.getPopularTv(page = 1, requestCategory = "home.popular_tv.page_1").results.map { TmdbMappers.tvToMediaItem(it) } },
             request("top-rated", "Top Rated") { api.getTopRated("movie", page = 1, requestCategory = "home.top_rated.page_1").results.map { TmdbMappers.movieToMediaItem(it) } },
             request("airing-today", "Airing Today") { api.getAiringToday(page = 1, requestCategory = "home.airing_today.page_1").results.map { TmdbMappers.tvToMediaItem(it) } },
-        ), publish = publish)
+        ), timeoutMs = if (api.usesTorveBackend) 30_000 else 6_000, publish = publish)
         if (shelves.isEmpty()) throw HomeShelvesUnavailableException(listOf("No Home source completed within its startup budget"))
         shelves
     }

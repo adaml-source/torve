@@ -23,6 +23,46 @@ import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 
 class MetadataRepositoryImplRegressionTest {
+    @Test fun artworkPreviewsCannotCrossTheSelectedPosterOrNeutralBackdrop() {
+        val poster="https://api.torve.app/apple-metadata/v1/images/poster"
+        val neutral="https://api.torve.app/apple-metadata/v1/images/neutral"
+        val foreign="https://api.torve.app/apple-metadata/v1/images/foreign"
+        val images=TmdbImages(backdrops=listOf(TmdbImageItem(filePath=neutral,iso6391=null),TmdbImageItem(filePath=foreign,iso6391="ru")))
+        val previews=mapOf(poster to "poster-preview",neutral to "neutral-preview",foreign to "wrong-preview")
+        val movie=TmdbMappers.movieToMediaItem(TmdbMovie(1,title="Deutsch",posterPath=poster,images=images,artworkPreviews=previews),"de")
+        val tv=TmdbMappers.tvToMediaItem(TmdbTv(1,name="Deutsch",posterPath=poster,images=images,artworkPreviews=previews),"de")
+        for(item in listOf(movie,tv)) {
+            assertEquals(setOf(poster,neutral),item.artworkPreviews.keys)
+            assertEquals(neutral,item.backdropUrl)
+            assertEquals("neutral-preview",item.artworkPreviews[neutral])
+        }
+    }
+    @Test fun previewCannotBeAppliedToADifferentPosterOrLanguageSelection() {
+        val url="https://api.torve.app/apple-metadata/v1/images/de"
+        val movie=TmdbMovie(101,title="Deutsch",posterPath=url,posterPreviewBase64="preview",posterPreviewPath=url)
+        assertEquals("preview",TmdbMappers.movieToMediaItem(movie,"de").posterPreviewBase64)
+        kotlin.test.assertNull(TmdbMappers.movieToMediaItem(movie.copy(posterPreviewPath="https://fixture.test/other"),"de").posterPreviewBase64)
+        val tv=TmdbTv(101,name="Deutsch",posterPath=url,posterPreviewBase64="preview",posterPreviewPath=url)
+        assertEquals("preview",TmdbMappers.tvToMediaItem(tv,"de").posterPreviewBase64)
+        kotlin.test.assertNull(TmdbMappers.tvToMediaItem(tv.copy(posterPreviewPath="https://fixture.test/other"),"de").posterPreviewBase64)
+    }
+    @Test fun backendBatchIsScopedToRequestedIdsAndReusesTheNormalPresentationCache() = runTest {
+        var calls=0
+        val http=HttpClient(MockEngine { request -> calls++
+            assertEquals("/apple-metadata/v1/presentations/movie",request.url.encodedPath)
+            assertEquals("de",request.url.parameters["language"])
+            assertEquals("101,202",request.url.parameters["ids"])
+            assertTrue(request.url.parameters["api_key"]==null)
+            respond("""{"page":1,"total_pages":1,"total_results":2,"results":[{"id":101,"title":"Deutsch","poster_path":"https://api.torve.app/apple-metadata/v1/images/example"},{"id":999,"title":"Unexpected"}]}""",headers=headersOf(HttpHeaders.ContentType,"application/json"))
+        }) { install(ContentNegotiation) { json(jsonConfig()) } }
+        try {
+            val api=TmdbApiClient(http,resolvedHostProvider={null},baseUrl="https://api.torve.app/apple-metadata/v1")
+            val repo=MetadataRepositoryImpl(api)
+            assertEquals(listOf(101),repo.cachedPresentations("movie",listOf(101,202),"de").map { it.tmdbId })
+            assertEquals("Deutsch",repo.getPresentation("movie",101,"de").title)
+            assertEquals(1,calls)
+        } finally { http.close() }
+    }
     @Test fun failedLogoRequestDoesNotPoisonTheArtworkCache() = runTest {
         var requests = 0
         val http = HttpClient(MockEngine {
@@ -62,7 +102,7 @@ class MetadataRepositoryImplRegressionTest {
     }
 
     @Test
-    fun homeLoadsContentWhenTmdbResponsesSucceed() = runTest {
+    fun homeLoadsContentWhenTmdbResponsesSucceed() = kotlinx.coroutines.runBlocking {
         val repo = MetadataRepositoryImpl(
             api = TmdbApiClient(
                 httpClientWithRoutes(successRoutes = true),
@@ -78,7 +118,7 @@ class MetadataRepositoryImplRegressionTest {
     }
 
     @Test
-    fun homeLoaderSurfacesErrorWhenAllBackendRequestsFail() = runTest {
+    fun homeLoaderSurfacesErrorWhenAllBackendRequestsFail() = kotlinx.coroutines.runBlocking {
         val repo = MetadataRepositoryImpl(
             api = TmdbApiClient(
                 httpClientWithRoutes(successRoutes = false),
@@ -90,11 +130,11 @@ class MetadataRepositoryImplRegressionTest {
             repo.getHomeShelves()
         }
         assertTrue(error.failedSegments.isNotEmpty())
-        assertTrue(error.message?.contains("trending_movies") == true)
+        assertTrue(error.message?.contains("Home content is unavailable") == true)
     }
 
     @Test
-    fun oneHomeSegmentFailureDoesNotMarkAllSegmentsFailed() = runTest {
+    fun oneHomeSegmentFailureDoesNotMarkAllSegmentsFailed() = kotlinx.coroutines.runBlocking {
         val repo = MetadataRepositoryImpl(
             api = TmdbApiClient(
                 httpClientWithRoutes(

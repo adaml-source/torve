@@ -128,6 +128,7 @@ class AppleHomeLayoutPolicyTest {
         val config = config(HomeSection.ADDON_SHELVES)
         val defaults = rows(state, listOf(config))
         assertEquals(listOf("Netflix · Movies", "Netflix · TV shows"), defaults.map { it.title })
+        assertEquals(listOf("addon:netflix-movies", "addon:netflix-series"), defaults.map { it.seeAllSection })
         assertEquals(defaults.map { it.title }, AppleHomeLayoutPolicy.editorRows(state, listOf(config), emptyList(), emptyList())
             .filter { it.key.startsWith("addon:") }.map { it.title })
         assertEquals("My Netflix", rows(state, listOf(config.copy(catalogueRows = mapOf(

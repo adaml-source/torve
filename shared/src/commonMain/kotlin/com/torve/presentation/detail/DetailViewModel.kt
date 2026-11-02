@@ -203,6 +203,7 @@ class DetailViewModel(
     private var activeSourceResultsKey: DetailSourceResultsCache.Key? = null
     private var currentType: String? = null
     private var currentId: Int? = null
+    private var extensionPreviewOwner: String? = null
     /**
      * Tracks the in-flight Usenet resolve chain so a fresh user tap can
      * pre-empt a stale one. Cancelled on content switch / VM clear.
@@ -305,11 +306,22 @@ class DetailViewModel(
     }
 
     fun loadDetail(type: String, id: Int) {
+        loadDetailInternal(type, id, null)
+    }
+
+    /** Apple passes the card already selected by the user; no broad detail prefetch. */
+    fun loadDetailWithSeed(type: String, id: Int, seedJSON: String) {
+        val seed = runCatching { com.torve.presentation.apple.AppleCatalogueDetail.decode(seedJSON) }.getOrNull()
+        loadDetailInternal(type, id, seed)
+    }
+
+    private fun loadDetailInternal(type: String, id: Int, seed: MediaItem?) {
         sourceResultsCache.clear()
         activeSourceResultsKey = null
         streamFetchJob?.cancel()
         mediaLifecycleLookupJob?.cancel()
         detailLoadJob?.cancel()
+        seasonDetailJob?.cancel()
         ratingsJob?.cancel()
         watchedEpisodesJob?.cancel()
         seriesWatchRefreshJob?.cancel()
@@ -335,19 +347,24 @@ class DetailViewModel(
         }
         currentType = type
         currentId = id
+        val openingOwner = contentPolicyFilter.profileOwnerKey()
         detailLoadJob = scope.launch {
             detailDiagLog("loadDetail enter type=$type id=$id")
             if (contentChanged) {
                 hasExplicitSeasonSelection = false
                 pinnedPlaybackEpisode = null
             }
+            val opening = DetailOpeningSeed.accept(type, id, seed, currentPolicy(), contentPolicyFilter)
+                ?.takeIf { applyActiveProfileLimit(listOf(it)).isNotEmpty() }
+            val openingProgress = opening?.let { runCatching { watchProgressRepo.getProgress(it.id) }.getOrNull() }
+            if (openingOwner != contentPolicyFilter.profileOwnerKey()) return@launch
             _state.update { current ->
                 if (contentChanged) {
                     // Never render the previous title while the requested one
                     // is loading. Besides showing incorrect details, the stale
                     // Watch-now action allowed a fast click to open a picker
                     // just before the real title replaced the whole surface.
-                    DetailUiState(isLoading = true)
+                    DetailUiState(isLoading = true, mediaItem = opening, watchProgress = openingProgress)
                 } else current.copy(
                     isLoading = true,
                     error = null,
@@ -610,7 +627,9 @@ class DetailViewModel(
                 _state.update { current ->
                     val currentItem = current.mediaItem
                     if (currentItem != null && currentItem.id == item.id && currentItem.type == item.type) {
-                        current.copy(mediaItem = filtered)
+                        current.copy(mediaItem = if (filtered.isStubDetail) filtered else currentItem.copy(
+                            ratings = filtered.ratings, rating = filtered.rating,
+                            voteCount = filtered.voteCount, imdbId = currentItem.imdbId ?: filtered.imdbId))
                     } else {
                         current
                     }
@@ -914,32 +933,54 @@ class DetailViewModel(
 
     fun loadSeasonDetail(tvId: Int, seasonNumber: Int) {
         seasonDetailJob?.cancel()
+        if (com.torve.data.addon.ExtensionRuntimePolicy.userMetadataOnly) {
+            // Stremio metadata already includes the selected extension's episodes.
+            // A second generic lookup can select another language/provider.
+            val season = _state.value.mediaItem?.seasons?.firstOrNull { it.seasonNumber == seasonNumber }
+            _state.update { it.copy(selectedSeason = seasonNumber, seasonDetail = season,
+                isLoadingSeasonDetail = false, seasonDetailError = null) }
+            return
+        }
+        val requestedItem = _state.value.mediaItem?.id
+        val requestedOwner = contentPolicyFilter.profileOwnerKey()
         seasonDetailJob = scope.launch {
             _state.update {
                 it.copy(
                     selectedSeason = seasonNumber,
-                    seasonDetail = null,
+                    seasonDetail = it.seasonDetail?.takeIf { season -> season.seasonNumber == seasonNumber },
                     seasonDetailError = null,
                     isLoadingSeasonDetail = true,
                 )
             }
             try {
-                val season = metadataRepo.getSeasonDetail(tvId, seasonNumber)
-                _state.update {
-                    it.copy(
-                        seasonDetail = season,
-                        seasonDetailError = null,
-                        isLoadingSeasonDetail = false,
-                    )
+                kotlinx.coroutines.withTimeout(30_000L) {
+                    var updates = 0
+                    do {
+                        val season = metadataRepo.getSeasonDetail(tvId, seasonNumber)
+                        ensureActive()
+                        if (_state.value.mediaItem?.id != requestedItem ||
+                            contentPolicyFilter.profileOwnerKey() != requestedOwner) return@withTimeout
+                        _state.update { it.copy(seasonDetail = season,
+                            seasonDetailError = null, isLoadingSeasonDetail = false) }
+                        if (!season.metadataPending || ++updates >= 15) break
+                        // Keep real episodes visible while optional translations
+                        // arrive. Never require navigation to republish them.
+                        kotlinx.coroutines.delay(1_500)
+                    } while (true)
                 }
             } catch (e: Exception) {
-                if (e is CancellationException) throw e
+                if (e is CancellationException && e !is kotlinx.coroutines.TimeoutCancellationException) throw e
                 detailDiagLog("loadSeasonDetail FAILED tvId=$tvId season=$seasonNumber error=${e::class.simpleName}")
-                val fallbackSeason = fallbackSeasonFromShowMetadata(seasonNumber)
+                if (_state.value.mediaItem?.id != requestedItem ||
+                    contentPolicyFilter.profileOwnerKey() != requestedOwner) return@launch
+                val fallbackSeason = _state.value.seasonDetail?.takeIf { it.seasonNumber == seasonNumber }
+                    ?: fallbackSeasonFromShowMetadata(seasonNumber)
                 _state.update {
                     it.copy(
                         seasonDetail = fallbackSeason,
-                        seasonDetailError = if (fallbackSeason == null) "season_metadata_failed" else null,
+                        // Numbered playback fallbacks are useful, but do not
+                        // claim their episode names/synopses finished loading.
+                        seasonDetailError = "season_metadata_failed",
                         isLoadingSeasonDetail = false,
                     )
                 }
@@ -1121,12 +1162,58 @@ class DetailViewModel(
         }
     }
 
+    /** Same selection, current family policy; does not make an upstream request. */
+    @Throws(Exception::class)
+    suspend fun showExtensionDetailPreview(json: String) {
+        val owner = contentPolicyFilter.profileOwnerKey()
+        val seed = com.torve.presentation.apple.AppleCatalogueDetail.decode(json)
+        val allowed = DetailOpeningSeed.extension(seed, currentPolicy(), contentPolicyFilter)
+            ?.takeIf { applyActiveProfileLimit(listOf(it)).isNotEmpty() } ?: return
+        if (owner == contentPolicyFilter.profileOwnerKey()) {
+            // A cancelled/restarted language task can finish its preview after
+            // the newer full detail. Never replace that detail with the old
+            // source card, or reset its selected season back to season one.
+            val current = _state.value.mediaItem
+            if (extensionPreviewOwner == owner && current != null && current.id == allowed.id && current.type == allowed.type) return
+            loadExtensionDetail(com.torve.presentation.apple.AppleCatalogueDetail.encode(allowed))
+        }
+    }
+
+    /** Fill the visible selection without cancelling playback or resetting its season. */
+    @Throws(Exception::class)
+    suspend fun completeExtensionDetail(json: String) {
+        val owner = contentPolicyFilter.profileOwnerKey()
+        val enriched = com.torve.presentation.apple.AppleCatalogueDetail.decode(json)
+        val current = _state.value.mediaItem
+        if (current == null) { loadExtensionDetail(json); return }
+        if (current.id != enriched.id || current.type != enriched.type) return
+        val allowed = DetailOpeningSeed.extension(enriched, currentPolicy(), contentPolicyFilter)
+            ?.takeIf { applyActiveProfileLimit(listOf(it)).isNotEmpty() }
+        if (owner != contentPolicyFilter.profileOwnerKey()) return
+        val item = allowed ?: contentPolicyFilter.run { enriched.asStubDetail() }
+        currentId = item.tmdbId
+        _state.update { state ->
+            if (state.mediaItem?.id != enriched.id) state else state.copy(mediaItem = item,
+                seasonDetail = item.seasons.firstOrNull { it.seasonNumber == state.selectedSeason }
+                    ?.takeIf { it.episodes.isNotEmpty() } ?: state.seasonDetail)
+        }
+        if (item.isStubDetail) { cancelSourceLookup(); return }
+        enrichRatings(item)
+        if (item.type == MediaType.SERIES && item.tmdbId != null) {
+            // The locale may have changed while this page stayed open. Keep
+            // the selected season visible, then refresh its text in place.
+            loadSeasonDetail(item.tmdbId, _state.value.selectedSeason)
+        }
+    }
+
     /** Use an extension's supplied metadata without enabling or querying the built-in catalogue. */
     fun loadExtensionDetail(json: String) {
         val item = kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
             .decodeFromString<MediaItem>(json)
         require(item.id.isNotBlank())
+        extensionPreviewOwner = contentPolicyFilter.profileOwnerKey()
         detailLoadJob?.cancel()
+        seasonDetailJob?.cancel()
         ratingsJob?.cancel()
         cancelSourceLookup()
         watchedEpisodesJob?.cancel()

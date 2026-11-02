@@ -10,6 +10,8 @@ object ExtensionRuntimePolicy {
     var userManagedOnly: Boolean = false
     /** Hosts opt in before initializing DI. Other platforms retain their existing catalogue. */
     var optionalMetadataExtensions: Boolean = false
+    /** Only explicitly installed manifests may supply catalogue/title metadata. */
+    var userMetadataOnly: Boolean = false
 }
 
 internal const val DEVICE_MANIFEST_INSTALL = "device"

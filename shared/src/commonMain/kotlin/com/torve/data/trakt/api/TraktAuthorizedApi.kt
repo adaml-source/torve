@@ -80,6 +80,9 @@ class TraktAuthorizedApi(
     suspend fun hasConnection(): Boolean =
         tokenStore.read()?.accessToken?.isNotBlank() == true
 
+    suspend fun getContentComments(imdbId: String, series: Boolean, page: Int): com.torve.presentation.detail.ContentCommentPage =
+        executeWithRefresh { token -> traktClient.getContentComments(imdbId, series, page, token) }
+
     suspend fun getWatchlist(): List<TraktWatchlistItemResponse> =
         executeWithRefresh { token -> traktClient.getWatchlist(token) }
 

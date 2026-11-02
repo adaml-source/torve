@@ -5,6 +5,8 @@ import com.torve.domain.model.MediaItem
 import com.torve.domain.model.MediaType
 import com.torve.domain.model.WatchProgress
 import com.torve.domain.repository.PreferencesRepository
+import com.torve.data.metadata.metadataPresentationCacheKey
+import com.torve.presentation.home.HOME_COMPLETE_SNAPSHOT_KEY
 import com.torve.util.ioDispatcher
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.withContext
@@ -38,7 +40,7 @@ internal class CatalogDiscoverySnapshotStore(
     private val now: () -> Long = { Clock.System.now().toEpochMilliseconds() },
 ) {
     private val json = Json { ignoreUnknownKeys = true }
-    private val key = "catalog_discovery_snapshot_v1_$mediaType"
+    private val key = metadataPresentationCacheKey("catalog_discovery_snapshot_v1_$mediaType")
     private suspend fun language() = prefs.getString("app_language").orEmpty()
     private fun fresh(savedAt: Long) = now() - savedAt in 0..7L * 24 * 60 * 60 * 1000
 
@@ -52,7 +54,7 @@ internal class CatalogDiscoverySnapshotStore(
             }
             // Upgrading users already have these rows in Home. Reuse those titles,
             // instead of sending duplicate catalogue requests before the first tab paint.
-            val home = prefs.getString("home_snapshot_v5")?.let { json.decodeFromString<HomeDiscoverySeed>(it) }
+            val home = prefs.getString(HOME_COMPLETE_SNAPSHOT_KEY)?.let { json.decodeFromString<HomeDiscoverySeed>(it) }
                 ?.takeIf { fresh(it.savedAtMs) } ?: return@withContext null
             val type = if (mediaType == "tv") MediaType.SERIES else MediaType.MOVIE
             fun shelf(id: String) = home.shelves.firstOrNull { it.id == id }?.items.orEmpty().filter { it.type == type }

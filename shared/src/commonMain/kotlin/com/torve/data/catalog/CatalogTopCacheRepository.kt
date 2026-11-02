@@ -1,6 +1,7 @@
 package com.torve.data.catalog
 
 import com.torve.data.metadata.TmdbApiClient
+import com.torve.data.metadata.TmdbMappers
 import com.torve.db.TorveDatabase
 import com.torve.domain.model.MediaItem
 import com.torve.domain.model.MediaType
@@ -30,7 +31,12 @@ class CatalogTopCacheRepository(
     private val tmdbApi: TmdbApiClient,
 ) {
     /** Total target size per (mediaType, genre) bucket. */
-    private val maxItemsPerGenre = 1000
+    private val maxItemsPerGenre = if (tmdbApi.usesTorveBackend) 60 else 1000
+
+    val supportsBackgroundWarmup: Boolean get() = !tmdbApi.usesTorveBackend
+
+    private fun cacheBucket(mediaType: String): String =
+        if (tmdbApi.usesTorveBackend) "$mediaType:apple-metadata-v1:${tmdbApi.resolvedContentLanguage()}" else mediaType
 
     /** Page size the TMDB discover endpoint returns. */
     private val pageSize = 20
@@ -45,7 +51,7 @@ class CatalogTopCacheRepository(
      */
     fun hasCacheFor(mediaType: String, genreId: Int): Boolean {
         val count = database.torveQueries
-            .countTopForGenre(mediaType, genreId.toLong())
+            .countTopForGenre(cacheBucket(mediaType), genreId.toLong())
             .executeAsOneOrNull() ?: return false
         return count > 0L
     }
@@ -59,7 +65,7 @@ class CatalogTopCacheRepository(
         // selectLastRefreshTime returns Long? (SQL MAX() is nullable);
         // the outer executeAsOneOrNull() captures the empty-table case.
         val last = database.torveQueries
-            .selectLastRefreshTime(mediaType, genreId.toLong())
+            .selectLastRefreshTime(cacheBucket(mediaType), genreId.toLong())
             .executeAsOneOrNull() ?: return true
         val lastFetch = last.last_fetch ?: return true
         val now = Clock.System.now().toEpochMilliseconds()
@@ -72,7 +78,7 @@ class CatalogTopCacheRepository(
      */
     fun getTop(mediaType: String, genreId: Int, limit: Int = maxItemsPerGenre): List<MediaItem> {
         val rows = database.torveQueries
-            .selectTopForGenre(mediaType, genreId.toLong(), limit.toLong())
+            .selectTopForGenre(cacheBucket(mediaType), genreId.toLong(), limit.toLong())
             .executeAsList()
         val type = if (mediaType == "movie") MediaType.MOVIE else MediaType.SERIES
         return rows.map { row ->
@@ -81,8 +87,8 @@ class CatalogTopCacheRepository(
                 tmdbId = row.tmdb_id.toInt(),
                 title = row.title,
                 type = type,
-                posterUrl = row.poster_path?.let { "${TmdbApiClient.IMAGE_BASE}/w342$it" },
-                backdropUrl = row.backdrop_path?.let { "${TmdbApiClient.IMAGE_BASE}/w780$it" },
+                posterUrl = TmdbMappers.posterUrl(row.poster_path, "w342"),
+                backdropUrl = TmdbMappers.backdropUrl(row.backdrop_path, "w780"),
                 overview = row.overview,
                 year = row.year?.toInt(),
                 rating = row.vote_average,
@@ -126,10 +132,10 @@ class CatalogTopCacheRepository(
         val now = Clock.System.now().toEpochMilliseconds()
         val capped = collected.take(maxItemsPerGenre)
         database.torveQueries.transaction {
-            database.torveQueries.deleteTopForGenre(mediaType, genreId.toLong())
+            database.torveQueries.deleteTopForGenre(cacheBucket(mediaType), genreId.toLong())
             capped.forEachIndexed { idx, row ->
                 database.torveQueries.insertTopItem(
-                    media_type = mediaType,
+                    media_type = cacheBucket(mediaType),
                     genre_id = genreId.toLong(),
                     rank = idx.toLong(),
                     tmdb_id = row.tmdbId.toLong(),

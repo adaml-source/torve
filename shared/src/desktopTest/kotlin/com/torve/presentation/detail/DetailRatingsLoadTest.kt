@@ -112,6 +112,64 @@ class DetailRatingsLoadTest {
         }
     }
 
+    @Test fun seasonTranslationsUpdateTheOpenPageWithoutReentry() = runTest {
+        var calls = 0
+        val metadata = object : MetadataRepository by stub<MetadataRepository>() {
+            override suspend fun getSeasonDetail(tvId: Int, seasonNumber: Int): Season {
+                calls++
+                return Season(seasonNumber,1,episodes=listOf(Episode(1,if(calls==1) "English episode" else "Deutsche Folge")),metadataPending=calls==1)
+            }
+        }
+        withDetail({ respond("{}", headers = headersOf(HttpHeaders.ContentType,"application/json")) },metadata) { vm ->
+            vm.loadExtensionDetail(Json.encodeToString(film.copy(tmdbId=42)))
+            vm.loadSeasonDetail(42,31)
+            withContext(Dispatchers.Default) {
+                withTimeout(5_000) {
+                    vm.state.first { it.seasonDetail?.episodes?.firstOrNull()?.name == "Deutsche Folge" }
+                }
+            }
+            assertEquals(2,calls)
+            assertFalse(vm.state.value.isLoadingSeasonDetail)
+            assertEquals(31,vm.state.value.selectedSeason)
+        }
+    }
+
+    @Test fun localizedDetailRefreshKeepsSeason31AndRefreshesItsExistingEpisodes() = runTest {
+        val next=CompletableDeferred<Season>();var calls=0
+        val metadata=object : MetadataRepository by stub<MetadataRepository>() {
+            override suspend fun getSeasonDetail(tvId: Int,seasonNumber: Int): Season {
+                assertEquals(31,seasonNumber);calls++
+                return next.await()
+            }
+        }
+        withDetail({ respond("{}",headers=headersOf(HttpHeaders.ContentType,"application/json")) },metadata) { vm ->
+            val show=film.copy(type=MediaType.SERIES,tmdbId=42,seasons=listOf(Season(31,1,episodes=listOf(Episode(1,"English episode")))))
+            vm.loadExtensionDetail(Json.encodeToString(show));vm.selectSeason(31)
+            vm.completeExtensionDetail(Json.encodeToString(show.copy(title="Lokalisierte Serie",seasons=listOf(Season(31,1)))))
+            assertEquals(31,vm.state.value.selectedSeason)
+            assertEquals("English episode",vm.state.value.seasonDetail?.episodes?.single()?.name)
+            next.complete(Season(31,1,episodes=listOf(Episode(1,"Deutsche Folge"))))
+            withContext(Dispatchers.Default) { withTimeout(5_000) { vm.state.first { it.seasonDetail?.episodes?.singleOrNull()?.name == "Deutsche Folge" } } }
+            assertEquals("Lokalisierte Serie",vm.state.value.mediaItem?.title)
+            assertFalse(vm.state.value.isLoadingSeasonDetail)
+            assertTrue(calls>=1)
+        }
+    }
+
+    @Test fun latePreviewForTheSameSelectionCannotEraseFullMetadataOrResetSeason31() = runTest {
+        withDetail({ respond("{}",headers=headersOf(HttpHeaders.ContentType,"application/json")) }) { vm ->
+            val full=film.copy(type=MediaType.SERIES,title="Vollständiger Titel",overview="Deutsche Handlung",
+                seasons=listOf(Season(1,1),Season(31,1,episodes=listOf(Episode(1,"Deutsche Folge")))))
+            vm.loadExtensionDetail(Json.encodeToString(full));vm.selectExtensionSeason(31)
+            val old=full.copy(title="Old English card",overview=null,seasons=emptyList())
+            vm.showExtensionDetailPreview(Json.encodeToString(old))
+            assertEquals("Vollständiger Titel",vm.state.value.mediaItem?.title)
+            assertEquals("Deutsche Handlung",vm.state.value.mediaItem?.overview)
+            assertEquals(31,vm.state.value.selectedSeason)
+            assertEquals("Deutsche Folge",vm.state.value.seasonDetail?.episodes?.single()?.name)
+        }
+    }
+
     @Test fun switchingTitlesCancelsTheOldDetailRefresh() = runTest {
         val firstStarted = CompletableDeferred<Unit>()
         val firstCancelled = CompletableDeferred<Unit>()
@@ -156,6 +214,52 @@ class DetailRatingsLoadTest {
             assertTrue(recommendationsStarted.isCompleted)
             assertTrue(vm.state.value.isLoadingSimilar)
             assertEquals("42", displayed.id)
+        }
+    }
+
+    @Test fun selectedCardIsVisibleWhileTheFirstFullDetailIsStillPending() = runTest {
+        val full = CompletableDeferred<MediaItem>()
+        val metadata = object : MetadataRepository by stub<MetadataRepository>() {
+            override suspend fun getDetail(type: String, id: Int) = full.await()
+            override suspend fun getSimilar(type: String, id: Int, page: Int): List<MediaItem> = awaitCancellation()
+        }
+        withDetail({ respond("{}", headers = headersOf(HttpHeaders.ContentType, "application/json")) }, metadata) { vm ->
+            val seed = film.copy(id = "tmdb:42", tmdbId = 42)
+            vm.loadDetailWithSeed("movie",42,Json.encodeToString(seed))
+            assertEquals("42",vm.state.value.mediaItem?.id)
+            assertEquals(seed.title,vm.state.value.mediaItem?.title)
+            assertEquals(seed.posterUrl,vm.state.value.mediaItem?.posterUrl)
+            assertTrue(vm.state.value.isLoading)
+            assertFalse(full.isCompleted)
+            full.complete(seed.copy(id="42",overview="Full description"))
+            withContext(Dispatchers.Default) { withTimeout(5_000) { vm.state.first { !it.isLoading } } }
+            assertEquals("Full description",vm.state.value.mediaItem?.overview)
+        }
+    }
+
+    @Test fun firstDetailPreviewRejectsAnUnrelatedTitleOrWrongMediaType() = runTest {
+        val metadata = object : MetadataRepository by stub<MetadataRepository>() {
+            override suspend fun getDetail(type: String,id: Int): MediaItem = awaitCancellation()
+        }
+        withDetail({ error("Preview must not call a rating provider") },metadata) { vm ->
+            vm.loadDetailWithSeed("movie",42,Json.encodeToString(film.copy(tmdbId=43)))
+            assertNull(vm.state.value.mediaItem)
+            vm.loadDetailWithSeed("tv",42,Json.encodeToString(film.copy(tmdbId=42)))
+            assertNull(vm.state.value.mediaItem)
+        }
+    }
+
+    @Test fun lateExtensionMetadataCannotReplaceANewSelectionOrResetItsSeason() = runTest {
+        withDetail({ respond("{}",headers=headersOf(HttpHeaders.ContentType,"application/json")) }) { vm ->
+            val series=film.copy(type=MediaType.SERIES,seasons=listOf(Season(1,0,"First"),Season(3,0,"Third")))
+            vm.showExtensionDetailPreview(Json.encodeToString(series))
+            vm.selectExtensionSeason(3)
+            vm.completeExtensionDetail(Json.encodeToString(series.copy(overview="Enriched description")))
+            assertEquals(3,vm.state.value.selectedSeason)
+            assertEquals("Enriched description",vm.state.value.mediaItem?.overview)
+            vm.loadExtensionDetail(Json.encodeToString(film.copy(id="tt0111161",title="Next title")))
+            vm.completeExtensionDetail(Json.encodeToString(series))
+            assertEquals("Next title",vm.state.value.mediaItem?.title)
         }
     }
 }

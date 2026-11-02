@@ -12,6 +12,37 @@ import kotlinx.serialization.json.Json
 import kotlin.test.*
 
 class HomeCatalogPlanTest {
+    @Test fun catalogueContinuationUsesRawOffsetAndPreservesMovieSeriesIdentity() = runTest {
+        val paths=mutableListOf<String>()
+        val http=HttpClient(MockEngine { request -> paths+=request.url.encodedPath
+            respond("""{"metas":[{"id":"tt1234567","name":"Next"}]}""") })
+        val catalogs=listOf("movie","series").map { AddonCatalog(it,"language",extra=listOf(AddonExtra("skip"))) }
+        val source=InstalledAddon("https://source.test/config/manifest.json",AddonManifest("source","Source","1",catalogs=catalogs))
+        try {
+            val result=CatalogAggregator(StremioAddonClient(http,Json)).shelfPage(listOf(source),"source-language::type=series",20)
+            assertEquals(listOf("/config/catalog/series/language/skip=20.json"),paths)
+            assertEquals(MediaType.SERIES,result.items.single().type)
+            assertEquals("extension:source",result.items.single().familySourceKey)
+            assertEquals(21,result.nextOffset);assertTrue(result.hasMore)
+        } finally { http.close() }
+    }
+    @Test fun unpaginatedCatalogueReturnsRemainderBeyondHomePreview() = runTest {
+        val http=HttpClient(MockEngine { respond("""{"metas":[${(1..65).joinToString(",") { """{"id":"$it","name":"Title $it","type":"movie"}""" }}]}""") })
+        try {
+            val result=CatalogAggregator(StremioAddonClient(http,Json)).shelfPage(listOf(addon("source",1)),"source-list-0",20)
+            assertEquals((21..65).map { "$it" },result.items.map { it.id })
+            assertEquals(65,result.nextOffset);assertFalse(result.hasMore)
+        } finally { http.close() }
+    }
+    @Test fun removedCatalogueCannotFetchUsingRetainedRoute() = runTest {
+        var calls=0
+        val http=HttpClient(MockEngine { calls++;respond("""{"metas":[]}""") })
+        try {
+            val source=addon("source",1).copy(isEnabled=false)
+            assertFailsWith<IllegalArgumentException> { CatalogAggregator(StremioAddonClient(http,Json)).shelfPage(listOf(source),"source-list-0",20) }
+            assertEquals(0,calls)
+        } finally { http.close() }
+    }
     private val config = HomeSectionConfig(HomeSection.ADDON_SHELVES, true, 1)
     private fun addon(id: String, count: Int) = InstalledAddon("https://$id.test/manifest.json",
         AddonManifest(id, id, "1", catalogs = (0 until count).map { AddonCatalog(if (it % 2 == 0) "movie" else "series", "list-$it") }))

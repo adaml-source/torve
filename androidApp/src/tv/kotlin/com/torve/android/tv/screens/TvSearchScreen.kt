@@ -100,6 +100,8 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
@@ -336,7 +338,6 @@ internal fun TvSearchScreen(
     val secretStore: IntegrationSecretStore = koinInject()
     val availabilityAggregator: SourceAvailabilityAggregator = koinInject()
     val settingsState by settingsViewModel.state.collectAsState()
-    val focusPreview = com.torve.android.tv.settings.rememberTvFocusPreviewPolicy(settingsState.personalDataUserId).hasPreview("search")
     if (settingsState.tmdbExtensionsLoaded && !settingsState.tmdbCatalogueEnabled) {
         var manage by rememberSaveable { mutableStateOf(false) }
         if (manage) com.torve.android.ui.community.ExtensionsScreen(onBack = { manage = false }, isTv = true)
@@ -451,7 +452,6 @@ internal fun TvSearchScreen(
     val sortRequester = remember { FocusRequester() }
     val firstFilterRequester = remember { FocusRequester() }
     val firstResultRequester = remember { FocusRequester() }
-    var previewBodyRequester by remember { mutableStateOf<FocusRequester?>(null) }
     val firstExploreRequester = remember { FocusRequester() }
     val firstRecentRequester = remember { FocusRequester() }
     val resultRequesters = remember { mutableMapOf<String, FocusRequester>() }
@@ -465,8 +465,20 @@ internal fun TvSearchScreen(
     var lastVisibleFilterRequester by remember { mutableStateOf<FocusRequester?>(null) }
     val showRecentSearchRow = query.isBlank() && recentSearches.isNotEmpty()
 
-    DisposableEffect(registerFocusHandle, focusRestoreController, screenId, focusPreview) {
-        if (focusPreview) return@DisposableEffect onDispose { }
+    TvSearchPosterRatingsEffect(visibleResults, resultsGridState, "$screenId:${settingsState.personalDataUserId}") { enriched ->
+        val scores = enriched.associateBy { it.tvSearchStableKey() }
+        fun MediaItem.withVisibleImdb(): MediaItem {
+            val fresh = scores[tvSearchStableKey()] ?: return this
+            val score = fresh.ratings?.imdbScore ?: return this
+            return copy(imdbId = imdbId ?: fresh.imdbId,
+                ratings = (ratings ?: com.torve.domain.model.MediaRatings()).copy(
+                    imdbScore = score, imdbVotes = fresh.ratings?.imdbVotes))
+        }
+        baseResults = baseResults.map { it.withVisibleImdb() }
+        results = results.map { it.withVisibleImdb() }
+    }
+
+    DisposableEffect(registerFocusHandle, focusRestoreController, screenId) {
         registerFocusHandle?.invoke(
             TvScreenFocusHandle(
                 captureFocusedOrigin = {
@@ -484,9 +496,6 @@ internal fun TvSearchScreen(
     }
 
     fun requestSearchBodyFocus(): Boolean {
-        if (!showFilters && focusPreview && results.isNotEmpty()) {
-            return runCatching { (previewBodyRequester ?: firstResultRequester).requestFocus() }.isSuccess
-        }
         if (!showFilters && results.isNotEmpty()) {
             focusedResultKey = null
             resultFocusRequestNonce += 1
@@ -1890,7 +1899,7 @@ internal fun TvSearchScreen(
             }
             TvSearchResultsLayout(
                 modifier = Modifier.fillMaxWidth().weight(1f),
-                showPreview = previewItem != null && !focusPreview && density.columns < 10,
+                showPreview = previewItem != null && density.columns < 10,
                 preview = { previewModifier ->
                     TvSearchSelectedPreviewV2(item = previewItem, history = previewHistory,
                         artworkLookupPending = previewItem?.let {
@@ -1966,26 +1975,6 @@ internal fun TvSearchScreen(
                             firstRequester = firstExploreRequester, upRequester = inputFocusRequester,
                             onContentFocused = onContentFocused,
                         )
-                        focusPreview -> com.torve.android.tv.components.TvFocusPreviewGrid(
-                            items = visibleResults, screenId = screenId, columns = density.columns,
-                            railFocusRequester = railFocusRequester, entryRequester = firstResultRequester,
-                            headerRequester = inputFocusRequester, modifier = Modifier.fillMaxSize(),
-                            wrapRows = true,
-                            hero = { TvSearchSelectedPreviewV2(item = previewItem, history = previewHistory,
-                                modifier = Modifier.fillMaxWidth().height(180.dp)) },
-                            onContentFocused = {
-                                if (it !== inputFocusRequester && it !== railFocusRequester) previewBodyRequester = it
-                                onContentFocused(it)
-                            },
-                            registerFocusHandle = registerFocusHandle,
-                            onFocused = { item, index ->
-                                focusedResultKey = item.tvSearchStableKey(); selectedResult = item; selectedResultKey = item.tvSearchStableKey()
-                                if (index >= visibleResults.lastIndex - density.columns * 2 && searchCanLoadMore &&
-                                    !loading && !loadingMoreResults && !loadMoreRequestPending) {
-                                    loadMoreRequestPending = true
-                                    loadMoreRequestNonce += 1
-                                }
-                            }, onClick = { saveRecentSearch(query); onMediaClick(it) })
                         else -> LazyVerticalGrid(
                             columns = GridCells.Fixed(density.columns),
                             state = resultsGridState,
@@ -4547,17 +4536,17 @@ internal fun TvSearchResultCard(
     modifier: Modifier,
     onFocused: () -> Unit,
     onClick: () -> Unit,
-    ratingPrefs: com.torve.domain.model.RatingDisplayPrefs? = null,
 ) {
     var focused by remember { mutableStateOf(false) }
     val scale by animateFloatAsState(targetValue = if (focused) 1.025f else 1f, label = "resultScale")
-    val titleStyle = if (density.columns >= 10)
-        MaterialTheme.typography.bodyMedium.copy(fontSize = 10.sp, lineHeight = 12.sp)
-        else if (density == TvSearchDensity.RELAXED)
-        MaterialTheme.typography.bodyMedium.copy(fontSize = 12.sp, lineHeight = 16.sp)
-        else MaterialTheme.typography.bodyMedium.copy(lineHeight = 18.sp)
+    val metadataStyle = MaterialTheme.typography.labelSmall.copy(
+        fontSize = if (density.columns >= 10) 8.sp else 11.sp,
+        lineHeight = if (density.columns >= 10) 10.sp else 14.sp,
+        shadow = androidx.compose.ui.graphics.Shadow(Color.Black, blurRadius = 5f),
+    )
     Box(
         modifier = modifier
+            .semantics { contentDescription = item.title }
             .onFocusChanged { focused = it.isFocused; if (it.isFocused) onFocused() }
             .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onClick)
             .zIndex(if (focused) 1f else 0f).scale(scale)
@@ -4568,28 +4557,18 @@ internal fun TvSearchResultCard(
         val imageUrl = item.posterUrl?.takeIf { it.isNotBlank() } ?: item.backdropUrl?.takeIf { it.isNotBlank() }
         if (imageUrl != null) AsyncImage(model = imageUrl, contentDescription = null,
             contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
-        if (ratingPrefs != null) {
-            val footerHeight = with(androidx.compose.ui.platform.LocalDensity.current) {
-                titleStyle.lineHeight.toDp() * 2 + MaterialTheme.typography.labelSmall.lineHeight.toDp()
-            } + 18.dp
-            com.torve.android.tv.components.TvPosterRatingPills(item, ratingPrefs,
-                Modifier.align(Alignment.BottomStart).padding(start = 6.dp, bottom = footerHeight), maxRatings = 2)
-        }
-        Box(Modifier.align(Alignment.TopEnd).padding(7.dp)
-            .background(Obsidian.copy(alpha = 0.88f), androidx.compose.foundation.shape.CircleShape).padding(5.dp)) {
-            Icon(if (item.type == MediaType.SERIES) Icons.Default.Tv else Icons.Default.Movie,
-                contentDescription = localizedUiText(if (item.type == MediaType.SERIES) "TV series" else "Movie"),
-                tint = Snow, modifier = Modifier.size(16.dp))
-        }
-        Column(Modifier.align(Alignment.BottomStart).fillMaxWidth()
+        Row(Modifier.align(Alignment.BottomStart).fillMaxWidth()
             .testTag("search_footer:${item.id}")
-            .background(Obsidian.copy(alpha = 0.94f)).padding(horizontal = if (density.columns >= 10) 4.dp else 8.dp, vertical = 6.dp),
-            verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            // Always reserve two title lines, including one-line and missing-art titles.
-            Text(item.title, color = Snow, style = titleStyle, fontWeight = FontWeight.SemiBold,
-                minLines = 2, maxLines = 2, overflow = TextOverflow.Ellipsis)
-            Text(item.year?.toString().orEmpty(), color = Silver, style = MaterialTheme.typography.labelSmall,
-                minLines = 1, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            .padding(horizontal = 4.dp, vertical = 5.dp),
+            horizontalArrangement = Arrangement.spacedBy(3.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(item.year?.toString().orEmpty(), color = Snow, style = metadataStyle,
+                maxLines = 1, modifier = Modifier.weight(1f))
+            val score = item.ratings?.imdbScore?.takeIf { it.isFinite() && it > 0f && it <= 10f }
+                Image(painterResource(R.drawable.tv_search_logo_imdb), contentDescription = "IMDb",
+                    contentScale = ContentScale.Fit,
+                    modifier = Modifier.width(if (density.columns >= 10) 13.dp else 19.dp).height(10.dp))
+                Text(score?.let { "%.1f".format(java.util.Locale.US, it) } ?: "—", color = Snow, style = metadataStyle,
+                    fontWeight = FontWeight.SemiBold, maxLines = 1)
         }
     }
 }
@@ -4768,7 +4747,10 @@ internal fun mergeTvSearchDuplicate(primary: MediaItem, other: MediaItem): Media
 
 /** A late ratings response may carry an older item that predates its title artwork. */
 internal fun mergeTvSearchEnrichment(current: MediaItem, enriched: MediaItem): MediaItem =
-    mergeTvSearchDuplicate(current, enriched).copy(ratings = enriched.ratings ?: current.ratings)
+    mergeTvSearchDuplicate(current, enriched).copy(ratings = enriched.ratings?.let { fresh ->
+        fresh.copy(imdbScore = fresh.imdbScore ?: current.ratings?.imdbScore,
+            imdbVotes = fresh.imdbVotes ?: current.ratings?.imdbVotes)
+    } ?: current.ratings)
 
 private fun List<MediaItem>.dedupeTvSearchResults(): List<MediaItem> {
     val byKey = LinkedHashMap<String, MediaItem>()

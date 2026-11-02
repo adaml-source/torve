@@ -26,6 +26,7 @@ data class TmdbKeyword(
 @Serializable
 data class TmdbMovie(
     val id: Int,
+    @SerialName("torve_ratings") val nativeRatings: com.torve.domain.model.MediaRatings? = null,
     val title: String = "",
     val adult: Boolean? = null,
     val overview: String = "",
@@ -54,11 +55,17 @@ data class TmdbMovie(
     @SerialName("release_dates") val releaseDates: TmdbReleaseDates? = null,
     val budget: Long? = null,
     val revenue: Long? = null,
+    @SerialName("torve_poster_preview") val posterPreviewBase64: String? = null,
+    @SerialName("torve_poster_preview_path") val posterPreviewPath: String? = null,
+    @SerialName("torve_artwork_previews") val artworkPreviews: Map<String, String> = emptyMap(),
+    @SerialName("torve_presentation_pending") val presentationPending: Boolean = false,
+    @SerialName("torve_logo_candidates") val logoCandidates: List<com.torve.domain.model.TitleLogoCandidate> = emptyList(),
 )
 
 @Serializable
 data class TmdbTv(
     val id: Int,
+    @SerialName("torve_ratings") val nativeRatings: com.torve.domain.model.MediaRatings? = null,
     val name: String = "",
     val adult: Boolean? = null,
     val overview: String = "",
@@ -87,11 +94,18 @@ data class TmdbTv(
     @SerialName("original_language") val originalLanguage: String? = null,
     @SerialName("origin_country") val originCountry: List<String> = emptyList(),
     @SerialName("production_countries") val productionCountries: List<TmdbCountry> = emptyList(),
+    @SerialName("torve_poster_preview") val posterPreviewBase64: String? = null,
+    @SerialName("torve_poster_preview_path") val posterPreviewPath: String? = null,
+    @SerialName("torve_artwork_previews") val artworkPreviews: Map<String, String> = emptyMap(),
+    @SerialName("torve_presentation_pending") val presentationPending: Boolean = false,
+    @SerialName("torve_logo_candidates") val logoCandidates: List<com.torve.domain.model.TitleLogoCandidate> = emptyList(),
 )
 
 @Serializable
 data class TmdbMultiResult(
     val id: Int,
+    @SerialName("torve_ratings") val nativeRatings: com.torve.domain.model.MediaRatings? = null,
+    @SerialName("imdb_id") val imdbId: String? = null,
     @SerialName("media_type") val mediaType: String = "",
     val adult: Boolean? = null,
     val title: String? = null,
@@ -193,6 +207,7 @@ data class TmdbPerson(
 @Serializable
 data class TmdbPersonCastCredit(
     val id: Int,
+    @SerialName("torve_ratings") val nativeRatings: com.torve.domain.model.MediaRatings? = null,
     val title: String? = null,
     val name: String? = null,
     @SerialName("media_type") val mediaType: String = "",
@@ -210,6 +225,7 @@ data class TmdbPersonCastCredit(
 @Serializable
 data class TmdbPersonCrewCredit(
     val id: Int,
+    @SerialName("torve_ratings") val nativeRatings: com.torve.domain.model.MediaRatings? = null,
     val title: String? = null,
     val name: String? = null,
     @SerialName("media_type") val mediaType: String = "",
@@ -261,6 +277,7 @@ data class TmdbSeasonDetail(
     val overview: String = "",
     val episodes: List<TmdbEpisode> = emptyList(),
     @SerialName("poster_path") val posterPath: String? = null,
+    @SerialName("torve_localization_pending") val metadataPending: Boolean = false,
 )
 
 @Serializable

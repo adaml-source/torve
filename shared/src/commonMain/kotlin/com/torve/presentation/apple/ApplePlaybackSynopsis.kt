@@ -6,6 +6,12 @@ import com.torve.presentation.detail.DetailUiState
 data class ApplePlaybackSynopsis(val title: String, val overview: String, val source: String? = null)
 
 object ApplePlaybackSynopsisPolicy {
+    /** A saved plot has no language provenance; length must not defeat a current translation. */
+    fun preferCurrentLanguage(base: ApplePlaybackSynopsis, candidate: String?, source: String): ApplePlaybackSynopsis {
+        val text = candidate?.trim()?.takeUnless { it.equals("N/A", true) }.orEmpty()
+        return if (text.isNotEmpty()) base.copy(overview = text, source = source) else base
+    }
+
     fun preferFull(base: ApplePlaybackSynopsis, candidate: String?, source: String): ApplePlaybackSynopsis {
         val text = candidate?.trim()?.takeUnless { it.equals("N/A", true) }.orEmpty()
         return if (text.length > base.overview.trim().length) base.copy(overview = text, source = source) else base

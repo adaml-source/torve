@@ -13,6 +13,44 @@ import kotlinx.serialization.json.Json
 import kotlin.test.*
 
 class LocalizedMediaRepositoryTest {
+    @Test fun slowCacheOnlyBatchIsCancelledWithoutPoisoningTheNormalTitleLookup() = runTest {
+        var cancelled=false;var batches=0;var normal=0
+        val client=http { request ->
+            if(request.url.encodedPath.contains("/presentations/")) {
+                batches++
+                try { delay(10_000) } finally { cancelled=true }
+            } else normal++
+            respond("""{"id":101,"title":"Deutsch"}""",headers=headersOf(HttpHeaders.ContentType,"application/json"))
+        }
+        try {
+            val api=TmdbApiClient(client,resolvedHostProvider={null},baseUrl="https://api.torve.app/apple-metadata/v1")
+            val repo=LocalizedMediaRepository(api,backgroundScope,presentations=MetadataRepositoryImpl(api))
+            // Ktor's MockEngine and body conversion use real worker dispatchers;
+            // keep the timeout on the same clock rather than advancing virtual time.
+            assertTrue(withContext(Dispatchers.Default) { repo.cachedPresentations(listOf("101"),"movie","de") }.isEmpty())
+            assertTrue(cancelled);assertEquals(1,batches)
+            assertEquals("Deutsch",repo.presentation("101","movie","de")!!.title)
+            assertEquals(1,normal)
+        } finally { client.close() }
+    }
+    @Test fun cachedBatchSeedsLocalizedLookupsAndHonorsTheProviderChoice() = runTest {
+        var calls=0;var allowed=true
+        val client=http { request -> calls++
+            assertEquals("/apple-metadata/v1/presentations/movie",request.url.encodedPath)
+            assertEquals("de",request.url.parameters["language"])
+            respond("""{"page":1,"total_pages":1,"total_results":1,"results":[{"id":101,"title":"Deutsch","poster_path":"https://api.torve.app/apple-metadata/v1/images/de"}]}""",headers=headersOf(HttpHeaders.ContentType,"application/json"))
+        }
+        try {
+            val api=TmdbApiClient(client,resolvedHostProvider={null},baseUrl="https://api.torve.app/apple-metadata/v1")
+            val repo=LocalizedMediaRepository(api,backgroundScope,enrichmentAllowed={allowed},presentations=MetadataRepositoryImpl(api))
+            assertEquals("Deutsch",withContext(Dispatchers.Default) { repo.cachedPresentations(listOf("tmdb:101"),"movie","de-DE") }.single().title)
+            assertEquals("Deutsch",repo.presentation("101","movie","de")!!.title)
+            assertEquals(1,calls)
+            allowed=false
+            assertTrue(repo.cachedPresentations(listOf("101"),"movie","de").isEmpty())
+            assertNull(repo.presentation("101","movie","de"));assertEquals(1,calls)
+        } finally { client.close() }
+    }
     private fun http(handler: suspend MockRequestHandleScope.(HttpRequestData) -> HttpResponseData) =
         HttpClient(MockEngine(handler)) { install(ContentNegotiation) { json(Json { ignoreUnknownKeys = true }) } }
     private fun MockRequestHandleScope.movie(language: String) = respond(

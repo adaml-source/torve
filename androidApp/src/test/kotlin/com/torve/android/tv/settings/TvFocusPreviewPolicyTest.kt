@@ -8,7 +8,7 @@ class TvFocusPreviewPolicyTest {
         val choices = mapOf("page:home" to false, "row:home:watchlist" to false, "page:movies" to true)
         val global = TvFocusPreviewPolicy(true, choices)
         assertTrue(global.enabled("home", "watchlist"))
-        assertTrue(global.enabled("search", "results"))
+        assertTrue(global.enabled("shows", "results"))
         val individual = global.copy(global = false)
         assertFalse(individual.enabled("home", "watchlist"))
         assertTrue(individual.enabled("movies"))
@@ -23,6 +23,16 @@ class TvFocusPreviewPolicyTest {
     @Test fun individualRowCanEnablePreviewOnDisabledPage() {
         val p = TvFocusPreviewPolicy(choices = mapOf("row:home:watchlist" to true))
         assertTrue(p.hasPreview("home")); assertFalse(p.enabled("home", "trending"))
+    }
+    @Test fun searchStaysARegularGridWithGlobalAndLegacyPageOrRowOverrides() {
+        val choices = mapOf("page:search" to true, "row:search:results" to true)
+        listOf(false, true).forEach { global ->
+            val policy = TvFocusPreviewPolicy(global, choices)
+            assertFalse(policy.enabled("search"))
+            assertFalse(policy.enabled("search", "results"))
+            assertFalse(policy.hasPreview("search"))
+        }
+        assertFalse(TV_FOCUS_PREVIEW_PAGES.any { it.first == "search" })
     }
     @Test fun everyLibraryAndProviderRouteUsesCanonicalPageChoice() {
         assertEquals("jellyfin", tvFocusPreviewPage("library_jellyfin"))

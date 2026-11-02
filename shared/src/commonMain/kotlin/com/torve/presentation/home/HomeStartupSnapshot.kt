@@ -2,9 +2,18 @@ package com.torve.presentation.home
 
 import com.torve.domain.model.*
 import com.torve.domain.repository.PreferencesRepository
+import com.torve.data.metadata.metadataPresentationCacheKey
 
-internal const val HOME_STARTUP_SNAPSHOT_KEY = "home_startup_snapshot_v1"
-internal const val HOME_COMPLETE_SNAPSHOT_KEY = "home_snapshot_v5"
+internal val HOME_STARTUP_SNAPSHOT_KEY get() = metadataPresentationCacheKey("home_startup_snapshot_v1")
+internal val HOME_COMPLETE_SNAPSHOT_KEY get() = metadataPresentationCacheKey("home_snapshot_v5")
+
+/** Old addon cards cannot seed a continuation from the replacement catalogue. */
+internal fun List<CatalogShelf>.migratedNativeCatalogueShelves(
+    revision: Int,
+    apple: Boolean = com.torve.data.metadata.platformMetadataBackendBaseUrl() != null,
+): List<CatalogShelf> = if (!apple || revision >= 2) this else filterNot {
+    Regex("-(?:[a-f0-9]{7}\\.)?tmdb\\.(year|language|top|trending|latest|search)(?:$|[:_])").containsMatchIn(it.id)
+}
 
 /** Read the small presentation first; old installations retain their existing fallback. */
 internal suspend fun readHomeStartupSnapshot(prefs: PreferencesRepository): String? =

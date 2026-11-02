@@ -21,16 +21,25 @@ data class ContentFact(val label: String, val value: String)
 }
 data class ContentCommentPage(val items: List<ContentComment>, val page: Int, val hasMore: Boolean)
 
-/** Public, read-only community data. No user history or access token is sent. */
-class ContentCommunity(private val tmdb: TmdbApiClient, private val trakt: TraktClient) {
+/** Read-only community data; extension-only hosts require the user's connected Trakt account. */
+class ContentCommunity(private val tmdb: TmdbApiClient, private val trakt: TraktClient,
+    private val authorized: com.torve.data.trakt.api.TraktAuthorizedApi? = null) {
     @Throws(Exception::class)
     suspend fun facts(item: MediaItem): List<ContentFact> {
+        if (com.torve.data.addon.ExtensionRuntimePolicy.userMetadataOnly) return baseFacts(item)
         val id = item.tmdbId ?: return baseFacts(item)
         return if (item.type == MediaType.SERIES) tvFacts(tmdb.getTvDetail(id)) else movieFacts(tmdb.getMovieDetail(id))
     }
 
     @Throws(Exception::class)
     suspend fun comments(item: MediaItem, page: Int): ContentCommentPage {
+        if (com.torve.data.addon.ExtensionRuntimePolicy.userMetadataOnly) {
+            // Never restore the retired public-provider fallback or resolve IDs through it.
+            val imdb = (item.imdbId ?: item.id).takeIf { Regex("tt[0-9]+").matches(it) }
+            val connection = authorized
+            if (imdb == null || connection == null || !connection.hasConnection()) return ContentCommentPage(emptyList(), 1, false)
+            return connection.getContentComments(imdb, item.type == MediaType.SERIES, page.coerceAtLeast(1))
+        }
         var imdb = item.imdbId
         if (imdb.isNullOrBlank() && item.tmdbId != null) {
             imdb = if (item.type == MediaType.SERIES) tmdb.getTvDetail(item.tmdbId).externalIds?.imdbId

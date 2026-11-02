@@ -14,13 +14,32 @@ class LocalizedMediaRepository(
     private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
     private val nowMillis: () -> Long = { Clock.System.now().toEpochMilliseconds() },
     private val enrichmentAllowed: suspend () -> Boolean = { true },
+    private val presentations: com.torve.domain.repository.MetadataRepository? = null,
 ) {
     private data class Entry(val value: Any?, val expiresAt: Long)
     private val mutex = Mutex()
     private val cache = LinkedHashMap<String, Entry>()
     private val pending = mutableMapOf<String, Deferred<Any?>>()
 
-    suspend fun presentation(mediaId: String, type: String, language: String, includeCast: Boolean = false): MediaItem? {
+    suspend fun cachedPresentations(mediaIds: List<String>, type: String, language: String): List<MediaItem> {
+        if (!enrichmentAllowed() || !api.usesTorveBackend) return emptyList()
+        val kind = when(type) { "movie" -> "movie"; "tv", "series" -> "tv"; else -> return emptyList() }
+        val locale=language.trim().substringBefore('-').substringBefore('_').lowercase()
+        if (!locale.matches(Regex("[a-z]{2}"))) return emptyList()
+        val ids=mediaIds.mapNotNull { AppleDetailNavigation.catalogId(it) }.distinct().take(12)
+        // Publication has its own short deadline in the Apple client. Let a
+        // valid cached reply finish on cellular instead of discarding it at
+        // 500 ms and launching the slower per-title provider requests again.
+        val values=withTimeoutOrNull(3_000) { presentations?.cachedPresentations(kind,ids,locale) }.orEmpty()
+        if (!enrichmentAllowed()) return emptyList()
+        mutex.withLock {
+            for(item in values.filter { !it.presentationPending && (it.posterUrl != null || it.backdropUrl != null) }) cache["presentation:$kind:${item.tmdbId}:$locale:false"] = Entry(item,nowMillis()+1_800_000L)
+            while(cache.size>400) cache.remove(cache.keys.first())
+        }
+        return values
+    }
+
+    suspend fun presentation(mediaId: String, type: String, language: String, includeCast: Boolean = false, refresh: Boolean = false): MediaItem? {
         // A cached overlay must not make an opted-out provider appear active.
         if (!enrichmentAllowed()) return null
         val kind = when (type) { "movie" -> "movie"; "tv", "series" -> "tv"; else -> return null }
@@ -34,8 +53,11 @@ class LocalizedMediaRepository(
                 if (kind == "tv") found.tvResults.firstOrNull()?.id else found.movieResults.firstOrNull()?.id
             }
         } ?: return null
-        val item = cached("presentation:$kind:$id:$locale:$includeCast") {
-            if (kind == "tv") TmdbMappers.tvToMediaItem(api.getTvPresentation(id, locale, includeCast), locale)
+        val presentationKey = "presentation:$kind:$id:$locale:$includeCast"
+        if (refresh) mutex.withLock { cache.remove(presentationKey) }
+        val item = cached(presentationKey) {
+            if (api.usesTorveBackend && !includeCast && presentations != null) presentations.getPresentation(kind, id, locale)
+            else if (kind == "tv") TmdbMappers.tvToMediaItem(api.getTvPresentation(id, locale, includeCast), locale)
             else TmdbMappers.movieToMediaItem(api.getMoviePresentation(id, locale, includeCast), locale)
         } ?: return null
         if (!enrichmentAllowed()) return null
@@ -58,11 +80,16 @@ class LocalizedMediaRepository(
             cache[key]?.takeIf { nowMillis() < it.expiresAt }?.let { return it.value as T? }
             pending[key] ?: scope.async {
                 try {
-                    val value = try { fetch() } catch (cancelled: CancellationException) { throw cancelled }
-                        catch (_: Exception) { null }
+                    // Cache genuine missing records, never a transient transport failure.
+                    val value = try { fetch() }
+                        catch (cancelled: CancellationException) { throw cancelled }
+                        catch (error: MetadataHttpException) { if (error.statusCode == 404) null else return@async null }
+                        catch (_: Exception) { return@async null }
                     mutex.withLock {
                         // Short negative caching prevents repeated failed requests as cards scroll.
-                        cache[key] = Entry(value, nowMillis() + if (value == null) 60_000L else 1_800_000L)
+                        if (value !is MediaItem || (!value.presentationPending && (value.posterUrl != null || value.backdropUrl != null))) {
+                            cache[key] = Entry(value, nowMillis() + if (value == null) 60_000L else 1_800_000L)
+                        }
                         while (cache.size > 400) cache.remove(cache.keys.first())
                     }
                     value

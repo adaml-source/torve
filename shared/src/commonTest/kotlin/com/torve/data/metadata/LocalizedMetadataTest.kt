@@ -10,6 +10,22 @@ import kotlinx.serialization.json.Json
 import kotlin.test.*
 
 class LocalizedMetadataTest {
+    @Test fun untaggedLogoCandidatesRemainSeparateFromLanguageSelectedArtwork() {
+        val json = Json { ignoreUnknownKeys = true }
+        val wire = """{"id":42,"title":"The Dog Stars","name":"The Dog Stars",
+            "torve_logo_candidates":[{"url":"https://api.torve.app/apple-metadata/v1/images/known","titles":["The Dog Stars"]}],
+            "images":{"logos":[]}}"""
+        val movie = TmdbMappers.movieToMediaItem(json.decodeFromString<TmdbMovie>(wire))
+        val series = TmdbMappers.tvToMediaItem(json.decodeFromString<TmdbTv>(wire))
+        for (item in listOf(movie,series)) {
+            assertNull(item.logoUrl)
+            assertEquals(listOf("The Dog Stars"),item.logoCandidates.single().titles)
+            assertTrue(item.logoCandidates.single().url.startsWith("https://api.torve.app/"))
+            assertEquals(item.logoCandidates,json.decodeFromString<com.torve.domain.model.MediaItem>(
+                json.encodeToString(com.torve.domain.model.MediaItem.serializer(),item)).logoCandidates)
+        }
+    }
+
     @Test fun heroesPreferNeutralScenesToTitleBearingLocalizedBackdrops() {
         val images = TmdbImages(backdrops = listOf(
             TmdbImageItem("/branded.jpg", "en", voteAverage = 10.0, voteCount = 100),

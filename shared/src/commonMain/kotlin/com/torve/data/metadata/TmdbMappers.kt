@@ -13,6 +13,7 @@ object TmdbMappers {
 
     private fun imageUrl(path: String?, size: String): String? {
         val normalized = path?.trim()?.takeIf { it.isNotEmpty() } ?: return null
+        if (platformMetadataBackendBaseUrl() != null && !normalized.startsWith("https://")) return null
         return if (normalized.startsWith("http://") || normalized.startsWith("https://")) {
             normalized
         } else {
@@ -69,6 +70,8 @@ object TmdbMappers {
     fun movieToMediaItem(m: TmdbMovie, preferredLanguage: String = "en"): MediaItem {
         val trailer = pickBestTrailer(m.videos?.results)
         val director = m.credits?.crew?.firstOrNull { it.job == "Director" }
+        val selectedPoster = posterUrl(bestImagePath(m.images?.posters.orEmpty(), preferredLanguage) ?: m.posterPath)
+        val selectedBackdrop = backdropUrl(titlelessBackdropPath(m.images) ?: bestImagePath(m.images?.backdrops.orEmpty(), preferredLanguage) ?: m.backdropPath)
         return MediaItem(
             id = m.id.toString(),
             tmdbId = m.id,
@@ -81,10 +84,14 @@ object TmdbMappers {
             ageCertifications = m.releaseDates?.results.orEmpty().flatMap { c -> c.releases.filter { it.certification.isNotBlank() }.map { com.torve.domain.model.AgeCertification(c.country, it.certification) } },
             year = m.releaseDate?.take(4)?.toIntOrNull(),
             overview = m.overview,
-            posterUrl = posterUrl(bestImagePath(m.images?.posters.orEmpty(), preferredLanguage) ?: m.posterPath),
-            backdropUrl = backdropUrl(titlelessBackdropPath(m.images) ?: bestImagePath(m.images?.backdrops.orEmpty(), preferredLanguage) ?: m.backdropPath),
+            posterUrl = selectedPoster,
+            posterPreviewBase64 = m.posterPreviewBase64?.takeIf { selectedPoster == m.posterPreviewPath && it.length <= 48_000 },
+            presentationPending = m.presentationPending,
+            backdropUrl = selectedBackdrop,
+            artworkPreviews = m.artworkPreviews.filter { (path, value) -> path in listOfNotNull(selectedPoster, selectedBackdrop) && value.length <= 48_000 },
             titlelessBackdropUrl = backdropUrl(titlelessBackdropPath(m.images)),
             logoUrl = logoUrl(bestLogoPath(m.images, preferredLanguage)),
+            logoCandidates = m.logoCandidates.take(2),
             rating = m.voteAverage,
             voteCount = m.voteCount,
             runtime = m.runtime,
@@ -107,13 +114,15 @@ object TmdbMappers {
             trailerKey = trailer?.key,
             tagline = m.tagline,
             popularity = m.popularity,
-            ratings = m.voteAverage?.let { MediaRatings(tmdbScore = it.toFloat()) },
+            ratings = m.nativeRatings ?: m.voteAverage?.let { MediaRatings(tmdbScore = it.toFloat()) },
         )
     }
 
     fun tvToMediaItem(t: TmdbTv, preferredLanguage: String = "en"): MediaItem {
         val trailer = pickBestTrailer(t.videos?.results)
         val director = t.credits?.crew?.firstOrNull { it.job == "Director" }
+        val selectedPoster = posterUrl(bestImagePath(t.images?.posters.orEmpty(), preferredLanguage) ?: t.posterPath)
+        val selectedBackdrop = backdropUrl(titlelessBackdropPath(t.images) ?: bestImagePath(t.images?.backdrops.orEmpty(), preferredLanguage) ?: t.backdropPath)
         return MediaItem(
             id = t.id.toString(),
             tmdbId = t.id,
@@ -124,10 +133,14 @@ object TmdbMappers {
             ageCertifications = t.contentRatings?.results.orEmpty().filter { it.rating.isNotBlank() }.map { com.torve.domain.model.AgeCertification(it.country, it.rating) },
             year = t.firstAirDate?.take(4)?.toIntOrNull(),
             overview = t.overview,
-            posterUrl = posterUrl(bestImagePath(t.images?.posters.orEmpty(), preferredLanguage) ?: t.posterPath),
-            backdropUrl = backdropUrl(titlelessBackdropPath(t.images) ?: bestImagePath(t.images?.backdrops.orEmpty(), preferredLanguage) ?: t.backdropPath),
+            posterUrl = selectedPoster,
+            posterPreviewBase64 = t.posterPreviewBase64?.takeIf { selectedPoster == t.posterPreviewPath && it.length <= 48_000 },
+            presentationPending = t.presentationPending,
+            backdropUrl = selectedBackdrop,
+            artworkPreviews = t.artworkPreviews.filter { (path, value) -> path in listOfNotNull(selectedPoster, selectedBackdrop) && value.length <= 48_000 },
             titlelessBackdropUrl = backdropUrl(titlelessBackdropPath(t.images)),
             logoUrl = logoUrl(bestLogoPath(t.images, preferredLanguage)),
+            logoCandidates = t.logoCandidates.take(2),
             rating = t.voteAverage,
             voteCount = t.voteCount,
             genres = t.genres?.map { Genre(it.id, it.name) } ?: emptyList(),
@@ -159,7 +172,7 @@ object TmdbMappers {
                     airDate = s.airDate,
                 )
             } ?: emptyList(),
-            ratings = t.voteAverage?.let { MediaRatings(tmdbScore = it.toFloat()) },
+            ratings = t.nativeRatings ?: t.voteAverage?.let { MediaRatings(tmdbScore = it.toFloat()) },
         )
     }
 
@@ -184,7 +197,7 @@ object TmdbMappers {
             popularity = c.popularity,
             genreIds = c.genreIds,
             voteCount = c.voteCount,
-            ratings = c.voteAverage?.let { MediaRatings(tmdbScore = it.toFloat()) },
+            ratings = c.nativeRatings ?: c.voteAverage?.let { MediaRatings(tmdbScore = it.toFloat()) },
         )
     }
 
@@ -212,7 +225,7 @@ object TmdbMappers {
             popularity = c.popularity,
             genreIds = c.genreIds,
             voteCount = c.voteCount,
-            ratings = c.voteAverage?.let { MediaRatings(tmdbScore = it.toFloat()) },
+            ratings = c.nativeRatings ?: c.voteAverage?.let { MediaRatings(tmdbScore = it.toFloat()) },
         )
     }
 
@@ -221,6 +234,7 @@ object TmdbMappers {
         return MediaItem(
             id = r.id.toString(),
             tmdbId = r.id,
+            imdbId = r.imdbId,
             type = if (r.mediaType == "tv") MediaType.SERIES else MediaType.MOVIE,
             title = r.title ?: r.name ?: "",
             adult = r.adult,
@@ -233,7 +247,7 @@ object TmdbMappers {
             genreIds = r.genreIds,
             releaseDate = date,
             popularity = r.popularity,
-            ratings = r.voteAverage?.let { MediaRatings(tmdbScore = it.toFloat()) },
+            ratings = r.nativeRatings ?: r.voteAverage?.let { MediaRatings(tmdbScore = it.toFloat()) },
         )
     }
 

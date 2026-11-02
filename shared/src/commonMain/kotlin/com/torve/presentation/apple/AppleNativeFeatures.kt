@@ -23,6 +23,17 @@ import com.torve.presentation.detail.primaryPlaybackTarget
 
 /** Typed adapters keep default arguments and enum policy in shared code. */
 class AppleNativeFeatures(private val koin: Koin) {
+    /** One adjacent discovery row shares the repository's language/profile cache. */
+    @Throws(Exception::class)
+    suspend fun prefetchDiscoveryRail(section: String): List<MediaItem> {
+        val type = when {
+            section.startsWith("MOVIE_GENRE_") -> "movie"
+            section.startsWith("TV_GENRE_") -> "tv"
+            else -> return emptyList()
+        }
+        val genre = section.substringAfter("_GENRE_").toIntOrNull()?.takeIf { it > 0 } ?: return emptyList()
+        return koin.get<MetadataRepository>().discover(type = type, withGenres = genre.toString()).items
+    }
     @Throws(Exception::class)
     suspend fun contentFacts(item: MediaItem): List<com.torve.presentation.detail.ContentFact> = koin.get<com.torve.presentation.detail.ContentCommunity>().facts(item)
     @Throws(Exception::class)
@@ -40,8 +51,9 @@ class AppleNativeFeatures(private val koin: Koin) {
     @Throws(Exception::class)
     suspend fun fullSynopsis(item: MediaItem, season: Int?, episode: Int?, fallback: String): ApplePlaybackSynopsis =
         koin.get<UserIdProvider>().withPersonalDataScope {
+            if (ExtensionRuntimePolicy.userMetadataOnly) return@withPersonalDataScope ApplePlaybackSynopsis(item.title, fallback)
             val isEpisode = item.type == MediaType.SERIES && (season != null || episode != null)
-            var story = ApplePlaybackSynopsis(if (isEpisode) "${item.title} Â· S$season E$episode" else item.title, fallback)
+            var story = ApplePlaybackSynopsis(if (isEpisode) "${item.title} · S$season E$episode" else item.title, fallback)
             if (isEpisode && (season == null || episode == null)) return@withPersonalDataScope story
             suspend fun <T> safely(block: suspend () -> T): T? = try {
                 kotlinx.coroutines.withTimeoutOrNull(6_000) { block() }
@@ -49,11 +61,15 @@ class AppleNativeFeatures(private val koin: Koin) {
             var imdb = item.imdbId
             if (item.tmdbId != null) {
                 val metadata = koin.get<MetadataRepository>()
-                val detail = safely { metadata.getDetail(if (item.type == MediaType.SERIES) "tv" else "movie", item.tmdbId) }
+                val detail = safely { metadata.getPresentation(if (item.type == MediaType.SERIES) "tv" else "movie", item.tmdbId) }
                 imdb = imdb ?: detail?.imdbId
                 val overview = if (isEpisode) safely { metadata.getSeasonDetail(item.tmdbId, season!!).episodes.firstOrNull { it.episodeNumber == episode }?.overview }
                     else detail?.overview
-                story = ApplePlaybackSynopsisPolicy.preferFull(story, overview, "TMDB")
+                val api = koin.get<com.torve.data.metadata.TmdbApiClient>()
+                val source = if (api.usesTorveBackend) "TheTVDB / Trakt" else "TMDB"
+                story = if (api.resolvedContentLanguage().startsWith("en", true))
+                    ApplePlaybackSynopsisPolicy.preferFull(story, overview, source)
+                else ApplePlaybackSynopsisPolicy.preferCurrentLanguage(story, overview, source)
             }
             if (imdb != null && koin.get<com.torve.data.metadata.TmdbApiClient>().resolvedContentLanguage().startsWith("en", true)) {
                 val plot = safely { koin.get<com.torve.data.ratings.OmdbClient>().fetchFullPlot(imdb,
@@ -109,32 +125,46 @@ class AppleNativeFeatures(private val koin: Koin) {
     }
     @Throws(Exception::class)
     suspend fun localizedMedia(mediaId: String, type: String, language: String): MediaItem? =
-        koin.get<com.torve.data.metadata.LocalizedMediaRepository>().presentation(mediaId, type, language)
+        if (ExtensionRuntimePolicy.userMetadataOnly) koin.get<com.torve.data.metadata.ExtensionMetadataRepository>().presentation(mediaId, type, language)
+        else koin.get<com.torve.data.metadata.LocalizedMediaRepository>().presentation(mediaId, type, language)
+    @Throws(Exception::class)
+    suspend fun cachedPresentations(mediaIds: List<String>, type: String, language: String): List<MediaItem> =
+        if (ExtensionRuntimePolicy.userMetadataOnly) koin.get<com.torve.data.metadata.ExtensionMetadataRepository>().cached(mediaIds,type,language)
+        else koin.get<com.torve.data.metadata.LocalizedMediaRepository>().cachedPresentations(mediaIds,type,language)
     @Throws(Exception::class)
     suspend fun extensionMetadata(mediaId: String, type: String, language: String): MediaItem? =
-        koin.get<com.torve.data.metadata.LocalizedMediaRepository>().presentation(mediaId, type, language, includeCast = true)
+        if (ExtensionRuntimePolicy.userMetadataOnly) koin.get<com.torve.data.metadata.ExtensionMetadataRepository>().presentation(mediaId, type, language)
+        else koin.get<com.torve.data.metadata.LocalizedMediaRepository>().presentation(mediaId, type, language, includeCast = true)
+    @Throws(Exception::class)
+    suspend fun selectedPresentation(mediaId: String, type: String, language: String): MediaItem? =
+        if (ExtensionRuntimePolicy.userMetadataOnly) koin.get<com.torve.data.metadata.ExtensionMetadataRepository>().presentation(mediaId, type, language)
+        else koin.get<com.torve.data.metadata.LocalizedMediaRepository>().presentation(mediaId, type, language, includeCast = true, refresh = true)
+    @Throws(Exception::class)
+    suspend fun catalogueRatings(seedJSON: String, language: String): String =
+        koin.get<UserIdProvider>().withPersonalDataScope {
+            val seed = AppleCatalogueDetail.decode(seedJSON)
+            if (ExtensionRuntimePolicy.userMetadataOnly) AppleCatalogueDetail.encode(
+                koin.get<com.torve.data.metadata.ExtensionMetadataRepository>().ratings(seed, language))
+            else seedJSON
+        }
     @Throws(Exception::class)
     suspend fun catalogueDetail(seedJSON: String, language: String): String =
         koin.get<UserIdProvider>().withPersonalDataScope {
             val seed = AppleCatalogueDetail.decode(seedJSON)
-            val item = kotlinx.coroutines.withTimeoutOrNull(8_000) {
+            if (ExtensionRuntimePolicy.userMetadataOnly) return@withPersonalDataScope AppleCatalogueDetail.encode(
+                koin.get<com.torve.data.metadata.ExtensionMetadataRepository>().resolve(seed, language))
+            val item = kotlinx.coroutines.withTimeoutOrNull(30_000) {
                 AppleCatalogueDetail.resolve(seed, koin.get<com.torve.domain.repository.AddonRepository>().getEnabledAddons(),
                     fetchMeta = { addon, type, id ->
-                        kotlinx.coroutines.withTimeoutOrNull(2_000) {
+                        kotlinx.coroutines.withTimeoutOrNull(8_000) {
                             koin.get<StremioAddonClient>().fetchMeta(addon.manifestUrl.removeSuffix("/manifest.json").trimEnd('/'), type, id).meta
                         }
                     }, enrich = { supplied ->
                         val type = if (supplied.type == MediaType.SERIES) "tv" else "movie"
-                        extensionMetadata(supplied.id, type, language)?.let { detail ->
-                            val first = detail.seasons.firstOrNull { it.seasonNumber > 0 }
-                            if (detail.type == MediaType.SERIES && detail.tmdbId != null && first != null) {
-                                val season = try { koin.get<MetadataRepository>().getSeasonDetail(detail.tmdbId, first.seasonNumber) }
-                                    catch (cancelled: CancellationException) { throw cancelled }
-                                    catch (_: Exception) { null }
-                                if (season != null) detail.copy(seasons = detail.seasons.map { if (it.seasonNumber == season.seasonNumber) season else it }) else detail
-                            } else detail
-                        }
-                    })
+                        // Publish the detail as soon as it arrives. The detail
+                        // model independently loads the user's selected season.
+                        if (ExtensionRuntimePolicy.userMetadataOnly) null else extensionMetadata(supplied.tmdbId?.toString() ?: supplied.id, type, language)
+                    }, nativeFirst = koin.get<com.torve.data.metadata.TmdbApiClient>().usesTorveBackend)
             } ?: seed
             AppleCatalogueDetail.encode(item)
         }
@@ -146,23 +176,18 @@ class AppleNativeFeatures(private val koin: Koin) {
         return koin.get<MetadataRepository>().getDetail(type, id).cast.distinctBy { it.id }.take(4)
     }
     @Throws(Exception::class)
-    suspend fun mediaArtwork(mediaId: String, type: String, landscape: Boolean): List<String> {
-        val id = mediaId.toIntOrNull()?.takeIf { it > 0 } ?: return emptyList()
+    suspend fun mediaArtwork(mediaId: String, type: String, landscape: Boolean, language: String): List<String> {
         if (type != "movie" && type != "tv") return emptyList()
         val metadata = koin.get<MetadataRepository>()
-        val item = try { metadata.getDetail(type, id) }
-            catch (e: CancellationException) { throw e }
-            catch (_: Exception) { null }
-        val gallery = try { metadata.getMediaImageUrls(type, id) }
-            catch (e: CancellationException) { throw e }
-            catch (_: Exception) { emptyList() }
-        // The metadata gallery exports posters at w500 and backdrops at w1280.
-        // Preserve a poster-shaped choice for portrait catalogue cards when possible.
-        val preferredSize = if (landscape) "/w1280/" else "/w500/"
+        val id = AppleDetailNavigation.catalogId(mediaId)
+            ?: mediaId.extractImdbIdOrNull()?.let { metadata.findByImdbId(it, type)?.tmdbId }
+            ?: return emptyList()
+        val item = try { metadata.getPresentation(type, id, language) }
+            catch (e: com.torve.data.metadata.MetadataHttpException) { if (e.statusCode == 404) return emptyList() else throw e }
         val primary = if (landscape) item?.backdropUrl else item?.posterUrl
         val secondary = if (landscape) item?.posterUrl else item?.backdropUrl
-        return (listOfNotNull(primary) + gallery.filter { preferredSize in it } +
-            listOfNotNull(secondary) + gallery).filter { it.isNotBlank() }.distinct().take(12)
+        val alternatives = metadata.getArtworkCandidates(type, id, landscape, language)
+        return (listOfNotNull(primary) + alternatives + listOfNotNull(secondary)).filter { it.isNotBlank() }.distinct()
     }
     private companion object { val traktLock = Mutex(); val alertLock = Mutex() }
     val settingsChanges get() = koin.get<com.torve.presentation.settings.SettingsRefreshNotifier>().events
@@ -505,7 +530,9 @@ internal fun appleRatingPreferences(state: com.torve.presentation.settings.Setti
 
 internal fun displayAppleRatings(item: MediaItem, prefs: RatingDisplayPrefs, detail: Boolean): List<AppleTvRating> {
     if (detail && !prefs.showRatingsOnDetailPage) return emptyList()
-    val ratings = item.ratings.withFallbackTmdbScore(item.rating) ?: return emptyList()
+    // An extension's `imdbRating` is not a second TMDB score.
+    val ratings = (if (ExtensionRuntimePolicy.userMetadataOnly) item.ratings
+        else item.ratings.withFallbackTmdbScore(item.rating)) ?: return emptyList()
     val torve = if (if (detail) prefs.showTorveScoreOnDetailPage && RatingSource.TORVE in prefs.enabledProviders else prefs.showTorveScoreOnCards)
         calculateTorveScore(ratings, prefs.torveWeights)?.let { AppleTvRating("TORVE", "${(it * 10).toInt() / 10.0}%") } else null
     val available = buildList {

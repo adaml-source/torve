@@ -1,6 +1,9 @@
 package com.torve.presentation.home
 
 import com.torve.domain.model.*
+import com.torve.data.addon.*
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import com.torve.domain.repository.MetadataRepository
 import com.torve.presentation.contentpolicy.ContentPolicyFilter
 import kotlinx.coroutines.*
@@ -16,12 +19,15 @@ data class NowStreamingState(
     val loading: Boolean = false,
     val hasMore: Boolean = false,
     val error: String? = null,
+    val availableServices: List<StreamingCatalogueService> = emptyList(),
+    val extensionBacked: Boolean = false,
 )
 
 internal data class NowStreamingConfiguration(
     val owner: String, val region: String, val language: String,
     val services: Set<Int>, val enabled: Boolean,
     val maximumRating: ContentRating?, val policy: ContentPolicyState,
+    val extensionSources: List<StreamingCatalogueSource>? = null,
 )
 
 /** A retained, bounded provider catalogue. It never falls back to unscoped discovery. */
@@ -35,6 +41,7 @@ class NowStreamingCatalogue internal constructor(
     private val hydrateRatings: (List<MediaItem>) -> List<MediaItem> = { it },
     private val enrichRatings: suspend (List<MediaItem>) -> List<MediaItem> = { it },
     private val ratingsDispatcher: CoroutineDispatcher = Dispatchers.Default,
+    private val extensionPage: suspend (StreamingCatalogueSource, Int) -> AddonShelfPage = { _, _ -> error("No installed streaming catalogue") },
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private val _state = policyFilter.profileState(NowStreamingState())
@@ -43,6 +50,8 @@ class NowStreamingCatalogue internal constructor(
         val lastPage: Int get() = lastPages.values.maxOrNull() ?: 1
     }
     private val pages = linkedMapOf<Int?, Page>()
+    private data class SourcePage(val items: List<MediaItem>, val offset: Int, val more: Boolean, val savedAt: Long)
+    private val sourcePages = linkedMapOf<String, SourcePage>()
     private var config: NowStreamingConfiguration? = null
     private var selected: Int? = null
     private var job: Job? = null
@@ -51,7 +60,7 @@ class NowStreamingCatalogue internal constructor(
     private var generation = 0
 
     init {
-        scope.launch { changes.onStart { emit(Unit) }.collect { request(reconfigure = true, force = true) } }
+        scope.launch { changes.onStart { emit(Unit) }.collect { request(reconfigure = true) } }
     }
 
     fun selectProvider(providerId: Int?) {
@@ -62,6 +71,7 @@ class NowStreamingCatalogue internal constructor(
         request()
     }
 
+    fun activate() = request(reconfigure = true)
     fun refresh() = request(reconfigure = true, force = true)
     fun loadMore() {
         if (_state.value.loading || !_state.value.hasMore) return
@@ -79,18 +89,26 @@ class NowStreamingCatalogue internal constructor(
                 if (ticket != generation || owner() != current.owner) return@launch
                 if (current != config) {
                     pages.clear()
+                    if (config?.copy(services = current.services) != current) sourcePages.clear()
                     ratingAttempts.clear()
-                    if (current.owner != config?.owner || selected !in current.services) selected = null
+                    if (current.owner != config?.owner || selected !in current.services ||
+                        (current.extensionSources != null && current.extensionSources.none { it.service.id == selected })) selected = null
                     config = current
                 }
-                val ids = current.services.filter { it in streamingServiceNames }.sorted()
+                val available = current.extensionSources?.map { it.service }?.distinctBy { it.id }.orEmpty()
+                val ids = current.services.filter { id -> if (current.extensionSources != null) available.any { it.id == id } else id in streamingServiceNames }.sorted()
                 val chosen = selected
                 fun active() = ticket == generation && owner() == current.owner && config == current && selected == chosen
                 val cached = pages[chosen]
                 val visible = cached?.items?.let { filter(current, it) }.orEmpty()
                 _state.value = NowStreamingState(visible, ids, chosen, current.region, current.enabled,
-                    hasMore = cached?.let { it.page < it.lastPage && it.items.size < 400 } == true)
+                    hasMore = cached?.let { it.page < it.lastPage && it.items.size < 400 } == true,
+                    availableServices = available, extensionBacked = current.extensionSources != null)
                 if (!current.enabled || ids.isEmpty()) return@launch
+                if (current.extensionSources != null) {
+                    loadExtensions(current, chosen, ids, more, force, ::active)
+                    return@launch
+                }
                 if (force) ratingAttempts.clear()
                 if (!more && !force && cached != null && now() - cached.savedAt in 0..300_000) {
                     launchRatings(chosen, ::active)
@@ -131,6 +149,52 @@ class NowStreamingCatalogue internal constructor(
                 }
             }
         }
+    }
+
+    /** Reuse provider feeds for instant chip/type changes; publish each ready feed independently. */
+    private suspend fun loadExtensions(current: NowStreamingConfiguration, chosen: Int?, ids: List<Int>,
+        more: Boolean, force: Boolean, active: () -> Boolean) = coroutineScope {
+        val sources = current.extensionSources.orEmpty().filter { it.service.id in ids && (chosen == null || chosen == it.service.id) }
+        fun publish(loading: Boolean, failed: Boolean = false) {
+            if (!active()) return
+            val feeds = sources.map { source -> sourcePages[source.key]?.items?.let { items ->
+                policyFilter.filterItems(current.policy, ContentAccessContext.ADDON_SHELF,
+                    policyFilter.filterProfileLimit(items, current.maximumRating), ContentSourceType.ADDON,
+                    addonPolicyFlags = source.addon.policyFlags).items
+                    .filter { !it.isContentPlaceholder && !it.isStubDetail && it.catalogueNotice == null }
+            }.orEmpty() }
+            // Preserve each extension's ranking and share the combined row fairly across its feeds.
+            val items = (0 until (feeds.maxOfOrNull { it.size } ?: 0)).flatMap { index -> feeds.mapNotNull { it.getOrNull(index) } }
+                .distinctBy { it.stableKey() }.take(400)
+            _state.update { it.copy(items = items, loading = loading,
+                hasMore = items.size < 400 && sources.any { sourcePages[it.key]?.more == true },
+                error = if (failed) "Some streaming catalogues could not be loaded. Try again." else null) }
+        }
+        val pending = sources.filter { source ->
+            val cached = sourcePages[source.key]
+            if (more) cached?.more == true else force || cached == null || now() - cached.savedAt !in 0..300_000
+        }
+        publish(pending.isNotEmpty())
+        val semaphore = Semaphore(2)
+        var failed = false
+        pending.map { source -> async {
+            semaphore.withPermit {
+                try {
+                    val cached = sourcePages[source.key]
+                    val offset = if (more) cached?.offset ?: 0 else 0
+                    val page = withTimeout(15_000) { extensionPage(source, offset) }
+                    ensureActive()
+                    if (!active()) return@withPermit
+                    val items = ((if (more) cached?.items.orEmpty() else emptyList()) + page.items)
+                        .distinctBy { it.stableKey() }.take(400)
+                    sourcePages[source.key] = SourcePage(items, page.nextOffset, page.hasMore && page.nextOffset > offset && items.size < 400, now())
+                    publish(true)
+                } catch (_: TimeoutCancellationException) { failed = true }
+                catch (cancelled: CancellationException) { throw cancelled }
+                catch (_: Exception) { failed = true }
+            }
+        } }.awaitAll()
+        publish(false, failed)
     }
 
     /** Ratings may improve published posters, never delay discovery or replace another service/profile. */

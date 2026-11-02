@@ -2,6 +2,8 @@ package com.torve.data.metadata
 
 actual fun tmdbApiKey(): String = ANDROID_TMDB_API_KEY
 
+internal actual fun platformMetadataBackendBaseUrl(): String? = null
+
 // Like iOS, let the HTTP engine resolve its own connection. A separate,
 // synchronous diagnostic lookup bypasses request timeouts and can stall an
 // entire startup batch while Fire OS waits for its system resolver.

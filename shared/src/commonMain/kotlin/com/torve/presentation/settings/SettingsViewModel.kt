@@ -182,6 +182,7 @@ class SettingsViewModel(
     fun setTmdbEnrichmentEnabled(enabled: Boolean) = setTmdbExtensionChoice(false, enabled)
 
     private fun setTmdbExtensionChoice(catalogue: Boolean, enabled: Boolean) {
+        if (com.torve.data.addon.ExtensionRuntimePolicy.userMetadataOnly) return
         val owner = userIdProvider.currentDataUserId()
         scope.launch(com.torve.data.auth.PersonalDataScope(userIdProvider.currentUserId(), userIdProvider.currentProfileId())) {
             val key = if (catalogue) com.torve.data.metadata.KEY_TMDB_CATALOGUE_ENABLED

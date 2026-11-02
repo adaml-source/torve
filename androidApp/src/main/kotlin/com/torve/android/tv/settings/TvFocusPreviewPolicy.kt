@@ -2,9 +2,11 @@ package com.torve.android.tv.settings
 
 /** Global override preserves each profile's page and row choices underneath it. */
 data class TvFocusPreviewPolicy(val global: Boolean = false, val choices: Map<String, Boolean> = emptyMap()) {
-    fun enabled(page: String, row: String? = null): Boolean = global ||
-        (row?.let { choices["row:$page:$it"] } ?: choices["page:$page"] ?: false)
-    fun hasPreview(page: String): Boolean = enabled(page) || choices.any { (key, value) -> value && key.startsWith("row:$page:") }
+    // Search always uses its fixed poster grid, including profiles with old overrides.
+    fun enabled(page: String, row: String? = null): Boolean = page != "search" && (global ||
+        (row?.let { choices["row:$page:$it"] } ?: choices["page:$page"] ?: false))
+    fun hasPreview(page: String): Boolean = page != "search" && (enabled(page) ||
+        choices.any { (key, value) -> value && key.startsWith("row:$page:") })
 }
 
 fun tvFocusPreviewPage(screen: String): String = when {
@@ -20,5 +22,5 @@ fun tvFocusPreviewPage(screen: String): String = when {
 }
 
 val TV_FOCUS_PREVIEW_PAGES = listOf("home" to "Home", "movies" to "Movies", "shows" to "TV shows",
-    "library" to "Library", "search" to "Search", "jellyfin" to "Jellyfin", "seeAll" to "See All",
+    "library" to "Library", "jellyfin" to "Jellyfin", "seeAll" to "See All",
     "related" to "Related titles", "people" to "Filmographies")

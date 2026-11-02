@@ -29,7 +29,15 @@ import org.koin.android.ext.koin.androidLogger
 import org.koin.core.context.startKoin
 import org.koin.java.KoinJavaComponent.getKoin
 
-class TorveApp : Application(), androidx.work.Configuration.Provider {
+class TorveApp : Application(), androidx.work.Configuration.Provider, coil3.SingletonImageLoader.Factory {
+    override fun newImageLoader(context: android.content.Context): coil3.ImageLoader =
+        coil3.ImageLoader.Builder(context).apply {
+            if (BuildConfig.FLAVOR.contains("tv", ignoreCase = true)) {
+                // A percentage of largeHeap lets artwork displace catalogue and SQLite memory.
+                memoryCache { coil3.memory.MemoryCache.Builder().maxSizeBytes(24L * 1024 * 1024).build() }
+            }
+        }.build()
+
     override fun attachBaseContext(base: android.content.Context) {
         super.attachBaseContext(base)
         com.torve.android.debug.StartupMetrics.init(this)
