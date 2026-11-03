@@ -69,6 +69,13 @@ class HouseholdSyncService(private val database: TorveDatabase, private val auth
 
     init {
         if (automatic) scope.launch {
+            retryHouseholdObservation(onFailure = {
+                _state.value = _state.value.copy(syncing = false, error = "Profile sync paused and will retry.")
+            }) { observeChanges() }
+        }
+    }
+
+    private suspend fun observeChanges() {
             auth.authUserFlow.map { it?.id }.distinctUntilChanged().collectLatest { account ->
                 if (account == null) { _state.value = HouseholdSyncState(); return@collectLatest }
                 // Active selection belongs to the device, while profile definitions belong to the household.
@@ -80,10 +87,10 @@ class HouseholdSyncService(private val database: TorveDatabase, private val auth
                         refresh(force = true)
                         merge(
                             flow { while (currentCoroutineContext().isActive) { delay(15_000); emit(Unit) } },
-                            queries.getAllProgress(person).asFlow().mapToList(ioDispatcher).map { Unit },
-                            queries.getAllHistory(person).asFlow().mapToList(ioDispatcher).map { Unit },
-                            queries.getAllWatchlist(person).asFlow().mapToList(ioDispatcher).map { Unit },
-                            queries.getAllProfiles(account).asFlow().mapToList(ioDispatcher).map { Unit },
+                            queries.getAllProgress(person).householdChangeSignals(),
+                            queries.getAllHistory(person).householdChangeSignals(),
+                            queries.getAllWatchlist(person).householdChangeSignals(),
+                            queries.getAllProfiles(account).householdChangeSignals(),
                             // Observe invalidations without materializing every preference/cache value.
                             queries.getPreferenceKeys(person).asFlow().debounce(250L).map {
                                 NAVIGATION_KEYS.associateWith { key -> queries.readPreferenceSafely(person, key) }
@@ -91,7 +98,6 @@ class HouseholdSyncService(private val database: TorveDatabase, private val auth
                         ).debounce(1_000L).collect { refresh() }
                     }
             }
-        }
     }
 
     fun requestRefresh(force: Boolean = false) {

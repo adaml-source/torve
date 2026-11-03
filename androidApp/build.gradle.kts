@@ -83,14 +83,14 @@ android {
     val baseVersionCode = providers.gradleProperty("torveUpdaterFixtureBaseVersionCode")
         .orNull
         ?.toIntOrNull()
-        ?: 212
+        ?: 213
 
     defaultConfig {
         applicationId = "com.torve.app"
         minSdk = 24
         targetSdk = 36
         versionCode = baseVersionCode
-        versionName = "1.7.4"
+        versionName = "1.7.5"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         multiDexEnabled = true
         multiDexKeepProguard = file("multidex-config.pro")
@@ -146,7 +146,7 @@ android {
         create("tv") {
             dimension = "formFactor"
             val tvBaseVersionCode = providers.gradleProperty("torveUpdaterFixtureBaseVersionCode")
-                .orNull?.toIntOrNull() ?: 217
+                .orNull?.toIntOrNull() ?: 218
             versionCode = 20000 + tvBaseVersionCode
             proguardFile("proguard-tv-rules.pro")
         }
@@ -447,6 +447,7 @@ dependencies {
     androidTestImplementation("androidx.test.ext:junit:1.2.1")
     androidTestImplementation("androidx.test.espresso:espresso-core:3.6.1")
     androidTestImplementation("androidx.sqlite:sqlite-framework:2.4.0")
+    androidTestImplementation(libs.sqldelight.android)
     androidTestImplementation(libs.ktor.mock)
     androidTestImplementation(libs.ktor.content.negotiation)
     androidTestImplementation(libs.ktor.serialization.json)
