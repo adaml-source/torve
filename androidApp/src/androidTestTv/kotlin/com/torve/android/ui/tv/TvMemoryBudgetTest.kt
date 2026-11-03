@@ -42,11 +42,22 @@ class TvMemoryBudgetTest {
         return (unwrapped as AbstractWindowedCursor).window!!
     }
 
+    private fun allocationFailure(): CursorWindowAllocationException {
+        // Fire OS's exception constructor is not part of its public API. Exercise the real
+        // native refusal without allocating a Java array or committing a large memory buffer.
+        try {
+            CursorWindow("ForcedAllocationFailure", Long.MAX_VALUE).close()
+        } catch (failure: CursorWindowAllocationException) {
+            return failure
+        }
+        throw AssertionError("An unrepresentable cursor window size must be refused")
+    }
+
     @Test fun actualHistoryQueryAndEveryDatabaseOverloadAvoidTheDefaultTwoMiBAllocation() {
         val allocations = mutableListOf<Long>()
         val helper = bounded(delegate(schema = true)) { bytes ->
             allocations += bytes
-            if (bytes > 128L * 1024) throw CursorWindowAllocationException("Simulated 2 MiB allocation failure")
+            if (bytes > 128L * 1024) throw allocationFailure()
             CursorWindow("HistoryRegression", bytes)
         }
         val driver = AndroidSqliteDriver(openHelper = helper)
@@ -70,7 +81,7 @@ class TvMemoryBudgetTest {
                 db.query(SimpleSQLiteQuery("SELECT COUNT(*) FROM watch_history"), CancellationSignal()))
             cursors.forEach { cursor -> cursor.use {
                 assertTrue(it.moveToFirst()); assertEquals(2_000, it.getInt(0))
-                assertFalse(window(it).putString("x".repeat(80_000), 0, 0))
+                assertFalse(window(it).putString("x".repeat(150_000), 0, 0))
             } }
             assertTrue(allocations.isNotEmpty())
             assertTrue(allocations.all { it <= 128L * 1024 })
@@ -115,16 +126,17 @@ class TvMemoryBudgetTest {
                 assertTrue(cursor.moveToFirst())
                 assertEquals("🎬".repeat(16_384), cursor.getString(0))
                 assertEquals(20_000L, cursor.getLong(1))
-                assertFalse(window(cursor).putString("x".repeat(80_000), 0, 0))
+                assertFalse(window(cursor).putString("x".repeat(150_000), 0, 0))
             }
         } finally { helper.close() }
     }
 
     @Test fun failedInitialAllocationFallsBackToASmallerWindow() {
         val allocations = mutableListOf<Long>()
+        val failure = allocationFailure()
         val helper = bounded(delegate()) { bytes ->
             allocations += bytes
-            if (bytes >= 128L * 1024) throw CursorWindowAllocationException("Injected allocation failure")
+            if (bytes >= 128L * 1024) throw failure
             CursorWindow("Fallback", bytes)
         }
         try {
@@ -145,10 +157,11 @@ class TvMemoryBudgetTest {
             override val writableDatabase: SupportSQLiteDatabase get() = capturingDb
         }
         var shouldFail = true
+        val failure = allocationFailure()
         val allocations = mutableListOf<Long>()
         val helper = bounded(capturingHelper) { bytes ->
             allocations += bytes
-            if (shouldFail) throw CursorWindowAllocationException("Injected exhausted allocations")
+            if (shouldFail) throw failure
             CursorWindow("Recovered", bytes)
         }
         try {
