@@ -56,7 +56,10 @@ class TvMemoryBudgetTest {
                 repeat(2_000) { index -> queries.insertHistory("fixture", "history$index", "media$index", "movie",
                     "History title $index " + "x".repeat(300), null, null, index.toLong(), 1000, null, null, null) }
             }
+            val historyAllocationsBefore = allocations.size
             val history = queries.getAllHistory("fixture").executeAsList()
+            assertEquals("The actual SQLDelight history query must use the bounded allocator", historyAllocationsBefore + 1, allocations.size)
+            assertEquals(128L * 1024, allocations.last())
             assertEquals(2_000, history.size)
             assertEquals("history1999", history.first().id)
             assertEquals("history0", history.last().id)
