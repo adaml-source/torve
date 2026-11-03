@@ -80,7 +80,7 @@ class TvMemoryBudgetTest {
         try {
             val db = helper.writableDatabase
             listOf("small", "x".repeat(200_000), "other", "y".repeat(600_000)).forEachIndexed { index, value ->
-                db.execSQL("INSERT INTO metadata VALUES (?,?)", arrayOf(index, value))
+                db.execSQL("INSERT INTO metadata VALUES (?,?)", arrayOf<Any>(index, value))
             }
             db.query("SELECT value FROM metadata ORDER BY id").use { cursor ->
                 assertEquals(4, cursor.count)
