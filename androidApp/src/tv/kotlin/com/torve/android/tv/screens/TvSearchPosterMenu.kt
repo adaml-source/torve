@@ -33,7 +33,8 @@ internal fun rememberTvSearchPosterMenu(
     owner: String?,
     actionsForItem: ((MediaItem, Float?) -> List<TvMediaContextMenuAction>)?,
     onContextAction: ((MediaItem, TvMediaContextMenuAction, Float?) -> Unit)?,
-): TvSearchPosterMenuHandle = key(owner) {
+    isScreenActive: Boolean = true,
+): TvSearchPosterMenuHandle = key(owner, isScreenActive) {
     rememberTvSearchPosterMenuForProfile(owner, actionsForItem, onContextAction)
 }
 
@@ -126,6 +127,8 @@ private fun rememberTvSearchPosterMenuForProfile(
     menu?.let { state ->
         TvMediaContextMenu(state, onDismiss = ::dismiss, onAction = { action ->
             when {
+                busy[state.item.tvSearchStableKey()] == true &&
+                    (action.id == "search_library" || action.id == "trailer" || action.id.startsWith("search_library_season:")) -> Unit
                 action.id == "search_library_loading" -> Unit
                 action.id == "search_library_cancel" -> dismiss()
                 action.id == "search_library" && state.item.type == MediaType.SERIES -> {

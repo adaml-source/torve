@@ -335,6 +335,7 @@ internal fun TvSearchScreen(
     drawBackground: Boolean = true,
     contextMenuActionsForItem: ((MediaItem, Float?) -> List<TvMediaContextMenuAction>)? = null,
     onContextMenuAction: ((MediaItem, TvMediaContextMenuAction, Float?) -> Unit)? = null,
+    isScreenActive: Boolean = true,
 ) {
     val metadataRepo: MetadataRepository = koinInject()
     val settingsViewModel: SettingsViewModel = koinInject()
@@ -346,7 +347,7 @@ internal fun TvSearchScreen(
     val availabilityAggregator: SourceAvailabilityAggregator = koinInject()
     val settingsState by settingsViewModel.state.collectAsState()
     val posterMenu = rememberTvSearchPosterMenu(settingsState.personalDataUserId,
-        contextMenuActionsForItem, onContextMenuAction)
+        contextMenuActionsForItem, onContextMenuAction, isScreenActive)
     if (settingsState.tmdbExtensionsLoaded && !settingsState.tmdbCatalogueEnabled) {
         var manage by rememberSaveable { mutableStateOf(false) }
         if (manage) com.torve.android.ui.community.ExtensionsScreen(onBack = { manage = false }, isTv = true)
@@ -588,6 +589,7 @@ internal fun TvSearchScreen(
         val resultKeys = results.map { it.tvSearchStableKey() }.toSet()
         val focusedKeyWasRemoved = focusedResultKey?.let { it !in resultKeys } == true
         resultRequesters.keys.retainAll(resultKeys)
+        previewArtworkLookupsCompleted.keys.retainAll(resultKeys)
         val preferredKey = selectedResultKey ?: selectedResult?.tvSearchStableKey()
         selectedResult = preferredKey?.let { key ->
             results.firstOrNull { it.tvSearchStableKey() == key }
@@ -1727,7 +1729,7 @@ internal fun TvSearchScreen(
         }
     }
 
-    LaunchedEffect(selectedResultKey) {
+    LaunchedEffect(selectedResultKey, selectedResult?.tmdbId) {
         val key = selectedResultKey ?: return@LaunchedEffect
         val item = results.firstOrNull { it.tvSearchStableKey() == key } ?: return@LaunchedEffect
         if (item.tmdbId == null && item.id.extractTmdbIdOrNull() == null) return@LaunchedEffect
@@ -1915,7 +1917,7 @@ internal fun TvSearchScreen(
                 preview = { previewModifier ->
                     TvSearchSelectedPreviewV2(item = previewItem, history = previewHistory,
                         artworkLookupPending = previewItem?.let {
-                            it.tmdbId != null && it.logoUrl.isNullOrBlank() &&
+                            (it.tmdbId != null || it.id.extractTmdbIdOrNull() != null) && it.logoUrl.isNullOrBlank() &&
                                 !previewArtworkLookupsCompleted.containsKey(it.tvSearchStableKey())
                         } == true,
                         availability = previewItem?.tmdbId?.let { sourceAvailabilityByTmdbId[it] }

@@ -3022,6 +3022,7 @@ fun TvRoot(
 
                                     TvRoutes.SEARCH -> TvSearchScreen(
                                         drawBackground = false,
+                                        isScreenActive = isTabVisible,
                                         contextMenuActionsForItem = contextMenuActionsForItem,
                                         onContextMenuAction = onContextMenuAction,
                                         railFocusRequester = railFocusRequester,
