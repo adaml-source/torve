@@ -47,6 +47,8 @@ import com.torve.android.tv.screens.TvSearchResultsLayout
 import com.torve.android.tv.screens.TvSearchSelectedPreviewV2
 import com.torve.android.tv.screens.TvSearchProviderRatingCards
 import com.torve.android.tv.screens.TvSearchToolbar
+import com.torve.android.tv.screens.rememberTvSearchPosterMenu
+import com.torve.android.tv.components.TvMediaContextMenuAction
 import com.torve.domain.model.MediaItem
 import com.torve.domain.model.MediaType
 import com.torve.domain.model.MediaRatings
@@ -57,6 +59,41 @@ import org.junit.Test
 @OptIn(ExperimentalTestApi::class)
 class TvSearchPresentationUiTest {
     @get:Rule val composeRule = createAndroidComposeRule<TorveTestHostActivity>()
+
+    @Test
+    fun menuButtonRunsWatchlistShortcutRestoresPosterAndKeepsNormalOkBehavior() {
+        var watchlistCalls = 0
+        var detailCalls = 0
+        val item = MediaItem("menu-movie", title = "Menu Movie", type = MediaType.MOVIE)
+        composeRule.setContent {
+            MaterialTheme {
+                val requester = androidx.compose.runtime.remember { FocusRequester() }
+                val menu = rememberTvSearchPosterMenu("menu-ui-test",
+                    actionsForItem = { _, _ -> listOf(TvMediaContextMenuAction("toggle_watchlist", "Add to watchlist")) },
+                    onContextAction = { selected, action, _ ->
+                        assertEquals(item.id, selected.id)
+                        assertEquals("toggle_watchlist", action.id)
+                        watchlistCalls++
+                    })
+                TvSearchResultCard(item, TvSearchDensity.BALANCED,
+                    Modifier.width(100.dp).aspectRatio(2f / 3f).focusRequester(requester),
+                    onFocused = {}, onClick = { detailCalls++ },
+                    onContextMenuRequested = { menu.open(item, it, requester) })
+            }
+        }
+        focus("Menu Movie")
+        key("Menu Movie", Key.Menu)
+        composeRule.waitUntil(10_000) { runCatching {
+            composeRule.onNodeWithTag("media_context_action:toggle_watchlist").assertIsDisplayed()
+        }.isSuccess }
+        composeRule.onNodeWithTag("media_context_action:toggle_watchlist")
+            .performSemanticsAction(SemanticsActions.RequestFocus) { it() }
+        composeRule.onNodeWithTag("media_context_action:toggle_watchlist").performKeyInput { pressKey(Key.DirectionCenter) }
+        waitForFocus("Menu Movie")
+        composeRule.runOnIdle { assertEquals(1, watchlistCalls); assertEquals(0, detailCalls) }
+        key("Menu Movie", Key.DirectionCenter)
+        composeRule.runOnIdle { assertEquals(1, detailCalls) }
+    }
 
     @Test
     fun postersShowOnlyYearAndImdbAtEverySizeAndRemainSelectable() {
@@ -215,12 +252,47 @@ class TvSearchPresentationUiTest {
                 MaterialTheme { Box(Modifier.width(228.dp)) { TvSearchProviderRatingCards(ratedItem()) } }
             }
         }
-        listOf("IMDb", "Rotten Tomatoes", "Audience", "TMDB").forEach {
+        listOf("IMDb", "Rotten Tomatoes", "Audience").forEach {
             composeRule.onNodeWithContentDescription(it, useUnmergedTree = true).assertIsDisplayed()
         }
-        listOf("8.1/10", "90%", "95%", "8.0/10", "Critics", "Audience").forEach {
+        listOf("8.1/10", "90%", "95%", "Critics", "Audience").forEach {
             composeRule.onNodeWithText(it, useUnmergedTree = true).assertIsDisplayed()
         }
+        composeRule.onNodeWithContentDescription("TMDB", useUnmergedTree = true).assertDoesNotExist()
+        composeRule.onNodeWithText("8.0/10", useUnmergedTree = true).assertDoesNotExist()
+        val imdb = composeRule.onNodeWithContentDescription("IMDb", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+        val rt = composeRule.onNodeWithContentDescription("Rotten Tomatoes", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+        assertEquals("IMDb and critics share the first row", imdb.top, rt.top, 1f)
+    }
+
+    @Test
+    fun tmdbIsOnlyShownWhenExternalScoresAreMissing() {
+        var ratings by mutableStateOf(MediaRatings(tmdbScore = 8f))
+        composeRule.setContent { MaterialTheme {
+            Box(Modifier.width(228.dp)) { TvSearchProviderRatingCards(ratedItem().copy(ratings = ratings)) }
+        } }
+        composeRule.onNodeWithContentDescription("TMDB", useUnmergedTree = true).assertIsDisplayed()
+        for (external in listOf(MediaRatings(imdbScore = 7f, tmdbScore = 8f),
+            MediaRatings(rottenTomatoesScore = 0, tmdbScore = 8f),
+            MediaRatings(rtAudienceScore = 60, tmdbScore = 8f))) {
+            composeRule.runOnIdle { ratings = external }
+            composeRule.onNodeWithContentDescription("TMDB", useUnmergedTree = true).assertDoesNotExist()
+        }
+    }
+
+    @Test
+    fun watchedMovieUsesInlineCheckAndSummaryHasMoreThanThreeLines() {
+        val overview = "A detailed synopsis with enough words to fill several lines in a narrow preview. ".repeat(8)
+        val movie = ratedItem().copy(type = MediaType.MOVIE, overview = overview)
+        val history = listOf(com.torve.domain.model.WatchHistoryEntry(
+            "watched", movie.id, "movie", movie.title, null, null, 1L, 1000L, null, null, null))
+        composeRule.setContent { MaterialTheme {
+            TvSearchSelectedPreviewV2(movie, history, modifier = Modifier.width(228.dp))
+        } }
+        composeRule.onNodeWithTag("search_preview_watched", useUnmergedTree = true).assertIsDisplayed()
+        composeRule.onNodeWithText("Watched").assertDoesNotExist()
+        val summary = composeRule.onNodeWithTag("search_preview_summary").fetchSemanticsNode().boundsInRoot
+        org.junit.Assert.assertTrue("Synopsis should have room for more than three lines", summary.height > 75f)
     }
 
     @Test

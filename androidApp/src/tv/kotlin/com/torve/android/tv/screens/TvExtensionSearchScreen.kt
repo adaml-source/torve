@@ -10,6 +10,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.focus.*
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
@@ -44,6 +45,7 @@ internal fun TvExtensionSearchScreen(
     onManage: () -> Unit,
     initialQuery: String = "",
     initialFilterType: String? = null,
+    onPosterMenuRequested: ((MediaItem, Rect?, FocusRequester) -> Unit)? = null,
 ) {
     val settings: SettingsViewModel = koinInject()
     val repository: AddonRepository = koinInject()
@@ -108,7 +110,7 @@ internal fun TvExtensionSearchScreen(
     @Suppress("UNUSED_VARIABLE") val visibilityVersion = watchedRevision
     val permitted = filter.filterItems(policyState, ContentAccessContext.DIRECT_SEARCH, enriched, ContentSourceType.ADDON).items
     TvExtensionSearchContent(model, permitted, railFocusRequester, onMediaClick, onFirstContentRequester,
-        onContentFocused, shouldAutoFocus, onManage)
+        onContentFocused, shouldAutoFocus, onManage, onPosterMenuRequested)
 }
 
 @Composable
@@ -121,6 +123,7 @@ internal fun TvExtensionSearchContent(
     focused: (FocusRequester) -> Unit,
     autoFocus: Boolean,
     manage: () -> Unit,
+    onPosterMenuRequested: ((MediaItem, Rect?, FocusRequester) -> Unit)? = null,
 ) {
     val toolbar = remember { List(6) { FocusRequester() } }
     val firstResult = remember { FocusRequester() }
@@ -209,7 +212,8 @@ internal fun TvExtensionSearchContent(
                             requesters.getOrPut(target.tvSearchStableKey()) { FocusRequester() }
                         } }, rail = rail, header = toolbar[0])
                     .focusProperties { if (index < columns) up = toolbar[0]; if (index % columns == 0) left = rail },
-                    onFocused = { focused(requester) }, onClick = { onMedia(item) })
+                    onFocused = { focused(requester) }, onClick = { onMedia(item) },
+                    onContextMenuRequested = onPosterMenuRequested?.let { open -> { bounds -> open(item, bounds, requester) } })
             }
         }
     }

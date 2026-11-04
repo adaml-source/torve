@@ -3022,6 +3022,8 @@ fun TvRoot(
 
                                     TvRoutes.SEARCH -> TvSearchScreen(
                                         drawBackground = false,
+                                        contextMenuActionsForItem = contextMenuActionsForItem,
+                                        onContextMenuAction = onContextMenuAction,
                                         railFocusRequester = railFocusRequester,
                                         onMediaClick = { item ->
                                             pushFocusReturnEntry(TvRoutes.SEARCH)

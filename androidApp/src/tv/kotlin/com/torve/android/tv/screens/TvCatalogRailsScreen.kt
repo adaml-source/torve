@@ -725,6 +725,8 @@ internal fun TvCatalogRailsScreen(
             initialQuery = searchQuery,
             initialFilterType = mediaType,
             instanceKey = "catalog_$mediaType",
+            contextMenuActionsForItem = contextMenuActionsForItem,
+            onContextMenuAction = onContextMenuAction,
             onFirstContentRequester = onFirstContentRequester,
             onContentFocused = onContentFocused,
             onMediaClick = onMediaClick,

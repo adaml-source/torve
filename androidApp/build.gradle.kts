@@ -83,14 +83,14 @@ android {
     val baseVersionCode = providers.gradleProperty("torveUpdaterFixtureBaseVersionCode")
         .orNull
         ?.toIntOrNull()
-        ?: 213
+        ?: 214
 
     defaultConfig {
         applicationId = "com.torve.app"
         minSdk = 24
         targetSdk = 36
         versionCode = baseVersionCode
-        versionName = "1.7.5"
+        versionName = "1.7.6"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         multiDexEnabled = true
         multiDexKeepProguard = file("multidex-config.pro")
@@ -146,7 +146,7 @@ android {
         create("tv") {
             dimension = "formFactor"
             val tvBaseVersionCode = providers.gradleProperty("torveUpdaterFixtureBaseVersionCode")
-                .orNull?.toIntOrNull() ?: 218
+                .orNull?.toIntOrNull() ?: 219
             versionCode = 20000 + tvBaseVersionCode
             proguardFile("proguard-tv-rules.pro")
         }

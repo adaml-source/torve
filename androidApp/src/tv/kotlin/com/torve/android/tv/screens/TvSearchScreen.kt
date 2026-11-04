@@ -54,6 +54,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material.icons.filled.Tv
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -113,6 +114,10 @@ import com.torve.android.tv.TV_PAGE_END_GUTTER
 import com.torve.android.tv.TV_PAGE_TOP_GUTTER
 import com.torve.android.tv.TvImagePrefetcher
 import com.torve.android.tv.TvScreenCache
+import com.torve.android.tv.components.TvMediaContextMenuAction
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.boundsInWindow
 import com.torve.android.tv.components.tvExternalCardRatingPrefs
 import com.torve.android.tv.focus.TvFocusTargetId
 import com.torve.android.tv.focus.TvScreenFocusHandle
@@ -328,6 +333,8 @@ internal fun TvSearchScreen(
     shouldAutoFocus: Boolean = true,
     registerFocusHandle: ((TvScreenFocusHandle?) -> Unit)? = null,
     drawBackground: Boolean = true,
+    contextMenuActionsForItem: ((MediaItem, Float?) -> List<TvMediaContextMenuAction>)? = null,
+    onContextMenuAction: ((MediaItem, TvMediaContextMenuAction, Float?) -> Unit)? = null,
 ) {
     val metadataRepo: MetadataRepository = koinInject()
     val settingsViewModel: SettingsViewModel = koinInject()
@@ -338,13 +345,16 @@ internal fun TvSearchScreen(
     val secretStore: IntegrationSecretStore = koinInject()
     val availabilityAggregator: SourceAvailabilityAggregator = koinInject()
     val settingsState by settingsViewModel.state.collectAsState()
+    val posterMenu = rememberTvSearchPosterMenu(settingsState.personalDataUserId,
+        contextMenuActionsForItem, onContextMenuAction)
     if (settingsState.tmdbExtensionsLoaded && !settingsState.tmdbCatalogueEnabled) {
         var manage by rememberSaveable { mutableStateOf(false) }
         if (manage) com.torve.android.ui.community.ExtensionsScreen(onBack = { manage = false }, isTv = true)
         else TvExtensionSearchScreen(
             shouldAutoFocus = shouldAutoFocus, onContentFocused = onContentFocused,
             onFirstContentRequester = onFirstContentRequester, railFocusRequester = railFocusRequester,
-            onMediaClick = onMediaClick, onManage = { manage = true }, initialQuery = initialQuery, initialFilterType = initialFilterType)
+            onMediaClick = onMediaClick, onManage = { manage = true }, initialQuery = initialQuery, initialFilterType = initialFilterType,
+            onPosterMenuRequested = posterMenu.open)
         return
     }
 
@@ -1720,14 +1730,16 @@ internal fun TvSearchScreen(
     LaunchedEffect(selectedResultKey) {
         val key = selectedResultKey ?: return@LaunchedEffect
         val item = results.firstOrNull { it.tvSearchStableKey() == key } ?: return@LaunchedEffect
-        val tmdbId = item.tmdbId ?: return@LaunchedEffect
+        if (item.tmdbId == null && item.id.extractTmdbIdOrNull() == null) return@LaunchedEffect
         if (!item.logoUrl.isNullOrBlank() && !item.overview.isNullOrBlank()) return@LaunchedEffect
         var lookupFinished = false
         try {
             delay(250)
-            val detail = kotlinx.coroutines.withTimeoutOrNull(6_500L) {
+            val detail = kotlinx.coroutines.withTimeoutOrNull(7_000L) {
                 withContext(Dispatchers.IO) {
-                    metadataRepo.getDetail(if (item.type == MediaType.SERIES) "tv" else "movie", tmdbId)
+                    loadTvSearchPreviewArtwork(item,
+                        presentation = { type, id -> metadataRepo.getPresentation(type, id) },
+                        logo = metadataRepo::getLogoUrl)
                 }
             }
             lookupFinished = true
@@ -1890,7 +1902,7 @@ internal fun TvSearchScreen(
             )
 
             // Preserve this width when focus moves to the toolbar or another poster.
-            val previewItem = selectedResult?.takeIf { selected -> visibleResults.any { it.tvSearchStableKey() == selected.tvSearchStableKey() } }
+            val previewItem = visibleResults.firstOrNull { it.tvSearchStableKey() == selectedResultKey }
                 ?: visibleResults.firstOrNull()
             val previewHistory by produceState<List<WatchHistoryEntry>>(emptyList(), previewItem?.id, previewItem?.type) {
                 value = emptyList()
@@ -1899,7 +1911,7 @@ internal fun TvSearchScreen(
             }
             TvSearchResultsLayout(
                 modifier = Modifier.fillMaxWidth().weight(1f),
-                showPreview = previewItem != null && density.columns < 10,
+                showPreview = previewItem != null,
                 preview = { previewModifier ->
                     TvSearchSelectedPreviewV2(item = previewItem, history = previewHistory,
                         artworkLookupPending = previewItem?.let {
@@ -2053,6 +2065,7 @@ internal fun TvSearchScreen(
                                         onContentFocused(registeredRequester)
                                     },
                                     onClick = { saveRecentSearch(query); onMediaClick(item) },
+                                    onContextMenuRequested = { bounds -> posterMenu.open(item, bounds, registeredRequester) },
                                 )
                             }
                             if (loadingMoreResults) {
@@ -3718,27 +3731,23 @@ internal fun TvSearchSelectedPreviewV2(
 ) {
     if (item == null) return
     Column(modifier.padding(top = 4.dp).verticalScroll(rememberScrollState()),
-        verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        verticalArrangement = Arrangement.spacedBy(6.dp)) {
         val artUrl = item.backdropUrl?.takeIf { it.isNotBlank() } ?: item.posterUrl?.takeIf { it.isNotBlank() }
         if (artUrl != null) {
             AsyncImage(model = artUrl, contentDescription = null, contentScale = ContentScale.Crop,
                 modifier = Modifier.fillMaxWidth().aspectRatio(16f / 9f).clip(RoundedCornerShape(10.dp)))
         }
         TvSearchTitleArtwork(item, artworkLookupPending)
-        Text(item.tvSearchPreviewMetadataLine(), color = Silver, style = MaterialTheme.typography.bodyMedium,
-            maxLines = 1, overflow = TextOverflow.Ellipsis)
-        TvSearchProviderRatingCards(item)
-        val watchedEpisodes = history.mapNotNull { entry ->
-            val season = entry.seasonNumber ?: return@mapNotNull null
-            val episode = entry.episodeNumber ?: return@mapNotNull null
-            season to episode
-        }.distinct().size
-        val watchedLabel = when {
-            item.type == MediaType.MOVIE && history.isNotEmpty() -> "Watched"
-            watchedEpisodes > 0 -> "$watchedEpisodes episodes watched"
-            else -> null
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment = Alignment.CenterVertically) {
+            Text(item.tvSearchPreviewMetadataLine(), color = Silver, style = MaterialTheme.typography.bodyMedium,
+                maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+            if (item.type == MediaType.MOVIE && history.isNotEmpty()) {
+                Icon(Icons.Default.Check, contentDescription = localizedUiText("Watched"), tint = AmberLight,
+                    modifier = Modifier.size(16.dp).testTag("search_preview_watched"))
+            }
         }
-        watchedLabel?.let { Text(it, color = AmberLight, style = MaterialTheme.typography.labelLarge) }
+        TvSearchProviderRatingCards(item)
         availability?.signals?.filter { it.kind != SourceAvailabilityKind.WATCH_HISTORY }
             ?.distinctBy { it.badge }?.take(2)?.joinToString(" · ") { it.badge }
             ?.takeIf { it.isNotBlank() }?.let {
@@ -3746,7 +3755,7 @@ internal fun TvSearchSelectedPreviewV2(
             }
         Text(localizedUiText(item.overview?.takeIf { it.isNotBlank() } ?: "Open details to learn more."),
             color = Silver, style = MaterialTheme.typography.bodyMedium,
-            maxLines = 3, overflow = TextOverflow.Ellipsis)
+            maxLines = 8, overflow = TextOverflow.Ellipsis, modifier = Modifier.testTag("search_preview_summary"))
         Text(localizedUiText("OK to open details"), color = Silver, style = MaterialTheme.typography.labelMedium)
     }
 }
@@ -3755,7 +3764,7 @@ internal fun TvSearchSelectedPreviewV2(
 private fun TvSearchTitleArtwork(item: MediaItem, artworkLookupPending: Boolean) {
     val titleHeight = with(androidx.compose.ui.platform.LocalDensity.current) {
         (MaterialTheme.typography.titleLarge.lineHeight * 2).toDp()
-    }.coerceAtLeast(54.dp)
+    }.coerceAtLeast(44.dp)
     com.torve.android.tv.components.TvTitleArtworkOrText(
         item = item,
         textStyle = MaterialTheme.typography.titleLarge,
@@ -3769,7 +3778,7 @@ private fun TvSearchTitleArtwork(item: MediaItem, artworkLookupPending: Boolean)
 internal fun TvSearchProviderRatingCards(item: MediaItem) {
     val ratings = item.ratings.withFallbackTmdbScore(item.rating)
     val cards = buildList {
-        ratings?.imdbScore?.takeIf { it > 0f }?.let { score ->
+        ratings?.imdbScore?.takeIf { it.isFinite() && it > 0f && it <= 10f }?.let { score ->
             add(
                 TvSearchProviderRatingCardData(
                     provider = "IMDb",
@@ -3779,7 +3788,7 @@ internal fun TvSearchProviderRatingCards(item: MediaItem) {
                 ),
             )
         }
-        ratings?.rottenTomatoesScore?.takeIf { it in 1..100 }?.let { score ->
+        ratings?.rottenTomatoesScore?.takeIf { it in 0..100 }?.let { score ->
             add(
                 TvSearchProviderRatingCardData(
                     provider = "Rotten Tomatoes",
@@ -3793,7 +3802,7 @@ internal fun TvSearchProviderRatingCards(item: MediaItem) {
                 ),
             )
         }
-        ratings?.rtAudienceScore?.takeIf { it in 1..100 }?.let { score ->
+        ratings?.rtAudienceScore?.takeIf { it in 0..100 }?.let { score ->
             add(
                 TvSearchProviderRatingCardData(
                     provider = "Audience",
@@ -3807,7 +3816,9 @@ internal fun TvSearchProviderRatingCards(item: MediaItem) {
                 ),
             )
         }
-        ratings?.tmdbScore?.takeIf { it > 0f }?.let { score ->
+        ratings?.tmdbScore?.takeIf { cardsScore ->
+            isEmpty() && cardsScore.isFinite() && cardsScore > 0f && cardsScore <= 10f
+        }?.let { score ->
             add(
                 TvSearchProviderRatingCardData(
                     provider = "TMDB",
@@ -3827,22 +3838,21 @@ internal fun TvSearchProviderRatingCards(item: MediaItem) {
         )
         return
     }
-    FlowRow(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(14.dp),
-        verticalArrangement = Arrangement.spacedBy(6.dp),
-        maxItemsInEachRow = 2,
-    ) {
-        cards.take(4).forEach { card -> TvSearchProviderRatingCard(card = card) }
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        cards.chunked(2).forEach { row ->
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                row.forEach { card -> TvSearchProviderRatingCard(card, Modifier.weight(1f)) }
+                if (row.size == 1) Spacer(Modifier.weight(1f))
+            }
+        }
     }
 }
 
 @Composable
-private fun TvSearchProviderRatingCard(card: TvSearchProviderRatingCardData) {
+private fun TvSearchProviderRatingCard(card: TvSearchProviderRatingCardData, modifier: Modifier = Modifier) {
     Row(
-        modifier = Modifier
-            .heightIn(min = 30.dp),
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        modifier = modifier.heightIn(min = 28.dp),
+        horizontalArrangement = Arrangement.spacedBy(5.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         card.iconRes?.let { iconRes ->
@@ -3850,7 +3860,7 @@ private fun TvSearchProviderRatingCard(card: TvSearchProviderRatingCardData) {
                 painter = painterResource(id = iconRes),
                 contentDescription = card.provider,
                 contentScale = ContentScale.Fit,
-                modifier = Modifier.width(32.dp).height(26.dp),
+                modifier = Modifier.width(26.dp).height(23.dp),
             )
         }
         Column(
@@ -4536,8 +4546,10 @@ internal fun TvSearchResultCard(
     modifier: Modifier,
     onFocused: () -> Unit,
     onClick: () -> Unit,
+    onContextMenuRequested: ((Rect?) -> Unit)? = null,
 ) {
     var focused by remember { mutableStateOf(false) }
+    var anchorBounds by remember { mutableStateOf<Rect?>(null) }
     val scale by animateFloatAsState(targetValue = if (focused) 1.025f else 1f, label = "resultScale")
     val metadataStyle = MaterialTheme.typography.labelSmall.copy(
         fontSize = if (density.columns >= 10) 8.sp else 11.sp,
@@ -4547,7 +4559,17 @@ internal fun TvSearchResultCard(
     Box(
         modifier = modifier
             .semantics { contentDescription = item.title }
+            .onGloballyPositioned { anchorBounds = it.boundsInWindow() }
             .onFocusChanged { focused = it.isFocused; if (it.isFocused) onFocused() }
+            .onPreviewKeyEvent { event ->
+                if (event.key != Key.Menu || onContextMenuRequested == null) false
+                else {
+                    if (event.type == KeyEventType.KeyDown && event.nativeKeyEvent.repeatCount == 0) {
+                        onContextMenuRequested(anchorBounds)
+                    }
+                    true
+                }
+            }
             .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onClick)
             .zIndex(if (focused) 1f else 0f).scale(scale)
             .border(if (focused) 2.dp else 1.dp,

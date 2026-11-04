@@ -2133,7 +2133,8 @@ internal fun TvMediaContextMenu(
                 }
                 TvMediaContextMenuRow(
                     action = action,
-                    modifier = if (index == 0) Modifier.focusRequester(firstActionRequester) else Modifier,
+                    modifier = (if (index == 0) Modifier.focusRequester(firstActionRequester) else Modifier)
+                        .testTag("media_context_action:${action.id}"),
                     onClick = { onAction(action) },
                 )
             }

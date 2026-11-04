@@ -53,6 +53,8 @@ class TvSearchRootNavigationTest {
                 it.config.getOrElse(SemanticsProperties.TestTag) { "" }.startsWith(cardPrefix)
             }
             rule.waitUntil(90_000) { rule.onAllNodes(cards).fetchSemanticsNodes().size >= 10 }
+            rule.onNodeWithTag("search_selected_preview").assertIsDisplayed()
+            val previewBounds = rule.onNodeWithTag("search_selected_preview").fetchSemanticsNode().boundsInRoot
             rule.onNodeWithTag(nav).performSemanticsAction(SemanticsActions.RequestFocus) { it() }
             rule.onNodeWithTag(nav).performKeyInput { pressKey(Key.DirectionRight) }
             rule.waitUntil(10_000) {
@@ -65,6 +67,18 @@ class TvSearchRootNavigationTest {
             fun focusedTag(): String = rule.onNode(cards and isFocused()).fetchSemanticsNode().config[SemanticsProperties.TestTag]
             rule.waitUntil(10_000) { rule.onAllNodes(cards and isFocused()).fetchSemanticsNodes().isNotEmpty() }
             val first = focusedTag()
+            rule.onNodeWithTag("search_selected_preview").assertIsDisplayed()
+            assertEquals(previewBounds.width,
+                rule.onNodeWithTag("search_selected_preview").fetchSemanticsNode().boundsInRoot.width, 1f)
+            repeat(3) {
+                rule.onNodeWithTag(first).performKeyInput { pressKey(Key.Menu) }
+                rule.waitUntil(10_000) { rule.onAllNodesWithTag("media_context_action:search_library").fetchSemanticsNodes().isNotEmpty() }
+                rule.onNodeWithTag("media_context_action:search_library").assertIsDisplayed()
+                rule.onNodeWithTag("media_context_action:toggle_watchlist").assertIsDisplayed()
+                rule.onNodeWithTag("media_context_action:trailer").assertIsDisplayed()
+                rule.onNodeWithTag("media_context_action:search_library").performKeyInput { pressKey(Key.Back) }
+                rule.waitUntil(10_000) { runCatching { rule.onNodeWithTag(first).assertIsFocused() }.isSuccess }
+            }
             val firstBounds = rule.onNodeWithTag(first).fetchSemanticsNode().boundsInRoot
             repeat(9) { rule.onNode(cards and isFocused()).performKeyInput { pressKey(Key.DirectionRight) } }
             assertEquals("Ten posters must be in the same row", firstBounds.top,
@@ -90,6 +104,20 @@ class TvSearchRootNavigationTest {
             rule.waitUntil(10_000) { rule.onAllNodes(cards and isFocused()).fetchSemanticsNodes().isNotEmpty() }
             rule.onNode(cards and isFocused()).performKeyInput { pressKey(Key.DirectionUp) }
             rule.waitUntil(10_000) { rule.onAllNodes(cards and isFocused()).fetchSemanticsNodes().isNotEmpty() }
+            if (!preview && !global) {
+                for (label in listOf("Compact · 12 per row", "Large · 6 per row", "Medium · 8 per row", "Small · 10 per row")) {
+                    view.performSemanticsAction(SemanticsActions.RequestFocus) { it() }
+                    view.performKeyInput { pressKey(Key.DirectionCenter) }
+                    rule.waitUntil(10_000) { rule.onAllNodesWithText(label).fetchSemanticsNodes().isNotEmpty() }
+                    rule.onNodeWithText(label).performClick()
+                    rule.waitUntil(10_000) { runCatching { view.assertIsFocused() }.isSuccess }
+                    rule.onNodeWithTag("search_selected_preview").assertIsDisplayed()
+                    assertEquals(previewBounds.width,
+                        rule.onNodeWithTag("search_selected_preview").fetchSemanticsNode().boundsInRoot.width, 1f)
+                    view.performKeyInput { pressKey(Key.DirectionDown) }
+                    rule.waitUntil(10_000) { rule.onAllNodes(cards and isFocused()).fetchSemanticsNodes().isNotEmpty() }
+                }
+            }
         } catch (failure: Throwable) {
             File(rule.activity.getExternalFilesDir(null), "search-failure-$preview.txt").writeText(rule.onRoot(useUnmergedTree = true).printToString())
             File(rule.activity.getExternalFilesDir(null), "search-failure-$preview.png").outputStream().use {
