@@ -15,15 +15,21 @@ import org.junit.Test
 @OptIn(ExperimentalTestApi::class)
 class TvExtensionSearchUiTest {
     @get:Rule val rule = createAndroidComposeRule<TorveTestHostActivity>()
-    private fun fixture(model: TvExtensionSearchState, items: List<MediaItem> = emptyList()) {
+    private fun fixture(model: TvExtensionSearchState, items: List<MediaItem> = emptyList(),
+        menu: ((MediaItem, androidx.compose.ui.geometry.Rect?, FocusRequester) -> Unit)? = null) {
         model.sourceCount = 1
         rule.runOnUiThread { rule.activity.window.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON) }
-        rule.setContent { MaterialTheme { TvExtensionSearchContent(model, items, FocusRequester(), {}, {}, {}, true, {}) } }
+        rule.setContent { MaterialTheme { TvExtensionSearchContent(model, items, FocusRequester(), {}, {}, {}, true, {}, menu) } }
     }
     private val navigationItems = (0..36).map { MediaItem("fixture$it", type = MediaType.MOVIE, title = "Fixture $it", year = 2026) }
 
-    @Test fun tenPosterRowsWrapAndKeepVerticalAndHeaderNavigation() {
+    @Test fun normalPreviewAndTenPosterRowsKeepVerticalAndHeaderNavigation() {
         fixture(TvExtensionSearchState().apply { query = "fixture" }, navigationItems)
+        rule.onNodeWithTag("search_selected_preview").assertIsDisplayed()
+        rule.onNodeWithText("View").performClick()
+        rule.waitUntil(10_000) { rule.onAllNodesWithText("Small · 10 per row").fetchSemanticsNodes().isNotEmpty() }
+        rule.onNodeWithText("Small · 10 per row").performClick()
+        rule.onNodeWithText("fixture").performSemanticsAction(androidx.compose.ui.semantics.SemanticsActions.RequestFocus) { it() }
         rule.onNodeWithText("fixture").performKeyInput { pressKey(Key.DirectionDown) }
         fun poster(index: Int) = rule.onNodeWithTag("search_result:fixture$index")
         fun key(index: Int, key: Key) { poster(index).performKeyInput { pressKey(key) } }
@@ -50,11 +56,22 @@ class TvExtensionSearchUiTest {
     @Test fun posterMetadataKeepsOnlyYearAndImdb() {
         fixture(TvExtensionSearchState().apply { query = "fixture" }, listOf(
             navigationItems.first().copy(ratings = MediaRatings(imdbScore = 8.2f, tmdbScore = 9.9f))))
-        rule.onNodeWithText("Fixture 0").assertDoesNotExist()
+        rule.onNode(hasText("Fixture 0") and hasAnyAncestor(hasTestTag("search_result:fixture0"))).assertDoesNotExist()
+        rule.onNodeWithTag("search_selected_preview").assertIsDisplayed()
         rule.onNodeWithContentDescription("Movie").assertDoesNotExist()
         rule.onNodeWithText("2026").assertIsDisplayed()
         rule.onNodeWithText("8.2").assertIsDisplayed()
         rule.onNodeWithText("9.9").assertDoesNotExist()
+    }
+
+    @Test fun focusedPosterUpdatesThePreviewAndMenuTargetsThatTitle() {
+        var menuId: String? = null
+        fixture(TvExtensionSearchState().apply { query = "fixture" }, navigationItems) { item, _, _ -> menuId = item.id }
+        rule.onNodeWithText("fixture").performKeyInput { pressKey(Key.DirectionDown) }
+        rule.onNodeWithTag("search_result:fixture0").performKeyInput { pressKey(Key.DirectionRight) }
+        rule.onNodeWithTag("search_result:fixture1").assertIsFocused().performKeyInput { pressKey(Key.Menu) }
+        rule.runOnIdle { assertEquals("fixture1", menuId) }
+        rule.waitUntil(10_000) { rule.onAllNodes(hasText("Fixture 1") and hasAnyAncestor(hasTestTag("search_selected_preview"))).fetchSemanticsNodes().isNotEmpty() }
     }
     @Test fun filtersAreAvailableBeforeSearchingAndPickerBackKeepsFocus() {
         fixture(TvExtensionSearchState())

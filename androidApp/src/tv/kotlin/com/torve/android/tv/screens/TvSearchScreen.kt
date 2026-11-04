@@ -1732,7 +1732,8 @@ internal fun TvSearchScreen(
     LaunchedEffect(selectedResultKey, selectedResult?.tmdbId) {
         val key = selectedResultKey ?: return@LaunchedEffect
         val item = results.firstOrNull { it.tvSearchStableKey() == key } ?: return@LaunchedEffect
-        if (item.tmdbId == null && item.id.extractTmdbIdOrNull() == null) return@LaunchedEffect
+        if (item.tmdbId == null && item.id.extractTmdbIdOrNull() == null &&
+            item.imdbId == null && item.id.extractImdbIdOrNull() == null) return@LaunchedEffect
         if (!item.logoUrl.isNullOrBlank() && !item.overview.isNullOrBlank()) return@LaunchedEffect
         var lookupFinished = false
         try {
@@ -1741,12 +1742,14 @@ internal fun TvSearchScreen(
                 withContext(Dispatchers.IO) {
                     loadTvSearchPreviewArtwork(item,
                         presentation = { type, id -> metadataRepo.getPresentation(type, id) },
-                        logo = metadataRepo::getLogoUrl)
+                        logo = metadataRepo::getLogoUrl,
+                        findByImdb = { imdb, type -> metadataRepo.findByImdbId(imdb, type) })
                 }
             }
             lookupFinished = true
             if (detail != null) {
                 fun MediaItem.withPreviewArtwork() = copy(
+                    tmdbId = tmdbId ?: detail.tmdbId,
                     logoUrl = logoUrl?.takeIf { it.isNotBlank() } ?: detail.logoUrl,
                     backdropUrl = backdropUrl?.takeIf { it.isNotBlank() } ?: detail.backdropUrl,
                     overview = overview?.takeIf { it.isNotBlank() } ?: detail.overview,

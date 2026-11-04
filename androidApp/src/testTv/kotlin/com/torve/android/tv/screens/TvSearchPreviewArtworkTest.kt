@@ -53,4 +53,22 @@ class TvSearchPreviewArtworkTest {
             fail("Cancellation must propagate")
         } catch (_: CancellationException) { }
     }
+
+    @Test fun extensionImdbIdentityResolvesArtworkWithoutChangingThePosterKey() = runTest {
+        val sparse = item.copy(id = "tt1234567", tmdbId = null, imdbId = "tt1234567")
+        val result = loadTvSearchPreviewArtwork(sparse, { _, id -> assertEquals(42, id); item }, { _, _ -> "logo" },
+            findByImdb = { imdb, type -> assertEquals("tt1234567", imdb); assertEquals("movie", type); item })
+        assertEquals("logo", result.logoUrl)
+        assertEquals(42, result.tmdbId)
+        assertEquals(sparse.tvSearchStableKey(), result.tvSearchStableKey())
+    }
+
+    @Test fun unidentifiedExtensionTitleDoesNotGuessArtworkFromAnotherMovie() = runTest {
+        val sparse = item.copy(id = "catalogue:custom", tmdbId = null)
+        val result = loadTvSearchPreviewArtwork(sparse,
+            { _, _ -> fail("No identity for presentation lookup"); item },
+            { _, _ -> fail("No identity for logo lookup"); null })
+        assertNull(result.logoUrl)
+        assertEquals(sparse.id, result.id)
+    }
 }

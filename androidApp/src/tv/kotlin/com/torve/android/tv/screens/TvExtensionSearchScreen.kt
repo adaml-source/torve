@@ -27,9 +27,12 @@ import com.torve.data.auth.withPersonalDataScope
 import com.torve.data.contentpolicy.ContentPolicyRepository
 import com.torve.domain.model.*
 import com.torve.domain.repository.AddonRepository
+import com.torve.domain.repository.MetadataRepository
+import com.torve.domain.repository.WatchHistoryRepository
 import com.torve.presentation.contentpolicy.ContentPolicyFilter
 import com.torve.presentation.settings.SettingsViewModel
 import kotlinx.coroutines.*
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import org.koin.compose.koinInject
@@ -125,19 +128,58 @@ internal fun TvExtensionSearchContent(
     manage: () -> Unit,
     onPosterMenuRequested: ((MediaItem, Rect?, FocusRequester) -> Unit)? = null,
 ) {
+    val metadata: MetadataRepository = koinInject()
+    val historyRepository: WatchHistoryRepository = koinInject()
     val toolbar = remember { List(6) { FocusRequester() } }
     val firstResult = remember { FocusRequester() }
     val firstNoticeAction = remember { FocusRequester() }
     val manageRequester = remember { FocusRequester() }
     val scope = rememberCoroutineScope()
     var filtersOpen by remember { mutableStateOf(false) }
-    var density by remember { mutableStateOf(TvSearchDensity.BALANCED) }
+    var density by remember { mutableStateOf(TvSearchDensity.SHOWCASE) }
     var recent by remember { mutableStateOf(emptyList<String>()) }
     val posterScores = remember(model) { mutableStateMapOf<String, MediaRatings>() }
     val results = filterTvExtensionSearch(items.map { item ->
         posterScores[item.tvSearchStableKey()]?.let { score -> item.copy(ratings = score) } ?: item
     }, model.filters)
     val columns = density.columns
+    var selectedKey by remember(model) { mutableStateOf<String?>(null) }
+    val selected = results.firstOrNull { it.tvSearchStableKey() == selectedKey } ?: results.firstOrNull()
+    val preview by produceState(Triple<String?, MediaItem?, Boolean>(null, null, false), model, selected?.tvSearchStableKey(), selected?.tmdbId) {
+        val item = selected
+        val key = item?.tvSearchStableKey()
+        value = Triple(key, item, item != null && item.logoUrl.isNullOrBlank())
+        if (item == null) return@produceState
+        try {
+            if (item.logoUrl.isNullOrBlank() || item.overview.isNullOrBlank()) {
+                delay(250)
+                val enriched = withTimeoutOrNull(7_000) { withContext(Dispatchers.IO) {
+                    loadTvSearchPreviewArtwork(item,
+                        presentation = { type, id -> metadata.getPresentation(type, id) },
+                        logo = metadata::getLogoUrl,
+                        findByImdb = { imdb, type -> metadata.findByImdbId(imdb, type) })
+                } }
+                value = Triple(key, enriched ?: item, false)
+            } else value = Triple(key, item, false)
+        } catch (cancelled: CancellationException) { throw cancelled }
+        catch (_: Exception) { value = Triple(key, item, false) }
+    }
+    val previewItem = selected?.let { base ->
+        preview.second?.takeIf { it.tvSearchStableKey() == base.tvSearchStableKey() }?.let { enriched ->
+            base.copy(tmdbId = base.tmdbId ?: enriched.tmdbId,
+                logoUrl = base.logoUrl?.takeIf { it.isNotBlank() } ?: enriched.logoUrl,
+                backdropUrl = base.backdropUrl?.takeIf { it.isNotBlank() } ?: enriched.backdropUrl,
+                overview = base.overview?.takeIf { it.isNotBlank() } ?: enriched.overview,
+                runtime = base.runtime ?: enriched.runtime)
+        } ?: base
+    }
+    val watched by produceState<List<WatchHistoryEntry>>(emptyList(), model, selected?.id, selected?.type) {
+        value = emptyList()
+        val item = selected ?: return@produceState
+        try { historyRepository.observeForMedia(item.id).collect { value = it } }
+        catch (cancelled: CancellationException) { throw cancelled }
+        catch (_: Exception) { }
+    }
     val gridState = rememberLazyGridState()
     TvSearchPosterRatingsEffect(results, gridState, model) { enriched ->
         enriched.forEach { item -> item.ratings?.let { posterScores[item.tvSearchStableKey()] = it } }
@@ -198,8 +240,12 @@ internal fun TvExtensionSearchContent(
             TvSearchToolbarButton(localizedUiText("Manage extensions"), Modifier.focusRequester(manageRequester).focusProperties { up = toolbar[0]; left = rail },
                 onFocused = {}, onClick = manage, onMoveDown = {})
         }
+        TvSearchResultsLayout(Modifier.fillMaxWidth().weight(1f), showPreview = previewItem != null,
+            preview = { modifier -> TvSearchSelectedPreviewV2(previewItem, history = watched, modifier = modifier,
+                artworkLookupPending = previewItem?.logoUrl.isNullOrBlank() &&
+                    (preview.first != selected?.tvSearchStableKey() || preview.third)) }) {
         LazyVerticalGrid(GridCells.Fixed(columns),
-            Modifier.fillMaxWidth().weight(1f).testTag("search.extension.results"), state = gridState,
+            Modifier.weight(1f).fillMaxHeight().testTag("search.extension.results"), state = gridState,
             verticalArrangement = Arrangement.spacedBy(16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp),
             contentPadding = PaddingValues(top = 4.dp, bottom = 16.dp)) {
             itemsIndexed(results, key = { _, item -> item.tvSearchStableKey() }) { index, item ->
@@ -212,9 +258,10 @@ internal fun TvExtensionSearchContent(
                             requesters.getOrPut(target.tvSearchStableKey()) { FocusRequester() }
                         } }, rail = rail, header = toolbar[0])
                     .focusProperties { if (index < columns) up = toolbar[0]; if (index % columns == 0) left = rail },
-                    onFocused = { focused(requester) }, onClick = { onMedia(item) },
+                    onFocused = { selectedKey = item.tvSearchStableKey(); focused(requester) }, onClick = { onMedia(item) },
                     onContextMenuRequested = onPosterMenuRequested?.let { open -> { bounds -> open(item, bounds, requester) } })
             }
+        }
         }
     }
     if (filtersOpen) TvExtensionSearchFilterDialog(model.filters,
