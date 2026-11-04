@@ -4582,7 +4582,7 @@ internal fun TvSearchResultCard(
         val imageUrl = item.posterUrl?.takeIf { it.isNotBlank() } ?: item.backdropUrl?.takeIf { it.isNotBlank() }
         if (imageUrl != null) AsyncImage(model = imageUrl, contentDescription = null,
             contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
-        val compact = density.columns >= 10
+        val compact = density.columns >= 8
         val footer = Modifier.align(Alignment.BottomStart).fillMaxWidth()
             .testTag("search_footer:${item.id}")
             .padding(horizontal = if (compact) 3.dp else 4.dp, vertical = if (compact) 3.dp else 5.dp)
@@ -4591,16 +4591,18 @@ internal fun TvSearchResultCard(
                 modifier = yearModifier.testTag("search_year:${item.id}"))
         }
         val imdb: @Composable () -> Unit = {
-            Row(horizontalArrangement = Arrangement.spacedBy(3.dp), verticalAlignment = Alignment.CenterVertically) {
+            Row(modifier = if (compact) Modifier.fillMaxWidth() else Modifier,
+                horizontalArrangement = Arrangement.spacedBy(3.dp), verticalAlignment = Alignment.CenterVertically) {
                 val score = item.ratings?.imdbScore?.takeIf { it.isFinite() && it > 0f && it <= 10f }
                 Image(painterResource(R.drawable.tv_search_logo_imdb), contentDescription = "IMDb",
-                    contentScale = ContentScale.Fit, modifier = Modifier.width(if (compact) 13.dp else 19.dp).height(10.dp))
+                    contentScale = ContentScale.Fit, modifier = Modifier.width(if (density.columns >= 10) 13.dp else 19.dp).height(10.dp))
                 Text(score?.let { "%.1f".format(java.util.Locale.US, it) } ?: "—", color = Snow, style = metadataStyle,
-                    fontWeight = FontWeight.SemiBold, maxLines = 1, modifier = Modifier.testTag("search_imdb_score:${item.id}"))
+                    fontWeight = FontWeight.SemiBold, maxLines = 1,
+                    modifier = (if (compact) Modifier.weight(1f) else Modifier).testTag("search_imdb_score:${item.id}"))
             }
         }
         if (compact) {
-            Column(footer) { year(Modifier); imdb() }
+            Column(footer) { year(Modifier.fillMaxWidth()); imdb() }
         } else {
             Row(footer, horizontalArrangement = Arrangement.spacedBy(3.dp), verticalAlignment = Alignment.CenterVertically) {
                 year(Modifier.weight(1f)); imdb()
