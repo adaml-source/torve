@@ -418,8 +418,8 @@ internal fun TvSearchScreen(
     var density by rememberSaveable(key = "tv_search_density_v2:$screenId") {
         mutableStateOf(restoredContentCache?.density ?: runCatching {
             TvSearchDensity.valueOf(context.getSharedPreferences("tv_prefs", Context.MODE_PRIVATE)
-                .getString("tv_search_density_v2", TvSearchDensity.BALANCED.name).orEmpty())
-        }.getOrDefault(TvSearchDensity.BALANCED))
+                .getString("tv_search_density_v2", TvSearchDensity.SHOWCASE.name).orEmpty())
+        }.getOrDefault(TvSearchDensity.SHOWCASE))
     }
     val searchActionScope = rememberCoroutineScope()
     var openSearchNonce by remember { mutableStateOf(0) }
@@ -4582,18 +4582,29 @@ internal fun TvSearchResultCard(
         val imageUrl = item.posterUrl?.takeIf { it.isNotBlank() } ?: item.backdropUrl?.takeIf { it.isNotBlank() }
         if (imageUrl != null) AsyncImage(model = imageUrl, contentDescription = null,
             contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
-        Row(Modifier.align(Alignment.BottomStart).fillMaxWidth()
+        val compact = density.columns >= 10
+        val footer = Modifier.align(Alignment.BottomStart).fillMaxWidth()
             .testTag("search_footer:${item.id}")
-            .padding(horizontal = 4.dp, vertical = 5.dp),
-            horizontalArrangement = Arrangement.spacedBy(3.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text(item.year?.toString().orEmpty(), color = Snow, style = metadataStyle,
-                maxLines = 1, modifier = Modifier.weight(1f))
-            val score = item.ratings?.imdbScore?.takeIf { it.isFinite() && it > 0f && it <= 10f }
+            .padding(horizontal = if (compact) 3.dp else 4.dp, vertical = if (compact) 3.dp else 5.dp)
+        val year: @Composable (Modifier) -> Unit = { yearModifier ->
+            Text(item.year?.toString().orEmpty(), color = Snow, style = metadataStyle, maxLines = 1,
+                modifier = yearModifier.testTag("search_year:${item.id}"))
+        }
+        val imdb: @Composable () -> Unit = {
+            Row(horizontalArrangement = Arrangement.spacedBy(3.dp), verticalAlignment = Alignment.CenterVertically) {
+                val score = item.ratings?.imdbScore?.takeIf { it.isFinite() && it > 0f && it <= 10f }
                 Image(painterResource(R.drawable.tv_search_logo_imdb), contentDescription = "IMDb",
-                    contentScale = ContentScale.Fit,
-                    modifier = Modifier.width(if (density.columns >= 10) 13.dp else 19.dp).height(10.dp))
+                    contentScale = ContentScale.Fit, modifier = Modifier.width(if (compact) 13.dp else 19.dp).height(10.dp))
                 Text(score?.let { "%.1f".format(java.util.Locale.US, it) } ?: "—", color = Snow, style = metadataStyle,
-                    fontWeight = FontWeight.SemiBold, maxLines = 1)
+                    fontWeight = FontWeight.SemiBold, maxLines = 1, modifier = Modifier.testTag("search_imdb_score:${item.id}"))
+            }
+        }
+        if (compact) {
+            Column(footer) { year(Modifier); imdb() }
+        } else {
+            Row(footer, horizontalArrangement = Arrangement.spacedBy(3.dp), verticalAlignment = Alignment.CenterVertically) {
+                year(Modifier.weight(1f)); imdb()
+            }
         }
     }
 }

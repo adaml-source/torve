@@ -23,7 +23,7 @@ import java.io.File
 @OptIn(ExperimentalTestApi::class)
 class TvSearchRootNavigationTest {
     @get:Rule val rule = createAndroidComposeRule<TvMainActivity>()
-    @Test fun defaultGridHasTenPostersWrapsAndReturnsFromHeader() = checkSearch(false)
+    @Test fun normalPreviewAndSmallGridWrapAndReturnFromHeader() = checkSearch(false)
     @Test fun legacySearchPreviewStillUsesNavigablePosterGrid() = checkSearch(true)
     @Test fun globalFocusPreviewStillUsesNavigableSearchPosterGrid() = checkSearch(true, global = true)
 
@@ -65,6 +65,16 @@ class TvSearchRootNavigationTest {
             view.performSemanticsAction(SemanticsActions.RequestFocus) { it() }
             view.performKeyInput { pressKey(Key.DirectionDown) }
             fun focusedTag(): String = rule.onNode(cards and isFocused()).fetchSemanticsNode().config[SemanticsProperties.TestTag]
+            rule.waitUntil(10_000) { rule.onAllNodes(cards and isFocused()).fetchSemanticsNodes().isNotEmpty() }
+            val normalRowTop = rule.onNode(cards and isFocused()).fetchSemanticsNode().boundsInRoot.top
+            assertEquals("Normal Search has six posters beside the preview", 6,
+                rule.onAllNodes(cards).fetchSemanticsNodes().count { kotlin.math.abs(it.boundsInRoot.top - normalRowTop) < 2f })
+            view.performSemanticsAction(SemanticsActions.RequestFocus) { it() }
+            view.performKeyInput { pressKey(Key.DirectionCenter) }
+            rule.waitUntil(10_000) { rule.onAllNodesWithText("Small · 10 per row").fetchSemanticsNodes().isNotEmpty() }
+            rule.onNodeWithText("Small · 10 per row").performClick()
+            rule.waitUntil(10_000) { runCatching { view.assertIsFocused() }.isSuccess }
+            view.performKeyInput { pressKey(Key.DirectionDown) }
             rule.waitUntil(10_000) { rule.onAllNodes(cards and isFocused()).fetchSemanticsNodes().isNotEmpty() }
             val first = focusedTag()
             rule.onNodeWithTag("search_selected_preview").assertIsDisplayed()

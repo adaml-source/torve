@@ -121,6 +121,27 @@ class TvSearchPresentationUiTest {
     }
 
     @Test
+    fun smallPostersFitTheFullYearAndImdbScoreBesideThePreview() {
+        composeRule.setContent { MaterialTheme {
+            Row {
+                listOf(TvSearchDensity.BALANCED to 53.dp, TvSearchDensity.COMPACT to 43.dp).forEach { (density, width) ->
+                    TvSearchResultCard(MediaItem(density.name, title = density.name, type = MediaType.MOVIE,
+                        year = 2024, ratings = MediaRatings(imdbScore = 8.1f)), density,
+                        Modifier.width(width).aspectRatio(2f / 3f), onFocused = {}, onClick = {})
+                }
+            }
+        } }
+        for (density in listOf(TvSearchDensity.BALANCED, TvSearchDensity.COMPACT)) {
+            for (tag in listOf("search_year:${density.name}", "search_imdb_score:${density.name}")) {
+                val layouts = mutableListOf<androidx.compose.ui.text.TextLayoutResult>()
+                composeRule.onNodeWithTag(tag, useUnmergedTree = true)
+                    .performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }
+                org.junit.Assert.assertFalse("Metadata is clipped at $tag", layouts.single().hasVisualOverflow)
+            }
+        }
+    }
+
+    @Test
     fun previewDoesNotResizeTheGridWhenFocusOrHydratedMetadataChanges() {
         var item by mutableStateOf(MediaItem(id = "gentlemen", title = "The Gentlemen", year = 2024, type = MediaType.SERIES))
         composeRule.setContent {
