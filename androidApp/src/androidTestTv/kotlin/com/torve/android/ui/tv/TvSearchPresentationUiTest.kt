@@ -136,7 +136,10 @@ class TvSearchPresentationUiTest {
                 val layouts = mutableListOf<androidx.compose.ui.text.TextLayoutResult>()
                 composeRule.onNodeWithTag(tag, useUnmergedTree = true)
                     .performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }
-                org.junit.Assert.assertFalse("Metadata is clipped at $tag", layouts.single().hasVisualOverflow)
+                val layout = layouts.single()
+                org.junit.Assert.assertFalse("Metadata is clipped at $tag: text=${layout.layoutInput.text.text}, size=${layout.size}, " +
+                    "constraints=${layout.layoutInput.constraints}, widthOverflow=${layout.didOverflowWidth}, heightOverflow=${layout.didOverflowHeight}, " +
+                    "lines=${layout.lineCount}, lastLineEnd=${layout.getLineEnd(0)}", layout.hasVisualOverflow)
             }
         }
     }
