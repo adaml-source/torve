@@ -3,6 +3,13 @@ import java.io.FileInputStream
 import java.security.MessageDigest
 import java.util.zip.ZipFile
 import org.gradle.api.tasks.bundling.Zip
+import com.android.build.api.instrumentation.AsmClassVisitorFactory
+import com.android.build.api.instrumentation.ClassContext
+import com.android.build.api.instrumentation.ClassData
+import com.android.build.api.instrumentation.InstrumentationParameters
+import org.objectweb.asm.ClassVisitor
+import org.objectweb.asm.MethodVisitor
+import org.objectweb.asm.Opcodes
 
 plugins {
     alias(libs.plugins.android.application)
@@ -83,14 +90,14 @@ android {
     val baseVersionCode = providers.gradleProperty("torveUpdaterFixtureBaseVersionCode")
         .orNull
         ?.toIntOrNull()
-        ?: 214
+        ?: 215
 
     defaultConfig {
         applicationId = "com.torve.app"
         minSdk = 24
         targetSdk = 36
         versionCode = baseVersionCode
-        versionName = "1.7.6"
+        versionName = "1.7.7"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         multiDexEnabled = true
         multiDexKeepProguard = file("multidex-config.pro")
@@ -146,7 +153,7 @@ android {
         create("tv") {
             dimension = "formFactor"
             val tvBaseVersionCode = providers.gradleProperty("torveUpdaterFixtureBaseVersionCode")
-                .orNull?.toIntOrNull() ?: 219
+                .orNull?.toIntOrNull() ?: 220
             versionCode = 20000 + tvBaseVersionCode
             proguardFile("proguard-tv-rules.pro")
         }
@@ -447,14 +454,55 @@ dependencies {
     androidTestImplementation("androidx.test.ext:junit:1.2.1")
     androidTestImplementation("androidx.test.espresso:espresso-core:3.6.1")
     androidTestImplementation("androidx.sqlite:sqlite-framework:2.4.0")
+    androidTestImplementation("androidx.room:room-runtime:2.6.1")
     androidTestImplementation(libs.sqldelight.android)
     androidTestImplementation(libs.ktor.mock)
     androidTestImplementation(libs.ktor.content.negotiation)
     androidTestImplementation(libs.ktor.serialization.json)
 }
 
+// WorkManager owns its Room database and exposes no SQLite factory in Configuration.
+// AGP dependency instrumentation applies the policy at the shared AndroidX query boundary,
+// including database-open callbacks and Room's background invalidation reader.
+abstract class BoundedSqliteCursorVisitorFactory : AsmClassVisitorFactory<InstrumentationParameters.None> {
+    override fun isInstrumentable(classData: ClassData): Boolean =
+        classData.className == "androidx.sqlite.db.framework.FrameworkSQLiteDatabase"
+
+    override fun createClassVisitor(classContext: ClassContext, nextClassVisitor: ClassVisitor): ClassVisitor =
+        object : ClassVisitor(Opcodes.ASM9, nextClassVisitor) {
+            private var queryMethods = 0
+            override fun visitMethod(access: Int, name: String, descriptor: String,
+                                     signature: String?, exceptions: Array<out String>?): MethodVisitor {
+                val method = super.visitMethod(access, name, descriptor, signature, exceptions)
+                if (name != "query" || !descriptor.endsWith(")Landroid/database/Cursor;")) return method
+                queryMethods++
+                return object : MethodVisitor(Opcodes.ASM9, method) {
+                    override fun visitInsn(opcode: Int) {
+                        if (opcode == Opcodes.ARETURN) {
+                            super.visitMethodInsn(Opcodes.INVOKESTATIC,
+                                "com/torve/platform/BoundedCursorOpenHelperKt", "boundSqliteCursor",
+                                "(Landroid/database/Cursor;)Landroid/database/Cursor;", false)
+                        }
+                        super.visitInsn(opcode)
+                    }
+                }
+            }
+            override fun visitEnd() {
+                check(queryMethods == 4) {
+                    "Expected four AndroidX SQLite query overloads, found $queryMethods"
+                }
+                super.visitEnd()
+            }
+        }
+}
+
 androidComponents {
     onVariants(selector().all()) { variant ->
+        // Room/WorkManager must receive the same bounded windows as Torve's SQLDelight database.
+        variant.instrumentation.transformClassesWith(
+            BoundedSqliteCursorVisitorFactory::class.java,
+            com.android.build.api.instrumentation.InstrumentationScope.ALL,
+        ) {}
         variant.resValues.put(variant.makeResValueKey("string", "tv_search_authority"),
             com.android.build.api.variant.ResValue("${variant.applicationId.get()}.search", null))
     }

@@ -17,7 +17,7 @@ import androidx.sqlite.db.SupportSQLiteQuery
 /** Small reads never need Fire OS's default 2 MiB allocation. Large individual rows can grow. */
 internal class BoundedCursorOpenHelper @JvmOverloads constructor(
     private val delegate: SupportSQLiteOpenHelper,
-    private val allocateWindow: (Long) -> CursorWindow = ::allocateQueryWindow,
+    private val allocateWindow: ((Long) -> CursorWindow)? = null,
 ) : SupportSQLiteOpenHelper by delegate {
     override val writableDatabase: SupportSQLiteDatabase
         get() = delegate.writableDatabase.withBoundedWindows(allocateWindow)
@@ -28,7 +28,14 @@ internal class BoundedCursorOpenHelper @JvmOverloads constructor(
 @SuppressLint("NewApi") // Invoked only after the API 28 check below.
 private fun allocateQueryWindow(bytes: Long) = CursorWindow("TorveQuery", bytes)
 
-private fun SupportSQLiteDatabase.withBoundedWindows(allocate: (Long) -> CursorWindow): SupportSQLiteDatabase =
+/** Entry point called by the AndroidX SQLite dependency instrumentation in every Android flavor. */
+fun boundSqliteCursor(cursor: Cursor): Cursor =
+    if (cursor is BoundedWindowCursor) cursor else cursor.withBoundedWindow(::allocateQueryWindow)
+
+private fun Cursor.applyWindowPolicy(allocate: ((Long) -> CursorWindow)?): Cursor =
+    if (allocate == null) boundSqliteCursor(this) else withBoundedWindow(allocate)
+
+private fun SupportSQLiteDatabase.withBoundedWindows(allocate: ((Long) -> CursorWindow)?): SupportSQLiteDatabase =
     object : SupportSQLiteDatabase by this {
         override fun query(query: String): Cursor = query(SimpleSQLiteQuery(query))
 
@@ -36,16 +43,19 @@ private fun SupportSQLiteDatabase.withBoundedWindows(allocate: (Long) -> CursorW
             query(SimpleSQLiteQuery(query, bindArgs))
 
         override fun query(query: SupportSQLiteQuery): Cursor =
-            this@withBoundedWindows.query(query).withBoundedWindow(allocate)
+            this@withBoundedWindows.query(query).applyWindowPolicy(allocate)
 
         override fun query(query: SupportSQLiteQuery, cancellationSignal: CancellationSignal?): Cursor =
-            this@withBoundedWindows.query(query, cancellationSignal).withBoundedWindow(allocate)
+            this@withBoundedWindows.query(query, cancellationSignal).applyWindowPolicy(allocate)
     }
 
 private fun Cursor.withBoundedWindow(allocate: (Long) -> CursorWindow): Cursor {
-    if (Build.VERSION.SDK_INT < 28 || this !is AbstractWindowedCursor) return this
+    if (Build.VERSION.SDK_INT < 28) return this
+    // An explicitly supplied allocator is used by allocation-failure regression tests.
+    val raw = if (this is BoundedWindowCursor) wrappedCursor else this
+    if (raw !is AbstractWindowedCursor) return this
     return try {
-        BoundedWindowCursor(this, allocate)
+        BoundedWindowCursor(raw, allocate)
     } catch (failure: Throwable) {
         close()
         throw failure
