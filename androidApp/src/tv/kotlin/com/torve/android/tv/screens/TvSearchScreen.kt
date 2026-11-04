@@ -4555,8 +4555,8 @@ internal fun TvSearchResultCard(
     var anchorBounds by remember { mutableStateOf<Rect?>(null) }
     val scale by animateFloatAsState(targetValue = if (focused) 1.025f else 1f, label = "resultScale")
     val metadataStyle = MaterialTheme.typography.labelSmall.copy(
-        fontSize = if (density.columns >= 10) 8.sp else 11.sp,
-        lineHeight = if (density.columns >= 10) 10.sp else 14.sp,
+        fontSize = when { density.columns >= 10 -> 8.sp; density.columns >= 8 -> 9.sp; else -> 11.sp },
+        lineHeight = when { density.columns >= 10 -> 10.sp; density.columns >= 8 -> 11.sp; else -> 14.sp },
         shadow = androidx.compose.ui.graphics.Shadow(Color.Black, blurRadius = 5f),
     )
     Box(
