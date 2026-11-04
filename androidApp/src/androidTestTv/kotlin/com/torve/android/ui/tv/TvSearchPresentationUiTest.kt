@@ -353,7 +353,7 @@ class TvSearchPresentationUiTest {
     private fun key(label: String, key: Key) { node(label).performKeyInput { pressKey(key) } }
     private fun waitForFocus(label: String, inPopup: Boolean = false) {
         composeRule.waitUntil(10_000) { runCatching {
-            composeRule.onNodeWithText(label).assertIsFocused()
+            node(label).assertIsFocused()
             inPopup || composeRule.activity.hasWindowFocus()
         }.getOrDefault(false) }
     }
